@@ -2,13 +2,25 @@
 
 **English** · [中文](README.zh.md)
 
-**Enabling AI to observe, reason, act, and test the consequences in real experiments at the atomic scale.**
+**Getting started**
 
-MAST is an experimental orchestration and execution system for scanning tunneling microscopy (STM).
-It connects multi-agent reasoning, instrument skills, visual observation, scientific analysis, and an operator interface,
-turning research objectives into physical operations with explicit execution constraints and observable outcomes.
-Its central contribution is a practical foundation for sustained experimental work: acquire evidence, act on the instrument,
-assess the consequences, and carry the experiment forward as the tip, sample, and measurement conditions evolve.
+- **Use the web interface:** in a configured MAST deployment, set experimental goals, run the built-in agent workflows, review measurements, and intervene or stop a task.
+- **Connect an external agent:** use the [Claude Code plugin](integrations/claude-code/README.md), or follow the [quickstart](docs/external/en/01-quickstart.md) to configure an MCP client or call the HTTP API. These clients connect to an already running MAST service.
+- **Review and test the source:** follow the [repository guide](AGENTS.md) for code navigation, environment setup, and software checks that require no instrument.
+
+This repository provides the **MAST 6.5.0 public source edition**. Instrument deployment requires site configuration,
+instrument calibration, and additional assets described in the [release notes](docs/OPEN_SOURCE_NOTES.md).
+The 6.5.0 external interface has passed software tests; hardware validation remains pending.
+
+**Autonomous experimental workflows for scanning tunneling microscopy.**
+
+MAST (Modular Autonomous SPM Toolkit) is an orchestration and execution system for scanning tunneling microscopy (STM),
+connecting AI agents to a physical instrument through a Nanonis controller. It brings experimental planning,
+instrument operation, visual observation, and data analysis into traceable workflows, with parameter validation,
+execution constraints, and operator intervention.
+
+The system supports repeated cycles of observation, action, and verification as tip, sample, and measurement conditions evolve.
+Measurements and action records provide the basis for reassessing experimental conditions and planning subsequent measurements.
 
 Within our SPM research software, MAST provides the instrument runtime and workflows;
 [VISTA-SPM](https://github.com/HamsterPark/VISTA-SPM) develops the reusable visual reasoning layer;
@@ -184,7 +196,7 @@ MAST 6.5.0 introduces `/api/ext/v1` and MCP integration. The new interface has p
 
 ### Long demonstration: a nearly 100-hour STM record
 
-In this separate campaign, the agent did more than write plans: at a real tunneling junction, it repeatedly relocated a drifting target, acquired spectra and images, and kept the experiment moving through communication faults. The researcher set scientific goals and time budgets and paused for liquid-nitrogen refills; the agent arranged the main measurements through MAST without a human issuing every instrument command.
+In this separate campaign, the agent repeatedly relocated a drifting target and acquired spectra and images at a real tunneling junction, with acquisition resuming after communication faults. The researcher set scientific goals and time budgets and paused for liquid-nitrogen refills; the agent arranged the main measurements through MAST without a human issuing every instrument command.
 
 This campaign used MAST **6.4.0**. Its main log runs from **2026-09-17 23:10:37 to 2026-09-22 02:08:10 China Standard Time**—**98 hours 57 minutes**. The experiment operated in an approximately **4.3 K (−269 °C)** environment, with a common reference setpoint of just **20 pA**, a subnanometer tunneling gap, and an approximately **18 pm**-deep feature in the early tracking segment. The 4.3 K figure is a nominal condition, and 20 pA was not the only setpoint.
 
@@ -205,16 +217,16 @@ This campaign used MAST **6.4.0**. Its main log runs from **2026-09-17 23:10:37 
 
 *Thermal drift continually shifts the target. This time-lapse pairs 46 early tracking images with their position trajectory; the table above covers the full main-log window.*
 
-The achievement is not simply staying awake. It is knowing when to measure, wait, stop, recover, and revise an explanation.
+Sustained experiments require measurement scheduling, settling intervals, drift tracking, fault recovery, and revision of interpretations. The records below illustrate these functions in this campaign.
 
-| It knows how to… | Evidence from this run |
+| Experimental function | Evidence from this run |
 |---|---|
-| **Work through the night** | From 22:00 to 06:00, it acquired **202** spectra and **126** images and made **132** tip moves. |
-| **Wait when physics demands it** | **1,671** deliberate waits had logged durations totaling **21.9 hours**; settling steps remained visible in the record. |
-| **Keep the target in sight** | It successfully re-registered a thermally drifting target **116** times, with a median position-prediction error of about **25 pm**. |
-| **Know when to stop** | It dropped a measurement that would overrun a handoff and rejected a plan beyond the confirmed scan area. |
-| **Check and recover** | Two resumptions after communication faults are marked on the clock. A separate feedback-state mismatch was detected and restored before measurements continued; the failure remains in the record. |
-| **Show scientific integrity** | It did not hide inconvenient evidence: preliminary interpretations that failed review were explicitly corrected. Raw images and spectra, failed attempts, timestamped actions, and the correction trail remain in the record. The willingness to correct a claim and let it be checked against the original data is one of this AI experiment's strongest achievements. |
+| **Overnight data acquisition** | From 22:00 to 06:00, the agent acquired **202** spectra and **126** images and made **132** tip moves. |
+| **Timed waits** | **1,671** deliberate waits had requested durations totaling **21.9 hours**; the waiting steps and their durations remain in the record. |
+| **Drift tracking and target relocation** | The agent successfully re-registered a thermally drifting target **116** times, with a median position-prediction error of about **25 pm**. |
+| **Time and spatial constraints** | A measurement that could not be completed before handover was removed from the plan; a plan extending beyond the confirmed scan area was rejected. |
+| **State verification and fault recovery** | Two resumptions after communication faults are marked on the clock. A separate feedback-state mismatch was detected and corrected before measurements continued; the failure remains in the record. |
+| **Evidence traceability and revision of interpretations** | Preliminary interpretations contradicted by subsequent review were explicitly revised. Raw images and spectra, failed attempts, timestamped actions, and the revision history remain in the record for further examination. |
 
 ### Selected STM and STS results
 
