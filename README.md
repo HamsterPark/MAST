@@ -2,349 +2,264 @@
 
 **English** · [中文](README.zh.md)
 
-**Getting started**
+**Getting started — external agents recommended**
 
-- **Use the web interface:** in a configured MAST deployment, set experimental goals, run the built-in agent workflows, review measurements, and intervene or stop a task.
-- **Connect an external agent:** use the [Claude Code plugin](integrations/claude-code/README.md), or follow the [quickstart](docs/external/en/01-quickstart.md) to configure an MCP client or call the HTTP API. These clients connect to an already running MAST service.
-- **Review and test the source:** follow the [repository guide](AGENTS.md) for code navigation, environment setup, and software checks that require no instrument.
+- **Connect an external agent:** use the [Claude Code plugin](integrations/claude-code/README.md), or the [MCP / HTTP quickstart](docs/external/en/01-quickstart.md), to connect your agent harness to a running MAST service. Give the external agent the experimental objective; MAST exposes instrument tools, state, and execution records.
+- **Deploy MAST on Windows:** [Releases](https://github.com/HamsterPark/MAST/releases) provides installers and portable packages. Follow the notes for the version you download.
+- **Monitor and intervene:** use the web interface to review instrument state and measurements, perform manual operations, and intervene or stop a task.
+- **Inspect the source:** the [repository guide](AGENTS.md) covers the 6.5.0 snapshot, environment setup, and software checks that require no instrument. Its built-in agent workflows are historical implementations.
 
-This repository provides the **MAST 6.5.0 public source edition**. Instrument deployment requires site configuration,
-instrument calibration, and additional assets described in the [release notes](docs/OPEN_SOURCE_NOTES.md).
-The 6.5.0 external interface has passed software tests; hardware validation remains pending.
+The source tree is a **MAST 6.5.0 public snapshot**; Windows packages are versioned separately. Current development follows the external-agent and VISTA-SPM approach described below. Instrument operation requires site configuration, calibration, and the relevant deployment assets. Installing an agent plugin connects a client to MAST; the backend must already be running. See [release scope and validation](#validation-and-public-release-scope) for the evidence associated with each version.
 
-**Autonomous experimental workflows for scanning tunneling microscopy.**
+**Connecting general-purpose AI agents to atomic-scale experiments.**
 
-MAST (Modular Autonomous SPM Toolkit) is an orchestration and execution system for scanning tunneling microscopy (STM),
-connecting AI agents to a physical instrument through a Nanonis controller. It brings experimental planning,
-instrument operation, visual observation, and data analysis into traceable workflows, with parameter validation,
-execution constraints, and operator intervention.
+MAST provides instrument access and constrained execution for scanning tunneling microscopy (STM) through a Nanonis controller. An external agent harness manages reasoning, context, and task organization; MAST supplies instrument skills, parameter checks, observation access, action records, and operator intervention. The integrated VISTA-SPM layer organizes visual evidence and quantitative measurements for the agent.
 
-The system supports repeated cycles of observation, action, and verification as tip, sample, and measurement conditions evolve.
-Measurements and action records provide the basis for reassessing experimental conditions and planning subsequent measurements.
+The scientific aim is to sustain a cycle of **observation, hypothesis, measurement, and revision** as tip, sample, and measurement conditions evolve. Our development effort now centers on the experimental interfaces and evidence needed to support that cycle.
 
-Within our SPM research software, MAST provides the instrument runtime and workflows;
-[VISTA-SPM](https://github.com/HamsterPark/VISTA-SPM) develops the reusable visual reasoning layer;
-[dsh-spm](https://github.com/HamsterPark/dsh-spm) implements SPM capabilities in DeepSeek Harness;
-and [STM-Bench](https://github.com/HamsterPark/STM-Bench) supplies simulated experiments and evidence-based evaluation.
-Their roles and version scope are described [below](#mast-vista-spm-and-the-experimental-reasoning-loop).
+![Python 3.13](https://img.shields.io/badge/python-3.13-blue) ![TypeScript](https://img.shields.io/badge/frontend-React%2018%20%2B%20TypeScript-blue) ![MIT license](https://img.shields.io/badge/license-MIT-green) ![Source snapshot date](https://img.shields.io/badge/snapshot-2026-09-21-lightgrey)
 
-![Python 3.13](https://img.shields.io/badge/python-3.13-blue) ![TypeScript](https://img.shields.io/badge/frontend-React%2018%20%2B%20TypeScript-blue) ![MIT license](https://img.shields.io/badge/license-MIT-green) ![Snapshot date](https://img.shields.io/badge/snapshot-2026-09-21-lightgrey)
+[Design direction](#why-external-agents-and-vista-spm) · [Experiments](#real-instrument-demonstrations) · [Scientific background](#scientific-background-and-experimental-challenges) · [Architecture](#capabilities-and-architecture) · [Validation](#validation-and-public-release-scope) · [Documentation](#documentation-and-contributions) · [Related projects](#related-projects-and-experimental-reasoning)
 
-**Two separate real-instrument demonstrations are featured below: tip repair on Au yielding atomically resolved STM images, and a completed MAST 6.4.0 campaign with nearly 100 hours of timestamped records.**
-The scientific background, system architecture, and versioned evidence below connect these demonstrations to the broader goal
-of autonomous experimental science.
+## Why external agents and VISTA-SPM
 
-## What is STM?
+We previously developed an in-house multi-agent orchestrator, custom experimental workflows, and specialized STM vision models based on DINOv3. **We have stopped developing the built-in agent workflows and the dedicated DINOv3 training approach.** Our recommended direction is now external agent harnesses for reasoning and task organization, MAST for instrument execution, and VISTA-SPM for visual reasoning support. The 6.5.0 source snapshot retains earlier implementations as a record of that work.
 
-A scanning tunneling microscope uses **quantum tunneling** to study surfaces. A conductive tip is brought close to a sample
-that supports a measurable tunneling channel. An applied bias drives a tiny current through the barrier between tip and sample.
-As the tip scans point by point, a feedback system typically adjusts its height to maintain a set current,
-producing images with atomic-scale resolution. Binnig and colleagues reported early surface studies using this method in 1982.
-See the [original paper](https://doi.org/10.1103/PhysRevLett.49.57) and, for an introduction,
-[Wikipedia: Scanning tunneling microscope](https://en.wikipedia.org/wiki/Scanning_tunneling_microscope).
+### Visual reasoning through a harness
 
-STM images contain information about both surface geometry and electronic structure. Varying the bias and recording current
-or differential conductance enables scanning tunneling spectroscopy (STS), which probes local electronic states at selected positions.
-Interpreting differential conductance as the sample's local density of states requires assumptions about the tip, tunneling barrier,
-temperature, and measurement conditions. A spectrum cannot automatically be treated as an intrinsic material property.
-See the [Tersoff–Hamann theory](https://doi.org/10.1103/PhysRevB.31.805) for the theoretical basis.
+[VISTA](https://arxiv.org/html/2610.02200v1) demonstrates that general-purpose multimodal models can perform strong visual reasoning in the interactive environments it evaluates when given direct image access, lossless visual memory, and tools for retrieving and inspecting observations. These results motivate our choice to adapt that approach to STM through VISTA-SPM.
 
-### The instrument conditions behind atomic-scale precision
+Training a specialized vision model requires data collection, annotation, compute, tuning, and repeated validation. For our project, this demands substantial time and funding. New samples, tip conditions, imaging contrast, and experimental tasks continually introduce new generalization requirements. Improvements in general-purpose multimodal LLMs make it more useful to invest in access to original evidence, calibrated coordinates, and quantitative measurement tools. VISTA-SPM provides that scientific scaffolding, while the general-purpose model interprets the observations. Generalization is evaluated as experiments and samples change.
 
-Low-temperature, ultrahigh-vacuum STM for low-energy electronic states and quantum materials combines several extreme conditions
-at a very small tunneling junction. The scales below illustrate the operating principles; actual conditions depend on the sample,
-measurement objectives, and instrument calibration.
+### Reusing the progress of external agent harnesses
 
-| Characteristic | Why it matters |
-|---|---|
-| **An extremely narrow tunneling junction** | Tip and sample are typically separated by only a few ångströms, or fractions of a nanometer. Current depends approximately exponentially on this distance: minute displacements provide high sensitivity but can also change the signal substantially. |
-| **Very low currents** | Common imaging currents range from picoamperes to nanoamperes, approximately $10^{-12}$ to $10^{-9}$ A. Preamplifiers, grounding, cabling, and bandwidth jointly determine whether these weak signals can be read reliably. |
-| **Low and ultralow temperatures** | Kelvin and millikelvin conditions reduce thermal broadening and support studies of low-energy states. Cooling, thermal equilibration, and control of electron temperature are themselves instrument engineering challenges. |
-| **Ultrahigh vacuum (UHV)** | UHV supports clean surfaces, tip preparation, and long measurements by reducing contamination from residual-gas adsorption. It does not guarantee that the tip remains unchanged during operation. |
-| **Low mechanical and electrical noise** | Vibration isolation, acoustic isolation, electromagnetic shielding, and filtering suppress junction motion and electrical disturbances. Radio-frequency noise can also affect electron temperature and spectroscopic resolution. |
-| **High stability over long periods** | Spectroscopic maps and repeated measurements require comparable tip conditions and spatial registration over hours or longer. Thermal drift, piezoelectric creep, and tip changes can break that correspondence. |
+Agent harnesses provide the environment for tool use, context management, task organization, and recovery. Their rapid development makes maintaining a separate in-house workflow stack increasingly difficult to justify: it duplicates general capabilities and is hard to keep aligned with improvements across the broader ecosystem. We have therefore moved planning and orchestration to external agents and made their interface the focus of MAST development.
 
-For typical imaging currents, see the [STM overview in this review of single-molecule measurements](https://doi.org/10.1021/nn103298x).
-Published instruments demonstrate these requirements in practice. Song and colleagues achieved subpicometer junction stability
-at a base temperature of 10 mK. Schwenk and colleagues discuss thermalization, radio-frequency filtering, and microelectronvolt energy
-resolution in ultralow-temperature spectroscopy. See the [10 mK scanning probe facility](https://www.nist.gov/publications/10-mk-scanning-probe-microscopy-facility)
-and [instrument design for high energy resolution](https://doi.org/10.1063/5.0005320).
-These are specifications of the instruments in the cited papers, not performance claims for MAST.
-STM can also operate at room temperature, in air, or in liquids; low temperature and UHV are not requirements for every STM.
+**Our priority is the experimental layer:** instrument interfaces, execution constraints, visual evidence, physical measurements, traceable records, and experimental evaluation. The goal is to bring improvements in general models and agent harnesses into laboratory work with minimal instrument-specific adaptation. This also directs our time and resources toward the scientific problems that require experimental expertise.
 
-## Why is STM one of the “crown jewels” of AI for experimental science?
+## Real-instrument demonstrations
 
-**We see autonomous STM as one of the most demanding and representative challenges in AI for experimental science.**
-It brings atomic-scale perception, physical reasoning, precision control, fault diagnosis, and experimental design into a single loop.
-Its research value lies in this concentration of scientific demands: the agent must establish trustworthy measurement conditions
-while using the same instrument to investigate matter at the atomic scale.
+Two independent demonstrations illustrate tip conditioning and sustained STM operation. The records and selected figures are supplied by the maintainer; complete experimental datasets and logs are outside this source release. The long campaign used **MAST 6.4.0**. Validation of the newer external interface is listed separately below.
 
-### A partly observable physical system that actions can change
+### Tip conditioning on Au and atomic-resolution imaging
 
-The crucial hidden variables are the **atomic configuration, chemical state, and electronic states of the tip apex**.
-During routine STM operation, the directly available images, spectra, and currents reflect the combined tip–sample response,
-not the true state of the apex itself. Inferring that state from these signals generally has no unique solution:
-different tip–sample combinations can produce similar observations.
-Tip-state inference therefore proceeds through **testable hypotheses constrained by experimental evidence**. Repeated observations,
-reference measurements, and deliberate controls refine those hypotheses and establish which measurement conditions can be trusted.
+![Eight STM frames and a relative timeline of tip conditioning on Au through MAST](docs/assets/au-tip-repair-overview.png)
 
-This unknown state also changes with operation: scanning, pulses, or contact can rearrange the apex or transfer material to it,
-altering image contrast and spectroscopic response. An autonomous system must retain uncertainty about the tip state
-and judge the suitability of its next action under that uncertainty.
-Research on atom manipulation in real STM experiments has explicitly identified spontaneous tip changes, unknown manipulation
-parameters, and the difficulty of accurately modeling tip–atom interactions. See [Chen et al., 2022](https://www.nature.com/articles/s41467-022-35149-w).
+*An external agent used an earlier MAST control path to condition the tip on an Au surface and obtain atomically resolved STM images. This task was separate from the long campaign.*
 
-For autonomous experiments, these physical properties create five connected challenges:
+### A nearly 100-hour STM campaign
 
-| System property | What it means in STM | What an autonomous agent needs to do |
-|---|---|---|
-| **Partial observability** | The true microscopic tip state is not directly observable, and images and spectra generally cannot identify it uniquely. Multiple tip–sample states can produce similar observations. | Maintain several evidence-constrained hypotheses and continually test their plausibility; treat tip condition as an uncertain judgment, not an established fact. |
-| **Strong nonlinearity** | Current varies exponentially with distance. Voltage, local electronic states, the barrier, and feedback jointly shape the response. A small parameter change can cross the boundary between imaging, manipulation, and contact. | Choose constrained actions using the current state and calibration; do not treat one successful parameter combination as a universal recipe. |
-| **Nonstationarity** | Thermal drift and piezoelectric creep change actual position over time, while piezoelectric hysteresis makes the voltage–displacement relationship depend on the preceding drive trajectory. Adsorption and tip reconstruction also alter measurement response. Identical control commands cannot be assumed to retain a fixed correspondence to position and response. | Continually check position, drift, and measurement response; relocate, reassess, and adjust the strategy when needed. Do not rely indefinitely on one calibration or successful outcome. |
-| **History dependence** | Earlier tip conditioning, pulses, contacts, adsorption, and material transfer leave different tip and surface states. Later experimental outcomes therefore depend on what the system has experienced. | Record actions, their order, timing, and outcomes; the same present parameter settings do not guarantee an identical physical state. |
-| **Actions change the system** | Tip conditioning, atom manipulation, and local excitation deliberately alter the tip or surface. Measurement itself can disturb fragile objects. Tip rearrangements and atom transfer may be irreversible; restoring the parameters does not restore the previous state. | Weigh both the information an action can provide and its physical consequences, recheck measurement conditions afterward, and retain abort and operator-intervention paths. |
+The agent repeatedly relocated a drifting target, acquired spectra and images, and resumed acquisition after communication faults. The researcher supplied scientific goals and time budgets and paused the experiment for liquid-nitrogen refills; the agent scheduled the main measurements through MAST without individual instrument commands from the researcher.
 
-These properties overlap. Piezoelectric hysteresis also reflects history dependence; it is grouped here with creep and thermal drift
-under nonstationarity to emphasize the difficulty of maintaining a stable correspondence between control inputs and actual coordinates or responses.
+The main event log spans **2026-09-17 23:10:37 to 2026-09-22 02:08:10 (UTC+8)**, or **98 hours 57 minutes**. This is the span of the record, including waits and interruptions. Nominal conditions were approximately **4.3 K (−269 °C)**, with a common reference setpoint of **20 pA** and a subnanometer tunneling gap. The early tracking segment followed a feature with an apparent-height variation of approximately **18 pm**; measurement setpoints varied during the campaign.
 
-A simple approximation for distance sensitivity is $I \propto e^{-2\kappa z}$, where $z$ is the tip–sample separation and $\kappa$
-is related to the effective tunneling barrier. This explains STM's high sensitivity, but does not fully describe an operating instrument:
-real observations also depend on tip electronic states, the sample, bias, temperature, drift, and noise.
-See [Tersoff–Hamann](https://doi.org/10.1103/PhysRevB.31.805) for the theory and
-[research on scanner hysteresis and creep](https://doi.org/10.1063/1.4974271) for nonideal scanner responses.
+![Spiral clock of timestamped operations in the completed campaign](docs/assets/long-run-clock.svg)
 
-We therefore view autonomous STM as a combination of **decision-making under partial observability, online system identification,
-active learning, and precision control**. This is a modeling perspective: an agent uses observations and action history to form
-tentative judgments about possible states and their plausibility, while choosing actions that both advance the experiment and test those judgments.
-The working model records uncertainty and evolves with the evidence, allowing the agent to select useful controls and revise
-its interpretation as the experiment develops.
+*Each turn represents 24 hours. Gold ticks denote spectra, orange arcs imaging, dark diamonds local tip-manipulation attempts, and open circles resumed acquisition after communication faults.*
 
-### The challenge is diagnosis, recovery, and scientific judgment
-
-An image that looks good does not establish that the tip is suitable for the next spectroscopic measurement.
-When a spectrum is anomalous, an experimenter must distinguish material electronic states from effects of tip states, charging,
-tip-induced band bending, feedback, and noise. Different explanations may call for different controls: changing measurement conditions,
-comparing scan directions, revisiting a reference area, or relocating and repeating a measurement after tip conditioning.
-For example, studies of semiconductor surfaces have directly measured band bending caused by the tip's electric field;
-see this [study of electrostatic tip–sample interactions](https://doi.org/10.1103/PhysRevLett.70.2471).
-The sample, calibrated instrument limits, and operator's authorization define the admissible experimental controls.
-
-The hard part is connecting these steps into reliable causal reasoning: detect an anomaly, propose possible causes, select observations
-that distinguish them, check the outcome, and decide whether to continue, recover, repeat the measurement, or involve the operator.
-**Autonomous scientific judgment must establish trust in the measurement conditions before interpreting the physics.**
-
-Much operating expertise is tacit. An experienced experimentalist knows when to wait, which streaks merit concern, and what to verify
-after tip conditioning. These judgments depend on context and must be translated into executable, verifiable workflows.
-A general-purpose large language model may know STM principles, yet that knowledge alone does not provide the current tip state,
-calibration, operating experience, or executable interface of a particular instrument.
-Reviews of AI for scanning probe microscopy likewise identify reliance on expert experience, autonomous tip conditioning,
-manipulation, and closed-loop experiments as important challenges. See [Li et al., 2026](https://doi.org/10.1016/j.asi.2026.100003).
-
-### From individual automated tasks to closed-loop scientific experiments
-
-Research has demonstrated concrete progress. In 2022, deep reinforcement learning enabled Ag atom manipulation in a real STM,
-and path planning supported autonomous atom assembly. In 2025, a room-temperature STM study integrated tip and surface assessment,
-atom recognition, area selection, drift correction, tip conditioning, and atom manipulation.
-Together, these studies establish concrete building blocks for linking perception, adaptive control, and atomic-scale fabrication.
-See [Chen et al., 2022](https://www.nature.com/articles/s41467-022-35149-w) and
-[Okuyama et al., 2025](https://doi.org/10.1021/acs.nanolett.5c04982).
-
-A 2026 review of self-driving scanning probe microscopy discusses the progression from automated acquisition, real-time analysis,
-and active learning toward discovery and manipulation. MAST aims to provide an inspectable engineering foundation for this direction,
-connecting experimental knowledge, instrument interfaces, execution constraints, observations, and work records.
-See [Narasimha et al., 2026](https://doi.org/10.1021/acs.accounts.6c00273).
-
-The long-term goal is a scientific loop: **observe → propose a hypothesis → design controls → execute within constraints → check changes
-to the instrument and sample → update the evidence → choose the next experiment**.
-Ruling out artifacts, restoring trustworthy measurements, and testing physical hypotheses provide a stronger test of autonomy
-than completing a single scan. STM's local environment and atomic-scale feedback make it a promising platform for evaluating
-experimental intelligence. MAST's research agenda is to make this loop sustained, inspectable, and reusable across scientific tasks.
-
-## MAST, VISTA-SPM, and the experimental reasoning loop
-
-**Representation is part of reasoning.** For our experimental systems, this principle connects the organisation of evidence to the choice of the next physical action. Preserving an image together with its coordinates, measurement conditions, and action history gives the agent a basis for comparing explanations and selecting informative control measurements. MAST supplies the execution context in which those decisions become experiments.
-
-**MAST makes scientific intent executable; VISTA-SPM makes visual evidence persist, remain inspectable, and support quantitative reasoning.** This division connects two essential parts of an autonomous experiment: operating the instrument and understanding what its observations mean over time.
-
-[VISTA](https://arxiv.org/abs/2610.02200) shows how direct images, lossless visual memory, active inspection, and revisable notes can support a multimodal model through extended interaction. The connection to STM is especially strong: a defect in an earlier frame may become a positional reference, and a comparison across several scans may distinguish sample motion from drift or a change in the tip. An experimental record gains scientific value when the agent can return to its spatial detail and measurement conditions as new hypotheses emerge.
-
-Our companion project [VISTA-SPM](https://github.com/HamsterPark/VISTA-SPM) develops this idea into a general visual framework for SPM. It couples persistent image archives with calibrated coordinates, region inspection, physical-value readout, line profiles, Fourier analysis, feature localisation, and registered image differences. These modules give an agent concrete ways to connect a visual observation to a measurable scientific question.
-
-| Project | Central responsibility | Contribution to the shared workflow |
-|---|---|---|
-| **MAST / this MAST-public edition** | Experimental orchestration and instrument execution | Translate scientific goals into skills and workflows, validate their parameters, manage instrument ownership, expose state and progress, and support recovery and operator intervention. |
-| [VISTA-SPM](https://github.com/HamsterPark/VISTA-SPM) | Visual reasoning framework and Python reference modules | Preserve and retrieve observations, inspect spatial detail, measure in physical units, and carry experimental understanding across long interactions. |
-| [dsh-spm](https://github.com/HamsterPark/dsh-spm) | SPM capabilities in the DeepSeek Harness runtime | Implement instrument and scientific tools in TypeScript and adapt the visual-memory and measurement design to dsh sessions, tool calls, and observation delivery. |
-| [STM-Bench](https://github.com/HamsterPark/STM-Bench) | Simulated experiments and evidence-based evaluation | Provide a controlled instrument environment, scientific tasks, acquisition records, and judging for comparing agent strategies and interfaces. |
-
-For example, after an atom-manipulation action, the execution layer supplies the operation record and resulting scan. The visual layer can retrieve the earlier frame, register the two images, and measure the atom relative to neighbouring landmarks. The agent then decides which explanation fits the evidence and which control measurement to acquire next. This is the scientific loop that the projects are designed to make explicit, reusable, and open to evaluation.
-
-The visual modules also have a useful scope outside an instrument session: archived scans can be inspected and measured offline, and the same interfaces can be adapted to other agent hosts. MAST contributes the operational setting and scientific workflows; dsh-spm demonstrates the TypeScript implementation; STM-Bench provides the experimental testbed.
-
-**Version and availability.** This repository remains the MAST 6.5.0 public source snapshot described below. [VISTA-SPM](https://github.com/HamsterPark/VISTA-SPM) is the public reference repository for the visual design used in ongoing MAST development and ported to dsh-spm. Its own simulator results and integration records provide the validation context for that visual layer.
-
-## MAST's results and validation
-
-The maintainer reports two selected demonstrations at different scales: a short Au tip-repair task and a separate, completed MAST 6.4.0 experiment. The latter's main event log covers approximately 99 hours. The figures below present selected visual excerpts; complete datasets and logs remain outside this source release.
-MAST 6.5.0 introduces `/api/ext/v1` and MCP integration. The new interface has passed software tests; hardware validation remains pending.
-
-### Short demonstration: tip repair on Au
-
-![Eight STM frames and a relative timeline of tip repair on Au through MAST](docs/assets/au-tip-repair-overview.png)
-
-*An external agent repaired the tip on Au through an earlier MAST control path and obtained atomically resolved STM images. This is independent of the long experiment below.*
-
-### Long demonstration: a nearly 100-hour STM record
-
-In this separate campaign, the agent repeatedly relocated a drifting target and acquired spectra and images at a real tunneling junction, with acquisition resuming after communication faults. The researcher set scientific goals and time budgets and paused for liquid-nitrogen refills; the agent arranged the main measurements through MAST without a human issuing every instrument command.
-
-This campaign used MAST **6.4.0**. Its main log runs from **2026-09-17 23:10:37 to 2026-09-22 02:08:10 China Standard Time**—**98 hours 57 minutes**. The experiment operated in an approximately **4.3 K (−269 °C)** environment, with a common reference setpoint of just **20 pA**, a subnanometer tunneling gap, and an approximately **18 pm**-deep feature in the early tracking segment. The 4.3 K figure is a nominal condition, and 20 pA was not the only setpoint.
-
-![Spiral clock of timestamped operations in the completed long-run record](docs/assets/long-run-clock.svg)
-
-*One turn is 24 hours: gold ticks are spectra, orange arcs are images, dark diamonds are local tip-manipulation attempts, and open circles mark resumed acquisition after communication faults.*
-
-| Measure | Final main-log total |
+| Measurement or activity | Final main-log total |
 |---|---|
 | Record span | **98 hours 57 minutes**, September 17–22 |
-| Spectroscopy | **677** spectra, **272,727** sampled points; **24.4 hours** of acquisition |
+| Spectroscopy | **677** spectra and **272,727** sampled points; **24.4 hours** of acquisition |
 | Imaging | **267** completed frames; **25.3 hours** of scanning |
-| Tip movement and deliberate waits | **485** moves; **1,671** logged waits with requested durations totaling **21.9 hours** |
-| Target tracking | **116** successful re-registrations; median position-prediction error about **25 pm** |
-| Traceable record | **5,805** timestamped events, including measurements, waits, checks, and exceptions—not 5,805 instrument commands |
+| Tip movement and waiting | **485** moves; **1,671** waits with requested durations totaling **21.9 hours** |
+| Target tracking | **116** successful re-registrations; median position-prediction error approximately **25 pm** |
+| Experimental record | **5,805** timestamped events covering measurements, waits, checks, and exceptions |
 
-![Time-lapse of the early tracking frames and drift trajectory](docs/assets/long-run-drift.gif)
+Event counts include activity beyond instrument commands. Wait durations are the logged requested values. These totals cover the main log; a separate earlier preparation series is excluded.
 
-*Thermal drift continually shifts the target. This time-lapse pairs 46 early tracking images with their position trajectory; the table above covers the full main-log window.*
+![Time-lapse of early tracking frames and the drift trajectory](docs/assets/long-run-drift.gif)
 
-Sustained experiments require measurement scheduling, settling intervals, drift tracking, fault recovery, and revision of interpretations. The records below illustrate these functions in this campaign.
+*The animation pairs 46 early tracking images with the target's position trajectory. The table covers the full main-log window.*
 
-| Experimental function | Evidence from this run |
+<details>
+<summary>Scheduling, recovery, and revision of interpretations</summary>
+
+| Experimental function | Evidence from this campaign |
 |---|---|
-| **Overnight data acquisition** | From 22:00 to 06:00, the agent acquired **202** spectra and **126** images and made **132** tip moves. |
-| **Timed waits** | **1,671** deliberate waits had requested durations totaling **21.9 hours**; the waiting steps and their durations remain in the record. |
-| **Drift tracking and target relocation** | The agent successfully re-registered a thermally drifting target **116** times, with a median position-prediction error of about **25 pm**. |
-| **Time and spatial constraints** | A measurement that could not be completed before handover was removed from the plan; a plan extending beyond the confirmed scan area was rejected. |
-| **State verification and fault recovery** | Two resumptions after communication faults are marked on the clock. A separate feedback-state mismatch was detected and corrected before measurements continued; the failure remains in the record. |
-| **Evidence traceability and revision of interpretations** | Preliminary interpretations contradicted by subsequent review were explicitly revised. Raw images and spectra, failed attempts, timestamped actions, and the revision history remain in the record for further examination. |
+| Overnight acquisition | Between 22:00 and 06:00, the agent acquired **202** spectra and **126** images and made **132** tip moves. |
+| Time and spatial constraints | A measurement that would overrun the handover was removed from the plan; a plan extending beyond the confirmed scan area was rejected. |
+| State verification and recovery | Two resumptions after communication faults are marked on the clock. A separate feedback-state mismatch was detected and corrected before acquisition continued. |
+| Traceability and interpretation | Preliminary interpretations contradicted by subsequent review were revised. Raw images and spectra, failed attempts, timestamped actions, and the revision history remain in the experimental record. |
 
-### Selected STM and STS results
+</details>
 
-The original measurements are arranged into three multi-panel figures covering spectroscopy, spatial sampling, and imaging. Axes, units, and essential settings remain; the sample name and internal site labels have been removed.
+<details>
+<summary>Selected measurements: spectroscopy, spatial sampling, and imaging</summary>
 
-![Six-panel figure of reference spectra, a time-ordered heat map, and tip-height response](docs/assets/long-run-results-spectra.png)
+The original measurements are arranged into three multi-panel figures. Axes, units, and essential settings are retained; sample names and internal site labels have been removed.
 
-![Seven-panel figure of local spectra, two current grids, and line spectroscopy](docs/assets/long-run-results-spatial.png)
+![Reference spectra, a time-ordered heat map, and tip-height response](docs/assets/long-run-results-spectra.png)
 
-![Six-panel figure of STM frames, lock-in X-channel maps, and an apparent-height timeline](docs/assets/long-run-results-imaging.png)
+![Local spectra, two current grids, and line spectroscopy](docs/assets/long-run-results-spatial.png)
 
-*The two grids in the second figure both map current at −0.5 V under different settings. Panels d–e of the third figure show the lock-in X channel; panel f reaches about hour 76. These selected panels are not a complete visual record of the final run.*
+![STM images, lock-in X-channel maps, and an apparent-height timeline](docs/assets/long-run-results-imaging.png)
 
-The totals above are final for this main event log; a separate earlier setup series is outside this accounting. The complete experimental dataset is not included here.
+*The two grids in the second figure map current at −0.5 V under different measurement settings. Panels d–e of the third figure show the lock-in X channel; panel f extends to approximately hour 76. These selected figures cover portions of the campaign.*
 
-The public source baseline `9884ff5` completed the following software checks without an instrument on **2026-09-21**, using Windows and Python 3.13:
+</details>
 
-| Validation | Recorded result |
+<a id="what-is-stm"></a>
+
+## Scientific background and experimental challenges
+
+STM measures quantum tunneling between a conductive tip and a sample. During typical constant-current imaging, feedback adjusts the tip height to maintain a current setpoint, producing atomic-scale images whose contrast depends on both surface geometry and electronic structure. Scanning tunneling spectroscopy (STS) measures current or differential conductance as a function of bias. Relating differential conductance to the sample's local density of states requires assumptions about the tip, tunneling barrier, temperature, and measurement conditions. See [Binnig et al.](https://doi.org/10.1103/PhysRevLett.49.57) and [Tersoff–Hamann](https://doi.org/10.1103/PhysRevB.31.805).
+
+Autonomous STM must establish credible measurement conditions while investigating the sample. The atomic configuration, chemistry, and electronic states of the tip apex are generally not observed directly. Images and spectra constrain possible tip–sample states, often without identifying a unique explanation. Scanning, pulses, contact, and material transfer can change those states during the experiment.
+
+| Physical property | Consequence for experimental decisions |
 |---|---|
-| Backend tests | **14,356 passed, 0 failed**; 46 skipped, 2 expected failures |
+| **Partial observability** | Maintain testable hypotheses about tip and sample conditions; use repeat scans, reference measurements, and controls to distinguish explanations. |
+| **Strong nonlinearity** | Tunneling current is highly sensitive to distance. Select actions using current calibration and operating conditions, with explicit parameter bounds. |
+| **Nonstationarity** | Thermal drift, piezoelectric creep, adsorption, and tip changes alter position or response over time. Recheck registration and measurement conditions throughout the experiment. |
+| **History dependence** | Piezoelectric hysteresis, previous pulses, contacts, and material transfer affect subsequent behavior. Retain the sequence, timing, and outcome of earlier operations. |
+| **Actions modify the system** | Tip conditioning and atom manipulation deliberately change the junction or surface; measurement can also perturb a sample. Evaluate physical consequences and recheck the state after an action. |
+
+A well-resolved image alone does not establish that the tip is suitable for spectroscopy. An anomalous spectrum may require tests of tip states, charging, [tip-induced band bending](https://doi.org/10.1103/PhysRevLett.70.2471), feedback, or noise. Relevant controls include changing measurement conditions, revisiting a reference area, or repeating a measurement after tip conditioning. Instrument calibration, sample conditions, and operator authorization determine which controls are admissible.
+
+Decisions about when to wait, condition the tip, or repeat a reference measurement depend on experimental expertise. Bringing that expertise into autonomous workflows requires general STM knowledge to be combined with instrument-specific calibration, operating procedures, and current observations.
+
+MAST's research objective is to support the full experimental cycle:
+
+**Observe → formulate hypotheses → design controls → execute within constraints → check changes to tip and sample → incorporate new evidence and revise interpretations → select the next measurement.**
+
+This objective connects STM expertise with decision-making under partial observability, online system identification, and active learning. It describes the research direction; the demonstrations and validation table define the capabilities evidenced by this release.
+
+Published work on [reinforcement learning for atom manipulation](https://www.nature.com/articles/s41467-022-35149-w) and [integrated STM automation](https://doi.org/10.1021/acs.nanolett.5c04982) provides relevant experimental context. Reviews of [self-driving SPM](https://doi.org/10.1021/acs.accounts.6c00273) and [AI-assisted SPM](https://doi.org/10.1016/j.asi.2026.100003) discuss the broader progression from individual automated tasks to closed-loop experiments.
+
+<details>
+<summary>Instrument conditions and measurement background</summary>
+
+For low-energy spectroscopy, low-temperature UHV STM combines a sensitive tunneling junction with demanding environmental control. Typical scales depend on the sample, task, and instrument.
+
+| Condition | Experimental significance |
+|---|---|
+| Tip–sample separation of a few ångströms | The approximate dependence $I \propto e^{-2\kappa z}$ gives high distance sensitivity. Here, $z$ is the separation and $\kappa$ depends on the effective barrier; tip and sample electronic states also affect the measured response. |
+| Picoampere to nanoampere currents | Signals commonly range from approximately $10^{-12}$ to $10^{-9}$ A. Preamplifiers, grounding, cabling, and bandwidth determine the measurement noise. |
+| Kelvin or millikelvin temperatures | Cooling reduces thermal broadening; thermal equilibration and electron temperature remain important for spectroscopy. |
+| Ultrahigh vacuum | Reduced residual-gas adsorption supports clean surfaces and long measurements, while tip changes remain possible. |
+| Mechanical and electrical isolation | Vibration isolation, shielding, and filtering suppress junction motion and electrical disturbances. |
+| Stability over hours or longer | Repeated spectra and maps require spatial registration and comparable tip conditions despite drift and creep. |
+
+For current scales, see the [single-molecule measurement review](https://doi.org/10.1021/nn103298x). Published examples include a [10 mK scanning probe facility](https://www.nist.gov/publications/10-mk-scanning-probe-microscopy-facility) and a [system designed for microelectronvolt tunneling resolution](https://doi.org/10.1063/5.0005320). These are properties of the cited instruments. STM also operates at room temperature, in air, and in liquids; low temperature and UHV are specific experimental choices. [Yothers et al.](https://doi.org/10.1063/1.4974271) discuss correction of drift and scanner nonlinearities.
+
+</details>
+
+## Capabilities and architecture
+
+The current division of responsibilities places reasoning and task organization in an external agent harness. MAST provides the instrument backend and execution checks, VISTA-SPM provides visual memory and measurement tools, and the Nanonis controller handles low-level feedback and instrument control.
+
+**Researcher → external agent / harness → MAST tools and execution checks → Nanonis / STM**
+
+**Instrument data → VISTA-SPM: archive, inspect, and measure → external-agent reasoning**
+
+The source entries below document the instrument foundation retained in the 6.5.0 snapshot. VISTA-SPM is integrated into current MAST; its public reference implementation and validation records are available in the companion repository.
+
+| Experimental requirement | Mechanism | Implementation or guide |
+|---|---|---|
+| Connect an external agent | Skill discovery, asynchronous jobs, request deduplication, conflict checks, and restart-state handling | [External jobs](MASTv2/mast/api/ext/jobs.py), [Claude Code integration](integrations/claude-code/README.md) |
+| Execute bounded physical operations | Parameter and SI-magnitude validation, execution-mode checks, instrument ownership, and abort handling | [Execution context](MASTv2/mast/core/execution_context.py), [safety checks](MASTv2/mast/core/safety.py) |
+| Relate reasoning to recent observations | Buffering and monitoring expose observation age and scan progress | [Buffer service](MASTv2/mast/buffer/service.py), [snapshot observation tools](MASTv2/mast/agents/_shared/buffer_tools.py) |
+| Inspect and measure visual evidence | Persistent images, calibrated coordinates, regional inspection, profiles, registration, and quantitative readout | [VISTA-SPM](https://github.com/HamsterPark/VISTA-SPM) |
+| Detect and handle communication failures | Controller-protocol reads, timeouts, reconnection and polling fallback, and explicit stream-completion states | [Controller protocol](MASTv2/mast/core/nanonis_patch.py), [interface communication](frontend/src/lib/) |
+
+The React operator interface supports monitoring, manual operations, intervention, and abort. Manual and external execution paths reuse execution checks; instrument ownership is process-local. The [review guide](AGENTS.md) maps the snapshot's implementation to regression tests.
+
+<details>
+<summary>Historical work: built-in agents and DINOv3-based vision</summary>
+
+Earlier MAST versions implemented an orchestrator, seven domain agents, typed artifact handoffs, and custom planning/runtime paths. We also developed specialized STM vision models using DINOv3 backbones, adaptation, and task-specific heads. These efforts informed our understanding of instrument state, observation interfaces, task handoffs, and the cost of maintaining sample-specific perception.
+
+Their implementations remain in the public snapshot for source review. They are no longer the project's recommended development or usage path. Historical entry points include [agent topology](docs/v2/agent-topology.md), [state contracts](MASTv2/mast/agents/state.py), [artifact handoffs](MASTv2/mast/agents/_shared/artifact_channel.py), [the vision module](MASTv2/mast/vision/module.py), and [the DINOv3-based backend](MASTv2/mast/vision/vigil_backend.py). Model weights and training data are outside the public snapshot.
+
+</details>
+
+Further reading: [instrument skill catalog](docs/v2/skill-catalog.md) and [model-provider adapters in the source snapshot](docs/api_providers/).
+
+## Validation and public release scope
+
+The records below describe specific versions and execution paths. They include historical implementations; the current project direction is the external-agent and VISTA-SPM approach above:
+
+| Component or record | Version and evidence | Scope |
+|---|---|---|
+| Long STM campaign | MAST **6.4.0**; timestamped record spanning approximately 99 hours | Maintainer-reported real-instrument operation through the earlier external control path; selected figures are public. |
+| Public source snapshot | MAST **6.5.0**; software baseline `9884ff5`, tested **2026-09-21** | Backend, frontend, and release checks using test doubles and synthetic data. |
+| External API and MCP integration | **6.5.0** snapshot of `/api/ext/v1` | The snapshot records software tests; it does not include hardware validation for this path. |
+| Built-in orchestration and DINOv3-based vision | Earlier research and development retained in the source snapshot | Historical implementations; further development of these approaches has stopped. Current work uses external agents and VISTA-SPM. |
+| Other snapshot extensions | The skill workshop and marketplace, and qPlus paths | Hardware validation was pending in the recorded snapshot. |
+
+The maintainer also reports functional instrument use of core execution, skills, internal agents and APIs, vision, monitoring, data I/O, buffering, updates, and networking in the versions deployed at the time.
+
+<details>
+<summary>Recorded software validation: environment, counts, and scope</summary>
+
+The recorded platform was **Windows / Python 3.13**, with source baseline **`9884ff5`**.
+
+| Check | Recorded result |
+|---|---|
+| Backend tests | **14,356 passed, 0 failed**; 46 skipped and 2 expected failures |
 | Frontend unit tests | **985 / 985 passed** |
 | Frontend build and type checking | Passed |
 | API contract | 302 OpenAPI paths and 577 schema definitions; frontend types synchronized |
-| Release checks | Python syntax, import closure, and public-content cleanup checks passed |
+| Release checks | Python syntax, import closure, and public-content cleanup passed |
 
-The tests use fakes and synthetic data. These results apply to the source baseline above; they do not mean the full suite was rerun
-after this documentation revision, or that hardware validation has been completed.
-See the [validation record (Chinese)](docs/OPEN_SOURCE_NOTES.md#四import-闭包与测试) for the environment, commands, skips, and reproduction requirements.
+These are historical software results for that baseline. Documentation edits do not rerun or extend this validation. The [validation record](docs/OPEN_SOURCE_NOTES.md#四import-闭包与测试) documents commands, optional dependencies, skips, and reproduction requirements. Tests use instrument doubles; a complete instrument simulator is not bundled.
 
-## Core engineering capabilities
+</details>
 
-MAST's engineering spans AI orchestration, physical instruments, scientific data, and web applications.
-The public source retains these main capabilities:
+The public source preserves the 6.5.0 implementation: instrument skills, execution checks, external-agent integration, data processing, the React interface, contribution examples, and tests, alongside historical built-in orchestration and vision code. Gallery and literature-management implementations are included with empty initial data. The presence of the earlier code records the project history; it does not make those approaches the current recommendation.
 
-| Engineering problem | Implemented mechanisms | Representative entry points |
-|---|---|---|
-| Connecting model actions to physical instruments | Skill parameter ranges and SI-magnitude validation, execution modes and safety checks, instrument ownership, and abort handling; primitive instrument skills and declarative composite workflows share execution constraints | [Execution context](MASTv2/mast/core/execution_context.py), [safety checks](MASTv2/mast/core/safety.py) |
-| Continuing experimental work across agents | An orchestrator and seven domain agents divide the work; typed artifact references, bounded summaries, and state reducers carry results across handoffs | [State contract](MASTv2/mast/agents/state.py), [artifact channel](MASTv2/mast/agents/_shared/artifact_channel.py) |
-| Supplying continuous observations to slower reasoning | Vision, monitoring, and buffering organize instrument observations and expose observation age and scan progress to agents | [Buffer service](MASTv2/mast/buffer/service.py), [observation tools](MASTv2/mast/agents/_shared/buffer_tools.py) |
-| Handling failures in a real system | Segmented controller-protocol reads, disconnection and timeout handling; WebSocket reconnection and polling fallback; SSE distinguishes completion, interrupted streams, and inactivity timeouts | [Protocol patch](MASTv2/mast/core/nanonis_patch.py), [frontend streaming](frontend/src/lib/) |
-| Exposing capabilities to external agents | An external API, MCP integration, and a skill-contribution interface; job-request deduplication, content-conflict checks, and state handling after restart | [External jobs](MASTv2/mast/api/ext/jobs.py), [Claude Code integration](integrations/claude-code/README.md) |
+Selected specialized modules, literature-derived skills, knowledge assets, vision weights, instrument calibration, site configuration, full experimental datasets, and private development history are excluded for licensing, intellectual-property, commercialization, and research-data reasons. Deployment requires the corresponding configuration and assets; the built-in preprocessing profile is an uncalibrated example. The [public release notes](docs/OPEN_SOURCE_NOTES.md) describe these omissions and their effects.
 
-The [review guide](AGENTS.md) connects these mechanisms to source code and regression tests, supporting both human review
-and code assistants that inspect the implementation. These mechanisms make actions and observations traceable, so instrument
-diagnoses and scientific interpretations can be checked against the underlying experimental record.
+<details>
+<summary>Source snapshot inventory</summary>
 
-## System architecture
-
-**Experimental intent and operator → multi-agent collaboration → skills and composite workflows → execution validation and safety checks → Nanonis / STM**
-
-**Instrument observations → vision and monitoring → buffer and state layers → agent reasoning and the next experiment**
-
-| Layer | Responsibility |
+| Metric | Count |
 |---|---|
-| Controller | Low-level real-time feedback and instrument control. |
-| Vision, monitoring, and buffering | Produce observations, organize state, and provide data freshness and execution progress. |
-| Agents and shared artifacts | Perform slower reasoning, task decomposition, and handoffs; among the domain agents, `instrument_control` invokes instrument skills. |
-| API and React operator interface | Present experimental state and results, with controls for observation, intervention, and abort. |
+| Python files / physical lines in `MASTv2/mast/` | 843 / 315,846 |
+| Handwritten TypeScript lines in `frontend/src/` | 65,628; generated `schema.d.ts` excluded |
+| Skill classes defining `execute()` | 444; built-in and composite skills |
+| HTTP / WebSocket route declarations | 365 |
+| Test function definitions in `tests/` | 11,659; parameterized cases not expanded |
 
-See the review guide for the execution entry points used by manual operation and external interfaces.
-Together, these layers connect real-time control with slower scientific reasoning.
-`core`, `skills`, the seven domain agents, the internal API, vision and monitoring, data I/O, buffering,
-signed incremental updates, and networking have all been used functionally on the maintainer's instrument;
-that experience applies to the functions and versions in use at the time.
-Long-horizon planning in `conduct/`, the custom runtime in `agentruntime/`, `goals/`, the skill workshop and marketplace,
-and the qPlus paths remain experimental, with hardware validation pending.
-The custom runtime coexists with the LangGraph path; `engine_v2_*` switches default to off.
+These are static counts of the exported tree. Runtime registrations, OpenAPI paths, and expanded test cases use different counting methods. Development began on 2026-03-17; the development repository had 1016 commits at export.
 
-Further reading: [agent topology](docs/v2/agent-topology.md), [skill catalog](docs/v2/skill-catalog.md), [model-provider adapters](docs/api_providers/).
+The historical agent topology comprises one orchestrator; seven domain agents for research coordination, literature, experimental design, instrument control, data processing, paper writing, and paper review; and two auxiliary nodes for brainstorming and buffer summaries. The snapshot also retains `conduct/`, `agentruntime/`, and `goals/`. Its custom runtime coexists with LangGraph, with `engine_v2_*` switches off by default; these details describe the archived design.
 
-## Public source at a glance
+</details>
 
-| Metric | Value |
+## Documentation and contributions
+
+| Task | Entry point |
 |---|---|
-| Python source files / physical lines (`MASTv2/mast/`) | 843 / 315,846 |
-| Handwritten TypeScript lines (`frontend/src/`, excluding generated `schema.d.ts`) | 65,628 |
-| Skill classes defining `execute()` (built-in and composite skills) | 444 |
-| HTTP / WebSocket route declarations (static count) | 365 |
-| Test function definitions (`tests/`, without expanding parameterized cases) | 11,659 |
-| Agents | One orchestrator; seven domain agents for research coordination, literature, experimental design, instrument control, data processing, paper writing, and paper review; and two auxiliary nodes for brainstorming and buffer summaries |
+| Connect an external agent — recommended | [Operator guide](docs/external/en/README.md), [quickstart](docs/external/en/01-quickstart.md), and [Claude Code plugin](integrations/claude-code/README.md) |
+| Inspect the source snapshot and run local checks | [Repository guide](AGENTS.md): source routes, Python 3.13 / Node 24 setup, and tests without instrument access; built-in orchestration is historical |
+| Contribute an instrument skill | [Contribution guide](CONTRIBUTING.md): submissions under `contrib/skills/`, with maintainer hardware validation before inclusion in the official skill tree |
+| Inspect dependencies and public-release boundaries | [Release notes](docs/OPEN_SOURCE_NOTES.md) and [third-party notices](THIRD_PARTY.md); optional PDF extraction and OCR dependencies are in `MASTv2/requirements-pdf.txt` |
 
-These are static counts of the release tree: skills are counted by class definitions, routes by declarations, and tests by functions.
-Runtime registrations, OpenAPI paths, and parameterized test cases use different counting methods.
-Development began on 2026-03-17; the private repository had accumulated 1016 commits at export time.
+## Related projects and experimental reasoning
 
-## Public release scope
+**Representation is part of reasoning.** An STM image becomes more useful for experimental decisions when its coordinates, measurement conditions, and action history remain available. Revisiting earlier observations supports comparison of explanations, spatial registration, and selection of informative controls.
 
-This repository is the **reduced public source edition of MAST 6.5.0**. It retains multi-agent orchestration, general instrument skills,
-execution and safety mechanisms, perception and data-processing frameworks, the React operator interface,
-external-agent interfaces, example skill contributions, and corresponding tests.
-General gallery and literature-management code is included with empty initial data.
+[VISTA-SPM](https://github.com/HamsterPark/VISTA-SPM) is integrated into current MAST as its visual reasoning layer. It adapts [VISTA](https://arxiv.org/abs/2610.02200) with image archives, calibrated coordinates, regional inspection, physical-value readout, profiles, Fourier analysis, feature localization, and registered image differences. These tools let a general-purpose multimodal model work with experimental evidence throughout an external-agent session.
 
-The release scope reflects **third-party copyright and licensing, intellectual property and commercialization arrangements,
-and protection of unpublished research and on-site data**.
-Some specialized modules, skills adapted from papers, knowledge assets, vision weights, instrument calibration,
-site configuration, and private development history are omitted.
-This edition supports source review, technical discussion, and software tests that require no instrument;
-a complete deployment requires the corresponding configuration and assets.
-The built-in preprocessing configuration is an uncalibrated example; evaluate it with your own data and configure its thresholds.
+| Project | Role |
+|---|---|
+| **MAST** | Instrument backend for external agents: skills, execution constraints, state and observation access, action records, and operator interaction |
+| [VISTA-SPM](https://github.com/HamsterPark/VISTA-SPM) | Integrated visual harness and Python reference modules for retaining, revisiting, and measuring SPM observations with a general-purpose multimodal model |
+| [dsh-spm](https://github.com/HamsterPark/dsh-spm) | SPM instruments and scientific tools in the DeepSeek Harness runtime, including TypeScript implementations of visual-memory and measurement capabilities |
+| [STM-Bench](https://github.com/HamsterPark/STM-Bench) | Simulated instruments, scientific tasks, acquisition records, and evidence-based evaluation of experimental strategies |
 
-See the [public release notes (Chinese)](docs/OPEN_SOURCE_NOTES.md) for retained components, omissions, and their effects.
-Licensing is documented in [LICENSE](LICENSE) and [THIRD_PARTY.md](THIRD_PARTY.md).
+A target workflow is to compare scans before and after atom manipulation, register them against nearby landmarks, measure the displacement, and choose a follow-up observation that tests the interpretation. Visual modules also support offline analysis of archived scans and adaptation to other agent hosts.
 
-## Reading, validation, and participation
+VISTA-SPM provides a public reference implementation. Its capabilities are integrated into MAST and have also been ported to dsh-spm. Its simulator results and integration records are documented in the respective repositories. The **MAST 6.5.0** source snapshot predates this change in direction; its historical vision code and validation records remain version-specific.
 
-- **Review the implementation:** the [review guide](AGENTS.md) provides six routes through the implementation and tests.
-- **Validate locally:** the same guide covers preparation and checks with Python 3.13 and Node 24. Tests and frontend builds can run without connecting an instrument.
-  Tests that need no hardware use instrument fakes; this repository does not include a complete instrument simulator.
-  Optional dependencies for PDF full-text extraction and optical character recognition are listed in `MASTv2/requirements-pdf.txt`.
-- **Extend the skills:** contributions to `contrib/skills/` are welcome. Community skills may enter the official tree after hardware validation by the maintainers.
-  See the [contribution guide](CONTRIBUTING.md).
-- **Connect external agents:** start with the [user guide](docs/external/en/README.md) and [Claude Code plugin](integrations/claude-code/README.md).
+## References
 
-## References and introductory resources
+The references provide scientific background and related work. MAST-specific evidence is documented in the experimental records and validation sections above.
 
-These sources support the STM background and the research motivation for autonomous experiments.
-MAST's implementation and validation are established by this repository's source, tests, and explicitly versioned records.
-Paper titles below are given in their original language.
+<details>
+<summary>Full bibliography and introductory resources</summary>
 
 1. Binnig et al. (1982), [Surface Studies by Scanning Tunneling Microscopy](https://doi.org/10.1103/PhysRevLett.49.57). An early experimental STM paper.
 2. Tersoff and Hamann (1985), [Theory of the scanning tunneling microscope](https://doi.org/10.1103/PhysRevB.31.805). The theoretical connection between imaging and local electronic states, with its underlying approximations.
@@ -358,9 +273,10 @@ Paper titles below are given in their original language.
 10. [Electrons, Photons, and Force: Quantitative Single-Molecule Measurements from Physics to Biology](https://doi.org/10.1021/nn103298x) (2011). Includes STM measurement principles and typical current scales.
 11. [Electrostatic sample-tip interactions in the scanning tunneling microscope](https://doi.org/10.1103/PhysRevLett.70.2471) (1993). An experimental study of tip-induced band bending.
 12. Wikipedia, [Scanning tunneling microscope](https://en.wikipedia.org/wiki/Scanning_tunneling_microscope). An introductory index of terminology and principles.
-
 13. Han et al. (2026), [VISTA: A Visual Harness for Reasoning in an Interactive World](https://arxiv.org/abs/2610.02200). Persistent visual evidence, active inspection, and long-horizon multimodal reasoning.
 
-## License, third parties, contributions, and security
+</details>
 
-[LICENSE](LICENSE) (MIT) · [THIRD_PARTY.md](THIRD_PARTY.md) · [Contribution guide](CONTRIBUTING.md) · [Security policy](SECURITY.md)
+## License and policies
+
+[MIT license](LICENSE) · [Third-party notices](THIRD_PARTY.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
