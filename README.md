@@ -2,14 +2,29 @@
 
 **English** · [中文](README.zh.md)
 
-**Getting started — external agents recommended**
+**Hardware support:** MAST currently supports only Nanonis controllers (a programming interface license is required) and selected optical components in the software's TERS section. We plan to expand support to other STM controllers and more optical components.
 
-- **Connect an external agent:** use the [Claude Code plugin](integrations/claude-code/README.md), or the [MCP / HTTP quickstart](docs/external/en/01-quickstart.md), to connect your agent harness to a running MAST service. Give the external agent the experimental objective; MAST exposes instrument tools, state, and execution records.
-- **Deploy MAST on Windows:** [Releases](https://github.com/HamsterPark/MAST/releases) provides installers and portable packages. Follow the notes for the version you download.
-- **Monitor and intervene:** use the web interface to review instrument state and measurements, perform manual operations, and intervene or stop a task.
-- **Inspect the source:** the [repository guide](AGENTS.md) covers the 6.5.0 snapshot, environment setup, and software checks that require no instrument. Its built-in agent workflows are historical implementations.
+**Getting started**
 
-The source tree is a **MAST 6.5.0 public snapshot**; Windows packages are versioned separately. Current development follows the external-agent and VISTA-SPM approach described below. Instrument operation requires site configuration, calibration, and the relevant deployment assets. Installing an agent plugin connects a client to MAST; the backend must already be running. See [release scope and validation](#validation-and-public-release-scope) for the evidence associated with each version.
+**On the instrument computer**
+
+1. Download the [MAST Windows installer](https://github.com/HamsterPark/MAST/releases), install it on the computer connected to your instrument, and open the MAST launcher.
+2. Start the main service in the launcher.
+3. Install Claude Code or Codex on the same computer.
+4. Open Claude Code or Codex and tell it: “Use MAST on this computer to help me with the following experiment: …”
+
+**From another computer**
+
+1. Install MAST on the instrument computer and open the MAST launcher.
+2. In the launcher, check the box to enable remote connections, set a username and password, and then start the main service.
+3. Install Claude Code or Codex on the computer you want to work from.
+4. Install Tailscale on both computers and sign in to the same Tailscale account.
+5. Follow the guide in the MAST launcher to install the OpenSSH service on the instrument computer. This allows the other computer to connect to it.
+6. Copy the connection details and key provided by the guide into Claude Code or Codex on your other computer. Tell it: “Connect to the instrument computer and use MAST to help me with the following experiment: …”
+
+You can view progress, operate the instrument manually, or stop a task in the MAST interface.
+
+This repository contains the **MAST 6.5.0 public source snapshot**; Windows installers have separate version numbers. See [release scope and validation](#validation-and-public-release-scope) for source availability and validation records.
 
 **Connecting general-purpose AI agents to atomic-scale experiments.**
 
@@ -232,7 +247,7 @@ The historical agent topology comprises one orchestrator; seven domain agents fo
 
 | Task | Entry point |
 |---|---|
-| Connect an external agent — recommended | [Operator guide](docs/external/en/README.md), [quickstart](docs/external/en/01-quickstart.md), and [Claude Code plugin](integrations/claude-code/README.md) |
+| External-agent interface reference | [Operator guide](docs/external/en/README.md), [quickstart](docs/external/en/01-quickstart.md), and [Claude Code plugin](integrations/claude-code/README.md) |
 | Inspect the source snapshot and run local checks | [Repository guide](AGENTS.md): source routes, Python 3.13 / Node 24 setup, and tests without instrument access; built-in orchestration is historical |
 | Contribute an instrument skill | [Contribution guide](CONTRIBUTING.md): submissions under `contrib/skills/`, with maintainer hardware validation before inclusion in the official skill tree |
 | Inspect dependencies and public-release boundaries | [Release notes](docs/OPEN_SOURCE_NOTES.md) and [third-party notices](THIRD_PARTY.md); optional PDF extraction and OCR dependencies are in `MASTv2/requirements-pdf.txt` |

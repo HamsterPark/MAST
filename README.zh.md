@@ -2,14 +2,29 @@
 
 [English](README.md) · **中文**
 
-**使用方式——推荐外置智能体**
+**硬件支持：** 目前仅支持 Nanonis 控制器（需要编程接口许可证），以及软件 TERS 部分中的部分光学元件。后续计划扩展到其他 STM 控制器和更多光学元件。
 
-- **接入外置智能体：** 使用 [Claude Code 插件](integrations/claude-code/README.zh.md)，或按 [MCP / HTTP 快速入门](docs/external/zh/01-quickstart.md)将智能体 Harness 连接到已运行的 MAST 服务。向外置智能体提出实验目标，由 MAST 提供仪器工具、状态与执行记录。
-- **部署 Windows 版 MAST：** [Releases](https://github.com/HamsterPark/MAST/releases) 提供安装程序和免安装包，请参照对应版本的发布说明。
-- **监控与介入：** 通过 Web 界面查看仪器状态和测量结果，进行手动操作，并介入或中止任务。
-- **阅读源码：** [仓库指南](AGENTS.zh.md)介绍 6.5.0 快照、环境配置与无需仪器的软件检查；其中的内置智能体工作流属于历史实现。
+**开始使用**
 
-本仓源码对应 **MAST 6.5.0 公开快照**，Windows 发行包采用独立版本号。当前开发采用下文介绍的外置智能体与 VISTA-SPM 路线。仪器操作需要站点配置、标定及相应部署资产；智能体插件用于连接 MAST，后端服务须预先启动。各版本的证据范围见[验证状态与公开范围](#验证状态与公开范围)。
+**直接在仪器电脑上使用**
+
+1. 下载 [MAST Windows 安装包](https://github.com/HamsterPark/MAST/releases)，在连接仪器的电脑上安装，然后打开 MAST 启动器。
+2. 在启动器中启动主服务。
+3. 在同一台电脑上安装 Claude Code 或 Codex。
+4. 打开 Claude Code 或 Codex，告诉它：“请使用这台电脑上的 MAST，帮我完成以下实验：……”
+
+**从另一台电脑远程使用**
+
+1. 在仪器电脑上安装 MAST，并打开 MAST 启动器。
+2. 在启动器中勾选“远程连接”，设置用户名和密码，然后启动主服务。
+3. 在你准备使用的另一台电脑上安装 Claude Code 或 Codex。
+4. 两台电脑都安装 Tailscale，并登录同一个 Tailscale 账户。
+5. 按照 MAST 启动器中的指南，在仪器电脑上安装 OpenSSH 服务，让另一台电脑能够连接它。
+6. 将指南提供的连接信息和密钥复制给另一台电脑上的 Claude Code 或 Codex，告诉它：“请连接仪器电脑，使用 MAST 帮我完成以下实验：……”
+
+实验过程中，可以在 MAST 界面查看进度、手动操作或停止任务。
+
+本仓库提供 **MAST 6.5.0 公开源码快照**，Windows 安装包采用独立版本号。源码公开范围与各版本的验证记录见[验证状态与公开范围](#验证状态与公开范围)。
 
 **连接通用 AI 智能体与原子尺度实验。**
 
@@ -232,7 +247,7 @@ React 操作员界面用于监控、手动操作、介入和中止。手动与�
 
 | 任务 | 阅读入口 |
 |---|---|
-| 接入外置智能体——推荐路线 | [操作指南](docs/external/zh/README.md)、[快速入门](docs/external/zh/01-quickstart.md)和 [Claude Code 插件](integrations/claude-code/README.zh.md) |
+| 外置智能体接口参考 | [操作指南](docs/external/zh/README.md)、[快速入门](docs/external/zh/01-quickstart.md)和 [Claude Code 插件](integrations/claude-code/README.zh.md) |
 | 审阅源码快照与本地验证 | [仓库指南](AGENTS.zh.md)：代码路线、Python 3.13 / Node 24 环境配置及无需仪器的测试；内置编排属于历史实现 |
 | 贡献仪器技能 | [投稿指南](CONTRIBUTING.zh.md)：向 `contrib/skills/` 提交，技能经维护者真机验证后可纳入官方技能树 |
 | 查阅依赖与公开范围 | [公开版本说明](docs/OPEN_SOURCE_NOTES.md)和[第三方声明](THIRD_PARTY.md)；PDF 提取与 OCR 的可选依赖列于 `MASTv2/requirements-pdf.txt` |
