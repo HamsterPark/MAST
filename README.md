@@ -28,7 +28,7 @@ This repository contains the **MAST 6.5.0 public source snapshot**; Windows inst
 
 **Connecting general-purpose AI agents to atomic-scale experiments.**
 
-MAST provides instrument access and constrained execution for scanning tunneling microscopy (STM) through a Nanonis controller. An external agent harness manages reasoning, context, and task organization; MAST supplies instrument skills, parameter checks, observation access, action records, and operator intervention. The integrated VISTA-SPM layer organizes visual evidence and quantitative measurements for the agent.
+MAST supports **scanning tunneling microscopy (STM) and tip-enhanced Raman spectroscopy (TERS)** with instrument interfaces and constrained execution. STM control currently uses Nanonis controllers; the software's TERS section supports selected optical components. An external agent harness manages reasoning, context, and task organization; MAST supplies instrument skills, parameter checks, observation access, action records, and operator intervention. The integrated VISTA-SPM layer organizes visual evidence and quantitative measurements for the agent.
 
 The scientific aim is to sustain a cycle of **observation, hypothesis, measurement, and revision** as tip, sample, and measurement conditions evolve. Our development effort now centers on the experimental interfaces and evidence needed to support that cycle.
 
@@ -168,10 +168,11 @@ The current division of responsibilities places reasoning and task organization 
 
 **Instrument data → VISTA-SPM: archive, inspect, and measure → external-agent reasoning**
 
-The source entries below document the instrument foundation retained in the 6.5.0 snapshot. VISTA-SPM is integrated into current MAST; its public reference implementation and validation records are available in the companion repository.
+The table below lists current usage entry points alongside source references from the 6.5.0 snapshot. VISTA-SPM is integrated into current MAST; its public reference implementation and validation records are available in the companion repository.
 
 | Experimental requirement | Mechanism | Implementation or guide |
 |---|---|---|
+| Support TERS experiments | Control supported optical components through the TERS interface | TERS section in the MAST application |
 | Connect an external agent | Skill discovery, asynchronous jobs, request deduplication, conflict checks, and restart-state handling | [External jobs](MASTv2/mast/api/ext/jobs.py), [Claude Code integration](integrations/claude-code/README.md) |
 | Execute bounded physical operations | Parameter and SI-magnitude validation, execution-mode checks, instrument ownership, and abort handling | [Execution context](MASTv2/mast/core/execution_context.py), [safety checks](MASTv2/mast/core/safety.py) |
 | Relate reasoning to recent observations | Buffering and monitoring expose observation age and scan progress | [Buffer service](MASTv2/mast/buffer/service.py), [snapshot observation tools](MASTv2/mast/agents/_shared/buffer_tools.py) |
