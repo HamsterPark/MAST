@@ -21,6 +21,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.skills.base import BaseSkill
 
 logger = logging.getLogger(__name__)
@@ -35,18 +36,24 @@ class AcquireOsciTrace(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description=(
+            description=tr(
                 "从 Nanonis 的 1 通道示波器（Osci1T）取一段缓冲时间序列。按硬件 RT 速率采样（V5e 上 "
                 "~20 kHz）。返回 (t0, dt, y_array)。要求 Nanonis 里已加载 Osci1T 模块 —— "
-                "默认自带的模拟器上没有。"
+                "默认自带的模拟器上没有。",
+                "Pull one buffered time series from the Nanonis 1-channel oscilloscope (Osci1T). "
+                "Samples at the hardware RT rate (~20 kHz on a V5e). Returns (t0, dt, y_array). "
+                "Requires the Osci1T module to be loaded in Nanonis -- the bundled simulator does "
+                "not have it by default.",
             ),
             parameters=[
                 ParameterSpec(
                     name="data_to_get",
                     type="int",
-                    description=(
+                    description=tr(
                         "0 = 当前显示的缓冲区（最快，可能是陈旧的），1 = 等下一个触发，2 = 等 2 "
-                        "个触发（最干净的快照）。"
+                        "个触发（最干净的快照）。",
+                        "0 = the buffer currently displayed (fastest, may be stale), 1 = wait for the "
+                        "next trigger, 2 = wait for 2 triggers (cleanest snapshot).",
                     ),
                     required=False, default=0,
                     min_value=0, max_value=2,
@@ -54,8 +61,10 @@ class AcquireOsciTrace(BaseSkill):
                 ParameterSpec(
                     name="signal_index",
                     type="int",
-                    description=(
-                        "可选的 0–15 信号通道索引，采集前赋给 Osci1T。-1 = 保持现有。"
+                    description=tr(
+                        "可选的 0–15 信号通道索引，采集前赋给 Osci1T。-1 = 保持现有。",
+                        "Optional signal channel index 0-15, assigned to Osci1T before acquisition. "
+                        "-1 = keep the current one.",
                     ),
                     required=False, default=-1,
                     min_value=-1, max_value=15,
@@ -157,10 +166,14 @@ class GetOsciTimebases(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description=(
+            description=tr(
                 "列出可用的 Oscilloscope-1-Channel（Osci1T）时基。每个时基就是每采样点的间隔 dt（s）；"
                 "采样率 fs = 1/dt。可选时基集合取决于 RT 频率与 RT 过采样。要求 Nanonis 里已加载 "
-                "Osci1T 模块。"
+                "Osci1T 模块。",
+                "List the available Oscilloscope-1-Channel (Osci1T) timebases. Each timebase is the "
+                "interval dt (s) between sample points; the sample rate is fs = 1/dt. The set of "
+                "selectable timebases depends on the RT frequency and RT oversampling. Requires the "
+                "Osci1T module to be loaded in Nanonis.",
             ),
             estimated_duration_s=0.5,
             composition_level=0,
@@ -229,17 +242,22 @@ class SetOsciTimebase(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
-            description=(
+            description=tr(
                 "按索引设置 Oscilloscope-1-Channel（Osci1T）时基。先用 GetOsciTimebases 拿到 "
-                "index→sample-rate 的对应关系。纯配置 —— 不移动针尖，也不改任何 setpoint。"
+                "index→sample-rate 的对应关系。纯配置 —— 不移动针尖，也不改任何 setpoint。",
+                "Set the Oscilloscope-1-Channel (Osci1T) timebase by index. First use "
+                "GetOsciTimebases to get the index-to-sample-rate mapping. Configuration only -- it "
+                "does not move the tip or change any setpoint.",
             ),
             parameters=[
                 ParameterSpec(
                     name="timebase_index",
                     type="int",
-                    description=(
+                    description=tr(
                         "在 GetOsciTimebases 返回的时基列表里的索引。索引越小 = 时基越快 / "
-                        "采样率越高。"
+                        "采样率越高。",
+                        "Index in the timebase list returned by GetOsciTimebases. A smaller index = a "
+                        "faster timebase / higher sample rate.",
                     ),
                     required=True, min_value=0,
                 ),

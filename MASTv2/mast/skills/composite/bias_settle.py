@@ -37,6 +37,7 @@ from __future__ import annotations
 import logging
 import time
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -76,21 +77,32 @@ class BiasSettleChange(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description=(
+            description=tr(
                 "走安全路径改样品偏压：跨零时**不在低偏压死区里逗留**（在那里"
                 "恒流反馈会把针尖往表面上压），大幅改动用 ramp 而不是直接跳，"
                 "改完还会等反馈稳定。"
                 "**偏压要变号、或者变化很大时，优先用它而不是 SetBias** —— "
                 "直接用 SetBias 跨零是撞针的经典路径，而参数范围和安全门"
-                "**都不会拦你**。"
+                "**都不会拦你**。",
+                "Change the sample bias by a safe path: when crossing zero it does "
+                "**not linger in the low-bias dead band** (where constant-current "
+                "feedback pushes the tip into the surface), large changes use a ramp "
+                "instead of a jump, and it waits for the feedback to settle "
+                "afterwards. **When the bias changes sign or changes a lot, prefer "
+                "this over SetBias** - crossing zero with SetBias is the classic path "
+                "to a tip crash, and neither the parameter range nor the safety gate "
+                "**will stop you**."
             ),
             parameters=[
                 ParameterSpec(
                     name="bias_v",
                     type="float",
-                    description=(
+                    description=tr(
                         "目标样品偏压，是一个 VOLT 量。偏压的量级不大，所以"
-                        "写普通字符串就行：'-2'（−2 V）、'0.05' 或 '50m'（50 mV）。"
+                        "写普通字符串就行：'-2'（−2 V）、'0.05' 或 '50m'（50 mV）。",
+                        "Target sample bias, a VOLT quantity. Bias magnitudes are "
+                        "small, so a plain string is fine: '-2' (-2 V), '0.05' or "
+                        "'50m' (50 mV)."
                     ),
                     unit="V",
                     required=True,
@@ -100,9 +112,12 @@ class BiasSettleChange(BaseSkill):
                 ParameterSpec(
                     name="settle_s",
                     type="float",
-                    description=(
+                    description=tr(
                         "改完之后等一会儿，让反馈的暂态衰减掉再进行下一次采集。"
-                        "留空用默认值。"
+                        "留空用默认值。",
+                        "Wait a while after the change so the feedback transient "
+                        "decays before the next acquisition. Leave empty for the "
+                        "default."
                     ),
                     unit="s",
                     required=False,
@@ -112,10 +127,14 @@ class BiasSettleChange(BaseSkill):
                 ParameterSpec(
                     name="allow_stop_in_deadband",
                     type="bool",
-                    description=(
+                    description=tr(
                         "允许**目标**偏压落在低偏压死区里（|V| < 50 mV）。"
                         "默认关：恒流反馈开着时停在那里会把针尖往表面上驱。"
-                        "**只有在反馈已关时才开它。**"
+                        "**只有在反馈已关时才开它。**",
+                        "Allow the **target** bias to fall inside the low-bias dead "
+                        "band (|V| < 50 mV). Off by default: with constant-current "
+                        "feedback on, stopping there drives the tip into the "
+                        "surface. **Turn it on only when feedback is already off.**"
                     ),
                     required=False,
                     default=False,
@@ -169,8 +188,11 @@ class BiasSettleChange(BaseSkill):
         if start is None:
             return SkillResult(
                 skill_name="BiasSettleChange", success=False,
-                error=("读不到当前偏压(Bias_Get)—— 不知道起点就无法判断这次"
-                       "改变会不会穿过零点,拒绝执行。"),
+                error=tr("读不到当前偏压(Bias_Get)—— 不知道起点就无法判断这次"
+                         "改变会不会穿过零点,拒绝执行。",
+                         "Cannot read the current bias (Bias_Get) - without the "
+                         "starting point it is impossible to tell whether this change "
+                         "crosses zero; refusing to run."),
                 nanonis_calls=calls)
 
         feedback_on = self._feedback_on(context, calls)
@@ -180,12 +202,18 @@ class BiasSettleChange(BaseSkill):
         if in_deadband and not allow_deadband and feedback_on is not False:
             return SkillResult(
                 skill_name="BiasSettleChange", success=False,
-                error=(
+                error=tr(
                     f"目标偏压 {target:.4g} V 落在低偏压死区(|V| < "
                     f"{ZERO_DEADBAND_V} V)内,而 Z 反馈"
                     f"{'开着' if feedback_on else '状态未知'}。恒流反馈在这里"
                     "维持不住电流,会把针尖一直推向表面。先关反馈"
-                    "(ZControllerOnOff),或改用一个更大的偏压。"),
+                    "(ZControllerOnOff),或改用一个更大的偏压。",
+                    f"Target bias {target:.4g} V is inside the low-bias dead band "
+                    f"(|V| < {ZERO_DEADBAND_V} V) and Z feedback is "
+                    f"{'on' if feedback_on else 'in an unknown state'}. Constant-current "
+                    "feedback cannot hold the current here and will keep pushing the "
+                    "tip toward the surface. Turn feedback off first "
+                    "(ZControllerOnOff), or use a larger bias."),
                 data={"bias_v_start": start, "bias_v_target": target,
                       "feedback_on": feedback_on,
                       "deadband_v": ZERO_DEADBAND_V},
@@ -217,7 +245,8 @@ class BiasSettleChange(BaseSkill):
         if not getattr(res, "success", False):
             return SkillResult(
                 skill_name="BiasSettleChange", success=False,
-                error=f"偏压变更失败({strategy}): {getattr(res, 'error', '')}",
+                error=tr(f"偏压变更失败({strategy}): {getattr(res, 'error', '')}",
+                         f"Bias change failed ({strategy}): {getattr(res, 'error', '')}"),
                 data={"bias_v_start": start, "bias_v_target": target,
                       "strategy": strategy},
                 nanonis_calls=calls)
@@ -243,7 +272,11 @@ class BiasSettleChange(BaseSkill):
                 "settle_s": settle,
                 "feedback_on": feedback_on,
             },
-            summary=(f"偏压 {start:.4g} V → {target:.4g} V"
-                     f"({'穿零斜坡' if crosses_zero else strategy}),"
-                     f"稳定 {settle:.3g} s"),
+            summary=tr(
+                f"偏压 {start:.4g} V → {target:.4g} V"
+                f"({'穿零斜坡' if crosses_zero else strategy}),"
+                f"稳定 {settle:.3g} s",
+                f"Bias {start:.4g} V -> {target:.4g} V "
+                f"({'zero-crossing ramp' if crosses_zero else strategy}), "
+                f"settled {settle:.3g} s"),
             nanonis_calls=calls)

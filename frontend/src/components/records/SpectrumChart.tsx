@@ -4,6 +4,7 @@ import UplotReact from "uplot-react";
 import type uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { api } from "@/api/client";
+import { tr } from "@/lib/i18n";
 import { useUiStore } from "@/store";
 import { Badge, DegradedNote, EmptyNote, ErrorNote, Spinner } from "@/components/ui";
 import { useElementWidth, useViewportHeight } from "@/hooks/useElementWidth";
@@ -16,17 +17,16 @@ import {
   type SpectrumMode,
 } from "@/lib/spectrumSeries";
 
-// STS 曲线 —— 一条谱的交互式显示。
+// STS curve: interactive display of a single spectrum.
 //
-// Until now a .dat reached this app as a ~160 px PNG of its first two columns:
-// no axes, no units, no zoom, and the backward sweep and lock-in channel thrown
-// away before the wire. The operator asked for 「sts曲线的初步处理和显示」; this
-// is that. Drag on the plot to zoom, double-click to reset (uPlot built-ins).
+// A .dat used to reach this app as a ~160 px PNG of its first two columns: no
+// axes, no units, no zoom, and the backward sweep and lock-in channel dropped
+// before the wire. This chart plots them as curves. Drag on the plot to zoom,
+// double-click to reset (uPlot built-ins).
 //
-// Series colours come from the theme tokens, not literals — `--mast-*` names,
-// because the earlier charts in this repo looked up `--accent` / `--border`,
-// which are defined nowhere, so every lookup returned "" and both themes got the
-// hard-coded fallbacks .
+// Series colours come from the theme tokens (`--mast-*` names); token names that
+// are not defined anywhere resolve to "" and silently fall back to the
+// hard-coded colours in both themes.
 
 function token(name: string): string {
   if (typeof window === "undefined") return "";
@@ -86,9 +86,9 @@ export function SpectrumChart({ path }: { path: string }) {
     const series: uPlot.Series[] = [{}];
     (prepared?.series ?? []).forEach((s, i) => {
       series.push({
-        // Backward sweeps are the dashed dim ones: they are the SAME quantity
-        // measured the other way, and giving them an equal-weight colour makes
-        // a normal trace/retrace pair look like two different signals.
+        // Backward sweeps are dashed and dim: they are the same quantity
+        // measured the other way, and an equal-weight colour would make a normal
+        // trace/retrace pair look like two different signals.
         stroke: i === 0 ? accent : dim,
         width: i === 0 ? 1.5 : 1,
         dash: i === 0 ? undefined : [4, 3],
@@ -144,7 +144,7 @@ export function SpectrumChart({ path }: { path: string }) {
 
   return (
     <div ref={boxRef}>
-      {q.data?.degraded && <DegradedNote what="谱数据" />}
+      {q.data?.degraded && <DegradedNote what={tr("谱数据", "spectrum data")} />}
       {q.data?.detail && !q.data.degraded && (
         <div className="mb-2 text-xs text-mast-warn">{q.data.detail}</div>
       )}
@@ -153,8 +153,11 @@ export function SpectrumChart({ path }: { path: string }) {
         <EmptyNote
           label={
             q.data?.degraded
-              ? `读不到这条谱${q.data?.detail ? `：${q.data.detail}` : ""}`
-              : "这个文件里没有可画的数值列。"
+              ? tr(
+                  `读不到这条谱${q.data?.detail ? `：${q.data.detail}` : ""}`,
+                  `Cannot read this spectrum${q.data?.detail ? `: ${q.data.detail}` : ""}`,
+                )
+              : tr("这个文件里没有可画的数值列。", "This file has no numeric columns to plot.")
           }
         />
       ) : (
@@ -178,10 +181,10 @@ export function SpectrumChart({ path }: { path: string }) {
                 ))}
               </div>
             )}
-            {prepared.hasNumeric && <Badge tone="warn">数值微分</Badge>}
+            {prepared.hasNumeric && <Badge tone="warn">{tr("数值微分", "Numerical derivative")}</Badge>}
             <span className="text-mast-muted">
-              {q.data?.n_points ?? 0} 点
-              {q.data?.decimated ? "（已抽稀）" : ""}
+              {tr(`${q.data?.n_points ?? 0} 点`, `${q.data?.n_points ?? 0} points`)}
+              {q.data?.decimated ? tr("（已抽稀）", " (decimated)") : ""}
               {q.data?.kind_evidence ? ` · ${q.data.kind_evidence}` : ""}
             </span>
           </div>
@@ -212,7 +215,7 @@ export function SpectrumChart({ path }: { path: string }) {
                 so what is on screen can be checked against what was measured. */}
             {(q.data?.columns?.length ?? 0) > prepared.series.length + 1 && (
               <div className="text-mast-faint">
-                文件通道：{(q.data?.columns ?? []).join(" · ")}
+                {tr("文件通道：", "File channels: ")}{(q.data?.columns ?? []).join(" · ")}
               </div>
             )}
           </div>

@@ -191,7 +191,7 @@ class MemoryStore:
     # ── MEMORY.md-style index for session-start injection ─────────────
     def index_markdown(self, namespace: str | None = None, *, max_lines: int = 60) -> str:
         """One-line-per-entry index (pinned first, then most-recent) to load into
-        an agent's context at session start, like a coding agent's memory file."""
+        an agent's context at session start (MEMORY.md-style)."""
         rows = self.list(namespace, limit=max_lines)
         if not rows:
             return "# MEMORY\n(空 — 还没有持久化记忆)\n"

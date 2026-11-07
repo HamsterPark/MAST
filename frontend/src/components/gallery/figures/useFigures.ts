@@ -1,6 +1,7 @@
+// Server data for figure export (docs/v2/design/data_gallery.md section 10): the artifact list and the job-slot state.
 //
-// 状态键不以 ["gallery", "figures"] 开头：「刷新产物列表」的 invalidate 按前缀匹配，
-// 不该顺带把任务状态也打回重拉。
+// The status key does not start with ["gallery", "figures"]: invalidating the artifact list
+// matches by prefix and must not also force the job status to refetch.
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
@@ -10,7 +11,7 @@ export const FIGURE_KEYS = {
   status: ["gallery", "figure-status"] as const,
 };
 
-/** 出图产物列表（纯读）。任务结束时由 FigureJobChip 让它失效重拉。 */
+/** Figure artifact list (read-only). FigureJobChip invalidates it when a job finishes. */
 export function useGalleryFigures() {
   return useQuery({
     queryKey: FIGURE_KEYS.list,
@@ -23,7 +24,7 @@ export function useGalleryFigures() {
   });
 }
 
-/** 出图任务槽：在跑时 1.5 s 一次看进度，否则 15 s 一次（任务可能是别的标签页发起的）。 */
+/** Figure job slot: poll every 1.5 s while running, otherwise every 15 s (a job may have been started from another tab). */
 export function useFigureStatus() {
   return useQuery({
     queryKey: FIGURE_KEYS.status,

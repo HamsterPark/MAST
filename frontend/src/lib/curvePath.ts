@@ -1,4 +1,4 @@
-// 曲线几何 — turning a sample series into SVG polyline points inside a unit box.
+// Curve geometry: turning a sample series into SVG polyline points inside a unit box.
 //
 // Deliberately NOT shared with components/vision/Sparkline.tsx even though the
 // arithmetic rhymes. Two differences that matter:

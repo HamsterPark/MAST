@@ -40,17 +40,17 @@ class InitItemModel(BaseModel):
     unit: str = ""
     #: 页面上这一项的**全部**说明，一句话：填什么 + 哪里读。
     #:
-    #: 由 ``what`` + ``where`` 合并而来（#39 / #40，第四轮）。改名不是只改内容：
-    #: 留旧名字装新东西 = 字段标签说谎，而下游全都信它 —— 这个仓吃过那个亏。
+    #: 由 ``what`` + ``where`` 合并而来。改名不是只改内容：
+    #: 留旧名字装新东西 = 字段标签说谎，而下游全都信它。
     hint: str = ""
     #: 填错会怎样。**只有 ``safety_critical`` 的项有**，而且一定有。
     consequence: str = ""
     #: 能从仪器读一次来对账的项，写上读法。**只喂「从仪器读一次」按钮，不上屏** ——
-    #: 它和 ``hint`` 说的是同一个地方，印两遍就是同一句话说两遍（#40 点名的就是它）。
+    #: 它和 ``hint`` 说的是同一个地方，印两遍就是同一句话说两遍。
     probe: str = ""
     has_factory: bool = True
     #: 填错会伤到硬件（或让某条安全判据反向）。只有这一族带 ``consequence``，
-    #: 而且常显 —— 页面上除此之外一个字都没有（#11 / #20 / #30 / #39 / #40）。
+    #: 而且常显 —— 页面上除此之外不再显示其他说明。
     safety_critical: bool = False
     unanswered_values: list[str] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
@@ -61,7 +61,7 @@ class InitItemModel(BaseModel):
     factory: Any = None
     status: str = "default"          # set | acknowledged | default | missing | n/a
     #: 仅 ``n/a`` 时非空：指名是上面**哪一项的哪个回答**让这一项失去意义。
-    #: 「上面某一项」这种说法把读者留在一道 48 项的谜题前。
+    #: 「上面某一项」这种说法让读者要在 48 项里自己找。
     na_reason: str = ""
     complete: bool = False
     input: InputSpec = Field(default_factory=InputSpec)

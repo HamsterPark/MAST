@@ -1,26 +1,24 @@
 import { useState } from "react";
 import { PIPELINE, agentColorVar, agentDef } from "./registry";
 import type { components } from "@/api/schema";
+import { tr } from "@/lib/i18n";
 
 // ════════════════════════════════════════════════════════════════════════════
-// 数据流 · ARTIFACT FLOW
+// Data flow (ARTIFACT FLOW)
 //
-// Redrawn 2026-07-11 ("对象总览-访问拓扑不科学").
-//
-// The old picture was a static bipartite blob derived from a one-to-one
-// {agent: artifact} table: every artifact had exactly ONE writer and every other
-// agent was drawn as a reader. Both halves were fiction — figures are written by
-// data_processing AND by paper_writing, the shared memory is written by all six,
-// and paper_review never opens a scan file.
+// A one-to-one {agent: artifact} table would claim that every artifact has exactly
+// ONE writer and that every other agent reads it. Neither holds: figures are
+// written by data_processing AND by paper_writing, the shared memory is written by
+// all six agents, and paper_review never opens a scan file.
 //
 // This draws the REAL directed flow instead:
 //   · production is the skeleton  — solid, in the writing agent's own hue;
 //   · consumption is the detail   — dashed and quiet until you ask for it;
-//   · multi-writer artifacts show TWO+ incoming solid edges (the case the old
-//     model could not express at all) and are called out explicitly;
+//   · multi-writer artifacts show TWO+ incoming solid edges (a one-writer model
+//     cannot express this) and are called out explicitly;
 //   · the two artifacts that everyone touches are drawn as what they ARE — a
 //     shared backplane and a side rail — rather than as nodes with 12 edges
-//     each, which is what made the old graph unreadable.
+//     each, which would be unreadable.
 // ════════════════════════════════════════════════════════════════════════════
 
 type Perm = components["schemas"]["ArtifactPermission"];
@@ -85,10 +83,10 @@ export function ArtifactFlowGraph({
 
   // Order the artifacts by their PRODUCER, not by a centre-of-mass of everyone
   // who touches them: this is a production flow, so the row should read left→
-  // right in the order things get made (文献 → 方案 → 扫描 → 分析 → 图表 → 稿件
-  // → 评审). Sorting by centre-of-mass instead let a far-right *reader* drag an
-  // early artifact rightwards — the literature index landed after the
-  // experiment plan, and the write edges crossed each other for no reason.
+  // right in the order things get made (literature → plan → scan → analysis →
+  // figures → manuscript → review). Sorting by centre-of-mass instead lets a
+  // far-right *reader* drag an early artifact rightwards, so the literature index
+  // lands after the experiment plan and write edges cross for no reason.
   const idxOf = (a: string) => PIPELINE.indexOf(a);
   const desired = nodes.map((p) => {
     const writers = (p.writers ?? []).map(idxOf).filter((i) => i >= 0);
@@ -132,7 +130,7 @@ export function ArtifactFlowGraph({
         viewBox={`0 0 ${W} ${H}`}
         style={{ display: "block", minWidth: 880 }}
         role="img"
-        aria-label="智能体与共享产物的数据流"
+        aria-label={tr("智能体与共享产物的数据流", "Data flow between agents and shared artifacts")}
         onMouseLeave={() => setFocus(null)}
       >
         <defs>
@@ -210,7 +208,7 @@ export function ArtifactFlowGraph({
               opacity={on ? 1 : 0.28}
               style={{ cursor: "pointer" }}
             >
-              <title>{`${a.cn} — 悬停查看其读写连线`}</title>
+              <title>{tr(`${a.cn} — 悬停查看其读写连线`, `${a.cn} — hover to see its read/write edges`)}</title>
               <rect x={0} y={0} width={AG_W} height={AG_H} rx={7}
                     className="fill-mast-panel" stroke={soft(hue, 62)} strokeWidth={1} />
               <rect x={0} y={0} width={AG_W} height={3} rx={1.5} fill={hue} />
@@ -241,7 +239,7 @@ export function ArtifactFlowGraph({
               onDoubleClick={() => onOpen?.(p.artifact_id)}
               style={{ cursor: "pointer" }}
             >
-              <title>{`${p.label || p.artifact_id}\n存储：${p.store}\n写：${(p.writers ?? []).map((w) => agentDef(w).cn).join("、") || "系统"}\n读：${(p.readers ?? []).map((r) => agentDef(r).cn).join("、") || "—"}`}</title>
+              <title>{tr(`${p.label || p.artifact_id}\n存储：${p.store}\n写：${(p.writers ?? []).map((w) => agentDef(w).cn).join("、") || "系统"}\n读：${(p.readers ?? []).map((r) => agentDef(r).cn).join("、") || "—"}`, `${p.label || p.artifact_id}\nStore: ${p.store}\nWritten by: ${(p.writers ?? []).map((w) => agentDef(w).cn).join(", ") || "system"}\nRead by: ${(p.readers ?? []).map((r) => agentDef(r).cn).join(", ") || "—"}`)}</title>
               {sel && (
                 <rect x={-4} y={-4} width={AR_W + 8} height={AR_H + 8} rx={9} fill="none"
                       stroke="var(--mast-accent)" strokeWidth={1.6} opacity={0.7} />
@@ -288,14 +286,14 @@ export function ArtifactFlowGraph({
                 {(p.writers ?? []).length === 0 && (
                   <text x={0} y={9.6} fontFamily={MONO} fontSize={8}
                         className="fill-mast-muted">
-                    系统写入
+                    {tr("系统写入", "System")}
                   </text>
                 )}
               </g>
               {multi && (
                 <text x={AR_W - 9} y={19} textAnchor="end" fontFamily={MONO} fontSize={8}
                       fontWeight={700} fill="var(--mast-accent)">
-                  多写
+                  {tr("多写", "Multi")}
                 </text>
               )}
 
@@ -316,7 +314,7 @@ export function ArtifactFlowGraph({
             opacity={!focus || focus === bus.artifact_id || PIPELINE.includes(focus) ? 1 : 0.3}
             style={{ cursor: "pointer" }}
           >
-            <title>{`${bus.label} — 六个智能体全员读写（共享总线）\n存储：${bus.store}`}</title>
+            <title>{tr(`${bus.label} — 六个智能体全员读写（共享总线）\n存储：${bus.store}`, `${bus.label} — read and written by all six agents (shared bus)\nStore: ${bus.store}`)}</title>
             {/* drawn as a BUS because that is what it is — a node with 12 edges
                 would have been unreadable and would have said nothing true */}
             <rect x={24} y={BUS_Y} width={W - 48} height={26} rx={5}
@@ -332,11 +330,11 @@ export function ArtifactFlowGraph({
             </text>
             <text x={36 + 90} y={BUS_Y + 17} fontFamily={MONO} fontSize={8.5}
                   fill={soft("var(--mast-accent)", 80)}>
-              全员读写 · {bus.store}
+              {tr(`全员读写 · ${bus.store}`, `All agents read/write · ${bus.store}`)}
             </text>
             <text x={W - 36} y={BUS_Y + 17} textAnchor="end" fontFamily={MONO} fontSize={8}
                   fontWeight={700} fill="var(--mast-accent)">
-              多写 ×{(bus.writers ?? []).length}
+              {tr(`多写 ×${(bus.writers ?? []).length}`, `Multi-writer ×${(bus.writers ?? []).length}`)}
             </text>
           </g>
         )}
@@ -349,7 +347,7 @@ export function ArtifactFlowGraph({
             opacity={!focus || focus === rail.artifact_id ? 1 : 0.3}
             style={{ cursor: "pointer" }}
           >
-            <title>{`${rail.label} — 视觉子系统写入，智能体只读（"agent 从不写缓冲区"不变式）`}</title>
+            <title>{tr(`${rail.label} — 视觉子系统写入，智能体只读（"agent 从不写缓冲区"不变式）`, `${rail.label} — written by the vision subsystem, read-only for agents (invariant: agents never write the buffer)`)}</title>
             <line x1={24} y1={RAIL_Y} x2={W - 24} y2={RAIL_Y}
                   stroke="var(--mast-border)" strokeWidth={1} strokeDasharray="4 4" />
             <text x={36} y={RAIL_Y + 14} fontFamily={SANS} fontSize={10}
@@ -358,7 +356,7 @@ export function ArtifactFlowGraph({
             </text>
             <text x={36 + 130} y={RAIL_Y + 14} fontFamily={MONO} fontSize={8}
                   className="fill-mast-muted" opacity={0.8}>
-              系统写入 · 智能体只读（agent 从不写缓冲区）
+              {tr("系统写入 · 智能体只读（agent 从不写缓冲区）", "System-written · agents read only (agents never write the buffer)")}
             </text>
           </g>
         )}
@@ -366,11 +364,11 @@ export function ArtifactFlowGraph({
         {/* ── legend ──────────────────────────────────────────────────── */}
         <g transform={`translate(24 ${AG_Y + 16})`} fontFamily={MONO} fontSize={9}>
           <line x1={0} y1={-4} x2={18} y2={-4} stroke="var(--mast-ag-ic)" strokeWidth={1.6} />
-          <text x={24} y={-1} className="fill-mast-muted">写入（生产）</text>
+          <text x={24} y={-1} className="fill-mast-muted">{tr("写入（生产）", "Write (produce)")}</text>
           <line x1={0} y1={12} x2={18} y2={12} stroke="var(--mast-muted)" strokeWidth={1}
                 strokeDasharray="3 4" />
-          <text x={24} y={15} className="fill-mast-muted">读取（消费）</text>
-          <text x={0} y={31} className="fill-mast-muted" opacity={0.75}>悬停可聚焦</text>
+          <text x={24} y={15} className="fill-mast-muted">{tr("读取（消费）", "Read (consume)")}</text>
+          <text x={0} y={31} className="fill-mast-muted" opacity={0.75}>{tr("悬停可聚焦", "Hover to focus")}</text>
         </g>
       </svg>
     </div>

@@ -4,23 +4,23 @@ import { api } from "@/api/client";
 import { DegradedNote, ErrorNote, Section, Spinner } from "@/components/ui";
 import { DocList, type DocRow } from "@/components/records/ExperimentDocuments";
 import { useCurrentScope } from "@/api/scope";
+import { tr } from "@/lib/i18n";
 
-// 报告 — the autonomous pipeline's WRITTEN
-// outputs. A full run could end "全流程完成…论文评审(ACCEPT)" while
-// nothing was visible on screen: paper_writing had no save tool at all,
-// and paper_review's load_draft pointed at a directory that never existed.
+// Reports: the written outputs of the autonomous pipeline (reports, reviews,
+// plans, paper drafts).
 //
-// 2026-07-29：文档现在住在**实验文件夹**里（reports/ 与 plans/），带真正的版本
-// 历史和归属。这个面板是跨实验的总览；单个实验的文档在 实验记录 → 实验详情 里。
-// 正文改用 markdown 渲染 —— 此前是 <pre> 吐源码，表格和公式全是原始符号。
+// Documents live in the experiment folder (reports/ and plans/) with real
+// version history and ownership. This panel is the cross-experiment overview;
+// the documents of a single experiment are in Experiments -> experiment detail.
+// Bodies are rendered as markdown.
 
 const KIND_TABS: { value: string; label: string }[] = [
-  { value: "", label: "全部" },
-  { value: "experiment_report", label: "实验报告" },
-  { value: "paper_draft", label: "论文草稿" },
-  { value: "literature_report", label: "文献报告" },
-  { value: "experiment_plan", label: "实验计划" },
-  { value: "review", label: "评审" },
+  { value: "", label: tr("全部", "All") },
+  { value: "experiment_report", label: tr("实验报告", "Experiment reports") },
+  { value: "paper_draft", label: tr("论文草稿", "Paper drafts") },
+  { value: "literature_report", label: tr("文献报告", "Literature reports") },
+  { value: "experiment_plan", label: tr("实验计划", "Experiment plans") },
+  { value: "review", label: tr("评审", "Reviews") },
 ];
 
 export function DocumentsPane() {
@@ -46,31 +46,32 @@ export function DocumentsPane() {
     refetchInterval: 30_000,
   });
 
-  if (q.isLoading) return <Spinner label="加载文档…" />;
+  if (q.isLoading) return <Spinner label={tr("加载文档…", "Loading documents…")} />;
   if (q.isError) return <ErrorNote error={q.error} />;
   const payload = q.data as
     | { documents?: DocRow[]; degraded?: boolean | null }
     | undefined;
-  if (payload?.degraded) return <DegradedNote what="文档库" />;
+  if (payload?.degraded) return <DegradedNote what={tr("文档库", "document library")} />;
 
   const docs = (payload?.documents ?? []) as DocRow[];
 
   return (
     <Section
-      title={`文档 (${docs.length})`}
-      subtitle="文献报告 / 实验计划 / 实验报告 / 论文草稿 / 评审 —— 每次修订都是新版本，永不覆盖。点击展开全文。"
+      title={`${tr("文档", "Documents")} (${docs.length})`}
+      subtitle={tr(
+        "文献报告 / 实验计划 / 实验报告 / 论文草稿 / 评审 —— 每次修订都是新版本，永不覆盖。点击展开全文。",
+        "Literature reports / experiment plans / experiment reports / paper drafts / reviews. Every revision is a new version; nothing is overwritten. Click to expand.",
+      )}
     >
       <div className="mb-3 flex flex-wrap items-center gap-2">
         {KIND_TABS.map((t) => (
           <button
             key={t.value}
             onClick={() => setKind(t.value)}
-            // `accent-ink` is the foreground for a SOLID accent fill (white on
-            // cyan in light, near-black on cyan in dark). Pairing it with
-            // `accent-soft` — a 9% tint that stays almost the page background —
-            // put white text on white in light mode: the active chip vanished
-            // . Every other accent-soft surface in this app pairs
-            // with `text-mast-accent`; this one was the outlier.
+            // `accent-ink` is the foreground for a solid accent fill; on the
+            // `accent-soft` tint (almost the page background) it would be
+            // unreadable in light mode, so the active chip pairs the tint with
+            // `text-mast-accent` like every other accent-soft surface.
             className={
               "rounded-full border px-2.5 py-1 text-xs " +
               (kind === t.value
@@ -83,14 +84,14 @@ export function DocumentsPane() {
         ))}
         <label
           className="ml-auto flex cursor-pointer items-center gap-1.5 text-xs text-mast-muted"
-          title="废弃的文档没有被删除，只是搬进了 _discarded 区，随时可恢复"
+          title={tr("废弃的文档没有被删除，只是搬进了 _discarded 区，随时可恢复", "Discarded documents are not deleted; they are moved to the _discarded area and can be restored at any time")}
         >
           <input
             type="checkbox"
             checked={showDiscarded}
             onChange={(e) => setShowDiscarded(e.target.checked)}
           />
-          含已废弃
+          {tr("含已废弃", "Include discarded")}
         </label>
         {currentExperimentId && (
           <label className="flex cursor-pointer items-center gap-1.5 text-xs text-mast-muted">
@@ -99,20 +100,24 @@ export function DocumentsPane() {
               checked={scopedOnly}
               onChange={(e) => setScopedOnly(e.target.checked)}
             />
-            只看当前实验
+            {tr("只看当前实验", "Current experiment only")}
           </label>
         )}
       </div>
 
       {docs.length === 0 ? (
         <div className="space-y-1 text-sm text-mast-muted">
-          <p>没有匹配的文档。</p>
+          <p>{tr("没有匹配的文档。", "No matching documents.")}</p>
           <p className="text-xs">
-            智能体写出的报告、综述、计划和论文草稿会保存到各自实验文件夹的{" "}
-            <code className="font-mono text-[11px]">reports/</code> 与{" "}
-            <code className="font-mono text-[11px]">plans/</code> 下。
-            没有活跃实验时保存的文档落在{" "}
-            <code className="font-mono text-[11px]">_unfiled/</code>，可以稍后认领。
+            {tr(
+              "智能体写出的报告、综述、计划和论文草稿会保存到各自实验文件夹的",
+              "Reports, reviews, plans and paper drafts written by agents are saved under ",
+            )}{" "}
+            <code className="font-mono text-[11px]">reports/</code> {tr("与", "and")}{" "}
+            <code className="font-mono text-[11px]">plans/</code>
+            {tr(" 下。没有活跃实验时保存的文档落在", " in their experiment folder. Documents saved with no active experiment go to")}{" "}
+            <code className="font-mono text-[11px]">_unfiled/</code>
+            {tr("，可以稍后认领。", " and can be claimed later.")}
           </p>
         </div>
       ) : (

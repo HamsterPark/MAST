@@ -6,9 +6,10 @@ import { Field, Toggle } from "../controls";
 import { fmtCurrent, fmtLength } from "../../lib/units";
 import { buildKnobPayload, clampKnob, fmtKnobValue, type KnobLike } from "../../lib/knobs";
 import type { SettingsPatch } from "@/lib/settingsWrite";
+import { tr } from "@/lib/i18n";
 
-// 设置 → 一个后端旋钮目录 — generic renderer for any config endpoint that ships
-// a knob catalogue (电流监控, 环境历史, …).
+// Settings -> a backend knob catalogue: generic renderer for any config endpoint
+// that ships a knob catalogue (current monitoring, environment history, conduct).
 //
 // The rows come from the catalogue rather than a hard-coded list, so adding a
 // knob to the backend's EDITABLE_KEYS makes it appear here with no frontend
@@ -34,54 +35,57 @@ export interface CatalogKnob {
   is_bool: boolean;
   /** `current` | `aux` on the monitoring catalogue; absent elsewhere. */
   group?: string;
-  /** 有限档位（今天只有 conduct 的 `cd_autonomy`）。空/缺席 = 连续量，用数字框。
+  /** Finite set of levels (currently only conduct's `cd_autonomy`). Empty or
+   *  absent means a continuous value, rendered as a number box.
    *
-   *  档位名的真源在后端（`autonomy.describe`）—— 在这里再写一份中文档位名，
-   *  就是那个名字的第二处定义，而两处定义岔开时没有任何东西会报错：界面上
-   *  写着「半自主」，存进去的却是别的档。 */
+   *  The level names are owned by the backend (`autonomy.describe`). Duplicating
+   *  them here would create a second definition that can drift without any error:
+   *  the UI would show one level name while a different level is stored. */
   choices?: Array<{ value: number; label_zh: string }>;
 }
 
-/** Amperes get an engineering-notation echo next to the box. Typing 1.2531
- *  where 1.2531e-6 was meant is a real incident in this project's history, and
- *  a value the operator can read as "20.0 pA" is the cheapest guard there is.
+/** Amperes get an engineering-notation echo next to the box. A dropped exponent
+ *  (typing 1.2531 where 1.2531e-6 was meant) is an easy slip, and a value that
+ *  reads back as "20.0 pA" is the cheapest guard against it.
  *
  *  ORDER MATTERS. `_m_per_s` has to be tested before `_s`, or a Z drift rate of
- *  5e-11 m/s echoes back as "5e-11 秒" — an echo that says the wrong unit is
- *  worse than no echo, because this box exists to be believed. Same for `_m`
- *  before `_a`-style suffixes: metres and amperes both read as tiny numbers and
- *  the picoprefix hides which one you are looking at. */
+ *  5e-11 m/s would echo back as "5e-11 s"; an echo with the wrong unit is worse
+ *  than no echo. Likewise `_m` is tested next to `_a`: metres and amperes both
+ *  read as tiny numbers and the SI prefix hides which one is being shown. */
 function unitEcho(key: string, value: number): string | null {
   if (key.endsWith("_m_per_s")) return `${fmtLength(value)}/s`;
   if (key.endsWith("_a")) return fmtCurrent(value, { placeholder: "—" });
   if (key.endsWith("_m")) return fmtLength(value);
-  if (key.endsWith("_hz")) return value > 0 ? `${value} Hz` : "自动";
+  if (key.endsWith("_hz")) return value > 0 ? `${value} Hz` : tr("自动", "Auto");
   if (key.endsWith("_frac") || key.endsWith("_sd_warn")) {
     return `${(value * 100).toFixed(1)} %`;
   }
-  if (key.endsWith("_s")) return `${value} 秒`;
+  if (key.endsWith("_s")) return tr(`${value} 秒`, `${value} s`);
   if (key.endsWith("_gb")) return `${value} GB`;
-  if (key.endsWith("_hours")) return `${value} 小时`;
-  if (key.endsWith("_days")) return `${value} 天`;
-  if (key.endsWith("_bins") || key.endsWith("_segments")) return `${value} 个`;
+  if (key.endsWith("_hours")) return tr(`${value} 小时`, `${value} h`);
+  if (key.endsWith("_days")) return tr(`${value} 天`, `${value} d`);
+  if (key.endsWith("_bins") || key.endsWith("_segments")) return tr(`${value} 个`, `${value}`);
   if (key.endsWith("_k")) return `${value} σ`;
   return null;
 }
 
 /** Section heading per group, plus the sentence the operator needs BEFORE
- *  touching those rows. `undefined` means the catalogue has no groups (环境历史)
- *  and everything renders as one flat list, exactly as before. */
+ *  touching those rows. `undefined` means the catalogue has no groups
+ *  (environment history) and everything renders as one flat list. */
 const GROUP_META: Record<string, { title: string; note: string }> = {
   current: {
-    title: "隧道电流",
-    note: "示波器采下来的 2 kHz 电流。阈值单位是安培，按这台机器的真实底噪标定。",
+    title: tr("隧道电流", "Tunneling current"),
+    note: tr(
+      "示波器采下来的 2 kHz 电流。阈值单位是安培，按这台机器的真实底噪标定。",
+      "The 2 kHz current captured by the oscilloscope. Thresholds are in amperes and should be calibrated to this machine's real noise floor.",
+    ),
   },
   aux: {
-    title: "辅助通道（Z 位置 / qPlus 振幅）",
-    note:
-      "1 Hz 低速旁路，不占示波器。阈值单位是米与赫兹——" +
-      "与上面那组毫无关系，不要照抄。告警出厂是关的：" +
-      "先跑 python -m mast.monitoring.commission 看【辅助通道】那段的建议值。",
+    title: tr("辅助通道（Z 位置 / qPlus 振幅）", "Auxiliary channels (Z position / qPlus amplitude)"),
+    note: tr(
+      "1 Hz 低速旁路，不占示波器。阈值单位是米与赫兹——与上面那组毫无关系，不要照抄。告警出厂是关的：先跑 python -m mast.monitoring.commission 看【辅助通道】那段的建议值。",
+      "A 1 Hz slow side path that does not use the oscilloscope. Thresholds are in metres and hertz, unrelated to the group above, so do not copy values across. Alarms are off by default: first run python -m mast.monitoring.commission and read the suggested values in its [auxiliary channels] section.",
+    ),
   },
 };
 
@@ -115,8 +119,9 @@ function KnobRow({
 
   const choices = knob.choices ?? [];
   if (choices.length > 0) {
-    // 有限档位：分段控件，不是数字框。让用户在一个框里敲「2」，等于要求他
-    // 记住那三个数分别是什么 —— 而记错一档在 conduct 上就是「谁能点头」记错。
+    // Finite levels get a segmented control, not a number box: typing "2" would
+    // require remembering what each number means, and picking the wrong level on
+    // conduct changes who may approve.
     const name = knob.label_zh || knob.key;
     return (
       <div className={"py-1" + (disabled ? " opacity-50" : "")}>
@@ -160,15 +165,15 @@ function KnobRow({
         </div>
         <span className="flex shrink-0 items-center gap-2">
           {/* Toggle's `label` is only an aria-label, so the state gets a visible
-              word too — the knob position and the accent color must not be the
-              only thing telling the operator whether 常开采集 is on. */}
+              word too: the knob position and accent color must not be the only
+              indication of whether the setting is on. */}
           <span className={"text-xs " + (on ? "text-mast-accent" : "text-mast-muted")}>
-            {on ? "开" : "关"}
+            {on ? tr("开", "On") : tr("关", "Off")}
           </span>
           <Toggle
             checked={on}
             onChange={(v) => !disabled && onCommit(v ? 1 : 0)}
-            label={`${name}：${on ? "开" : "关"}`}
+            label={`${name}: ${on ? tr("开", "On") : tr("关", "Off")}`}
           />
         </span>
       </div>
@@ -177,8 +182,8 @@ function KnobRow({
 
   const echo = unitEcho(knob.key, value);
   const bounds =
-    knob.max > 0 ? `范围 ${fmtKnobValue(knob.min)} – ${fmtKnobValue(knob.max)}` : "";
-  const hint = [knob.hint_zh, bounds, echo && `当前 ≈ ${echo}`]
+    knob.max > 0 ? `${tr("范围", "Range")} ${fmtKnobValue(knob.min)} – ${fmtKnobValue(knob.max)}` : "";
+  const hint = [knob.hint_zh, bounds, echo && `${tr("当前 ≈", "Now ≈")} ${echo}`]
     .filter(Boolean)
     .join(" · ");
 
@@ -234,9 +239,9 @@ export function KnobCatalogSection({
     queryFn: async () => {
       const { data, error } = await api.GET(configPath);
       if (error) throw error;
-      // conduct 的降级理由字段叫 `reason`（monitoring / env-history 叫
-      // `detail`）。少认一个名字的后果不是报错，是那句「为什么读不到」静默
-      // 消失 —— 而它正是这个分支存在的理由。
+      // conduct reports its degradation reason as `reason` (monitoring and
+      // env-history use `detail`). Missing one of the names does not raise an
+      // error; it silently drops the "why it cannot be read" message.
       return data as {
         knobs?: CatalogKnob[];
         degraded?: boolean;
@@ -258,7 +263,7 @@ export function KnobCatalogSection({
         {unavailableNote}
         {(() => {
           const why = config.data?.detail || config.data?.reason;
-          return why ? `（${why}）` : "";
+          return why ? ` (${why})` : "";
         })()}
       </p>
     );
@@ -276,7 +281,7 @@ export function KnobCatalogSection({
 
   // Group in CATALOGUE ORDER, so the backend's EDITABLE_KEYS stays the single
   // place that decides what appears and in what sequence. A catalogue with no
-  // `group` (环境历史) collapses to one unlabelled section — same page as before.
+  // `group` (environment history) collapses to one unlabelled section.
   const sections: Array<{ id: string | undefined; rows: CatalogKnob[] }> = [];
   for (const k of knobs) {
     const last = sections[sections.length - 1];
@@ -319,10 +324,10 @@ export function KnobCatalogSection({
           disabled={saving}
           className="rounded border border-mast-border bg-mast-panel px-3 py-1 text-xs text-mast-muted hover:text-mast-text disabled:opacity-50"
         >
-          恢复默认
+          {tr("恢复默认", "Restore defaults")}
         </button>
       </div>
-      {saving && <p className="text-xs text-mast-muted">保存中…</p>}
+      {saving && <p className="text-xs text-mast-muted">{tr("保存中…", "Saving…")}</p>}
     </div>
   );
 }

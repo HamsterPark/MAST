@@ -37,6 +37,7 @@ re-raises the interrupt with a fresh id.
 """
 from __future__ import annotations
 
+from mast.i18n import tr
 import logging
 import threading
 import time as _time
@@ -68,8 +69,8 @@ MAX_APPROVAL_WAIT_S = 900.0
 
 # How often the wait emits a status frame. Doubles as the SSE keep-alive: a
 # silent connection is what idle-TCP reapers (WireGuard keepalive, gateway idle
-# timeouts, Wi-Fi roaming, sleep) kill — which is how a network blip turned into
-# "对话卡住" . ws.py pings every 15 s for the same reason.
+# timeouts, Wi-Fi roaming, sleep) kill — which is how a network blip left the
+# conversation stuck. ws.py pings every 15 s for the same reason.
 APPROVAL_BEAT_S = 15.0
 
 
@@ -111,8 +112,10 @@ def publish_interrupts(store, owner, chunk_value, thread_id) -> list[dict]:
             pendings = [{
                 "event_id": f"intr_{thread_id}_{_uuid.uuid4().hex[:8]}",
                 "agent_id": owner,
-                "skill": (f"工作流 {_val.get('workflow', '?')} · 节点 "
-                          f"{_val.get('node_id', '?')}"),
+                "skill": tr(f"工作流 {_val.get('workflow', '?')} · 节点 "
+                            f"{_val.get('node_id', '?')}",
+                            f"Workflow {_val.get('workflow', '?')} · node "
+                            f"{_val.get('node_id', '?')}"),
                 "params": dict(_val.get("inputs") or {}),
                 "rationale": str(_val.get("message", "")),
                 "allowed_decisions": list(routes),
@@ -152,7 +155,7 @@ def publish_interrupts(store, owner, chunk_value, thread_id) -> list[dict]:
                 # back to instrument_control — attributing the supervisor's
                 # question to an agent that never asked it.
                 "agent_id": str(_val.get("agent_id") or "") or owner,
-                "skill": "向用户提问",
+                "skill": tr("向用户提问", "Question for the user"),
                 "params": {
                     "question": _ask.get("question", ""),
                     "options": _labels,
@@ -185,10 +188,13 @@ def publish_interrupts(store, owner, chunk_value, thread_id) -> list[dict]:
             pendings = [{
                 "event_id": f"intr_{thread_id}_{_uuid.uuid4().hex[:8]}",
                 "agent_id": owner,
-                "skill": f"缓冲区关键事件：{kinds}",
+                "skill": tr(f"缓冲区关键事件：{kinds}", f"Critical buffer events: {kinds}"),
                 "params": {"events": events, "suggested_action": suggested},
-                "rationale": (f"检测到 {len(events)} 个关键硬件事件（{kinds}），"
-                              f"建议动作：{suggested}。请在机台确认/处理后决定是否继续。"),
+                "rationale": tr(f"检测到 {len(events)} 个关键硬件事件（{kinds}），"
+                                f"建议动作：{suggested}。请在机台确认/处理后决定是否继续。",
+                                f"Detected {len(events)} critical hardware events ({kinds}); "
+                                f"suggested action: {suggested}. Check / handle it at the instrument "
+                                "before deciding whether to continue."),
                 "allowed_decisions": ["approve", "reject"],
                 "kind": "buffer_hitl",
                 "thread_id": thread_id,
@@ -215,7 +221,7 @@ def publish_interrupts(store, owner, chunk_value, thread_id) -> list[dict]:
             for ar in action_requests:
                 if not isinstance(ar, dict):
                     continue
-                skill = ar.get("name") or "未知 skill"
+                skill = ar.get("name") or tr("未知 skill", "unknown skill")
                 args = ar.get("args") or {}
                 pendings.append({
                     "event_id": f"intr_{thread_id}_{_uuid.uuid4().hex[:8]}",
@@ -261,14 +267,14 @@ def await_resolution(store, event_id: str, kind: str, abort, *,
     A GENERATOR: yields ``("beat", frame)`` while waiting, then exactly one
     ``("result", resume_value_or_None)`` as its final item. It has to be a
     generator because the caller IS the SSE generator — a plain callback could
-    not push a frame out to the client, and a silent wait is exactly what made
-    a stuck approval impossible to diagnose from the operator's chair.
+    not push a frame out to the client, and a silent wait leaves a stuck
+    approval impossible to diagnose from the UI.
 
     TIMEOUT — why it exists:
     this used to be ``while True``, i.e. an approval nobody answered pinned a
     Starlette threadpool worker FOREVER and left ``task.active=True`` on that
     conversation, so every later message bounced off the busy guard ("该群聊仍在
-    后端运行"). The operator saw "编排器处理中… 由于某种原因卡住了，原因不详",
+    后端运行"). The UI showed a processing state with no reason given,
     and a mere network blip on the remote machine was enough to strand a run
     that nobody could then answer. The hold path below already had
     ``_MAX_HOLD_S`` auto-resume for exactly this reason; the approval path was
@@ -314,11 +320,11 @@ def await_resolution(store, event_id: str, kind: str, abort, *,
             return
         if ev.wait(timeout=0.5):
             break
-        # Heartbeat — two jobs, both learned the hard way:
-        #  * #33 "由于某种原因卡住了，原因不详" — while an approval is pending the
+        # Heartbeat — two jobs:
+        #  * While an approval is pending the
         #    stream emitted NOTHING, so the UI could not say what it was waiting
         #    for. Now it says which interrupt, how long, and how much longer.
-        #  * #34 "网络变化也会导致对话卡住" — a silent SSE connection gets reaped by
+        #  * A silent SSE connection gets reaped by
         #    anything that kills idle TCP (WireGuard keepalive, corporate gateway
         #    idle timeouts, Wi-Fi roaming, sleep). ws.py has pinged every 15 s for
         #    exactly this reason; run-task never did.
@@ -332,14 +338,19 @@ def await_resolution(store, event_id: str, kind: str, abort, *,
                 # — there is nothing to reject, and under `continue` the agent
                 # carries on with its stated fallback.
                 _beat_text = (
-                    f"等待用户回答提问 — 已等 {waited:.0f}s，{left}s 后"
-                    + ("本次运行将停下等待（进度已保存）"
+                    tr(f"等待用户回答提问 — 已等 {waited:.0f}s，{left}s 后",
+                       f"Waiting for the user to answer the question - waited {waited:.0f}s, in {left}s ")
+                    + (tr("本次运行将停下等待（进度已保存）",
+                          "this run will stop and wait (progress saved)")
                        if _timeout_action == "halt"
-                       else "智能体将按其说明的保守默认自行继续")
+                       else tr("智能体将按其说明的保守默认自行继续",
+                               "the agent will carry on with its stated conservative default"))
                 )
             else:
-                _beat_text = (f"等待人工审批 — 已等 {waited:.0f}s，"
-                              f"{left}s 后按拒绝处理")
+                _beat_text = tr(f"等待人工审批 — 已等 {waited:.0f}s，"
+                                f"{left}s 后按拒绝处理",
+                                f"Waiting for human approval - waited {waited:.0f}s, "
+                                f"will be treated as rejected in {left}s")
             yield ("beat", {
                 "kind": "status",
                 "subkind": "awaiting_approval",
@@ -363,14 +374,20 @@ def await_resolution(store, event_id: str, kind: str, abort, *,
                     store["pending"].pop(event_id, None)
                     store["events"].pop(event_id, None)
             if _is_ask and _timeout_action == "halt":
-                msg = (f"提问超时({waited:.0f}s)未收到用户回答 — 本次运行就此停下"
-                       "（进度已保存，回答后可继续）。")
+                msg = tr(f"提问超时({waited:.0f}s)未收到用户回答 — 本次运行就此停下"
+                         "（进度已保存，回答后可继续）。",
+                         f"Question timed out ({waited:.0f}s) with no answer from the user - this run "
+                         "stops here (progress saved; it can continue once answered).")
             elif _is_ask:
-                msg = (f"提问超时({waited:.0f}s)未收到用户回答 — 智能体将按其说明的"
-                       "保守默认自行继续。")
+                msg = tr(f"提问超时({waited:.0f}s)未收到用户回答 — 智能体将按其说明的"
+                         "保守默认自行继续。",
+                         f"Question timed out ({waited:.0f}s) with no answer from the user - the agent "
+                         "will carry on with its stated conservative default.")
             else:
-                msg = (f"审批超时({waited:.0f}s)未收到用户裁决 — 已按拒绝处理，"
-                       "未执行该动作。")
+                msg = tr(f"审批超时({waited:.0f}s)未收到用户裁决 — 已按拒绝处理，"
+                         "未执行该动作。",
+                         f"Approval timed out ({waited:.0f}s) with no decision from the user - treated "
+                         "as rejected; the action was not executed.")
             # SAY SO (2026-07-28). The timeout emitted no frame at all: the
             # pending card simply vanished from the UI after a heartbeat that had
             # been promising 「Ns 后按拒绝处理」, and the operator was left

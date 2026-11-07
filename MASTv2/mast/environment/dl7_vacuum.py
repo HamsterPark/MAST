@@ -122,7 +122,9 @@ def probe_dl7(port: str, address: int = DL7_DEFAULT_ADDRESS,
                                    read_size=DL7_RESPONSE_LEN, timeout=timeout)
         parse_response(reply, address)
         return True
-    except Exception:  # SerialUnavailable / DL7FrameError / anything → not a DL-7
+    except Exception as exc:  # SerialUnavailable / DL7FrameError / anything → not a DL-7
+        logger.debug("autodetect: %s: no DL-7 answer at address %d (%s: %s)",
+                     port, address, type(exc).__name__, exc)
         return False
     finally:
         if transport is not None:

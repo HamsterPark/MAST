@@ -2,11 +2,12 @@ import type { components } from "@/api/schema";
 import { Sparkline } from "@/components/vision/Sparkline";
 import { EmptyNote } from "@/components/ui";
 import { fmtCurrent } from "@/lib/units";
+import { tr } from "@/lib/i18n";
 import { METRIC_TILES, metricSeries, type MetricUnit } from "@/lib/monitoring";
 
 type FeatureRow = components["schemas"]["FeatureRow"];
 
-// 特征瓦片 — six numbers with their recent history.
+// Feature tiles — six numbers with their recent history.
 //
 // The series comes from /api/monitoring/features, NOT from status.latest: a
 // sparkline needs history and `latest` is one point. It also means a WS push
@@ -37,18 +38,30 @@ export function FeatureSparklines({
   degraded?: boolean;
   detail?: string | null;
 }) {
-  // 「还没采到」与「读不到」是两句话。前者是等待，后者是故障 —— 而两者的
-  // `rows` 都是空数组。不分开的话，一次 `features_query` 失败会显示成
-  // 「采集满一段后即可看到」，于是用户安心地等一个永远不会来的东西。
+  // "Not collected yet" and "cannot read" are different states (waiting vs a fault)
+  // although `rows` is empty in both. Without the distinction a failed
+  // `features_query` would show "available after one segment" and the user would
+  // wait for data that never arrives.
   if (degraded) {
     return (
       <EmptyNote
-        label={detail ? `读不到特征数据：${detail}` : "读不到特征数据（不是「还没采到」）。"}
+        label={
+          detail
+            ? tr(`读不到特征数据：${detail}`, `Cannot read feature data: ${detail}`)
+            : tr("读不到特征数据（不是「还没采到」）。", "Cannot read feature data (this is not \"not collected yet\").")
+        }
       />
     );
   }
   if (!rows.length) {
-    return <EmptyNote label="尚无特征数据——采集满一段后即可看到。" />;
+    return (
+      <EmptyNote
+        label={tr(
+          "尚无特征数据——采集满一段后即可看到。",
+          "No feature data yet; it appears once one segment has been collected.",
+        )}
+      />
+    );
   }
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3">

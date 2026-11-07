@@ -1,12 +1,14 @@
-// 数据 tab 的翻页累积。
+// Page accumulation for the Data tab.
 //
-// The listing used to ask for a fixed 60 files and print "只显示最近 60 个"
+// The listing used to ask for a fixed 60 files and print "showing only the latest 60"
 // underneath. File 61 was unreachable by any interaction on the page — the
 // number was not a page size, it was a ceiling. The server now takes an
 // `offset`, and these helpers hold the accumulated pages.
 //
 // Pure functions, no React: components cannot be rendered in this repo's test
 // setup (`node --test`), so anything worth asserting has to live here.
+
+import { tr } from "./i18n.ts";
 
 export interface PagedScan {
   path: string;
@@ -19,7 +21,7 @@ export interface PagedScan {
  * instrument is still writing to: a scan saved between page 1 and page 2 shifts
  * every later entry one slot down, so the first row of page 2 is the row the
  * operator already saw at the bottom of page 1. Without this the same file
- * appears twice, which — on a tab whose whole point this round was to STOP
+ * appears twice, which — on a tab whose purpose includes NOT
  * showing one measurement twice — would read as the copy bug coming back.
  *
  * (The reverse shift, an entry skipped across the boundary, cannot be fixed
@@ -50,11 +52,16 @@ export function nextOffset(accumulated: readonly PagedScan[]): number {
 /** Text for the "showing X of Y" line. Empty string when there is nothing to say. */
 export function pageSummary(shown: number, collapsed: number, rawFiles: number): string {
   if (!collapsed) return "";
-  const parts = [`显示 ${shown} / ${collapsed} 项`];
+  const parts = [tr(`显示 ${shown} / ${collapsed} 项`, `Showing ${shown} / ${collapsed}`)];
   // Only mention copies when there ARE copies: on a machine with the ingest off
   // the two numbers are equal and the extra clause is noise.
   if (rawFiles > collapsed) {
-    parts.push(`已折叠 ${rawFiles - collapsed} 个重复副本（共 ${rawFiles} 个文件）`);
+    parts.push(
+      tr(
+        `已折叠 ${rawFiles - collapsed} 个重复副本（共 ${rawFiles} 个文件）`,
+        `${rawFiles - collapsed} duplicate copies folded (${rawFiles} files total)`,
+      ),
+    );
   }
   return parts.join(" · ");
 }

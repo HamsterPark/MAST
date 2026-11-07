@@ -1,14 +1,15 @@
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { tr } from "@/lib/i18n";
 
-// 共享的 markdown 渲染。报告/计划/论文草稿都是 markdown，此前 report tab 用
-// <pre> 直接吐源码 —— 表格是一堆竖线、公式是一堆美元符号、图片是一行链接文本。
+// Shared markdown renderer for reports, plans and paper drafts.
 //
-// 两条约束（项目铁律）：
-//   1. 宽内容（表格、代码块）必须在自己的容器里横向滚动，页面本身绝不横向滚动。
-//   2. 图片链接是相对路径（../_assets/x.png），浏览器解析不到 —— 所以图片一律
-//      降级成一行可见的占位说明，而不是留一个碎图标让人以为报告坏了。
-//      要看带图的成品请用「导出 HTML」（图片 base64 内嵌，单文件自包含）。
+// Two constraints:
+//   1. Wide content (tables, code blocks) scrolls horizontally inside its own
+//      container; the page itself never scrolls horizontally.
+//   2. Image links are relative paths (../_assets/x.png) the browser cannot
+//      resolve, so images degrade to a visible one-line placeholder instead of a
+//      broken icon. The exported HTML embeds images as base64.
 
 export function MarkdownView({
   text,
@@ -79,15 +80,15 @@ export function MarkdownView({
             />
           ),
           hr: () => <hr className="my-3 border-mast-border" />,
-          // 相对路径的图在浏览器里必然加载不到 —— 说清楚它是什么、去哪看，
-          // 而不是留一个碎图标。
+          // Relative-path images cannot load in the browser; say what the image is
+          // and where to see it instead of showing a broken icon.
           img: ({ src, alt }) => (
             <span className="my-2 flex items-center gap-2 rounded border border-dashed border-mast-border px-2 py-1.5 text-[11px] text-mast-muted">
               <span aria-hidden>🖼</span>
               <span>
-                图：{alt || "(无说明)"}
+                {tr("图：", "Figure: ")}{alt || tr("(无说明)", "(no caption)")}
                 <span className="ml-1 font-mono opacity-70">{src}</span>
-                <span className="ml-1">— 导出 HTML 可看到内嵌图片</span>
+                <span className="ml-1">{tr("— 导出 HTML 可看到内嵌图片", "— export HTML to see embedded images")}</span>
               </span>
             </span>
           ),

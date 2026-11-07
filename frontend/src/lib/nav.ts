@@ -1,39 +1,30 @@
-// 顶栏导航表 — the only place a page becomes reachable without knowing its URL.
+// Top-bar navigation table: the only place a page becomes reachable without
+// knowing its URL.
 //
-// Lives apart from AppLayout so it can be asserted against. A page missing from
-// here is not broken in any way a type checker, a test run, or a screenshot can
-// see: the route still resolves, the component still renders, every link that
-// points at it still works. It is simply unreachable for someone who does not
-// already know it exists — and the report that reaches you is not「这个页面没了」
-// but「这个页面只能进去一次」, which sounds like a state bug and is not one.
+// It lives apart from AppLayout so it can be asserted against. A page missing
+// from here still routes, renders and type-checks, and looks fine in a screenshot
+// of itself; the only symptom is that nobody can get to it. test/nav.test.ts
+// checks that every section has a component and every old address redirects.
 //
-// That is exactly what happened to 仪器初始化. Both of its entry
-// points were wired and working: a banner (which by design disappears once the
-// completion stamp is set) and a button on the 设置 page. Neither is navigation.
-// Correcting 退针方向 — the field where a wrong answer drives
-// the tip INTO the sample — had no way in through the UI, and it had to be written
-// over the API instead.
+// Big tabs group related pages. Second-level pages are real route segments, not
+// in-page state, so bookmarks and shared links land on the right page. Old
+// top-level addresses redirect to their new place, see LEGACY_REDIRECTS.
 //
-// ── 17 个大标签合并成 10 个 ─────────────────────
-//
-// 分组方案：高级管理+设置+仪器初始化+用量花销 合并成一个;记忆 并进
-// 实验记录;光学台 并进实验性功能;电流监控 和 环境历史 合二为一;技能 和
-// 技能构建器 合并。五组分法是给定的,照做。
-//
-// **合并的是导航，不是页面**：每个原页面仍然是原来那个组件，一行没动，只是从
-// 「顶栏的一项」变成「某个大标签下的一段」。这样做的代价是层级深了一级
-// （高级管理那条链现在有五层），收益是顶栏从 17 项挤成 10 项 —— 而挤到换行的
-// 顶栏正是用户在抱怨的那件事。
-//
-// **二级页是真的路由段**，不是页面内的 useState。理由是书签：`/settings` 这类
-// 地址在用户的浏览器里存了几个月，合并之后它们必须还能落到对的地方，而一个
-// 存在 localStorage 里的子页选择回答不了「这个链接指向哪一页」。
-// 旧地址一条不落地重定向到新位置，见 LEGACY_REDIRECTS。
+// Feature status:
+//   - `legacy`: hidden unless Settings → General → Legacy features is on (the
+//     built-in agent stack). The route still exists and explains how to enable it.
+//   - `status: "incomplete"`: shown, with a marker that the feature is unfinished.
+
+import { tr } from "./i18n.ts";
+
+export type FeatureStatus = "incomplete";
 
 export interface NavSection {
-  /** 二级路径段（拼在大标签的 `to` 后面）。 */
+  /** Second-level path segment (appended to the tab's `to`). */
   seg: string;
   label: string;
+  legacy?: boolean;
+  status?: FeatureStatus;
 }
 
 export interface NavTab {
@@ -42,98 +33,112 @@ export interface NavTab {
   /** react-router `end`: match this path exactly, not as a prefix. */
   end?: boolean;
   /**
-   * 这个大标签底下的二级页。
+   * Second-level pages of this tab.
    *
-   * 有 sections 的大标签，其 `to` 本身**不渲染内容**，只把人送到某一段
-   * （上次停的那一段，没有记忆就是第一段）。没有 sections 的就是一页到底。
+   * A tab with sections renders nothing at its own `to`; it forwards to a section
+   * (the last one visited, else the first). A tab without sections is one page.
    */
   sections?: NavSection[];
+  legacy?: boolean;
+  status?: FeatureStatus;
 }
 
 export const TABS: NavTab[] = [
-  { to: "/", label: "仪器 Chat", end: true },
-  { to: "/agents", label: "Agents" },
-  { to: "/qa", label: "查询助手" },
-  // 技能 + 技能构建器（#34 第五组）。构建器是「做一个新技能」，目录是「看现有
-  // 技能」—— 同一件事的两端，本来就该在一起。
+  // "/" is the built-in agent chat when legacy features are on, and the
+  // instrument overview otherwise (see HomeRoute in router.tsx).
+  { to: "/", label: tr("仪器 Chat", "Instrument Chat"), end: true },
+  { to: "/agents", label: "Agents", legacy: true },
+  { to: "/qa", label: tr("查询助手", "Query Assistant"), legacy: true },
   {
     to: "/skills",
-    label: "技能",
+    label: tr("技能", "Skills"),
     sections: [
-      { seg: "library", label: "技能目录" },
-      { seg: "builder", label: "技能构建器" },
+      { seg: "library", label: tr("技能目录", "Skill Library") },
+      { seg: "builder", label: tr("技能构建器", "Skill Builder") },
     ],
   },
-  { to: "/literature", label: "文献库" },
-  // 实验记录 + 记忆 + 多天 conduct（#34 第二组）。
-  //
-  // conduct 放这一组而不是新开第 11 个大标签：大标签数量要收紧，
-  // 而一份 conduct **必须**绑定一个实验（`experiment_id` 必填，它的 spec 快照与
-  // progress.jsonl 都落在那个实验的文件夹里），所以它本来就属于这一组。
-  //
-  // 它同时还有**第二个入口**：等人的时候心愿单页会出现一条 `conduct:<id>` 的
-  // 请求。这不是冗余 —— 两个入口都不是导航
-  // 就等于没有入口；这里一个是导航、一个是待办，两者互补。
-  //
-  // 数据图库（2026-09-13）也在这一组：它整理的是实验采到的数据（预处理 → 展示 → 人工
-  // 标记/系列），与「记录」同属一件事；理由的完整版在 nav.test.ts 的 ADDED_LATER。
+  { to: "/literature", label: tr("文献库", "Literature"), status: "incomplete" },
+  // Spectroscopy / TERS: the spectrometer PC runs a satellite and MAST on the STM
+  // PC is the hub. It has its own tab because it stays open during an experiment.
+  { to: "/ters", label: tr("光谱 / TERS", "Spectra / TERS") },
+  // Records, data gallery, multi-day conduct and memory: a conduct run is always
+  // bound to an experiment, so it belongs with the records.
   {
     to: "/records",
-    label: "实验记录",
+    label: tr("实验记录", "Records"),
     sections: [
-      { seg: "log", label: "记录" },
-      { seg: "gallery", label: "数据图库" },
-      { seg: "conduct", label: "多天 conduct" },
-      { seg: "memory", label: "记忆" },
+      { seg: "log", label: tr("记录", "Log") },
+      { seg: "gallery", label: tr("数据图库", "Data Gallery") },
+      { seg: "map", label: tr("扫描地图", "Scan Map") },
+      { seg: "conduct", label: tr("多天 conduct", "Multi-day Conduct"), legacy: true },
+      { seg: "memory", label: tr("记忆", "Memory"), legacy: true },
     ],
   },
-  { to: "/wishlist", label: "心愿单" },
-  // 设置 + 仪器初始化 + 高级管理 + 用量花销（#34 第一组）。
-  //
-  // 组根沿用 `/settings` 而不是新造一个 `/system`：这是四个里最常被收藏、也最
-  // 常被人直接敲的地址。换掉它等于让最常用的那个书签走一次重定向，白白多一跳。
-  //
-  // 仪器初始化仍然有自己的位置 —— 把它请进顶栏的理由（横幅会消失、
-  // 设置页里的按钮不是导航）一条都没变，只是那个位置现在在「设置」下面一层。
+  // Requests from agents (including external agents via mast_ask_operator) wait
+  // here for the operator, so the page stays visible; only its wishlist/feedback
+  // form is legacy.
+  { to: "/wishlist", label: tr("操作员请求", "Operator Requests") },
+  // Settings, instrument setup, advanced administration and usage. The group root
+  // stays `/settings` because it is the most bookmarked address. Instrument setup
+  // keeps a permanent place because the banner that links to it disappears once
+  // setup is complete.
   {
     to: "/settings",
-    label: "设置",
+    label: tr("设置", "Settings"),
     sections: [
-      { seg: "general", label: "常规设置" },
-      { seg: "setup", label: "仪器初始化" },
-      { seg: "admin", label: "高级管理" },
-      { seg: "usage", label: "用量花销" },
+      { seg: "general", label: tr("常规设置", "General") },
+      { seg: "setup", label: tr("仪器初始化", "Instrument Setup") },
+      { seg: "admin", label: tr("高级管理 🔒", "Advanced 🔒") },
+      { seg: "usage", label: tr("用量花销", "Usage & Cost"), legacy: true },
     ],
   },
-  // 电流监控 + 环境历史（#34 第四组）。两者都是「仪器现在/最近怎么样」。
   {
     to: "/monitoring",
-    label: "监控",
+    label: tr("监控", "Monitoring"),
     sections: [
-      { seg: "current", label: "电流监控" },
-      { seg: "env", label: "环境历史" },
+      { seg: "current", label: tr("电流监控", "Current Monitor") },
+      { seg: "env", label: tr("环境历史", "Environment History") },
     ],
   },
-  // 实验性功能 + 光学台（#34 第三组）。
   {
     to: "/experimental",
-    label: "实验性功能",
+    label: tr("实验性功能", "Experimental"),
     sections: [
-      { seg: "tools", label: "仪器工具" },
-      { seg: "optics", label: "光学台" },
+      { seg: "tools", label: tr("仪器工具", "Instrument Tools") },
+      { seg: "optics", label: tr("光学台", "Optics Bench") },
+      // Drawn optical path of the setup, shared with the AI. Not legacy and not tied to a
+      // station profile: an STM station with a TERS path and the optical station both have
+      // an optical layout to describe.
+      { seg: "layout", label: tr("光路图", "Optical Layout") },
     ],
   },
 ];
 
+/** Label of the "/" tab for the current legacy setting. */
+export function homeLabel(legacy: boolean): string {
+  return legacy ? tr("仪器 Chat", "Instrument Chat") : tr("总览", "Overview");
+}
+
+/** Tabs and sections visible for the given legacy setting. */
+export function visibleTabs(legacy: boolean): NavTab[] {
+  return TABS.filter((t) => legacy || !t.legacy).map((t) =>
+    t.sections ? { ...t, sections: t.sections.filter((s) => legacy || !s.legacy) } : t,
+  );
+}
+
+/** Short marker appended to a label for its feature status. */
+export function statusMarker(t: { legacy?: boolean; status?: FeatureStatus }): string | null {
+  if (t.status === "incomplete") return tr("不完善", "incomplete");
+  if (t.legacy) return tr("旧版", "legacy");
+  return null;
+}
+
 /**
- * 合并之前的顶栏地址 → 合并之后它去了哪里。
+ * Old top-level addresses and where those pages live now.
  *
- * 纯数据，因为它要被两边用：`router.tsx` 拿它生成重定向路由，测试拿它断言
- * 「一条都没漏、且每一条都指向真的存在的地方」。手写两份就会漏 —— 而漏掉的
- * 那一条的症状是用户的书签打开一个 404 白页，看起来像「这个功能被删了」。
- *
- * 这张表**只增不改**：一条旧地址一旦进来就永远留着。它的成本是路由表里多一行，
- * 而删掉它的成本是某个人存了半年的书签突然打不开，还查不出为什么。
+ * Plain data so that router.tsx can build the redirects from it and the tests can
+ * assert that every entry points at a real page. Entries are only ever added:
+ * removing one breaks somebody's bookmark with no clue why.
  */
 export const LEGACY_REDIRECTS: Record<string, string> = {
   "/builder": "/skills/builder",
@@ -149,38 +154,24 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
  * Pages that are reachable by URL on purpose and deliberately have no tab.
  *
  * An explicit list, so that "no tab" is always a decision someone wrote down
- * rather than an omission nobody noticed. `/dashboard` is embedded elsewhere;
- * `/chat` is an alias of `/`.
- *
- * ── `/vision` 那一条的理由从「embedded elsewhere」换掉 ──
- *
- * 那句话是半句真话，剩下的半句是：对话页的「视觉缓冲」
- * 只嵌了 `/vision` 七个子页里的四个（扫描地图 / 视觉脉冲 / 近期帧 / 缓冲），
- * 而且嵌的那张扫描地图**没有粗动大地图**。信号捕获+FFT、长期监控、拼图三个子页
- * 一次都没有被嵌过。更糟的是：在加上那个链接之前，全仓渲染出来的链接里**没有
- * 一个指向 `/vision`** —— `VisionRibbon` 里那个 `<Link to="/vision">` 只在不传
- * `onOpenBuffer` 时才画，而唯一的调用方永远传。
- *
- * 于是它不是「没有 tab 但嵌在别处」，是「没有 tab、没有链接、只有知道地址的人
- * 进得去」。这类缺口不会表现成「导航里少了一项」，而是「某个具体功能找不到入口」。
- * 与仪器初始化那次同一个形状。
- *
- * 现在「视觉缓冲」页顶有一个指过去的链接，所以这条豁免重新成立 —— 靠的是那个
- * 链接，不是靠这段注释。它被 `test/scanMapPairing.test.ts` 钉住。
+ * rather than an omission nobody noticed. `/dashboard` is the home page when
+ * legacy features are off and is linked from the right panel; `/chat` is an alias
+ * of `/`; `/vision` (legacy) is linked from the top of the chat page's vision
+ * buffer view, which test/scanMapPairing.test.ts pins.
  */
 export const INTENTIONALLY_UNLISTED = ["/dashboard", "/vision", "/chat"] as const;
 
-/** 一个大标签下某一段的完整路径。 */
+/** Full path of a section under a tab. */
 export function sectionPath(tab: NavTab, seg: string): string {
   return `${tab.to === "/" ? "" : tab.to}/${seg}`;
 }
 
-/** 这个大标签认得的全部二级段 id（喂给 useStickyTab 的合法名单）。 */
+/** All section ids of a tab (the allowed list for useStickyTab). */
 export function sectionIds(tab: NavTab): string[] {
   return (tab.sections ?? []).map((s) => s.seg);
 }
 
-/** 顶栏里的某一项，按 `to` 找。 */
+/** A top-bar tab, looked up by `to`. */
 export function findTab(to: string): NavTab | undefined {
   return TABS.find((t) => t.to === to);
 }

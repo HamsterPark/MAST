@@ -22,6 +22,7 @@ import logging
 from typing import Any
 
 from mast.core.types import SkillResult
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -39,15 +40,37 @@ def _guard_on() -> bool:
 _QPLUS_REFUSAL = (
     "当前登记的针尖是 qPlus 传感器（{name}），而 {skill} 会向表面下压。损坏传感器可能不可逆，并需要更换与重新标定。确认执行时显式提供 allow_on_qplus=true；若登记不正确，请先用 register_tip 更正。"
 )
+_QPLUS_REFUSAL_EN = (
+    "The registered tip is a **qPlus sensor** ({name}), and {skill} presses the tip down into the "
+    "surface. A quartz tuning fork that gets crushed is damaged irreversibly -- the machine has to be "
+    "opened up, re-fitted and recalibrated (f0/Q), and no experiments will be possible for the next "
+    "few days.\n"
+    "To run it on a qPlus tip anyway, pass allow_on_qplus=true explicitly; if the tip is not actually "
+    "a qPlus, correct the registration with register_tip first."
+)
 
 
 def qplus_gate(skill_name: str, params: dict, calls: list | None = None
                ) -> "SkillResult | None":
-    """qPlus 下压类操作的可选确认门，默认关闭。
-    MAST_QPLUS_POKE_GUARD=1 可启用该门。它检查显式确认，不能代替动作深度包络
-    或工作流中的偏压准备；后两者由各自的约束处理。
-    针尖状态不可读时此门保持既有放行语义，调用方仍需遵守其余动作约束。
-    参数值与偏压策略需按仪器条件验证，不能从默认门状态推导物理安全保证。
+    """qPlus 针尖上的「戳表面」类操作。**默认放行。**
+
+    读不到针尖状态一律放行 —— 门的失败模式必须是放过而不是拦住(误拦可能让操作
+    员在针要撞上去时按不动按钮)。
+
+    ## 为什么默认放行
+
+    qPlus 仪器允许在一个很小的深度包络内扎针(2 nm 以内)。这道门只问「是否已确认这是 qPlus」;
+    一道每次都被同一个确认解开的门,不是保护,是仪式。
+
+    **改的是默认值,不是把保护删掉。** 真正护音叉的是另外两样,都留着:
+
+      1. 扎针深度包络 ``max_poke_depth_m`` —— 超了**拒绝不夹紧**。
+         「2 nm 以内」由它执行,不是这道门。
+      2. 扎针前把偏压**缓降到 20 mV**(``_tip_phases._poke_step``)——
+         qPlus 扎针必须先降到 20 mV,否则音叉起振,每次扎针都在毁针。
+
+    ``MAST_QPLUS_POKE_GUARD=1`` 可以把它开回来(环境变量而不是配置项:
+    配置项会长出第二个真源,而这是对单台仪器的一次性取舍)。
     """
     if params.get(ALLOW_ON_QPLUS):
         return None
@@ -64,8 +87,8 @@ def qplus_gate(skill_name: str, params: dict, calls: list | None = None
     return SkillResult(
         skill_name=skill_name,
         success=False,
-        error=_QPLUS_REFUSAL.format(
-            name=facts.get("name") or "未命名", skill=skill_name),
+        error=tr(_QPLUS_REFUSAL, _QPLUS_REFUSAL_EN).format(
+            name=facts.get("name") or tr("未命名", "unnamed"), skill=skill_name),
         nanonis_calls=list(calls or []),
     )
 
@@ -126,27 +149,45 @@ def policy_fields_for_result(plan: Any) -> dict[str, Any]:
 
 
 def shaper_bias_default(context) -> "tuple[float | None, str]":
-    """Tip shaper 的缺省 bias_v 沿用当前成像偏压；读不到时返回 (None, 原因)。
-    读取当前值避免缺省参数悄悄切换到一个与当前成像无关的固定偏压。
-    显式 change_bias 参数仍然保留，调用方可以关闭偏压更改。
-    读取失败不回落到固定数值，必须由调用方处理未知状态。
+    """Tip shaper 的 ``bias_v`` 缺省值 = **此刻的成像偏压**;读不到给 ``(None, 原因)``。
+
+    修法:shaper 缺省取扫图偏压,而不是锁死 3 V。
+
+    在此之前两个扎针技能都写着 ``params.get("bias_v", 3.0)``。那个 3.0 追到
+    v1 移植时的 stub 占位,**没有任何物理来源** —— 它对应哪台机器、
+    哪根针?哪台都不对。和 ``"Piezo"``(不存在的模块名)是同一族:
+    **一个没人拥有的默认值**。
+
+    换成读取之后有三处直接受益:
+
+    * qPlus 那条路**一处生效**:成像偏压设成 20 mV → shaper 自带就是 20 mV → 扎。
+      不再需要两处配合,也就不会再出现「一处设了、另一处顶掉」——
+      曾出现过这样被顶掉的情形(设了 20 mV,回包 ``bias_v: 3.0``)。
+    * 非 qPlus 针尖也对:沿用成像偏压是最小惊讶;3 V 是一个**会实际改变针尖**的
+      动作,不该是默认发生的事。
+    * ``change_bias`` 这个参数**保留** —— 调用方仍可显式关掉。
+
+    **读不到不回落到 3.0。** ``lookup() || DEFAULT`` 是反复出现的出错形状;
+    这里宁可让调用方看到一句「读不到当前偏压」,也不要悄悄打一个没人要的 3 V。
     """
     try:
         rec = context.safe_call("Bias_Get")
     except Exception as exc:  # noqa: BLE001
-        return None, f"Bias_Get 抛异常:{type(exc).__name__}: {exc}"
+        return None, tr(f"Bias_Get 抛异常:{type(exc).__name__}: {exc}",
+                        f"Bias_Get raised: {type(exc).__name__}: {exc}")
     err = getattr(rec, "error", None)
     if err:
-        return None, f"Bias_Get 报错:{err}"
+        return None, tr(f"Bias_Get 报错:{err}", f"Bias_Get returned an error: {err}")
     raw = getattr(rec, "return_value", None)
     # 回包形状 (err, raw, body) —— 载荷在 index 2,与全仓其它解析同一走法。
     try:
         body = raw[2] if isinstance(raw, (list, tuple)) and len(raw) > 2 else None
         val = float(body[0] if isinstance(body, (list, tuple)) else body)
     except (TypeError, ValueError, IndexError):
-        return None, f"Bias_Get 回包读不懂(repr 前 80 字:{str(raw)[:80]})"
+        return None, tr(f"Bias_Get 回包读不懂(repr 前 80 字:{str(raw)[:80]})",
+                        f"Cannot parse the Bias_Get reply (first 80 chars of repr: {str(raw)[:80]})")
     if val != val or val in (float("inf"), float("-inf")):   # NaN / inf
-        return None, f"Bias_Get 读回 {val!r}"
+        return None, tr(f"Bias_Get 读回 {val!r}", f"Bias_Get read back {val!r}")
     return val, ""
 
 

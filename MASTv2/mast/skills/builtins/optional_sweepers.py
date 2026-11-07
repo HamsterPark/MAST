@@ -30,6 +30,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.skills.base import BaseSkill
 
 # APRFGen_FreqSwpStart(Direction) / PowerSwpStart / ListSwpStart: 0 = down, 1 = up
@@ -75,7 +76,7 @@ class ConfigureHighSpeedSweep(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "配置高速扫频器（High-Speed Sweeper）：扫哪个信号、扫什么范围、多少个点、"
+                tr("配置高速扫频器（High-Speed Sweeper）：扫哪个信号、扫什么范围、多少个点、"
                 "时序，以及记录哪些通道。\n"
                 "\n"
                 "**用它之前先读这一段。** 被扫的信号是按**序号**从可扫信号表里挑的 —— 调 GetHighSpeedSweepStatus 才看得到那张表。"
@@ -86,54 +87,73 @@ class ConfigureHighSpeedSweep(BaseSkill):
                 "；false 则是绝对值。把这个弄反，是扫到一个你从没打算去的值的经典途径。\n"
                 "\n"
                 "z_controller_off=true 会在整段扫描期间抬掉 Z 反馈 —— 做谱学时这是对的（针尖绝不能去追电流）"
-                "，而如果被扫的信号会牵动 Z，它就是一份撞针风险。配置本身还什么都不改变；真正执行的是 RunHighSpeedSweep。"
+                "，而如果被扫的信号会牵动 Z，它就是一份撞针风险。配置本身还什么都不改变；真正执行的是 RunHighSpeedSweep。",
+                   "Configure the High-Speed Sweeper: which signal to sweep, over what range, how many points, "
+                   "the timing, and which channels to record.\n"
+                   "\n"
+                   "**Read this before using it.** The swept signal is picked by **index** from the sweepable-signal table - call GetHighSpeedSweepStatus to see that table. "
+                   "HSSwp sweeps whatever you name: the bias, a piezo, an output. It neither knows nor cares which. "
+                   "A wrong index means driving the wrong thing at high speed.\n"
+                   "\n"
+                   "relative_limits=true makes start/stop **offsets** from the signal's current value (e.g. ±0.5 V around the current bias)"
+                   "; false means absolute values. Getting this backwards is the classic way to sweep to a value you never meant to go to.\n"
+                   "\n"
+                   "z_controller_off=true lifts the Z feedback for the whole sweep - correct for spectroscopy (the tip must never chase the current)"
+                   ", and a tip-crash risk if the swept signal affects Z. Configuring itself still changes nothing; it is RunHighSpeedSweep that executes.")
             ),
             parameters=[
                 ParameterSpec(name="sweep_signal_index", type="int",
-                              description="**可扫信号表**里的序号（不是通用信号目录）",
+                              description=tr("**可扫信号表**里的序号（不是通用信号目录）",
+                                             "Index in the **sweepable-signal table** (not the general signal catalog)"),
                               required=True, min_value=0, max_value=127),
                 ParameterSpec(name="start", type="float",
-                              description="扫描起点（绝对值；relative_limits 时则为偏移量）",
+                              description=tr("扫描起点（绝对值；relative_limits 时则为偏移量）",
+                                             "Sweep start (absolute; an offset when relative_limits)"),
                               required=True),
                 ParameterSpec(name="stop", type="float",
-                              description="扫描终点（绝对值；relative_limits 时则为偏移量）",
+                              description=tr("扫描终点（绝对值；relative_limits 时则为偏移量）",
+                                             "Sweep end (absolute; an offset when relative_limits)"),
                               required=True),
                 ParameterSpec(name="relative_limits", type="bool",
-                              description="start/stop 是相对该信号**当前**值的偏移量",
+                              description=tr("start/stop 是相对该信号**当前**值的偏移量",
+                                             "start/stop are offsets from the signal's **current** value"),
                               required=False, default=False),
                 ParameterSpec(name="points", type="int",
-                              description="每次扫描的点数",
+                              description=tr("每次扫描的点数", "Number of points per sweep"),
                               required=False, default=256, min_value=2, max_value=100_000),
                 ParameterSpec(name="acquire_channels", type="str",
-                              description="扫描期间要记录的信号序号，逗号分隔（例如 '0,24'）",
+                              description=tr("扫描期间要记录的信号序号，逗号分隔（例如 '0,24'）",
+                                             "Signal indices to record during the sweep, comma-separated (e.g. '0,24')"),
                               required=True),
                 ParameterSpec(name="settling_time_s", type="float",
-                              description="每点的稳定时间",
+                              description=tr("每点的稳定时间", "Settling time per point"),
                               unit="s", required=False, default=1e-4,
                               min_value=0.0, max_value=10.0),
                 ParameterSpec(name="integration_time_s", type="float",
-                              description="每点的积分时间",
+                              description=tr("每点的积分时间", "Integration time per point"),
                               unit="s", required=False, default=1e-4,
                               min_value=0.0, max_value=10.0),
                 ParameterSpec(name="initial_settling_time_s", type="float",
-                              description="第一个点之前的稳定时间",
+                              description=tr("第一个点之前的稳定时间", "Settling time before the first point"),
                               unit="s", required=False, default=1e-3,
                               min_value=0.0, max_value=60.0),
                 ParameterSpec(name="max_slew_time_s", type="float",
-                              description="允许用来爬到起始值的最长时间",
+                              description=tr("允许用来爬到起始值的最长时间", "Longest time allowed to ramp to the start value"),
                               unit="s", required=False, default=1.0,
                               min_value=0.0, max_value=60.0),
                 ParameterSpec(name="backward_sweep", type="bool",
-                              description="同时反向扫一遍（stop → start）",
+                              description=tr("同时反向扫一遍（stop → start）", "Also sweep backwards (stop → start)"),
                               required=False, default=True),
                 ParameterSpec(name="num_sweeps", type="int",
-                              description="平均多少次扫描（0 = 一直连续扫到被停止为止）",
+                              description=tr("平均多少次扫描（0 = 一直连续扫到被停止为止）",
+                                             "How many sweeps to average (0 = keep sweeping continuously until stopped)"),
                               required=False, default=1, min_value=0, max_value=10_000),
                 ParameterSpec(name="z_controller_off", type="bool",
-                              description="扫描期间抬掉 Z 反馈（做谱学时是对的；如果被扫信号会牵动 Z，则是一份撞针风险）",
+                              description=tr("扫描期间抬掉 Z 反馈（做谱学时是对的；如果被扫信号会牵动 Z，则是一份撞针风险）",
+                                             "Lift the Z feedback during the sweep (correct for spectroscopy; a tip-crash risk if the swept signal affects Z)"),
                               required=False, default=False),
                 ParameterSpec(name="z_offset_m", type="float",
-                              description="控制器关闭期间施加的 Z 偏移",
+                              description=tr("控制器关闭期间施加的 Z 偏移", "Z offset applied while the controller is off"),
                               unit="m", required=False, default=0.0,
                               min_value=-1e-6, max_value=1e-6),
             ],
@@ -147,8 +167,10 @@ class ConfigureHighSpeedSweep(BaseSkill):
         chs = _channels(params["acquire_channels"])
         if not chs:
             return _fail(name,
-                         f"acquire_channels 解析失败：{params['acquire_channels']!r}"
-                         "（应为逗号分隔的信号索引）", [])
+                         tr(f"acquire_channels 解析失败：{params['acquire_channels']!r}"
+                         "（应为逗号分隔的信号索引）",
+                            f"could not parse acquire_channels: {params['acquire_channels']!r}"
+                            " (should be comma-separated signal indices)"), [])
         calls: list = []
 
         rec = context.safe_call("HSSwp_SwpChSignalSet",
@@ -214,11 +236,15 @@ class ConfigureHighSpeedSweep(BaseSkill):
                   "points": int(params.get("points", 256) or 256),
                   "acquire_channels": chs,
                   "z_controller_off": z_off},
-            summary=(f"HSSwp 已配置：信号 {params['sweep_signal_index']}，"
+            summary=(tr(f"HSSwp 已配置：信号 {params['sweep_signal_index']}，"
                      f"{params['start']}→{params['stop']}"
                      f"（{'相对' if params.get('relative_limits') else '绝对'}），"
-                     f"{params.get('points', 256)} 点"
-                     + ("，Z 反馈将关闭" if z_off else "")),
+                     f"{params.get('points', 256)} 点",
+                        f"HSSwp configured: signal {params['sweep_signal_index']}, "
+                        f"{params['start']}→{params['stop']}"
+                        f" ({'relative' if params.get('relative_limits') else 'absolute'}), "
+                        f"{params.get('points', 256)} points")
+                     + (tr("，Z 反馈将关闭", ", Z feedback will be turned off") if z_off else "")),
         )
 
 
@@ -232,7 +258,7 @@ class RunHighSpeedSweep(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "执行由 ConfigureHighSpeedSweep 配好的那次扫描。它会把你点名的那路信号 —— 偏压、"
+                tr("执行由 ConfigureHighSpeedSweep 配好的那次扫描。它会把你点名的那路信号 —— 偏压、"
                 "一块压电、一路输出 —— 从起点**驱动**到终点，而且很快。\n"
                 "\n"
                 "当心：扫频器对信号本身是不可知的。它会毫不犹豫地把一块压电开到硬限位上、或者把偏压拉过一个会毁掉针尖的范围，"
@@ -241,14 +267,24 @@ class RunHighSpeedSweep(BaseSkill):
                 "\n"
                 "wait=true 会阻塞到扫描结束（或 timeout_s 到期）并返回数据；wait=false 立刻返回，"
                 "之后由你用 GetHighSpeedSweepStatus 轮询。StopHighSpeedSweep 能中止它，"
-                "按 中止 也能。"
+                "按 中止 也能。",
+                   "Run the sweep set up by ConfigureHighSpeedSweep. It **drives** the signal you named - the bias, "
+                   "a piezo, an output - from start to end, and fast.\n"
+                   "\n"
+                   "Caution: the sweeper is agnostic about the signal. It will without hesitation run a piezo to its hard limit, or pull the bias through a range that destroys the tip, "
+                   "because that is what it was told to do. Always ConfigureHighSpeedSweep first, and check what you actually pointed it at."
+                   "\n"
+                   "\n"
+                   "wait=true blocks until the sweep ends (or timeout_s expires) and returns the data; wait=false returns at once, "
+                   "and you poll with GetHighSpeedSweepStatus afterwards. StopHighSpeedSweep can abort it, "
+                   "and so can the Abort button.")
             ),
             parameters=[
                 ParameterSpec(name="wait", type="bool",
-                              description="阻塞直到扫描结束",
+                              description=tr("阻塞直到扫描结束", "Block until the sweep ends"),
                               required=False, default=True),
                 ParameterSpec(name="timeout_s", type="float",
-                              description="wait=true 时最多等多久",
+                              description=tr("wait=true 时最多等多久", "How long to wait at most when wait=true"),
                               unit="s", required=False, default=60.0,
                               min_value=1.0, max_value=3600.0),
             ],
@@ -269,7 +305,7 @@ class RunHighSpeedSweep(BaseSkill):
         return SkillResult(
             skill_name=name, success=True, nanonis_calls=calls,
             data={"waited": wait, "result": _rv(rec)},
-            summary="高速扫描完成" if wait else "高速扫描已启动（后台运行）",
+            summary=tr("高速扫描完成", "High-speed sweep finished") if wait else tr("高速扫描已启动（后台运行）", "High-speed sweep started (running in the background)"),
         )
 
 
@@ -283,7 +319,8 @@ class StopHighSpeedSweep(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "立即停止正在跑的高速扫描。永远允许 —— 包括在 abort 之后，那正是「停止」这件事存在的意义。"
+                tr("立即停止正在跑的高速扫描。永远允许 —— 包括在 abort 之后，那正是「停止」这件事存在的意义。",
+                   "Stop the running high-speed sweep immediately. Always allowed - including after an abort, which is exactly what 'stop' exists for.")
             ),
             parameters=[],
             estimated_duration_s=1.0,
@@ -296,7 +333,7 @@ class StopHighSpeedSweep(BaseSkill):
         if rec.error:
             return _fail("StopHighSpeedSweep", f"HSSwp_Stop failed: {rec.error}", [rec])
         return SkillResult(skill_name="StopHighSpeedSweep", success=True,
-                           nanonis_calls=[rec], summary="高速扫描已停止")
+                           nanonis_calls=[rec], summary=tr("高速扫描已停止", "High-speed sweep stopped"))
 
 
 class GetHighSpeedSweepStatus(BaseSkill):
@@ -309,10 +346,14 @@ class GetHighSpeedSweepStatus(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读高速扫频器的状态：是否有扫描在跑、当前的扫描信号与限值，以及**可扫信号表**。\n"
+                tr("读高速扫频器的状态：是否有扫描在跑、当前的扫描信号与限值，以及**可扫信号表**。\n"
                 "\n"
                 "请在 ConfigureHighSpeedSweep **之前**调它 —— 扫描信号是按序号从那张表里挑的，"
-                "而那张表不是通用信号目录。序号靠猜，就是在扫错东西。"
+                "而那张表不是通用信号目录。序号靠猜，就是在扫错东西。",
+                   "Read the state of the high-speed sweeper: whether a sweep is running, the current sweep signal and limits, and the **sweepable-signal table**.\n"
+                   "\n"
+                   "Call it **before** ConfigureHighSpeedSweep - the sweep signal is picked by index from that table, "
+                   "and that table is not the general signal catalog. Guessing the index means sweeping the wrong thing.")
             ),
             parameters=[],
             estimated_duration_s=1.0,
@@ -355,20 +396,26 @@ class ConfigureRfGenerator(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "设定 RF 源的频率与功率，但**不**打开输出。用它来预置一组设置、核对一遍，然后才调 StartRfGenerator。"
+                tr("设定 RF 源的频率与功率，但**不**打开输出。用它来预置一组设置、核对一遍，然后才调 StartRfGenerator。"
                 "\n"
                 "\n"
                 "power_dbm 的单位是 dBm，这是一个**对数**标度：+10 dBm 是 0 dBm 的十倍功率，"
                 "不是多百分之十。频率单位是 Hz —— 2.5 GHz 要写成 2.5e9，写 2.5 就是 2.5 Hz，"
-                "而且不会有任何提示。"
+                "而且不会有任何提示。",
+                   "Set the frequency and power of the RF source but **do not** turn the output on. Use it to preset a set of values and check them before calling StartRfGenerator."
+                   "\n"
+                   "\n"
+                   "power_dbm is in dBm, a **logarithmic** scale: +10 dBm is ten times the power of 0 dBm, "
+                   "not ten percent more. Frequency is in Hz - 2.5 GHz must be written as 2.5e9; writing 2.5 means 2.5 Hz, "
+                   "with no warning at all.")
             ),
             parameters=[
                 ParameterSpec(name="frequency_hz", type="float",
-                              description="RF 频率，单位**赫兹**（2.5 GHz = 2.5e9）",
+                              description=tr("RF 频率，单位**赫兹**（2.5 GHz = 2.5e9）", "RF frequency, in **hertz** (2.5 GHz = 2.5e9)"),
                               unit="Hz", required=True,
                               min_value=0.0, max_value=4e10),
                 ParameterSpec(name="power_dbm", type="float",
-                              description="RF 功率，单位 dBm（对数标度）",
+                              description=tr("RF 功率，单位 dBm（对数标度）", "RF power, in dBm (logarithmic scale)"),
                               unit="dBm", required=True,
                               min_value=-100.0, max_value=30.0),
             ],
@@ -394,8 +441,10 @@ class ConfigureRfGenerator(BaseSkill):
             skill_name=name, success=True, nanonis_calls=calls,
             data={"frequency_hz": float(params["frequency_hz"]),
                   "power_dbm": float(params["power_dbm"]), "output_on": False},
-            summary=(f"RF 已配置：{float(params['frequency_hz']):.6g} Hz，"
-                     f"{float(params['power_dbm']):.4g} dBm（输出仍关闭）"),
+            summary=(tr(f"RF 已配置：{float(params['frequency_hz']):.6g} Hz，"
+                     f"{float(params['power_dbm']):.4g} dBm（输出仍关闭）",
+                        f"RF configured: {float(params['frequency_hz']):.6g} Hz, "
+                        f"{float(params['power_dbm']):.4g} dBm (output still off)")),
         )
 
 
@@ -409,13 +458,20 @@ class StartRfGenerator(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.DANGEROUS,
             description=(
-                "以当前配置好的频率与功率打开 RF 输出。\n"
+                tr("以当前配置好的频率与功率打开 RF 输出。\n"
                 "\n"
                 "DANGEROUS：打进隧道结里的 dBm 就是**能量**。RF 功率会耦合进针尖和样品，"
                 "量够大就会改变、乃至毁掉这两者。先调 ConfigureRfGenerator 并确认那些数字 —— GetRfGeneratorStatus 显示的才是实际设进去的值。"
                 "\n"
                 "\n"
-                "StopRfGenerator 能切断它，按 中止 也能。"
+                "StopRfGenerator 能切断它，按 中止 也能。",
+                   "Turn on the RF output at the currently configured frequency and power.\n"
+                   "\n"
+                   "DANGEROUS: the dBm you put into the tunnel junction is **energy**. RF power couples into the tip and sample, "
+                   "and enough of it will alter or even destroy both. First call ConfigureRfGenerator and confirm the numbers - what GetRfGeneratorStatus shows is what was actually set."
+                   "\n"
+                   "\n"
+                   "StopRfGenerator can cut it off, and so can the Abort button.")
             ),
             parameters=[],
             estimated_duration_s=1.0,
@@ -429,7 +485,7 @@ class StartRfGenerator(BaseSkill):
             return _fail("StartRfGenerator", f"APRFGen_RFOutOnOffSet failed: {rec.error}", [rec])
         return SkillResult(skill_name="StartRfGenerator", success=True,
                            nanonis_calls=[rec], data={"output_on": True},
-                           summary="RF 输出已开启")
+                           summary=tr("RF 输出已开启", "RF output turned on"))
 
 
 class StopRfGenerator(BaseSkill):
@@ -442,8 +498,10 @@ class StopRfGenerator(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "停掉任何正在跑的 RF 扫描，**并且**关闭 RF 输出。永远允许，包括在 abort 之后。"
-                "两件事都做，且按这个顺序 —— 只停扫描而不切断输出，会让 RF 停在扫描走到的那个值上继续输出。"
+                tr("停掉任何正在跑的 RF 扫描，**并且**关闭 RF 输出。永远允许，包括在 abort 之后。"
+                "两件事都做，且按这个顺序 —— 只停扫描而不切断输出，会让 RF 停在扫描走到的那个值上继续输出。",
+                   "Stop any running RF sweep **and** turn off the RF output. Always allowed, including after an abort. "
+                   "It does both, in this order - stopping only the sweep without cutting the output would leave the RF on at whatever value the sweep reached.")
             ),
             parameters=[],
             estimated_duration_s=1.0,
@@ -463,9 +521,9 @@ class StopRfGenerator(BaseSkill):
         calls.append(rec)
         if rec.error:
             return _fail(name, f"APRFGen_RFOutOnOffSet(off) failed: {rec.error}", calls)
-        msg = "RF 扫描已停止，输出已关闭"
+        msg = tr("RF 扫描已停止，输出已关闭", "RF sweep stopped, output turned off")
         if sweep_err:
-            msg = f"RF 输出已关闭（扫描停止报错：{sweep_err}）"
+            msg = tr(f"RF 输出已关闭（扫描停止报错：{sweep_err}）", f"RF output turned off (stopping the sweep reported an error: {sweep_err})")
         return SkillResult(skill_name=name, success=True, nanonis_calls=calls,
                            data={"output_on": False}, summary=msg)
 
@@ -480,38 +538,45 @@ class RunRfFrequencySweep(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.DANGEROUS,
             description=(
-                "以当前功率把 RF 频率从一端扫到另一端，每个点驻留一段时间。\n"
+                tr("以当前功率把 RF 频率从一端扫到另一端，每个点驻留一段时间。\n"
                 "\n"
                 "DANGEROUS，理由与 StartRfGenerator 相同 —— 整段扫描期间它都在往外发 RF。"
                 "请先用 ConfigureRfGenerator 把功率设好。\n"
                 "\n"
                 "限值单位是**赫兹**。dwell_s 是每点的驻留时间；points 是点数。总时长 ≈ points × dwell_s × repetitions。"
                 "auto_off=true 会在扫描结束时切断 RF —— 除非你特别希望输出停在末频率上继续，"
-                "否则就让它开着。"
+                "否则就让它开着。",
+                   "Sweep the RF frequency from one end to the other at the current power, dwelling for a while at each point.\n"
+                   "\n"
+                   "DANGEROUS, for the same reason as StartRfGenerator - it transmits RF throughout the sweep. "
+                   "Set the power first with ConfigureRfGenerator.\n"
+                   "\n"
+                   "Limits are in **hertz**. dwell_s is the dwell time per point; points is the number of points. Total duration ≈ points × dwell_s × repetitions. "
+                   "auto_off=true cuts the RF when the sweep ends - leave it on unless you specifically want the output to stay on at the final frequency.")
             ),
             parameters=[
                 ParameterSpec(name="lower_hz", type="float",
-                              description="扫描下限，单位**赫兹**",
+                              description=tr("扫描下限，单位**赫兹**", "Lower sweep limit, in **hertz**"),
                               unit="Hz", required=True, min_value=0.0, max_value=4e10),
                 ParameterSpec(name="upper_hz", type="float",
-                              description="扫描上限，单位**赫兹**",
+                              description=tr("扫描上限，单位**赫兹**", "Upper sweep limit, in **hertz**"),
                               unit="Hz", required=True, min_value=0.0, max_value=4e10),
                 ParameterSpec(name="points", type="int",
-                              description="整段扫描的点数",
+                              description=tr("整段扫描的点数", "Number of points in the whole sweep"),
                               required=False, default=101, min_value=2, max_value=100_000),
                 ParameterSpec(name="dwell_s", type="float",
-                              description="每个点的驻留时间",
+                              description=tr("每个点的驻留时间", "Dwell time at each point"),
                               unit="s", required=False, default=0.01,
                               min_value=1e-6, max_value=60.0),
                 ParameterSpec(name="repetitions", type="int",
-                              description="这段扫描重复多少遍",
+                              description=tr("这段扫描重复多少遍", "How many times to repeat the sweep"),
                               required=False, default=1, min_value=1, max_value=10_000),
                 ParameterSpec(name="direction", type="str",
-                              description="up（lower→upper）或 down",
+                              description=tr("up（lower→upper）或 down", "up (lower→upper) or down"),
                               required=False, default="up",
                               allowed_values=list(_DIRECTIONS)),
                 ParameterSpec(name="auto_off", type="bool",
-                              description="扫描结束时关闭 RF 输出",
+                              description=tr("扫描结束时关闭 RF 输出", "Turn off the RF output when the sweep ends"),
                               required=False, default=True),
             ],
             estimated_duration_s=30.0,
@@ -524,7 +589,8 @@ class RunRfFrequencySweep(BaseSkill):
         lo = float(params["lower_hz"])
         hi = float(params["upper_hz"])
         if lo >= hi:
-            return _fail(name, f"lower_hz ({lo:g}) 必须小于 upper_hz ({hi:g})", [])
+            return _fail(name, tr(f"lower_hz ({lo:g}) 必须小于 upper_hz ({hi:g})",
+                                  f"lower_hz ({lo:g}) must be smaller than upper_hz ({hi:g})"), [])
         calls: list = []
 
         rec = context.safe_call("APRFGen_FreqSwpLimitsSet", lo, hi)
@@ -560,9 +626,11 @@ class RunRfFrequencySweep(BaseSkill):
                   "points": int(params.get("points", 101) or 101),
                   "dwell_s": float(params.get("dwell_s", 0.01) or 0.01),
                   "auto_off": bool(params.get("auto_off", True))},
-            summary=(f"RF 频率扫描已启动：{lo:.6g}→{hi:.6g} Hz，"
-                     f"{params.get('points', 101)} 点"
-                     + ("，结束后自动关输出" if auto_off else "，结束后输出保持开启")),
+            summary=(tr(f"RF 频率扫描已启动：{lo:.6g}→{hi:.6g} Hz，"
+                     f"{params.get('points', 101)} 点",
+                        f"RF frequency sweep started: {lo:.6g}→{hi:.6g} Hz, "
+                        f"{params.get('points', 101)} points")
+                     + (tr("，结束后自动关输出", ", output turns off automatically afterwards") if auto_off else tr("，结束后输出保持开启", ", output stays on afterwards"))),
         )
 
 
@@ -576,8 +644,9 @@ class GetRfGeneratorStatus(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读 RF 源的频率、功率，以及 —— 真正要紧的那一项 —— **输出是否开着**。在假定 RF 是关的之前，"
-                "先核这一条。"
+                tr("读 RF 源的频率、功率，以及 —— 真正要紧的那一项 —— **输出是否开着**。在假定 RF 是关的之前，"
+                "先核这一条。",
+                   "Read the RF source's frequency, power and - the item that really matters - **whether the output is on**. Check this before assuming the RF is off.")
             ),
             parameters=[],
             estimated_duration_s=1.0,

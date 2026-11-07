@@ -26,7 +26,7 @@ Responses are JSON except `/data/file` and `/data/frame`. Errors have one shape;
 | 200 / 202 | Success; 202 = a new job was accepted. **A skill that fails is still a 200**: read the job's `state` and `result.success`. |
 | 403 | The path is outside the allowed roots, or the extension is not whitelisted; or `cross_origin_refused`: a browser-originated cross-site request (an `Origin` that is not this service, a cross-site `Sec-Fetch-Site`, or a strange host name — the shape of DNS rebinding). |
 | 404 | No such resource (skill, job, experiment, sample, request, file, channel, path). |
-| 409 | Conflict: the `request_id` was used for a different body; switching scope while the instrument is in use. |
+| 409 | Conflict: the `request_id` was used for a different body; switching scope while the instrument is in use; an observation-gate refusal (`observe_first`, `act_in_flight`, `same_code_cell`, `checkpoint_requested`, `session_closed`, `use_act`); another run is active. |
 | 415 | `unsupported_media_type`: a write request without `application/json`. |
 | 422 | Invalid request; the skill is switched off on this instrument. |
 | 429 | Too many jobs running at once. |
@@ -53,6 +53,7 @@ Responses are JSON except `/data/file` and `/data/frame`. Errors have one shape;
 | POST | `/composites` | Save and register a composite skill |
 | POST | `/skills/proposals` | Propose a Python skill (for review) |
 | GET | `/data/files` | Recent data files |
+| GET | `/data/search` | Search data records by metadata |
 | GET | `/data/file` | Raw bytes |
 | GET | `/data/frame` | An oriented `.sxm` frame (`.npz`) |
 | POST | `/notes` | Write a note into MAST's memory |
@@ -61,6 +62,34 @@ Responses are JSON except `/data/file` and `/data/frame`. Errors have one shape;
 | GET | `/requests` | Your requests and the answers |
 | GET | `/requests/{request_id}` | One request and its answer |
 | POST | `/handover` | A handover report in the document library |
+| POST | `/vista/hello` | Register the client session (instrument-driving then only through act) |
+| POST | `/vista/observe` | The newest observation and a fresh token |
+| POST | `/vista/act` | Execute one action (with the token) |
+| GET | `/vista/acts/{job_id}` | An action job's state and observation |
+| GET | `/vista/status` | Workspace and gate state (never the token) |
+| POST | `/vista/inspect` | The magnifier: look at any archived frame |
+| POST | `/vista/read_values` | Exact readings |
+| POST | `/vista/measure/{tool}` | Rulers: profile, FFT, blobs, difference, statistics |
+| GET | `/vista/notes/{which}` | Read GUIDE.md / WORKING.md |
+| PUT | `/vista/notes/{which}` | Write GUIDE.md / WORKING.md |
+| GET | `/vista/history` | This experiment's action records and summary |
+| POST | `/wait` | Server-side wait: job, frame, alert, reply, detector, timer |
+| POST | `/detectors` | Create an analysis detector (pyexec) |
+| GET | `/detectors` | List the detectors |
+| GET | `/detectors/{detector_id}` | One detector and its hits |
+| POST | `/detectors/{detector_id}/enable` | Enable / disable |
+| DELETE | `/detectors/{detector_id}` | Delete a detector |
+| POST | `/detectors/{detector_id}/test` | Try it once on one frame |
+| POST | `/literature/search` | Search the literature knowledge base |
+| POST | `/runner/start` | Start an unattended run (Claude Code, subscription) |
+| GET | `/runner` | Recent runs |
+| GET | `/runner/{run_id}` | One run's state |
+| POST | `/runner/{run_id}/stop` | Operator stop |
+| POST | `/runner/{run_id}/hook` | Hook relay (the runner's own) |
+| GET | `/optical-layouts` | The optical layouts people drew |
+| GET | `/optical-layouts/{layout_id}` | One layout: geometry, trace, description, link state, comments |
+| GET | `/optical-layouts/{layout_id}/render.png` | A PNG of the layout |
+| POST | `/optical-layouts/{layout_id}/comments` | Comment (you cannot edit the layout or resolve comments) |
 
 ## Overview, scope and emergency stop
 
@@ -243,13 +272,38 @@ Propose a new atomic skill (Python source) — only when a composite cannot expr
 
 ### `GET /data/files`
 
-Recent data files, newest first (several copies of one measurement fold into one entry; `locations` lists each copy): `{files:[{path, name, ext, mtime, size_bytes, kind, copies, locations}], count, has_more, degraded, counts_by_ext}`. Only files inside the allowed roots are listed; **a directory chosen by the client is never accepted**.
+Recent data files, newest first (several copies of one measurement fold into one entry; `locations` lists each copy): `{files:[{path, name, ext, mtime, size_bytes, kind, copies, locations}], count, has_more, degraded, counts_by_ext}`. Only files inside the allowed roots are listed; **a directory chosen by the client is never accepted**. A file the active experiment's VISTA archive holds also carries `frame` (its frame id).
 
 | Parameter | In | Type | Required | Default | Limits |
 |---|---|---|---|---|---|
 | `n` | query | `integer` |  | `20` | `min=1, max=200` |
 | `ext` | query | `string \| null` |  |  |  |
 | `offset` | query | `integer` |  | `0` | `min=0` |
+
+### `GET /data/search`
+
+Search data records by metadata: the data gallery's index (size, pixels, bias, setpoint, channels, a spectrum's sweep range, the operator's rating / tags / note), plus the newest files the index does not have yet (headers read on the spot, at most 200 per search). All query parameters are optional and combine: `ext` (`sxm,dat,3ds`), `experiment` / `sample` (an id, a prefix of at least 6 hex characters, or part of the name), `since` / `until` (start time; `YYYY-MM-DD[ HH:MM[:SS]]`, ISO or epoch seconds, in the instrument PC's local time without a time zone; a date alone in `until` includes that whole day), `size_min_nm` / `size_max_nm`, `bias_min_v` / `bias_max_v`, `setpoint_min_pa` / `setpoint_max_pa`, `text`, `tag`, `min_rating` (2 key, 1 usable, -1 excluded), `order`, `n`, `offset`, `live`. Answer: `{items:[{path, name, ext, kind, time, saved, experiment, sample, frame, fetchable, source, …}], count, total, offset, has_more, query, index:{available, written_at, items, roots}, live:{examined, added, truncated, max}, frames:{workspace, known}, notes?, degraded}`; `experiment` / `sample` / `frame` are null when MAST cannot tell; `fetchable: false` means the path lies outside the roots the data egress allows (unchanged). An unreadable time or kind is 422 `bad_query`.
+
+| Parameter | In | Type | Required | Default | Limits |
+|---|---|---|---|---|---|
+| `ext` | query | `string \| null` |  |  |  |
+| `experiment` | query | `string \| null` |  |  | `maxLength=200` |
+| `sample` | query | `string \| null` |  |  | `maxLength=200` |
+| `since` | query | `string \| null` |  |  | `maxLength=40` |
+| `until` | query | `string \| null` |  |  | `maxLength=40` |
+| `size_min_nm` | query | `number \| null` |  |  | `min=0` |
+| `size_max_nm` | query | `number \| null` |  |  | `min=0` |
+| `bias_min_v` | query | `number \| null` |  |  |  |
+| `bias_max_v` | query | `number \| null` |  |  |  |
+| `setpoint_min_pa` | query | `number \| null` |  |  |  |
+| `setpoint_max_pa` | query | `number \| null` |  |  |  |
+| `text` | query | `string \| null` |  |  | `maxLength=200` |
+| `tag` | query | `string \| null` |  |  | `maxLength=80` |
+| `min_rating` | query | `integer \| null` |  |  | `min=-1, max=2` |
+| `order` | query | `string` |  | `"newest"` |  |
+| `n` | query | `integer` |  | `50` | `min=1, max=200` |
+| `offset` | query | `integer` |  | `0` | `min=0` |
+| `live` | query | `boolean` |  | `true` |  |
 
 ### `GET /data/file`
 
@@ -304,7 +358,7 @@ Write a note into MAST's memory; **MAST's own agents recall it automatically**. 
 
 ### `GET /notes`
 
-Search notes: with `q`, recall across the current experiment and global (falling back to substring search when the semantic index is unavailable); without `q`, the most recent. Memories written by MAST's own agents are here too (see `author`).
+Search notes: with `q`, recall across the current experiment and global (falling back to substring search when the semantic index is unavailable); without `q`, the most recent. Memories written by MAST's own agents are here too (see `author`). Each note carries `match` (semantic / substring / recent) and `score` (cosine similarity for semantic hits, −1..1; null otherwise): the nearest notes always come back, so a low score marks an unrelated one.
 
 | Parameter | In | Type | Required | Default | Limits |
 |---|---|---|---|---|---|
@@ -314,7 +368,7 @@ Search notes: with `q`, recall across the current experiment and global (falling
 
 ### `POST /requests`
 
-Ask the operator a question or make a request; it lights up in the user interface. The reply is `{ok, request:{id, status, ...}}`. **Do not wait here** — the answer is asynchronous; read it later with `GET /requests/{request_id}` or the `operator_requests` briefing section. Resending an unanswered question does not duplicate it.
+Ask the operator a question or make a request; it lights up in the user interface. The reply is `{ok, request:{id, status, ...}}`. **Do not wait here** — the answer is asynchronous; read it later with `GET /requests/{request_id}` or the `operator_requests` briefing section, or wait for `operator_reply` in `POST /wait`. Resending an unanswered question does not duplicate it. With `kind` `question` / `action` / `info` (or any other word) it is a free-text request and the operator replies with a note. With `kind` `confirm` / `choice` / `number` / `text` / `attest` it is a **structured prompt**: `options` (`[{id, label}]`, a choice needs two or more), `number_min` / `number_max` / `unit`, `attest_slots` (attest: the manual optical-state slots the operator's answer sets; required), `severity` (`info` / `action` / `safety`), `timeout_s` (at most 7 days; omitted = 24 hours, then it closes as a timeout). A card in the web UI, a launcher popup and a sound alert the operator at once, and **only the operator can answer it, you cannot**. Structured fields with a free-text `kind` are a 422 `structured_fields_need_kind`; a prompt that is not valid is a 422 `invalid_prompt`. **Structured prompts exist on the optical station only**: on an STM station every request is a text request - the `kind` is stored as written and the structured fields are ignored without an error. What the operator sees to sign in an attest comes from the slot definitions, not from you: a yes/no slot (such as `laser_area_safe`) takes no `options`, a choice slot only options from its own list (shown under the slot's own names), a number slot has its own unit and range, and one prompt names slots of one kind. A new prompt while you have 25 unanswered ones, or while external agents together have 75 (the operator's list holds 100 in all), is a 429 `too_many_open_prompts` (with a `scope`; changing your name does not help).
 
 **Request body** (`RequestBody`)
 
@@ -322,10 +376,25 @@ Ask the operator a question or make a request; it lights up in the user interfac
 |---|---|---|---|---|
 | `message` | `string` | yes |  | `minLength=1, maxLength=4000` |
 | `kind` | `string` |  | `"question"` | `maxLength=40` |
+| `title` | `string \| null` |  |  | `maxLength=200` |
+| `options` | `array<RequestOption> \| null` |  |  |  |
+| `number_min` | `number \| null` |  |  |  |
+| `number_max` | `number \| null` |  |  |  |
+| `unit` | `string \| null` |  |  | `maxLength=20` |
+| `attest_slots` | `array<string> \| null` |  |  |  |
+| `severity` | `string \| null` |  |  | `maxLength=20` |
+| `timeout_s` | `number \| null` |  |  | `>=0.0, max=604800.0` |
+
+where `RequestOption`:
+
+| Field | Type | Required | Default | Limits |
+|---|---|---|---|---|
+| `id` | `string` | yes |  | `minLength=1, maxLength=64` |
+| `label` | `string` | yes |  | `minLength=1, maxLength=200` |
 
 ### `GET /requests`
 
-Your requests and their answers, unanswered first: `{count, requests}`. Filter with `status`: `pending` (unanswered; `open` means the same), `done`, `dismissed`; an unknown value is a 422 `unknown_status`.
+Your requests and their answers, unanswered first: `{count, requests}`, free-text requests and structured prompts alike. Filter with `status`: `pending` (unanswered; `open` means the same), `done`, `dismissed`; an unknown value is a 422 `unknown_status`.
 
 | Parameter | In | Type | Required | Default | Limits |
 |---|---|---|---|---|---|
@@ -333,7 +402,7 @@ Your requests and their answers, unanswered first: `{count, requests}`. Filter w
 
 ### `GET /requests/{request_id}`
 
-One request: `note` is the written answer, `path` a file or folder the operator pointed to (there may be both).
+One request: `note` is the written answer, `path` a file or folder the operator pointed to (there may be both). A structured prompt (its id looks like `op-0001-…`) also carries `structured: true`, the exact state `prompt_status` (`open` / `answered` / `cancelled` / `timeout` / `dismissed`; `status` stays `pending` / `done` / `dismissed`) and `answer`: `{status, choice, value, note, answered_by, source, answered_at, ok}`, null until it is answered.
 
 | Parameter | In | Type | Required | Default | Limits |
 |---|---|---|---|---|---|
@@ -352,11 +421,318 @@ Write a handover report into MAST's document library (the operator sees it on th
 | `title` | `string` |  | `""` | `maxLength=200` |
 | `since` | `string \| null` |  |  | `maxLength=40` |
 
+## VISTA: observations and actions (one act, one observation)
+
+### `POST /vista/hello`
+
+Register this client session (`X-MAST-Session`) and get an overview: `{session, actor, workspace, turn, strict, gate, frames, spectra, notes}`. Any `/vista/*` call registers the session too; from then on, **skills that drive the instrument cannot be submitted through `POST /jobs` from this session** (409 `use_act`) — use `POST /vista/act` with the observation token. Reads, analysis and stop / withdraw are not affected. `client_meta` is what the bridge forwards about the client (Codex `itemId`, model name ...), used only for the gate and the records.
+
+**Request body** (`MetaBody`)
+
+| Field | Type | Required | Default | Limits |
+|---|---|---|---|---|
+| `client_meta` | `object \| null` |  |  |  |
+
+### `POST /vista/observe`
+
+The newest observation: the newest frame (scan or spectrum) of the workspace as an image, its summary, the instrument readbacks (bias, setpoint, current, Z, tip XY, drift compensation), the last action's record, and **a fresh token**. Call it at the start, when the token is lost, and after a frame from outside. The answer is `{observation:{obs_id, turn, frames, text, images, next_token, token_on_image}}`; `text` is the JSON the model reads (it carries `next_token` too) and `images` holds at most one image. In strict mode the token is printed only in a band under the image and `next_token` is null.
+
+**Request body** (`MetaBody`)
+
+| Field | Type | Required | Default | Limits |
+|---|---|---|---|---|
+| `client_meta` | `object \| null` |  |  |  |
+
+### `POST /vista/act`
+
+Execute **one** action: `action` + `params` (VISTA's action table: `scan`, `set_bias`, `set_current`, `feedback`, `move_tip`, `pulse`, `poke`, `sts`, `df_curve`, `pll`, `move_atom`, `drift_compensation`, `wait`, `withdraw`, `approach`; units nm, V, pA, s; a position is `{x_nm, y_nm}` or display pixels of an archived frame `{frame, x, y}`), or a raw skill `skill` + `skill_params` (SI units). Anything that drives the instrument needs `after` = the newest observation's token; a raw skill that does not drive the instrument runs as a plain job (`kind: "job"`, token untouched). An action is a job of `kind: "act"`: idempotent (`request_id`), cancellable, journaled, refused when the instrument is busy. It waits up to `wait_s` (≤ 50 s): when done, the answer is `{kind:"act", state:"done", job_id, turn, ok, job_state, observation}`; when not, `state:"running"` — wait for it with `POST /wait` (condition `{type:"job", job_id}`). Gate refusals are all 409: `session_closed`, `act_in_flight` (with `job_id`), `same_code_cell` (an action from the same Codex code cell already ran), `checkpoint_requested`, `observe_first` (token missing, used or superseded; **carries the newest observation and a fresh token**). A refused action executed nothing.
+
+**Request body** (`ActBody`)
+
+| Field | Type | Required | Default | Limits |
+|---|---|---|---|---|
+| `action` | `string \| null` |  |  |  |
+| `params` | `object \| null` |  |  |  |
+| `skill` | `string \| null` |  |  |  |
+| `skill_params` | `object \| null` |  |  |  |
+| `note` | `string` |  | `""` | `maxLength=1000` |
+| `after` | `string \| null` |  |  |  |
+| `request_id` | `string \| null` |  |  | `maxLength=120` |
+| `wait_s` | `number` |  | `45.0` | `min=0.0, max=50.0` |
+| `client_meta` | `object \| null` |  |  |  |
+
+### `GET /vista/acts/{job_id}`
+
+The current state of an action job (long poll with `wait_s` ≤ 50), in the same shape as the `POST /vista/act` answer, with its observation once done. If a newer observation superseded its token, `next_token` is null and `token_note` says so.
+
+| Parameter | In | Type | Required | Default | Limits |
+|---|---|---|---|---|---|
+| `job_id` | path | `string` | yes |  |  |
+| `wait_s` | query | `number` |  | `0.0` | `min=0.0, max=50.0` |
+
+### `GET /vista/status`
+
+Workspace, turn, number of frames and spectra, strict mode, the gate (whether a token is live, which session it is bound to, which action is running, invalidations — **never the token itself**), registered clients, the watcher. No hardware I/O.
+
+## VISTA: magnifier, readings, rulers, working notes and history
+
+### `POST /vista/inspect`
+
+The magnifier (VISTA `inspect`): up to 16 views per call; each takes any archived frame and can crop a region, switch channel / direction, remove the background and set the contrast, enlarged by whole numbers. The answer is VISTA's tool reply `{text, images, is_error}`, one image per view. Read-only; never touches the instrument.
+
+### `POST /vista/read_values`
+
+Exact readings (VISTA `read_values`): physical values at points, along lines or over regions of archived frames (unit in the key suffix), up to 64 views. Take exact numbers from here, never by reading pixels.
+
+### `POST /vista/measure/{tool}`
+
+Rulers: `line_profile` (profile between two points, distances, step heights), `fft_peaks` (periods and lattices), `detect_blobs` (counts and positions), `diff` (difference of two frames, drift), `stats` (statistics). Arguments as in VISTA's tools of the same name; result images are archived as derived frames (`m`), which are not instrument frames and do not affect the token. The tools measure; they never interpret.
+
+| Parameter | In | Type | Required | Default | Limits |
+|---|---|---|---|---|---|
+| `tool` | path | `string` | yes |  |  |
+
+### `GET /vista/notes/{which}`
+
+Read `guide` (GUIDE.md: durable lessons shared by all experiments) or `working` (WORKING.md: this experiment's working memory).
+
+| Parameter | In | Type | Required | Default | Limits |
+|---|---|---|---|---|---|
+| `which` | path | `string` | yes |  |  |
+
+### `PUT /vista/notes/{which}`
+
+Replace GUIDE.md (≤ 64 KiB) or WORKING.md (≤ 16 KiB) as a whole. When the runner has asked for a checkpoint, writing WORKING.md marks it ready.
+
+| Parameter | In | Type | Required | Default | Limits |
+|---|---|---|---|---|---|
+| `which` | path | `string` | yes |  |  |
+
+**Request body** (`NotesBody`)
+
+| Field | Type | Required | Default | Limits |
+|---|---|---|---|---|
+| `content` | `string` | yes |  |  |
+| `client_meta` | `object \| null` |  |  |  |
+
+### `GET /vista/history`
+
+This experiment's objective record: `view=events` gives action records by turn range (resolved parameters, controller result, instrument state afterwards, new frame ids), frames from outside, detector hits and checkpoints; `view=attempts` summarises (actions and failures per kind, frames and spectra).
+
+| Parameter | In | Type | Required | Default | Limits |
+|---|---|---|---|---|---|
+| `view` | query | `string` |  | `"events"` |  |
+| `start_turn` | query | `integer` |  | `0` | `min=0` |
+| `end_turn` | query | `integer \| null` |  |  | `min=0` |
+| `limit` | query | `integer` |  | `64` | `min=1, max=128` |
+
+## Waits and detectors
+
+### `POST /wait`
+
+Wait on the server until something happens, at most `timeout_s` (default 600, max 840; set the client's MCP tool timeout to ≥ 900 s — Codex: `tool_timeout_sec = 900`). Any one of `conditions` ends the wait: `job` (the job `job_id` ends, an action or a plain job), `frame` (a new frame is archived), `alert` (an anomaly, current-monitor or conduct alert at `min_level` or above: `info` / `warning` / `critical`, default `warning`), `operator_reply` (the operator answers; optionally one `request_id`), `detector` (a detector hit; optionally one `detector_id`), `timer` (after `seconds`). The answer is `{fired:[{index, type, event, seq, age_s, backlog}], timed_out, waited_s, cursor, observation?}`; `backlog: true` means it happened before this wait started (queued after your cursor) and `age_s` is how many seconds ago — an alert that returns at once may be minutes old; a current-monitor alert's `event` also carries `segment_start` / `segment_end` (the ~1 s of current judged, UTC), `measured` (sigma, jump rate, largest step and mean in pA) and `context` (scanning or not, seconds since the last scanning segment, the skill holding the instrument and the last one seen, bias, setpoint). When a finished action or a new frame fired, `observation` carries that observation (image + fresh token). Pass `cursor` back as the next `since` and no event between two waits is lost; a cursor that is too old (pushed out of the buffer) or from an earlier process returns at once with a `type: "gap"` entry. A client that disconnects ends the wait early. Invalid input is a 422 `invalid_condition` / `invalid_cursor`.
+
+**Request body** (`WaitBody`)
+
+| Field | Type | Required | Default | Limits |
+|---|---|---|---|---|
+| `conditions` | `array<object>` | yes |  |  |
+| `timeout_s` | `number` |  | `600.0` | `min=0.0, max=840.0` |
+| `since` | `string \| null` |  |  | `maxLength=128` |
+
+### `POST /detectors`
+
+Create an analysis detector for the current experiment: agent-written Python that defines `def detect(frame)`, run by MAST on every newly archived scan or spectrum (`applies_to`) in a separate interpreter (pyexec: no instrument access, no write access to raw data, killed on timeout, memory-capped). `frame` has `kind`, `fid`, `channels` (channel → forward 2-D array, SI units), `backward`, `meta`; spectra also `columns` and `units`. Return a falsy value (no hit), `True`, or `{hit, message, value}`. A hit is logged in the workspace events and wakes a `/wait` on `detector`. Limits: at most 8 enabled per experiment; `max_runtime_s` 20 by default, at most 120; 5 errors in a row or more than 30 hits an hour disable it with a reason; beyond 60 wakes an hour across detectors, hits are recorded without waking anyone. Creating the same name with the same code again returns the existing one (`existing: true`). Detectors never act: to act on a hit, use `/vista/act` or a composite skill. Code is at most 64 KB and must compile. The code runs as the MAST user on the instrument PC, so by default only loopback requests are accepted (over the LAN: 403 `loopback_only`, unless the operator sets `MAST_DETECTORS_ALLOW_REMOTE=1`).
+
+**Request body** (`DetectorCreate`)
+
+| Field | Type | Required | Default | Limits |
+|---|---|---|---|---|
+| `name` | `string` | yes |  | `minLength=1, maxLength=80` |
+| `code` | `string` | yes |  | `minLength=1, maxLength=65536` |
+| `applies_to` | `array<"scan" \| "spectrum">` | yes |  |  |
+| `description` | `string` |  | `""` | `maxLength=500` |
+| `max_runtime_s` | `number` |  | `20.0` | `min=1.0, max=120.0` |
+
+### `GET /detectors`
+
+All detectors of the current experiment: enabled or not (with the reason when disabled), run and hit counts, recent hits.
+
+### `GET /detectors/{detector_id}`
+
+One detector: its code, state, counters and last 50 hits. An unknown id is a 404 `unknown_detector`.
+
+| Parameter | In | Type | Required | Default | Limits |
+|---|---|---|---|---|---|
+| `detector_id` | path | `string` | yes |  |  |
+
+### `POST /detectors/{detector_id}/enable`
+
+`{enabled: true|false}` switches a detector on or off. At the limit of enabled detectors the answer is a 409 `too_many_enabled`.
+
+| Parameter | In | Type | Required | Default | Limits |
+|---|---|---|---|---|---|
+| `detector_id` | path | `string` | yes |  |  |
+
+**Request body** (`DetectorEnable`)
+
+| Field | Type | Required | Default | Limits |
+|---|---|---|---|---|
+| `enabled` | `boolean` | yes |  |  |
+
+### `DELETE /detectors/{detector_id}`
+
+Delete a detector (send `{}` as the body).
+
+| Parameter | In | Type | Required | Default | Limits |
+|---|---|---|---|---|---|
+| `detector_id` | path | `string` | yes |  |  |
+
+### `POST /detectors/{detector_id}/test`
+
+Run it once, now, synchronously, on an archived frame (`frame`, e.g. `t0007.s0`) and return what it returned or the error it raised (with the traceback). Not counted as a hit, wakes nobody. A frame kind outside `applies_to` is a 422 `frame_not_applicable`; an unknown frame a 404 `unknown_frame`. Like creation, loopback only by default.
+
+| Parameter | In | Type | Required | Default | Limits |
+|---|---|---|---|---|---|
+| `detector_id` | path | `string` | yes |  |  |
+
+**Request body** (`DetectorTestBody`)
+
+| Field | Type | Required | Default | Limits |
+|---|---|---|---|---|
+| `frame` | `string` | yes |  | `minLength=1, maxLength=64` |
+
+## Literature
+
+### `POST /literature/search`
+
+Search MAST's literature knowledge base (the operator's library of papers) by meaning, without touching the instrument: each hit gives title, year, journal, DOI, a relevance score and an abstract excerpt. `material` focuses the search on one material (e.g. `Cu(111)`). The same implementation as the main API's `/api/literature/search`; vector search needs DashScope embeddings and falls back to keyword matching, flagged `degraded: true`, when they are unavailable.
+
+**Request body** (`LiteratureSearchBody`)
+
+| Field | Type | Required | Default | Limits |
+|---|---|---|---|---|
+| `query` | `string` | yes |  | `minLength=1, maxLength=500` |
+| `k` | `integer` |  | `8` | `min=1.0, max=50.0` |
+| `material` | `string` |  | `""` | `maxLength=120` |
+| `library_id` | `string \| null` |  |  | `maxLength=120` |
+
+## Runner (unattended sessions)
+
+### `POST /runner/start`
+
+Start an unattended run: MAST launches Claude Code itself (`claude -p`, stream-json) with MAST's MCP bridge as its only tool server, and `task` as its assignment. Subscription only: `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` are removed from the child, and a session whose init reports an `apiKeySource` other than none is not started. Sessions rotate on an image budget and on context length: the agent first writes WORKING.md (only the notes tools work meanwhile) and the next session continues from the notes, the task and the newest observation; every tool call is checked for its result. One run at a time: another active run is a 409 `run_active`; a missing Claude Code, bridge or bridge Python is a 503 `runner_unavailable` (executables come only from environment overrides, never over HTTP). Answers 202 with the run view. The Codex runner comes in a later minor version.
+
+**Request body** (`RunnerStart`)
+
+| Field | Type | Required | Default | Limits |
+|---|---|---|---|---|
+| `task` | `string` | yes |  | `minLength=1, maxLength=20000` |
+| `client` | `"claude"` |  | `"claude"` |  |
+| `model` | `string \| null` |  |  | `maxLength=80` |
+| `effort` | `"low" \| "medium" \| "high" \| "xhigh" \| "max" \| null` |  |  |  |
+| `base_url` | `string \| null` |  |  | `maxLength=200` |
+| `preflight` | `boolean \| null` |  |  |  |
+| `max_segments` | `integer \| null` |  |  |  |
+| `turn_timeout_s` | `number \| null` |  |  |  |
+| `stall_turns` | `integer \| null` |  |  |  |
+| `image_limit_per_session` | `integer \| null` |  |  |  |
+| `image_reserve` | `integer \| null` |  |  |  |
+| `max_budget_usd` | `number \| null` |  |  |  |
+| `max_recoveries` | `integer \| null` |  |  |  |
+| `compact_window_tokens` | `integer \| null` |  |  |  |
+| `compact_pct` | `integer \| null` |  |  |  |
+
+### `GET /runner`
+
+Recent runs (this process and earlier ones), newest first.
+
+### `GET /runner/{run_id}`
+
+One run: state, outcome, segments, usage, tool calls that got no result. An unknown id is a 404 `unknown_run`.
+
+| Parameter | In | Type | Required | Default | Limits |
+|---|---|---|---|---|---|
+| `run_id` | path | `string` | yes |  |  |
+
+### `POST /runner/{run_id}/stop`
+
+Operator stop: the session's actions are refused at once (`session_closed`), Claude Code is interrupted and the run ends as `stopped_by_operator`. The emergency stop is still `/estop`.
+
+| Parameter | In | Type | Required | Default | Limits |
+|---|---|---|---|---|---|
+| `run_id` | path | `string` | yes |  |  |
+
+**Request body** (`RunnerStop`)
+
+| Field | Type | Required | Default | Limits |
+|---|---|---|---|---|
+| `reason` | `string` |  | `""` | `maxLength=300` |
+
+### `POST /runner/{run_id}/hook`
+
+Relay for Claude Code's hooks (PreCompact / PostCompact / Stop), loopback only, with the run's `X-MAST-Runner-Secret`. Answers `{output: <hook decision>}`. For the runner itself; agents never call it.
+
+| Parameter | In | Type | Required | Default | Limits |
+|---|---|---|---|---|---|
+| `run_id` | path | `string` | yes |  |  |
+
+**Request body** (`RunnerHook`)
+
+| Field | Type | Required | Default | Limits |
+|---|---|---|---|---|
+| `event` | `string \| null` |  |  | `maxLength=64` |
+| `payload` | `object` |  |  |  |
+
+## Optical layouts (read, and comment)
+
+### `GET /optical-layouts`
+
+The optical layouts people drew in the web page (where the components on the optical table are, their direction, model, whether they are motorized, what they connect to): `{layouts:[{id, title, revision, updated_at, updated_by, components, open_comments}]}`, most recently saved first; a file that cannot be read has an extra `error`. An empty list when nothing has been drawn. Read-only; no device is touched.
+
+### `GET /optical-layouts/{layout_id}`
+
+One optical layout: `layout` (geometry, components, annotations, links; mm and degrees, origin at the table's lower left, x to the right, y up, angles counter-clockwise from +x), `trace` (one tree per light source and wavelength: polylines, hit points, `offset_mm` (the signed distance of the hit from the component's center), `incidence_deg`, `path_mm` (path length so far)), `summary` (the beam paths in order and the list of problems - **read this first**; in the language of the request's `X-MAST-Lang`), `links_state` (the current state behind each device / manual optical-state slot link; devices the process already has open are read, **a device is never opened for this**) and `comments` (the unresolved ones). An unknown id is a 404 `unknown_layout`, a file that cannot be read a 500 `layout_unreadable` (the file is left as it is). **You cannot change this layout**: it records what is physically on the table, which only the operator knows.
+
+| Parameter | In | Type | Required | Default | Limits |
+|---|---|---|---|---|---|
+| `layout_id` | path | `string` | yes |  |  |
+
+### `GET /optical-layouts/{layout_id}/render.png`
+
+A PNG (`image/png`) of the layout: components as simple shapes, beams coloured by wavelength (infrared / ultraviolet dashed, weight following the intensity), a yellow ring where a beam hits more than 20% of the aperture off center, a red cross where it meets a back side or just misses a component. `width` is the width in pixels (200-3000, default 1200); `fit=content` (the default) zooms to where the components and beams are, `fit=table` draws the whole table (the axes always carry table coordinates). Needs no display.
+
+| Parameter | In | Type | Required | Default | Limits |
+|---|---|---|---|---|---|
+| `layout_id` | path | `string` | yes |  |  |
+| `width` | query | `integer` |  | `1200` | `min=200, max=3000` |
+| `fit` | query | `"table" \| "content"` |  | `"content"` |  |
+
+### `POST /optical-layouts/{layout_id}/comments`
+
+Add a comment to this layout (a question, a warning, a suggestion), optionally about one component (`component_id`, which must be in the layout, else 422 `invalid_comment`). The author is recorded as your agent id (`ext:<X-MAST-Actor>`); a name in the body is not accepted and any extra field is a 422. The operator sees it in the web page and resolves it - **you cannot resolve a comment or change the layout**. An agent may have at most 50 unresolved comments on one layout (429 `too_many_open_comments`) and a layout holds at most 1000 comments (when full the oldest resolved ones make room; all unresolved answers 429 `layout_comments_full`). Answers `{ok, comment}`.
+
+| Parameter | In | Type | Required | Default | Limits |
+|---|---|---|---|---|---|
+| `layout_id` | path | `string` | yes |  |  |
+
+**Request body** (`LayoutCommentBody`)
+
+| Field | Type | Required | Default | Limits |
+|---|---|---|---|---|
+| `text` | `string` | yes |  | `minLength=1, maxLength=2000` |
+| `component_id` | `string \| null` |  |  | `maxLength=40` |
+
+```json
+{"text": "M2 is hit 6 mm off center; is the mount shimmed?", "component_id": "m2"}
+```
+
 ## Job view
 
 ```json
 {
-  "job_id": "j_0123456789ab", "skill": "GetBias", "params": {}, "params_used": {},
+  "job_id": "j_0123456789ab", "kind": "skill", "skill": "GetBias", "params": {},
+  "params_used": {},
   "actor": "claude-code", "session": "", "request_id": "getbias-001", "note": "",
   "run_id": "ext-j_0123456789ab",
   "state": "succeeded", "terminal": true,
@@ -401,6 +777,7 @@ Write a handover report into MAST's document library (the operator sees it on th
 | `recording` | Your signature and whether experiment recording is configured for the current scope. |
 | `jobs` | Your recent jobs. |
 | `operator_requests` | Your requests to the operator, and the answers. |
+| `optical_layouts` | The optical layouts people drew: how many, their component counts, unresolved comments, how to read one. **Empty when nothing has been drawn** and then left out of the top-level `text`. On both station profiles. |
 
 ## Skill card
 

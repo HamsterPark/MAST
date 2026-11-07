@@ -1,0 +1,321 @@
+{
+  "name": "unknown_wavelength",
+  "description": "A lamp without a wavelength: it passes a band-pass filter (the filter cannot judge) and transmits through a dichroic (wavelength_nm is null). The LED at 450 nm is reflected by a second dichroic of the same kind.",
+  "layout": {
+    "schema": 1,
+    "id": "unknown",
+    "title": "Unknown wavelength",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "lamp1",
+        "type": "lamp",
+        "label": "LAMP",
+        "x_mm": 50.0,
+        "y_mm": 62.5,
+        "angle_deg": 0.0,
+        "aperture_mm": 5.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "led1",
+        "type": "led",
+        "label": "LED",
+        "x_mm": 50.0,
+        "y_mm": 187.5,
+        "angle_deg": 0.0,
+        "aperture_mm": 5.0,
+        "props": {
+          "wavelength_nm": 450.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "flt1",
+        "type": "filter",
+        "label": "F1",
+        "x_mm": 150.0,
+        "y_mm": 62.5,
+        "angle_deg": 0.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "pass_min_nm": 500.0,
+          "pass_max_nm": 600.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "dm1",
+        "type": "dichroic",
+        "label": "DM1",
+        "x_mm": 225.0,
+        "y_mm": 62.5,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "edge_nm": 700.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det1",
+        "type": "detector",
+        "label": "D1",
+        "x_mm": 350.0,
+        "y_mm": 62.5,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det2",
+        "type": "detector",
+        "label": "D2",
+        "x_mm": 225.0,
+        "y_mm": 250.0,
+        "angle_deg": 270.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "dm2",
+        "type": "dichroic",
+        "label": "DM2",
+        "x_mm": 225.0,
+        "y_mm": 187.5,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "edge_nm": 700.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "lamp1",
+      "wavelength_nm": null,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 62.5,
+              "x1": 150.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 150.0,
+              "y0": 62.5,
+              "x1": 225.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 225.0,
+              "y0": 62.5,
+              "x1": 350.0,
+              "y1": 62.5
+            }
+          ],
+          "events": [
+            {
+              "component": "flt1",
+              "action": "transmit",
+              "x": 150.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 100.0
+            },
+            {
+              "component": "dm1",
+              "action": "transmit",
+              "x": 225.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 175.0
+            },
+            {
+              "component": "det1",
+              "action": "stop",
+              "x": 350.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 300.0
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "led1",
+      "wavelength_nm": 450.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 187.5,
+              "x1": 225.0,
+              "y1": 187.5
+            },
+            {
+              "x0": 225.0,
+              "y0": 187.5,
+              "x1": 225.0,
+              "y1": 250.0
+            }
+          ],
+          "events": [
+            {
+              "component": "dm2",
+              "action": "reflect",
+              "x": 225.0,
+              "y": 187.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 175.0
+            },
+            {
+              "component": "det2",
+              "action": "stop",
+              "x": 225.0,
+              "y": 250.0,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 237.5
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ]
+}

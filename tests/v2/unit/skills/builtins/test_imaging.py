@@ -332,6 +332,53 @@ def test_configure_scan_signals_namesget_triple():
     assert buf_calls[0][1][0] == [0, 1]
 
 
+def test_configure_scan_does_not_set_partial_channel_buffer():
+    # 请求 "Z,Current" 但信号名里没有 Z。旧行为把
+    # 匹配上的 Current 单独设进缓冲 ⇒ 扫图**只剩 Current** 通道。新行为：少匹配
+    # 一个就整组不设，保持操作员当前通道不动，并报 unchanged_partial_match。
+    names = ["Current (A)", "Bias (V)"]   # 没有任何 Z* 信号
+    canned = {
+        "Scan_FrameSet": {"return_value": ["", b"", []]},
+        "Scan_FrameGet": {"return_value": ["", b"", [0.0, 0.0, 1e-7, 1e-7, 30.0]]},
+        "Signals_NamesGet": {"return_value": ["", b"", [64, len(names), names]]},
+        "Scan_BufferSet": {"return_value": ["", b"", []]},
+        "Scan_SpeedSet": {"return_value": ["", b"", []]},
+    }
+    ctx = FakeCtx(canned=canned)
+    res = ConfigureScan().execute(
+        ctx,
+        {"center_x_m": 0.0, "center_y_m": 0.0, "width_m": 100e-9,
+         "height_m": 100e-9, "channels": "Z,Current"},
+    )
+    assert res.success
+    # 关键：绝不因为只匹配到 Current 就把缓冲设成只剩 Current。
+    assert not any(c[0] == "Scan_BufferSet" for c in ctx.calls), \
+        "部分匹配时不得设缓冲（否则会把采集通道砍成只剩 Current）"
+    assert res.data["channels_source"] == "unchanged_partial_match"
+
+
+def test_configure_scan_sets_buffer_when_all_channels_match():
+    # 全部匹配 ⇒ 正常整组设好（回归保护：别把正常路也一起挡了）。
+    names = ["Z (m)", "Current (A)", "Bias (V)"]
+    canned = {
+        "Scan_FrameSet": {"return_value": ["", b"", []]},
+        "Scan_FrameGet": {"return_value": ["", b"", [0.0, 0.0, 1e-7, 1e-7, 30.0]]},
+        "Signals_NamesGet": {"return_value": ["", b"", [64, len(names), names]]},
+        "Scan_BufferSet": {"return_value": ["", b"", []]},
+        "Scan_SpeedSet": {"return_value": ["", b"", []]},
+    }
+    ctx = FakeCtx(canned=canned)
+    res = ConfigureScan().execute(
+        ctx,
+        {"center_x_m": 0.0, "center_y_m": 0.0, "width_m": 100e-9,
+         "height_m": 100e-9, "channels": "Z,Current"},
+    )
+    assert res.success
+    buf = [c for c in ctx.calls if c[0] == "Scan_BufferSet"]
+    assert len(buf) == 1 and buf[0][1][0] == [0, 1]
+    assert res.data["channels_source"] == "set"
+
+
 # ── ConfigureScan speed-override behaviour ─────────────────────────────────────
 
 

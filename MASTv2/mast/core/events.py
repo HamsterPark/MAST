@@ -71,6 +71,23 @@ class EventType(Enum):
     # agent 能到达的写路径**只有** pending 推荐 —— 它不能改自己的工具面。所以这
     # 一帧的意思是「有人想让你看一眼」，不是「工具面变了」。
     SKILL_RECOMMENDATION = "skill_recommendation"
+    # 卫星节点（光谱电脑等）的状态变化（ters_satellite_integration.md §5.3）。
+    # **只发指针式的状态变化**：payload 是 ``{sat_id, kind, …}``，``kind`` ∈
+    # link（connected/degraded/lost 跳变）| restart（boot_id 变了）| device（人工接管、
+    # 设备 error/offline 的跳变）| deadman | error | manual | estop | estop_ack | file
+    # （新文件入库，≤1 条/5 s/卫星）| port_guard（端口归属冲突变化）。界面收到后 refetch
+    # ``GET /api/satellites`` / ``GET /api/port-guard``。光谱帧、轴位置这类高频数据**绝不**
+    # 走这里（只重放 100 条），走 LiveHub；设备 busy↔ready 也不发 —— 一张 1000 点的图
+    # 就是 2000 条。
+    SATELLITE = "satellite"
+    # An operator prompt was posted / answered / closed, or an optical-state slot was
+    # written (optical station, docs/v2/design/optical_station_witec.md). **Pointers
+    # only**, like SATELLITE: ``{what: "prompt"|"optical_state", event, prompt_id?, status?,
+    # kind?, severity?, slot?, seq}``; the browser refetches ``GET /api/operator/prompts``
+    # (or ``/optical-state``) — that is the single source, because this bus replays only the
+    # last 100 events and a client that accumulated state from frames would show a wrong list.
+    # The launcher has no WebSocket: it polls the same endpoint and compares ``seq``.
+    OPERATOR_PROMPT = "operator_prompt"
 
 
 @dataclass
@@ -211,12 +228,20 @@ class EventBus:
         """Shorthand: publish a SCAN_COMPLETE event."""
         self.publish(Event(type=EventType.SCAN_COMPLETE, data={"path": path}))
 
-    def publish_skill_step(self, skill: str, step: int, success: bool) -> None:
-        """Shorthand: publish a SKILL_STEP event."""
-        self.publish(Event(
-            type=EventType.SKILL_STEP,
-            data={"skill": skill, "step": step, "success": success},
-        ))
+    def publish_skill_step(self, skill: str, step: int, success: bool,
+                           category: str | None = None) -> None:
+        """Shorthand: publish a SKILL_STEP event.
+
+        ``category`` (optional, 2026-11-03): the skill's ``SkillCategory`` value
+        (``read`` / ``write`` / ``composite`` / ``analysis``). Subscribers that act
+        on finished skills (the current monitor's pin + afterglow) use it to leave
+        pure reads alone. Omitted ⇒ the event keeps its old shape, and old
+        publishers (the legacy ``SkillExecutor``) behave exactly as before.
+        """
+        data = {"skill": skill, "step": step, "success": success}
+        if category:
+            data["category"] = str(category)
+        self.publish(Event(type=EventType.SKILL_STEP, data=data))
 
     def publish_connection(self, connected: bool, detail: str = "") -> None:
         """Shorthand: publish a CONNECTION event."""
@@ -283,6 +308,15 @@ class EventBus:
         """
         self.publish(Event(type=EventType.CONDUCT_ALERT,
                            data={"conduct_id": str(conduct_id or ""), **kwargs}))
+
+    def publish_satellite(self, sat_id: str, kind: str, **kwargs) -> None:
+        """Shorthand: publish a SATELLITE event (pointer only — see the EventType comment)."""
+        self.publish(Event(type=EventType.SATELLITE,
+                           data={"sat_id": str(sat_id or ""), "kind": str(kind), **kwargs}))
+
+    def publish_operator_prompt(self, **kwargs) -> None:
+        """Shorthand: publish an OPERATOR_PROMPT event (pointer only — see the EventType comment)."""
+        self.publish(Event(type=EventType.OPERATOR_PROMPT, data=kwargs))
 
     def publish_current_monitor(self, **kwargs) -> None:
         """Shorthand: publish a CURRENT_MONITOR event.

@@ -48,6 +48,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.agents._shared.skill_adapter import wrap_skill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -90,19 +91,26 @@ class SurveySurface_TileScan(CompositeSkillGraph):
             category=SkillCategory.COMPOSITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "用 NxN 个扫描瓦片巡查一块方形表面区域，拿到全局概貌。"
+                tr("用 NxN 个扫描瓦片巡查一块方形表面区域，拿到全局概貌。"
                 "每个瓦片产出一个 .sxm 文件。"
                 "**在**放大到具体特征**之前**用它。只在针尖已进针且稳定之后跑。"
                 "可选地给每个瓦片的成像质量打分，并推荐最适合后续高分辨扫描的"
-                "那一块。"
+                "那一块。",
+                    "Survey a square surface area with NxN scan tiles to get a global overview. "
+                    "Each tile produces one .sxm file. "
+                    "Use it **before** zooming in on specific features. Run only after the tip is approached and stable. "
+                    "Optionally scores the imaging quality of each tile and recommends the tile best suited for a follow-up "
+                    "high-resolution scan.")
             ),
             parameters=[
                 ParameterSpec(
                     name="center_x_m",
                     type="float",
                     description=(
-                        "巡查区中心 X，单位 METERS。常见 -1.5u 到 1.5u（±1.5 µm）。"
-                        "例：0 ✓；1.5u ✓；1（= 1 meter！）✗。"
+                        tr("巡查区中心 X，单位 METERS。常见 -1.5u 到 1.5u（±1.5 µm）。"
+                        "例：0 ✓；1.5u ✓；1（= 1 meter！）✗。",
+                            "Survey area center X, in METERS. Typical -1.5u to 1.5u (±1.5 µm). "
+                            "E.g. 0 OK; 1.5u OK; 1 (= 1 meter!) wrong.")
                     ),
                     unit="m",
                     required=False,
@@ -113,7 +121,7 @@ class SurveySurface_TileScan(CompositeSkillGraph):
                 ParameterSpec(
                     name="center_y_m",
                     type="float",
-                    description="巡查区中心 Y，单位 METERS。常见 -1.5u 到 1.5u。",
+                    description=tr("巡查区中心 Y，单位 METERS。常见 -1.5u 到 1.5u。", "Survey area center Y, in METERS. Typical -1.5u to 1.5u."),
                     unit="m",
                     required=False,
                     default=0.0,
@@ -124,8 +132,10 @@ class SurveySurface_TileScan(CompositeSkillGraph):
                     name="total_size_m",
                     type="float",
                     description=(
-                        "被巡查的方形区总边长，单位 METERS。默认 200n"
-                        "（200 nm）。硬上限 10u（10 µm）。例：200n = 200 nm；1u = 1 µm。"
+                        tr("被巡查的方形区总边长，单位 METERS。默认 200n"
+                        "（200 nm）。硬上限 10u（10 µm）。例：200n = 200 nm；1u = 1 µm。",
+                            "Total side length of the surveyed square area, in METERS. Default 200n "
+                            "(200 nm). Hard limit 10u (10 µm). E.g. 200n = 200 nm; 1u = 1 µm.")
                     ),
                     unit="m",
                     required=False,
@@ -137,10 +147,14 @@ class SurveySurface_TileScan(CompositeSkillGraph):
                     name="tile_size_m",
                     type="float",
                     description=(
-                        "单个扫描瓦片的边长，单位 METERS。默认 50n"
+                        tr("单个扫描瓦片的边长，单位 METERS。默认 50n"
                         "（50 nm）。**必须能整除 total_size_m**，才凑得出整数的 NxN "
                         "栅格；除不尽的值会**向上取整**，保证巡查范围**至少**覆盖 "
-                        "total_size_m。"
+                        "total_size_m。",
+                            "Side length of a single scan tile, in METERS. Default 50n "
+                            "(50 nm). **Must divide total_size_m evenly** to form an integer NxN "
+                            "grid; values that do not divide are **rounded up**, so the survey covers **at least** "
+                            "total_size_m.")
                     ),
                     unit="m",
                     required=False,
@@ -152,10 +166,14 @@ class SurveySurface_TileScan(CompositeSkillGraph):
                     name="line_time_s",
                     type="float",
                     description=(
-                        "每个瓦片的正扫行时间，单位秒。**除非用户点了名，否则留空** —— "
+                        tr("每个瓦片的正扫行时间，单位秒。**除非用户点了名，否则留空** —— "
                         "留空时它按瓦片尺寸从用户的分尺度策略表里取。"
                         "越慢 = SNR 越好，但总时间越长。整轮巡查 "
-                        "≈ (N×N tiles) × tile_lines × line_time。"
+                        "≈ (N×N tiles) × tile_lines × line_time。",
+                            "Forward-scan line time per tile, in seconds. **Leave empty unless the user named one** -- "
+                            "when empty it is taken from the user's per-scale policy table by tile size. "
+                            "Slower = better SNR but longer total time. Whole survey "
+                            "≈ (N×N tiles) × tile_lines × line_time.")
                     ),
                     unit="s",
                     required=False,
@@ -168,14 +186,15 @@ class SurveySurface_TileScan(CompositeSkillGraph):
                 ParameterSpec(
                     name="channels",
                     type="str",
-                    description="每个瓦片要采的通道，逗号分隔。默认 'Z,Current'。",
+                    description=tr("每个瓦片要采的通道，逗号分隔。默认 'Z,Current'。",
+                                    "Channels to acquire for each tile, comma-separated. Default 'Z,Current'."),
                     required=False,
                     default="Z,Current",
                 ),
                 ParameterSpec(
                     name="wait_timeout_s",
                     type="float",
-                    description="单个瓦片扫描的等待上限。",
+                    description=tr("单个瓦片扫描的等待上限。", "Wait limit for a single tile scan."),
                     unit="s",
                     required=False,
                     default=180.0,
@@ -186,9 +205,12 @@ class SurveySurface_TileScan(CompositeSkillGraph):
                     name="assess_quality",
                     type="bool",
                     description=(
-                        "每扫完一个瓦片就对它跑一次 AssessImageQuality。"
+                        tr("每扫完一个瓦片就对它跑一次 AssessImageQuality。"
                         "每个瓦片多花 ~2-5 s，但这样这个技能才能推荐出最适合"
-                        "后续高分辨扫描的那一块区域。"
+                        "后续高分辨扫描的那一块区域。",
+                            "Run AssessImageQuality on each tile right after it is scanned. "
+                            "Costs ~2-5 s extra per tile, but it is what lets this skill recommend the best area "
+                            "for a follow-up high-resolution scan.")
                     ),
                     required=False,
                     default=True,

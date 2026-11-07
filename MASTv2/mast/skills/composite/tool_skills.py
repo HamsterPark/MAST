@@ -37,6 +37,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.skills.base import BaseSkill
 
 logger = logging.getLogger(__name__)
@@ -77,11 +78,11 @@ WORKFLOW_TOOL_EXCLUDE: frozenset[str] = frozenset({
 
 # Domain labels for the builder palette grouping (source=agent_tool).
 AGENT_TOOL_DOMAINS = {
-    "data_processing":   "数据处理工具",
-    "literature":        "文献工具",
-    "paper_writing":     "论文写作工具",
-    "paper_review":      "论文评审工具",
-    "experiment_design": "实验设计工具",
+    "data_processing":   tr("数据处理工具", "Data processing tools"),
+    "literature":        tr("文献工具", "Literature tools"),
+    "paper_writing":     tr("论文写作工具", "Paper writing tools"),
+    "paper_review":      tr("论文评审工具", "Paper review tools"),
+    "experiment_design": tr("实验设计工具", "Experiment design tools"),
 }
 
 _ERROR_PREFIX = re.compile(

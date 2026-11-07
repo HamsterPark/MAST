@@ -4,8 +4,9 @@ import { api } from "@/api/client";
 import { Card, Spinner, ErrorNote, DegradedNote, EmptyNote } from "@/components/ui";
 import { Sparkline } from "@/components/vision/Sparkline";
 import { Button } from "@/components/controls";
+import { langTag, tr } from "@/lib/i18n";
 
-// 视觉缓冲 — full Vision-Buffer event panel. Typed replacement for
+// Vision buffer — full Vision-Buffer event panel. Typed replacement for
 // gui/vision_buffer.py: stats bar + events/s sparkline, kind checkbox filter,
 // severity & time-range dropdowns, pause/refresh, color-coded event list with
 // expandable payload JSON + thumbnail stub, CSV/JSON export.
@@ -22,30 +23,30 @@ type BufferEvent = {
   t_wall: number;
 };
 
-// kind → CN label + color bucket (mirrors _KIND_META).
+// kind → display label + color bucket (mirrors _KIND_META).
 const KIND_META: { kind: string; cn: string; bucket: "info" | "warn" | "crit" | "set" }[] = [
-  { kind: "tip_quality_drop", cn: "针尖质量下降", bucket: "warn" },
-  { kind: "feature_of_interest", cn: "特征发现", bucket: "info" },
-  { kind: "scan_complete", cn: "扫描完成", bucket: "info" },
-  { kind: "sensor_fault", cn: "传感器故障", bucket: "crit" },
-  { kind: "emergency_retract_needed", cn: "紧急退针", bucket: "crit" },
-  { kind: "vision_error", cn: "视觉模型错误", bucket: "warn" },
-  { kind: "setpoint_change", cn: "设定点变更", bucket: "set" },
-  { kind: "e_stop", cn: "急停", bucket: "crit" },
-  { kind: "tip_shape_verdict", cn: "针尖整形", bucket: "info" },
+  { kind: "tip_quality_drop", cn: tr("针尖质量下降", "Tip quality drop"), bucket: "warn" },
+  { kind: "feature_of_interest", cn: tr("特征发现", "Feature found"), bucket: "info" },
+  { kind: "scan_complete", cn: tr("扫描完成", "Scan complete"), bucket: "info" },
+  { kind: "sensor_fault", cn: tr("传感器故障", "Sensor fault"), bucket: "crit" },
+  { kind: "emergency_retract_needed", cn: tr("紧急退针", "Emergency retract"), bucket: "crit" },
+  { kind: "vision_error", cn: tr("视觉模型错误", "Vision model error"), bucket: "warn" },
+  { kind: "setpoint_change", cn: tr("设定点变更", "Setpoint change"), bucket: "set" },
+  { kind: "e_stop", cn: tr("急停", "E-stop"), bucket: "crit" },
+  { kind: "tip_shape_verdict", cn: tr("针尖整形", "Tip shaping"), bucket: "info" },
 ];
 const KIND_CN: Record<string, string> = Object.fromEntries(KIND_META.map((m) => [m.kind, m.cn]));
 
 const RANGE_OPTIONS: { label: string; secs: number | null }[] = [
-  { label: "最近 1 分钟", secs: 60 },
-  { label: "最近 5 分钟", secs: 300 },
-  { label: "最近 15 分钟", secs: 900 },
-  { label: "最近 1 小时", secs: 3600 },
-  { label: "全部", secs: null },
+  { label: tr("最近 1 分钟", "Last 1 minute"), secs: 60 },
+  { label: tr("最近 5 分钟", "Last 5 minutes"), secs: 300 },
+  { label: tr("最近 15 分钟", "Last 15 minutes"), secs: 900 },
+  { label: tr("最近 1 小时", "Last 1 hour"), secs: 3600 },
+  { label: tr("全部", "All"), secs: null },
 ];
 
 const SEV_OPTIONS: { label: string; value: string }[] = [
-  { label: "全部", value: "all" },
+  { label: tr("全部", "All"), value: "all" },
   { label: "INFO", value: "info" },
   { label: "WARN", value: "warn" },
   { label: "CRITICAL", value: "critical" },
@@ -55,7 +56,7 @@ function edgeColor(kind: string, severity: string, payload?: Record<string, unkn
   const sev = (severity || "").toLowerCase();
   if (sev === "critical") return "var(--mast-danger)";
   // SAFE mode demotes a tip verdict to a record-only INFO. Colour it as the
-  // information it now is — otherwise the kind's own bucket ("针尖质量下降" =
+  // information it now is — otherwise the kind's own bucket (tip_quality_drop =
   // warn) paints a yellow edge on an event that is explicitly not asking for
   // anything, and the panel contradicts the badge next to it.
   if (payload?.["safe_mode_suppressed"]) return "var(--mast-accent)";
@@ -68,7 +69,7 @@ function edgeColor(kind: string, severity: string, payload?: Record<string, unkn
 
 function severityCn(severity: string): string {
   return (
-    { info: "信息", warn: "警告", warning: "警告", critical: "严重" }[
+    { info: tr("信息", "Info"), warn: tr("警告", "Warning"), warning: tr("警告", "Warning"), critical: tr("严重", "Critical") }[
       (severity || "").toLowerCase()
     ] || severity || "?"
   );
@@ -84,7 +85,7 @@ function fmtWall(tWall: number): string {
   if (!tWall) return "—";
   try {
     const d = new Date(tWall * 1000);
-    const hms = d.toLocaleTimeString();
+    const hms = d.toLocaleTimeString(langTag());
     return `${hms}.${String(d.getMilliseconds()).padStart(3, "0")}`;
   } catch {
     return "—";
@@ -96,14 +97,13 @@ function shortRepr(v: unknown): string {
   const s = typeof v === "string" || typeof v === "boolean" ? String(v) : JSON.stringify(v);
   return s.length <= 80 ? s : s.slice(0, 77) + "…";
 }
-// The human-readable verdict fields. These are SENTENCES written for the
-// operator ("反馈振荡/振铃（55 周期/行）——50% 处,建议降增益"), and squeezing them
-// through shortRepr in a 4-key summary cut them mid-word with no way to read the
-// rest (—「这里显示不全而且没有展开功能」). They get their own line, in
-// full; everything else stays in the compact key list.
+// The human-readable verdict fields. These are sentences written for the
+// operator (e.g. a feedback-ringing note with a gain recommendation); squeezing
+// them through shortRepr in a 4-key summary would cut them mid-word with no way
+// to read the rest. They get their own line, in full; everything else stays in
+// the compact key list.
 // `summary_zh` is the key scan_monitor actually writes; the rest are what other
-// publishers use. Verified against the producers, not guessed — the backend had
-// a sibling bug where it read `advice`/`summary`, which nothing writes.
+// publishers use (checked against the producers).
 const NARRATIVE_KEYS = [
   "summary_zh", "advice", "summary", "message", "reason", "detail",
 ] as const;
@@ -195,10 +195,9 @@ function EventRow({ ev }: { ev: BufferEvent }) {
   const [noFrame, setNoFrame] = useState(false);
   const filePath =
     (ev.payload?.["file_path"] as string | undefined) ?? (ev.payload?.["path"] as string | undefined);
-  // The PNG of the frame THIS event judged. Rendered lazily straight from
-  // /api/vision/event-frame/{id} — the row used to draw a 24×24 dashed stub
-  // here, which is why every pulse read "建议降增益" with nothing to look at
-  // (). A missing frame says so; it never borrows another image.
+  // The PNG of the frame THIS event judged, rendered lazily from
+  // /api/vision/event-frame/{id}. A missing frame says so; it never borrows
+  // another image.
   const hasFrame = Boolean(ev.payload?.["frame_path"]) && !noFrame;
   return (
     <div
@@ -216,13 +215,16 @@ function EventRow({ ev }: { ev: BufferEvent }) {
         {Boolean(ev.payload?.["safe_mode_suppressed"]) && (
           <span
             className="rounded bg-mast-warn-bg px-1.5 py-0.5 text-xs text-mast-warn"
-            title="安全模式：本条针尖判定已被降级为仅记录，不中止实验、不请求修针。原始判定见展开的 payload。"
+            title={tr(
+              "安全模式：本条针尖判定已被降级为仅记录，不中止实验、不请求修针。原始判定见展开的 payload。",
+              "Safe mode: this tip verdict was downgraded to record-only; it does not abort the experiment or request tip shaping. The raw verdict is in the expanded payload.",
+            )}
           >
-            安全模式抑制
+            {tr("安全模式抑制", "Safe-mode suppressed")}
           </span>
         )}
         {ev.cause_ref && (
-          <span className="font-mono text-xs text-mast-muted" title="cause_ref · 视觉缓冲游标">
+          <span className="font-mono text-xs text-mast-muted" title={tr("cause_ref · 视觉缓冲游标", "cause_ref · vision buffer cursor")}>
             ↗ {ev.cause_ref}
           </span>
         )}
@@ -239,7 +241,7 @@ function EventRow({ ev }: { ev: BufferEvent }) {
         <div className="px-3 pb-2">
           <img
             src={`/api/vision/event-frame/${encodeURIComponent(ev.event_id)}`}
-            alt={`事件 #${ev.seqno} 判定时的画面`}
+            alt={tr(`事件 #${ev.seqno} 判定时的画面`, `Frame at the time of event #${ev.seqno}`)}
             loading="lazy"
             onError={() => setNoFrame(true)}
             className="max-h-64 w-auto max-w-full rounded border border-mast-border"
@@ -258,7 +260,7 @@ function EventRow({ ev }: { ev: BufferEvent }) {
           onClick={() => setOpen((o) => !o)}
           className="text-xs text-mast-accent hover:underline"
         >
-          {open ? "收起 Payload JSON" : "展开 Payload JSON"}
+          {open ? tr("收起 Payload JSON", "Hide payload JSON") : tr("展开 Payload JSON", "Show payload JSON")}
         </button>
         {open && (
           <pre className="mt-1 max-h-64 overflow-auto rounded bg-mast-bg p-2 font-mono text-xs text-mast-text">
@@ -332,13 +334,16 @@ export function VisionBufferPanel() {
   return (
     <div className="space-y-3">
       <p className="text-xs text-mast-muted">
-        视觉模型（DINOv3 / 旧 ResNet18+UNet+DQN）推理后写入 BufferService 的所有事件 —— 轮询 2 秒。
-        事件类型与 payload schema 见 <code>mast.buffer.schemas</code>。
+        {tr(
+          "视觉模型（DINOv3 / 旧 ResNet18+UNet+DQN）推理后写入 BufferService 的所有事件 —— 轮询 2 秒。",
+          "All events the vision model (DINOv3 / legacy ResNet18+UNet+DQN) writes to BufferService after inference — polled every 2 s.",
+        )}{" "}
+        {tr("事件类型与 payload schema 见", "Event kinds and payload schemas are in")} <code>mast.buffer.schemas</code>.
       </p>
 
       {q.isPending && !data && <Spinner />}
       {q.isError && !data && <ErrorNote error={q.error} />}
-      {data?.degraded && <DegradedNote what="视觉缓冲" />}
+      {data?.degraded && <DegradedNote what={tr("视觉缓冲", "vision buffer")} />}
 
       {data && !data.degraded && (
         <>
@@ -350,16 +355,16 @@ export function VisionBufferPanel() {
               }`}
             >
               <span className={`h-1.5 w-1.5 rounded-full ${paused ? "bg-mast-muted" : "bg-mast-auto"}`} />
-              {paused ? "已暂停" : "实时"}
+              {paused ? tr("已暂停", "Paused") : tr("实时", "Live")}
             </span>
-            <StatChip label="已发布" value={stats?.events_published ?? 0} />
-            <StatChip label="丢弃 oldest" value={dropped} alert={dropped > 0} />
-            <StatChip label="扇出失败" value={stats?.events_fanout_failed ?? 0} />
+            <StatChip label={tr("已发布", "Published")} value={stats?.events_published ?? 0} />
+            <StatChip label={tr("丢弃 oldest", "Dropped (oldest)")} value={dropped} alert={dropped > 0} />
+            <StatChip label={tr("扇出失败", "Fan-out failed")} value={stats?.events_fanout_failed ?? 0} />
             <StatChip label="WAL" value={stats?.wal_event_writes ?? 0} />
-            <StatChip label="订阅者" value={stats?.subscribers_active ?? 0} />
-            <StatChip label="显示" value={`${filtered.length} / ${allEvents.length}`} />
+            <StatChip label={tr("订阅者", "Subscribers")} value={stats?.subscribers_active ?? 0} />
+            <StatChip label={tr("显示", "Shown")} value={`${filtered.length} / ${allEvents.length}`} />
             <span className="ml-auto flex items-center gap-2">
-              <span className="text-xs text-mast-muted">events/s · 最近 60 s</span>
+              <span className="text-xs text-mast-muted">{tr("events/s · 最近 60 s", "events/s · last 60 s")}</span>
               <Sparkline
                 values={rates}
                 color={dropped > 0 ? "var(--mast-danger)" : "var(--mast-accent)"}
@@ -373,7 +378,7 @@ export function VisionBufferPanel() {
           {/* Filter row: event-kind checkboxes */}
           <Card className="space-y-3">
             <div>
-              <div className="mb-1.5 text-xs text-mast-muted">事件类型</div>
+              <div className="mb-1.5 text-xs text-mast-muted">{tr("事件类型", "Event type")}</div>
               <div className="flex flex-wrap gap-2">
                 {KIND_META.map((m) => (
                   <label
@@ -394,7 +399,7 @@ export function VisionBufferPanel() {
             </div>
             <div className="flex flex-wrap items-end gap-3">
               <label className="flex flex-col gap-1 text-xs">
-                <span className="text-mast-muted">严重度</span>
+                <span className="text-mast-muted">{tr("严重度", "Severity")}</span>
                 <select
                   value={severity}
                   onChange={(e) => setSeverity(e.target.value)}
@@ -408,7 +413,7 @@ export function VisionBufferPanel() {
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-xs">
-                <span className="text-mast-muted">时间范围</span>
+                <span className="text-mast-muted">{tr("时间范围", "Time range")}</span>
                 <select
                   value={String(rangeS)}
                   onChange={(e) => setRangeS(e.target.value === "null" ? null : Number(e.target.value))}
@@ -421,21 +426,21 @@ export function VisionBufferPanel() {
                   ))}
                 </select>
               </label>
-              <Button onClick={() => setPaused((p) => !p)}>{paused ? "▶ 继续" : "⏸ 暂停"}</Button>
-              <Button onClick={() => q.refetch()}>立即刷新</Button>
-              <Button onClick={() => setActiveKinds(KIND_META.map((m) => m.kind))}>重置筛选</Button>
+              <Button onClick={() => setPaused((p) => !p)}>{paused ? tr("▶ 继续", "▶ Resume") : tr("⏸ 暂停", "⏸ Pause")}</Button>
+              <Button onClick={() => q.refetch()}>{tr("立即刷新", "Refresh now")}</Button>
+              <Button onClick={() => setActiveKinds(KIND_META.map((m) => m.kind))}>{tr("重置筛选", "Reset filters")}</Button>
               <div className="ml-auto flex gap-2">
                 <Button
                   onClick={() => downloadText(`vision_buffer_${Date.now()}.csv`, eventsToCsv(filtered))}
                   disabled={!filtered.length}
                 >
-                  导出 CSV
+                  {tr("导出 CSV", "Export CSV")}
                 </Button>
                 <Button
                   onClick={() => downloadText(`vision_buffer_${Date.now()}.json`, eventsToJson(filtered))}
                   disabled={!filtered.length}
                 >
-                  导出 JSON
+                  {tr("导出 JSON", "Export JSON")}
                 </Button>
               </div>
             </div>
@@ -443,7 +448,10 @@ export function VisionBufferPanel() {
 
           {/* Event list (newest first) */}
           {filtered.length === 0 ? (
-            <EmptyNote label="尚无符合筛选条件的事件。视觉模型写入 BufferService 后会自动出现于此。" />
+            <EmptyNote label={tr(
+                "尚无符合筛选条件的事件。视觉模型写入 BufferService 后会自动出现于此。",
+                "No events match the filters. Events appear here once the vision model writes to BufferService.",
+              )} />
           ) : (
             <div className="space-y-2">
               {[...filtered].reverse().map((ev) => (

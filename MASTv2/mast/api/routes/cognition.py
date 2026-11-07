@@ -269,7 +269,12 @@ def cognition_dream(request: Request, body: DreamRequest) -> CognitionJobAck:
     store IS wired the offline rule-based consolidator runs synchronously (no LLM
     key needed) and the written paths are returned in the ack; SSE progress is
     layered on later at integration.
+
+    Refused (403) while legacy features are off: dreaming is part of the legacy
+    memory feature, on demand included.
     """
+    from mast.legacy_gate import require_internal_llm
+    require_internal_llm("dreaming")
     ctx = request.app.state.ctx
     store = _resolve_store(ctx)
     db_path = _db_path_from(ctx, store)
@@ -308,6 +313,8 @@ def cognition_brainstorm(request: Request, body: BrainstormRequest) -> Cognition
     execution (and SSE streaming of the transcript) is wired at integration; for
     now the ack confirms the contract and parameters were accepted.
     """
+    from mast.legacy_gate import require_internal_llm
+    require_internal_llm("brainstorm")   # → 403 while legacy features are off
     ctx = request.app.state.ctx
     store = _resolve_store(ctx)
     db_path = _db_path_from(ctx, store)

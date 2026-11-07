@@ -4,6 +4,10 @@ The fake is a real ``http.server`` on a loopback port that implements the part
 of the ``/api/ext/v1`` contract these tests need, and records every request it
 sees. The tools run in-process through ``Toolbox.call_tool``, exactly the call
 ``stdio_rpc`` makes.
+
+The fake is a MAST 6.5: it has no ``/vista/*`` routes, so ``mast_run`` falls back
+to ``POST /jobs`` as it does against a MAST older than 7.0. The 7.0 routes are
+tested in ``test_mast_mcp_vista.py``.
 """
 from __future__ import annotations
 
@@ -57,7 +61,7 @@ class FakeMast:
         self.login: tuple[str, str] | None = None
         self.html_paths: set[str] = set()
         self.bare_404_paths: set[str] = set()
-        self.drop_next_post = False
+        self.drop_next_post: str | None = None     # route whose next POST loses its answer
         self.busy = False
         self.scope = {"experiment": None, "sample": None,
                       "recording": {"v1": False, "v2": False, "note": "no active experiment"}}
@@ -169,8 +173,8 @@ def _handler(fake: FakeMast):
                 self._send(404, {"detail": "Not Found"}, ext_header=False)
                 return
             route = path[len(PREFIX):]
-            if method == "POST" and fake.drop_next_post:
-                fake.drop_next_post = False
+            if method == "POST" and fake.drop_next_post == route:
+                fake.drop_next_post = None
                 if route == "/jobs":
                     fake.create_job(body)          # MAST got it; the answer is lost
                 self.close_connection = True
@@ -252,7 +256,8 @@ def _box(url: str, tmp_path: Path, **env: str) -> Toolbox:
 
 
 def _call(box: Toolbox, name: str, **arguments):
-    return box.call_tool(name, arguments, CallSignal(threading.Event()))
+    out = box.call_tool(name, arguments, CallSignal(threading.Event()))
+    return out.text, out.is_error
 
 
 # ── requests carry who is acting ─────────────────────────────────────────────
@@ -341,7 +346,7 @@ def test_refused_submissions_say_what_to_do_instead(fake, tmp_path):
 
 
 def test_lost_answer_to_a_submit_is_retried_once_with_the_same_request_id(fake, tmp_path):
-    fake.drop_next_post = True
+    fake.drop_next_post = "/jobs"
     text, is_error = _call(_box(fake.url, tmp_path), "mast_run", skill="GetBias", wait_s=5)
     assert not is_error, text
     posts = fake.requests_to("POST", "/jobs")
@@ -371,8 +376,8 @@ def test_long_waits_are_split_and_stay_inside_the_budget(tmp_path, wait_s, expec
     clock = [1000.0]
     client = _ScriptedClient(clock)
     box = Toolbox(load_config({"MAST_URL": "http://127.0.0.1:1"}), client=client)
-    text, _ = box.call_tool("mast_run", {"skill": "Scan", "wait_s": wait_s},
-                            CallSignal(threading.Event()), clock=lambda: clock[0])
+    text = box.call_tool("mast_run", {"skill": "Scan", "wait_s": wait_s},
+                         CallSignal(threading.Event()), clock=lambda: clock[0]).text
     gets = [c for c in client.calls if c[0] == "GET"]
     assert [int(c[2]["wait_s"]) for c in gets] == expected
     assert all(c[3] >= int(c[2]["wait_s"]) + 2 for c in gets), "socket timeout shorter than the wait"
@@ -425,6 +430,199 @@ def test_connection_refused_says_what_to_check(tmp_path):
     text, is_error = _call(_box(f"http://127.0.0.1:{_closed_port()}", tmp_path), "mast_status")
     assert is_error
     assert "Cannot connect" in text and "running" in text and "https" in text
+    assert "launcher" in text and "启动主服务" in text, "an open launcher is not a running service"
+
+
+class _Listener:
+    """A loopback port that accepts and records what each connection sent before closing."""
+
+    def __init__(self):
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(8)
+        self.port = self.sock.getsockname()[1]
+        self.received: list[bytes] = []
+        self.thread = threading.Thread(target=self._serve, daemon=True)
+        self.thread.start()
+
+    def _serve(self):
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            with conn:
+                conn.settimeout(2.0)
+                data = b""
+                try:
+                    while chunk := conn.recv(64):
+                        data += chunk
+                except OSError:
+                    pass
+                self.received.append(data)
+
+    def close(self):
+        self.sock.close()
+
+
+def test_the_launcher_probe_finds_its_port_and_sends_nothing():
+    from mast_mcp.client import launcher_port
+
+    lst = _Listener()
+    try:
+        started = time.monotonic()
+        assert launcher_port([_closed_port(), lst.port, _closed_port()]) == lst.port
+        assert time.monotonic() - started < 2.0, "the ports are tried together"
+        deadline = time.monotonic() + 3
+        while not lst.received and time.monotonic() < deadline:
+            time.sleep(0.02)
+        # the launcher acts only on "BRING_FOREGROUND": an empty connection changes nothing
+        assert lst.received == [b""]
+        assert launcher_port([_closed_port()]) is None
+    finally:
+        lst.close()
+
+
+def test_refused_at_mast_s_port_with_the_launcher_open_says_to_start_the_service(
+        tmp_path, monkeypatch):
+    from mast_mcp import client as mast_client
+
+    port = _closed_port()
+    lst = _Listener()
+    monkeypatch.setattr(mast_client, "MAST_PORT", port)            # stands in for 7862
+    monkeypatch.setattr(mast_client, "LAUNCHER_PORTS", (lst.port,))
+    try:
+        text, is_error = _call(_box(f"http://127.0.0.1:{port}", tmp_path), "mast_status")
+    finally:
+        lst.close()
+    assert is_error and "Cannot connect" in text
+    assert f"port {lst.port}" in text and "launcher seems to be open" in text
+    assert "启动主服务" in text and "needs no restart" in text
+
+
+def test_the_launcher_is_looked_for_only_at_mast_s_own_port(tmp_path, monkeypatch):
+    from mast_mcp import client as mast_client
+
+    probed = []
+    monkeypatch.setattr(mast_client, "launcher_port", lambda *a, **k: probed.append(1))
+    _call(_box(f"http://127.0.0.1:{_closed_port()}", tmp_path), "mast_status")
+    assert probed == []
+
+
+# ── LAN mode: https with a self-signed certificate and a login ──────────────────
+@pytest.fixture()
+def lan_mast(tmp_path):
+    """A MAST in LAN mode: TLS with a self-signed certificate, HTTP Basic on every request."""
+    import datetime
+    import ssl
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+    import ipaddress
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "MAST LAN test")])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
+            .public_key(key.public_key()).serial_number(x509.random_serial_number())
+            .not_valid_before(now - datetime.timedelta(minutes=5))
+            .not_valid_after(now + datetime.timedelta(days=1))
+            .add_extension(x509.SubjectAlternativeName(
+                [x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]), critical=False)
+            .sign(key, hashes.SHA256()))
+    cert_path, key_path = tmp_path / "lan_cert.pem", tmp_path / "lan_key.pem"
+    cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(key.private_bytes(serialization.Encoding.PEM,
+                                           serialization.PrivateFormat.PKCS8,
+                                           serialization.NoEncryption()))
+    expected = "Basic " + base64.b64encode(b"admin:pw").decode("ascii")
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            if self.headers.get("Authorization") != expected:
+                body = b'{"detail":"Unauthorized"}'
+                self.send_response(401)
+                self.send_header("WWW-Authenticate", 'Basic realm="MAST"')
+            else:
+                body = json.dumps({"mode": "SAFE", "abort": {"set": False},
+                                   "lock": {"held": False}}).encode()
+                self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(str(cert_path), str(key_path))
+    server.socket = ctx.wrap_socket(server.socket, server_side=True)
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05},
+                              daemon=True)
+    thread.start()
+    yield server.server_address[1]
+    server.shutdown()
+    server.server_close()
+
+
+def test_plain_http_to_lan_mode_names_everything_at_once(lan_mast, tmp_path):
+    text, is_error = _call(_box(f"http://127.0.0.1:{lan_mast}", tmp_path), "mast_status")
+    assert is_error and "answers with TLS" in text and "LAN mode" in text
+    # one message, every missing setting and the other way out: one reconnect is enough
+    assert f"MAST_URL=https://127.0.0.1:{lan_mast}" in text
+    assert "MAST_USER and MAST_PASSWORD" in text and "MAST_VERIFY_TLS=false" in text
+    assert "mast_url, mast_user, mast_password and verify_tls" in text
+    assert "untick LAN access" in text and "/mcp" in text
+    assert '"error":"lan_mode"' in text
+
+
+def test_an_untrusted_lan_certificate_also_names_the_login(lan_mast, tmp_path):
+    text, is_error = _call(_box(f"https://127.0.0.1:{lan_mast}", tmp_path), "mast_status")
+    assert is_error and "not trusted" in text and "self-signed" in text
+    assert "MAST_VERIFY_TLS=false" in text and "MAST_USER and MAST_PASSWORD" in text
+    assert "MAST_URL=https" not in text, "the address is already https"
+    # switching LAN access off instead: back to plain http, and that does need a reconnect
+    assert f"MAST_URL=http://127.0.0.1:{lan_mast} works after restarting" in text
+
+
+def test_a_missing_lan_login_names_only_what_is_missing(lan_mast, tmp_path):
+    text, is_error = _call(_box(f"https://127.0.0.1:{lan_mast}", tmp_path,
+                                MAST_VERIFY_TLS="false"), "mast_status")
+    assert is_error and "LAN mode" in text and "mast_user" in text
+    assert "MAST_USER and MAST_PASSWORD" in text
+    assert "MAST_VERIFY_TLS" not in text, text
+    assert "MAST_URL=https" not in text, text
+    assert "Two ways out" in text and "untick LAN access" in text
+
+
+def test_lan_mode_works_once_everything_is_set(lan_mast, tmp_path):
+    text, is_error = _call(_box(f"https://127.0.0.1:{lan_mast}", tmp_path, MAST_VERIFY_TLS="false",
+                                MAST_USER="admin", MAST_PASSWORD="pw"), "mast_status")
+    assert not is_error, text
+    assert text.startswith("MAST status: mode SAFE")
+
+
+def test_https_to_a_plain_http_mast_names_the_plain_address(fake, tmp_path):
+    port = urlsplit(fake.url).port
+    text, is_error = _call(_box(f"https://127.0.0.1:{port}", tmp_path), "mast_status")
+    assert is_error and "TLS handshake" in text
+    assert f"MAST_URL=http://127.0.0.1:{port}" in text and "/mcp" in text
+
+
+def test_lan_help_for_a_remote_mast_has_no_launcher_way_out():
+    from mast_mcp.client import MastClient
+
+    cfg = load_config({"MAST_URL": "http://192.0.2.10:7862", "MAST_ALLOW_REMOTE": "true"})
+    help_text = MastClient(cfg).lan_mode_help(https=True, login=True, insecure=True)
+    assert help_text.startswith("Set all at once: MAST_URL=https://192.0.2.10:7862")
+    assert "launcher (" not in help_text and "untick" not in help_text
 
 
 def test_a_system_proxy_is_never_used(fake, tmp_path, monkeypatch):

@@ -20,6 +20,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -56,41 +57,41 @@ class FindSpectralPeaks(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "在一条已保存的 .dat 谱里找峰,报出每个峰的能量(eV 与 meV)、半高全宽和"
+                tr("在一条已保存的 .dat 谱里找峰,报出每个峰的能量(eV 与 meV)、半高全宽和"
                 "显著度。只读文件,不碰硬件。verdict 取 'peaks' / 'none' / 'undecidable'。"
                 "噪声尺度取自这条谱自己;门限按谱长自动抬高,所以纯噪声不会被当成峰。"
-                "没有 lock-in 通道时用电流的数值微分,并在 didv_source 里说明。"
+                "没有 lock-in 通道时用电流的数值微分,并在 didv_source 里说明。", "Find peaks in a saved .dat spectrum and report each peak's energy (eV and meV), full width at half maximum and prominence. Reads the file only, does not touch hardware. verdict is 'peaks' / 'none' / 'undecidable'. The noise scale is taken from the spectrum itself; the threshold is raised automatically with spectrum length, so pure noise is not taken for peaks. Without a lock-in channel the numerical derivative of the current is used, and didv_source says so.")
             ),
             parameters=[
                 ParameterSpec(name="dat_path", type="str",
-                              description=".dat 谱文件路径。", required=True),
+                              description=tr(".dat 谱文件路径。", "Path of the .dat spectrum file."), required=True),
                 ParameterSpec(
                     name="signal", type="str",
-                    description="用哪一路:auto / didv(lock-in)/ current_derivative。",
+                    description=tr("用哪一路:auto / didv(lock-in)/ current_derivative。", "Which channel to use: auto / didv (lock-in) / current_derivative."),
                     required=False, default="auto",
                     allowed_values=["auto", "didv", "current_derivative"]),
                 # 能量窗刻意没有 default:缺席就是「整条谱」。
                 ParameterSpec(name="bias_min_v", type="float",
-                              description="只在这个偏压以上找峰,单位**伏**(普通数字)。",
+                              description=tr("只在这个偏压以上找峰,单位**伏**(普通数字)。", "Only look for peaks above this bias, in **volts** (a plain number)."),
                               required=False, min_value=-10.0, max_value=10.0),
                 ParameterSpec(name="bias_max_v", type="float",
-                              description="只在这个偏压以下找峰,单位**伏**(普通数字)。",
+                              description=tr("只在这个偏压以下找峰,单位**伏**(普通数字)。", "Only look for peaks below this bias, in **volts** (a plain number)."),
                               required=False, min_value=-10.0, max_value=10.0),
                 ParameterSpec(name="min_prominence_sigma", type="float",
-                              description="显著度门限的下限,以噪声 σ 计。",
+                              description=tr("显著度门限的下限,以噪声 σ 计。", "Lower limit of the prominence threshold, in units of noise sigma."),
                               required=False, default=3.0, min_value=1.0, max_value=50.0),
                 ParameterSpec(name="max_peaks", type="int",
-                              description="最多报几个峰(按能量从低到高)。",
+                              description=tr("最多报几个峰(按能量从低到高)。", "Maximum number of peaks reported (from low to high energy)."),
                               required=False, default=8, min_value=1, max_value=64),
                 ParameterSpec(name="max_fwhm_v", type="float",
-                              description="比这更宽的就是背景,不是能级,单位**伏**。",
+                              description=tr("比这更宽的就是背景,不是能级,单位**伏**。", "Anything wider than this is background, not a level, in **volts**."),
                               required=False, default=0.30, min_value=0.001, max_value=10.0),
                 ParameterSpec(name="polarity", type="str",
-                              description="找极大(positive)还是极小(negative)。",
+                              description=tr("找极大(positive)还是极小(negative)。", "Look for maxima (positive) or minima (negative)."),
                               required=False, default="positive",
                               allowed_values=["positive", "negative"]),
                 ParameterSpec(name="refine", type="str",
-                              description="峰位细化方式。",
+                              description=tr("峰位细化方式。", "Peak position refinement method."),
                               required=False, default="lorentzian",
                               allowed_values=["grid", "parabolic", "lorentzian"]),
             ],
@@ -104,24 +105,24 @@ class FindSpectralPeaks(BaseSkill):
 
         path = str(params.get("dat_path") or "")
         if not path or not Path(path).exists():
-            return SkillResult(skill_name=_NAME, success=False, error=f"文件不存在: {path}")
+            return SkillResult(skill_name=_NAME, success=False, error=tr(f"文件不存在: {path}", f"File does not exist: {path}"))
         try:
             import numpy as np
 
             from mast.io.nanonis_files import read_dat
             from mast.vision.spectral_peaks import find_peaks_1d
         except ImportError as exc:
-            return SkillResult(skill_name=_NAME, success=False, error=f"缺依赖: {exc}")
+            return SkillResult(skill_name=_NAME, success=False, error=tr(f"缺依赖: {exc}", f"Missing dependency: {exc}"))
         try:
             got = read_dat(path)
         except Exception as exc:  # noqa: BLE001
-            return SkillResult(skill_name=_NAME, success=False, error=f".dat 读取失败: {exc}")
+            return SkillResult(skill_name=_NAME, success=False, error=tr(f".dat 读取失败: {exc}", f"Failed to read .dat: {exc}"))
         cols = got.get("columns") or {}
         header = got.get("header") or {}
         bias_col = _pick(cols, _BIAS_PATTERNS)
         if bias_col is None:
             return SkillResult(skill_name=_NAME, success=False,
-                               error=f"谱里没有偏压列(有的是 {sorted(cols)})")
+                               error=tr(f"谱里没有偏压列(有的是 {sorted(cols)})", f"No bias column in the spectrum (found {sorted(cols)})"))
         x = np.asarray(cols[bias_col], dtype=float)
         want = str(params.get("signal") or "auto")
         didv_col = None if want == "current_derivative" else _pick(cols, _DIDV_PATTERNS)
@@ -132,7 +133,7 @@ class FindSpectralPeaks(BaseSkill):
             cur_col = _pick(cols, _CURRENT_PATTERNS)
             if cur_col is None:
                 return SkillResult(skill_name=_NAME, success=False,
-                                   error="谱里既没有 lock-in 也没有电流列")
+                                   error=tr("谱里既没有 lock-in 也没有电流列", "The spectrum has neither a lock-in nor a current column"))
             y = np.gradient(np.asarray(cols[cur_col], dtype=float), x)
             didv_col, source = cur_col, "numeric"
         lo, hi = params.get("bias_min_v"), params.get("bias_max_v")
@@ -145,7 +146,7 @@ class FindSpectralPeaks(BaseSkill):
             return SkillResult(skill_name=_NAME, success=True,
                                data={"verdict": "undecidable", "reasons": ["window_too_small"],
                                      "n_points": int(window.sum()), "dat_path": path},
-                               summary="能量窗里点太少,判不了")
+                               summary=tr("能量窗里点太少,判不了", "Too few points in the energy window to decide"))
 
         res = find_peaks_1d(
             x[window], y[window],
@@ -171,7 +172,7 @@ class FindSpectralPeaks(BaseSkill):
                 "dat_y_m": _as_float(header.get("Y (m)"))}
         if peaks:
             listed = ", ".join(f"{p['energy_mev']:.0f} meV" for p in peaks[:4])
-            summary = f"找到 {len(peaks)} 个峰:{listed}" + ("…" if len(peaks) > 4 else "")
+            summary = tr(f"找到 {len(peaks)} 个峰:{listed}", f"Found {len(peaks)} peaks: {listed}") + ("…" if len(peaks) > 4 else "")
         else:
-            summary = f"没有超过门限的峰(σ = {res.noise_sigma:.2e})"
+            summary = tr(f"没有超过门限的峰(σ = {res.noise_sigma:.2e})", f"No peak above the threshold (sigma = {res.noise_sigma:.2e})")
         return SkillResult(skill_name=_NAME, success=True, data=data, summary=summary)

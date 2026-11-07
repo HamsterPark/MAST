@@ -1,0 +1,224 @@
+{
+  "name": "off_center_hits",
+  "description": "Two beams 6.3 mm above and below the axis of a 45-degree mirror (angle 135): offset along the mirror is -/+ 6.3*sqrt(2) = -/+ 8.909 mm (local +y of the mirror points to lower left). The reflected beams meet a wide detector at +/- 6.3 mm.",
+  "layout": {
+    "schema": 1,
+    "id": "offcenter",
+    "title": "Off-centre hits",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 50.0,
+        "y_mm": 68.8,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "las2",
+        "type": "laser",
+        "label": "L2",
+        "x_mm": 50.0,
+        "y_mm": 56.2,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "m1",
+        "type": "mirror",
+        "label": "M1",
+        "x_mm": 112.5,
+        "y_mm": 62.5,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.4,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det1",
+        "type": "detector",
+        "label": "D1",
+        "x_mm": 112.5,
+        "y_mm": 250.0,
+        "angle_deg": 270.0,
+        "aperture_mm": 50.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 68.8,
+              "x1": 118.8,
+              "y1": 68.8
+            },
+            {
+              "x0": 118.8,
+              "y0": 68.8,
+              "x1": 118.8,
+              "y1": 250.0
+            }
+          ],
+          "events": [
+            {
+              "component": "m1",
+              "action": "reflect",
+              "x": 118.8,
+              "y": 68.8,
+              "offset_mm": -8.91,
+              "incidence_deg": 45.0,
+              "path_mm": 68.8
+            },
+            {
+              "component": "det1",
+              "action": "stop",
+              "x": 118.8,
+              "y": 250.0,
+              "offset_mm": 6.3,
+              "incidence_deg": 0.0,
+              "path_mm": 250.0
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "las2",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 56.2,
+              "x1": 106.2,
+              "y1": 56.2
+            },
+            {
+              "x0": 106.2,
+              "y0": 56.2,
+              "x1": 106.2,
+              "y1": 250.0
+            }
+          ],
+          "events": [
+            {
+              "component": "m1",
+              "action": "reflect",
+              "x": 106.2,
+              "y": 56.2,
+              "offset_mm": 8.91,
+              "incidence_deg": 45.0,
+              "path_mm": 56.2
+            },
+            {
+              "component": "det1",
+              "action": "stop",
+              "x": 106.2,
+              "y": 250.0,
+              "offset_mm": -6.3,
+              "incidence_deg": 0.0,
+              "path_mm": 250.0
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ],
+  "expected_misses": []
+}

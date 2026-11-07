@@ -5,8 +5,7 @@ verbs where MAST could WRITE a setting and had no way to READ IT BACK. The agent
 could change the lock-in's modulation signal, the PLL's excitation, the piezo range,
 the tip-shaper's parameters — and then had to take its own word for it.
 
-That is the same defect the kept producing under different names
-("硬件『停止』≠『达标』"). A write that returns without a TCP error has been
+That is the same defect class as "hardware stopped != target reached". A write that returns without a TCP error has been
 *accepted*, not necessarily *applied*, and nothing downstream can tell the
 difference. Verification is not paranoia here; it is the only way the claim in a
 SkillResult is anything more than a restatement of the request.
@@ -42,6 +41,7 @@ from mast.core.types import (
 )
 from mast.skills.base import BaseSkill
 from mast.skills.builtins.zctrl_gain import gain_reading_notes
+from mast.i18n import tr
 
 _ZCTRL_MODULE_STATUS = {
     1: "Off", 2: "On", 3: "Hold", 4: "SwitchingOff", 5: "SafeTip", 6: "Withdrawing",
@@ -136,10 +136,10 @@ def _name_tip_shaper_props(props) -> dict:
     if len(vals) != len(_TIP_SHAPER_PROPS):
         return {"props_named": None,
                 "props_named_error": (
-                    f"本机返回 {len(vals)} 个值，而协议 "
+                    tr(f"本机返回 {len(vals)} 个值，而协议 "
                     f"(TCP-reference/tcp_protocol.txt, TipShaper.PropsGet) "
                     f"定义了 {len(_TIP_SHAPER_PROPS)} 个 —— 字段顺序无法确证，"
-                    f"故不做具名。请对着协议原文人工核对 props。")}
+                    f"故不做具名。请对着协议原文人工核对 props。", f"This machine returned {len(vals)} values, while the protocol (TCP-reference/tcp_protocol.txt, TipShaper.PropsGet) defines {len(_TIP_SHAPER_PROPS)} - the field order cannot be confirmed, so no names are given. Check props manually against the original protocol text."))}
     named: dict = {}
     for (key, unit), value in zip(_TIP_SHAPER_PROPS, vals, strict=True):
         named[key] = bool(value) if unit == "" else value
@@ -187,7 +187,7 @@ class GetZControllerState(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "一次调用读回**整个** Z 控制器状态：环是否闭合、设定值、增益、Z 位置、Z 限值及其是否启用、"
+                tr("一次调用读回**整个** Z 控制器状态：环是否闭合、设定值、增益、Z 位置、Z 限值及其是否启用、"
                 "tip lift、退针速率、关断延时，以及 home 位置。\n"
                 "\n"
                 "**「环关了吗？」有两个不同的答案，而它们并不是一回事。** `controller_on` 来自**实时控制器**（ZCtrl_OnOffGet）"
@@ -195,7 +195,7 @@ class GetZControllerState(BaseSkill):
                 "，而实时控制器其实还没跟上。`module_status` 是 Nanonis 界面上显示的那个。"
                 "两者不一致时，信 `controller_on`。\n"
                 "\n"
-                "改动过 Z 环的任何东西之后、以及任何一次粗进针之前，都调它一下。"
+                "改动过 Z 环的任何东西之后、以及任何一次粗进针之前，都调它一下。", "Read back the **entire** Z controller state in one call: whether the loop is closed, setpoint, gains, Z position, Z limits and whether they are enabled, tip lift, withdraw rate, switch-off delay, and the home position.\n\n**\"Is the loop off?\" has two different answers, and they are not the same thing.** `controller_on` comes from the **real-time controller** (ZCtrl_OnOffGet) - this is the one the Nanonis manual tells you to read before any action that needs an open loop, because the module side may still say \"Off\" while the real-time controller has not caught up. `module_status` is the one shown in the Nanonis UI. When the two disagree, trust `controller_on`.\n\nCall it after changing anything about the Z loop, and before any coarse approach.")
             ),
             parameters=[],
             estimated_duration_s=1.5,
@@ -245,9 +245,9 @@ class GetZControllerState(BaseSkill):
             module_on = code == 2
             if module_on != rt_on:
                 d["disagreement"] = (
-                    f"⚠ 实时控制器说 {'ON' if rt_on else 'OFF'}，"
+                    tr(f"⚠ 实时控制器说 {'ON' if rt_on else 'OFF'}，"
                     f"而 Z-Controller 模块显示 {d['module_status_name']}。"
-                    "以实时控制器为准（Nanonis 手册：通信延迟期间两者会不一致）。"
+                    "以实时控制器为准（Nanonis 手册：通信延迟期间两者会不一致）。", f"WARNING: the real-time controller says {'ON' if rt_on else 'OFF'}, while the Z-Controller module shows {d['module_status_name']}. The real-time controller is authoritative (Nanonis manual: the two can disagree during communication delay).")
                 )
         # gains contains P (m), T (s) and I (m/s); annotate units and implausible
         # magnitudes so a malformed readback cannot look like successful agreement.
@@ -256,11 +256,11 @@ class GetZControllerState(BaseSkill):
         d["z_limits_enabled"] = _as_bool(d.get("z_limits_enabled"))
         if d["z_limits_enabled"] is False:
             d["z_limits_warning"] = (
-                "⚠ Z 位置限值**未启用**（z_limits_enabled = 0）。z_limits 里的那对数字"
+                tr("⚠ Z 位置限值**未启用**（z_limits_enabled = 0）。z_limits 里的那对数字"
                 "此刻不起任何作用 —— Nanonis 手册：限值未启用时设置限值「has no "
                 "effect」。若你正依赖 Z 限值兜底（尤其是为了某个较高的样品把限值收窄），"
                 "先用 SetZLimits(enable=true) 启用；未启用时唯一还在拦 Z 的是压电本身"
-                "的行程与 SafeTip。"
+                "的行程与 SafeTip。", "WARNING: the Z position limits are **not enabled** (z_limits_enabled = 0). The pair of numbers in z_limits has no effect right now - Nanonis manual: setting limits while they are not enabled \"has no effect\". If you are relying on the Z limits as a backstop (especially having narrowed them for a taller sample), first enable them with SetZLimits(enable=true); while not enabled, the only things still stopping Z are the piezo travel itself and SafeTip.")
             )
 
         gains = d.get("gains")
@@ -290,12 +290,12 @@ class GetSpectroscopyConfig(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "回读谱学配置 —— 偏压谱、Z 谱，或两者都读：扫描属性、高级属性（Z 控制器是否保持、"
+                tr("回读谱学配置 —— 偏压谱、Z 谱，或两者都读：扫描属性、高级属性（Z 控制器是否保持、"
                 "终点 Z、是否记录终点 Z）、多线段（MLS）模式及其分段取值，以及 Z 谱的退针延时。"
                 "\n"
                 "\n"
                 "用它在跑之前确认一次谱学确实是按你要的那样设好的。一张糟糕的 MLS 分段表、或一个没料到的「Z 控制器保持开启」"
-                "，都不会报错 —— 它只是产出一条含义与你所想不同的曲线。"
+                "，都不会报错 —— 它只是产出一条含义与你所想不同的曲线。", "Read back the spectroscopy configuration - bias spectroscopy, Z spectroscopy, or both: scan properties, advanced properties (whether the Z controller is held, end-point Z, whether end-point Z is recorded), multi-line-segment (MLS) mode and its segment values, and the Z spectroscopy retract delay.\n\nUse it to confirm once before running that spectroscopy is really set up the way you want. A bad MLS segment table, or an unexpected \"Z controller held on\", will not raise an error - it just produces a curve whose meaning differs from what you think.")
             ),
             parameters=[
                 ParameterSpec(name="which", type="str",
@@ -346,18 +346,18 @@ class GetPllConfig(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "回读 PLL：**激励输出是否开着**、幅度控制器的设定值与带宽、相位控制器的带宽、解调器的相位参考与谐波次数、"
+                tr("回读 PLL：**激励输出是否开着**、幅度控制器的设定值与带宽、相位控制器的带宽、解调器的相位参考与谐波次数、"
                 "输入量程，以及频率／激励的覆写。\n"
                 "\n"
                 "`excitation_on` 是最该先看的一项：MAST 从前能把 PLL 激励打开，"
-                "却没有任何办法问它到底开没开。一路被忘在开启状态的激励，意味着你以为静止的悬臂其实正在被驱动。"
+                "却没有任何办法问它到底开没开。一路被忘在开启状态的激励，意味着你以为静止的悬臂其实正在被驱动。", "Read back the PLL: **whether the excitation output is on**, setpoint and bandwidth of the amplitude controller, bandwidth of the phase controller, phase reference and harmonic order of the demodulator, input range, and frequency/excitation overrides.\n\n`excitation_on` is the item to look at first: MAST could previously turn the PLL excitation on but had no way to ask whether it was really on. An excitation forgotten in the on state means the cantilever you think is still is actually being driven.")
             ),
             parameters=[
                 ParameterSpec(name="modulator", type="int",
-                              description="调制器序号",
+                              description=tr("调制器序号", "Modulator index"),
                               required=False, default=1, min_value=1, max_value=8),
                 ParameterSpec(name="demodulator", type="int",
-                              description="解调器序号",
+                              description=tr("解调器序号", "Demodulator index"),
                               required=False, default=1, min_value=1, max_value=8),
             ],
             estimated_duration_s=2.0,
@@ -391,11 +391,11 @@ class GetPiezoConfig(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "回读压电：它的**量程**、标定、灵敏度、迟滞校正（开／关及其系数）、漂移补偿、倾斜，以及 **XYZ 电压限值**。"
+                tr("回读压电：它的**量程**、标定、灵敏度、迟滞校正（开／关及其系数）、漂移补偿、倾斜，以及 **XYZ 电压限值**。"
                 "\n"
                 "\n"
                 "量程和限值是把一个下达的电压变成一段距离、并框住它能走多远的那两样东西。MAST 从前能设量程却读不回来 —— 也就是说，"
-                "它算出的每一个位置，都建立在一个它无从核对的数字上。"
+                "它算出的每一个位置，都建立在一个它无从核对的数字上。", "Read back the piezo: its **range**, calibration, sensitivity, hysteresis correction (on/off and its coefficients), drift compensation, tilt, and the **XYZ voltage limits**.\n\nRange and limits are the two things that turn a commanded voltage into a distance and bound how far it can go. MAST could previously set the range but not read it back - meaning every position it computed rested on a number it had no way to check.")
             ),
             parameters=[],
             estimated_duration_s=2.0,
@@ -426,7 +426,7 @@ class GetTipShaperConfig(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "回读 tip-shaper 配置：关断延时、是否改变偏压、所用的偏压与 lift、下压／回撤速度、"
+                tr("回读 tip-shaper 配置：关断延时、是否改变偏压、所用的偏压与 lift、下压／回撤速度、"
                 "各段等待时间，以及事后是否恢复反馈。\n"
                 "\n"
                 "**请用 `props_named`** —— 同一批数值，按协议自己的字段名索引（`bias_v`、"
@@ -437,7 +437,7 @@ class GetTipShaperConfig(BaseSkill):
                 "\n"
                 "\n"
                 "在 TipShape **之前**读这个。修针是蓄意把针尖**扎进**表面 —— 这些参数就是「一次受控的轻戳」"
-                "与「一根埋进去的针」之间的分界，而在此之前 MAST 能设它们却看不到它们。"
+                "与「一根埋进去的针」之间的分界，而在此之前 MAST 能设它们却看不到它们。", "Read back the tip-shaper configuration: switch-off delay, whether bias is changed, the bias and lift used, push/pull speeds, wait times of each phase, and whether feedback is restored afterwards.\n\n**Use `props_named`** - the same values indexed by the protocol's own field names (`bias_v`, `tip_lift_m`, `lift_height_m`...). `props` is the raw 11-element on-wire array, kept as evidence; **do not** index into it by guessing the order. It mixes **voltages** and **Z lifts**, so being off by one reads a bias as a height. When `props_named` is null, the instrument returned an unexpected number of values, and `props_named_error` explains this - in that case treat the order as unknown.\n\nRead this **before** TipShape. Tip conditioning deliberately **pushes the tip into** the surface - these parameters are the dividing line between \"a controlled light poke\" and \"a buried tip\", and until now MAST could set them but not see them.")
             ),
             parameters=[],
             estimated_duration_s=1.0,
@@ -463,10 +463,10 @@ class GetScanPatternConfig(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "回读图案模块：网格定义、线定义，以及图案实验的属性（跑哪个实验、文件基名、测量前延时）。"
+                tr("回读图案模块：网格定义、线定义，以及图案实验的属性（跑哪个实验、文件基名、测量前延时）。"
                 "\n"
                 "\n"
-                "一个跑在错误网格上的网格实验，就是在错误的地方测上好几个小时 —— 而这个网格此前是只写的。"
+                "一个跑在错误网格上的网格实验，就是在错误的地方测上好几个小时 —— 而这个网格此前是只写的。", "Read back the pattern module: grid definition, line definition, and the properties of the pattern experiment (which experiment to run, file base name, delay before measurement).\n\nA grid experiment running on the wrong grid means hours of measuring in the wrong places - and this grid used to be write-only.")
             ),
             parameters=[],
             estimated_duration_s=1.5,
@@ -492,12 +492,12 @@ class GetMiscInstrumentConfig(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "回读那些不归属于某个更大子系统的设置：**偏压量程**、电流前放的标定与可用增益档、原子跟踪器的参数、"
+                tr("回读那些不归属于某个更大子系统的设置：**偏压量程**、电流前放的标定与可用增益档、原子跟踪器的参数、"
                 "粗动马达的频率／幅度、偏压扫描器与通用扫描器的限值、Follow-Me 的过采样与 point-&-shoot 设置、"
                 "函数发生器的空闲值与所驱动的信号，以及 1 通道示波器的通道。\n"
                 "\n"
                 "单看每一项都很小；合起来，它们是其余每一个读数被缩放所依据的那些数字。尤其是电流**标定**："
-                "它错了，MAST 有史以来报出的每一个电流都会差一个固定倍数，而且悄无声息。"
+                "它错了，MAST 有史以来报出的每一个电流都会差一个固定倍数，而且悄无声息。", "Read back settings that do not belong to any larger subsystem: the **bias range**, current preamplifier calibration and available gain ranges, atom-tracker parameters, coarse-motion motor frequency/amplitude, limits of the bias scanner and general scanner, Follow-Me oversampling and point-&-shoot settings, function generator idle value and driven signal, and the channel of the 1-channel oscilloscope.\n\nEach one is small on its own; together they are the numbers every other reading is scaled by. The current **calibration** in particular: if it is wrong, every current MAST has ever reported is off by a fixed factor, silently.")
             ),
             parameters=[],
             estimated_duration_s=3.0,

@@ -57,6 +57,7 @@ import logging
 import time
 from dataclasses import dataclass
 from typing import Any
+from mast.i18n import tr
 
 # ``_floats``:回包解包,与 ``envelope_reconcile`` 同一份(同包,不再抄第三份)。
 # 两个被 import 的 core 模块顶层都只依赖标准库,无环。
@@ -131,24 +132,26 @@ class ParkVerdict:
         """一行证据。数字带单位,不带任何没测过的猜测。"""
         parts: list[str] = []
         if self.feedback_on is None:
-            parts.append("Z 反馈: 读不到")
+            parts.append(tr("Z 反馈: 读不到", "Z feedback: unreadable"))
         else:
-            parts.append(f"Z 反馈: {'闭合' if self.feedback_on else '断开'}")
+            parts.append(tr(f"Z 反馈: {'闭合' if self.feedback_on else '断开'}",
+                            f"Z feedback: {'closed' if self.feedback_on else 'open'}"))
         if self.module_status:
-            parts.append(f"模块: {self.module_status}")
+            parts.append(tr(f"模块: {self.module_status}", f"module: {self.module_status}"))
         if self.z_m is not None:
             parts.append(f"Z = {self.z_m * 1e9:.1f} nm")
         if self.rail_m is not None:
-            parts.append(f"收回端 = {self.rail_m * 1e9:.1f} nm")
+            parts.append(tr(f"收回端 = {self.rail_m * 1e9:.1f} nm", f"retracted end = {self.rail_m * 1e9:.1f} nm"))
         if self.gap_m is not None and self.tolerance_m is not None:
-            parts.append(f"差 {self.gap_m * 1e9:.1f} nm(容差 {self.tolerance_m * 1e9:.1f} nm)")
+            parts.append(tr(f"差 {self.gap_m * 1e9:.1f} nm(容差 {self.tolerance_m * 1e9:.1f} nm)",
+                            f"gap {self.gap_m * 1e9:.1f} nm (tolerance {self.tolerance_m * 1e9:.1f} nm)"))
         if self.travel_source:
-            parts.append(f"行程来源: {self.travel_source}")
+            parts.append(tr(f"行程来源: {self.travel_source}", f"travel source: {self.travel_source}"))
         if self.unreadable:
-            parts.append(f"读不到: {', '.join(self.unreadable)}")
+            parts.append(tr(f"读不到: {', '.join(self.unreadable)}", f"unreadable: {', '.join(self.unreadable)}"))
         if self.undeclared:
-            parts.append(f"本机未声明: {', '.join(self.undeclared)}")
-        return "；".join(parts)
+            parts.append(tr(f"本机未声明: {', '.join(self.undeclared)}", f"not declared on this machine: {', '.join(self.undeclared)}"))
+        return tr("；", "; ").join(parts)
 
 
 def park_verdict_from_readings(
@@ -195,10 +198,14 @@ def park_verdict_from_readings(
     # 一个确定的「还没到」。确定的否定比一个 unreadable 有用得多。
     if feedback_on is True:
         return _verdict(NOT_PARKED,
-                        "Z 反馈环仍然闭合(实时控制器回报 ON)—— 针没有退到静态安全态。")
+                        tr("Z 反馈环仍然闭合(实时控制器回报 ON)—— 针没有退到静态安全态。",
+                           "The Z feedback loop is still closed (real-time controller reports "
+                           "ON) -- the tip has not been withdrawn to the static safe state."))
     if module_status == "Withdrawing":
         # 码 6:模块自己说退针**正在进行**。这是过程,不是那个状态。
-        return _verdict(NOT_PARKED, "退针正在进行中(模块状态 Withdrawing),还没到位。")
+        return _verdict(NOT_PARKED,
+                        tr("退针正在进行中(模块状态 Withdrawing),还没到位。",
+                           "Withdraw is in progress (module status Withdrawing), not there yet."))
 
     # ── 再看能不能判 ──────────────────────────────────────────────────────
     if feedback_on is None:
@@ -214,14 +221,21 @@ def park_verdict_from_readings(
     if undeclared:
         return _verdict(
             UNREADABLE,
-            "判不了退针到位没有:本机从没声明过 ``z_extend_sign``(Z 压电伸长朝哪个"
-            "方向),所以不知道行程的哪一端是收回端。**不猜** —— 猜反了会把停在伸长端"
-            "(朝样品那一侧)的针判成已退针。请在仪器档案里声明后再判。")
+            tr("判不了退针到位没有:本机从没声明过 ``z_extend_sign``(Z 压电伸长朝哪个"
+               "方向),所以不知道行程的哪一端是收回端。**不猜** —— 猜反了会把停在伸长端"
+               "(朝样品那一侧)的针判成已退针。请在仪器档案里声明后再判。",
+               "Cannot tell whether the withdraw is complete: this machine has never "
+               "declared ``z_extend_sign`` (which direction the Z piezo extends), so it "
+               "does not know which end of the travel is the retracted end. **No guessing** "
+               "-- guessing wrong would judge a tip parked at the extended end (the sample "
+               "side) as withdrawn. Declare it in the instrument profile, then re-check."))
     if missing:
         return _verdict(
             UNREADABLE,
-            f"判不了退针到位没有:{', '.join(missing)} 读不到。"
-            "读不到不等于没退到,也不等于退到了。")
+            tr(f"判不了退针到位没有:{', '.join(missing)} 读不到。"
+               "读不到不等于没退到,也不等于退到了。",
+               f"Cannot tell whether the withdraw is complete: {', '.join(missing)} unreadable. "
+               "Unreadable does not mean not withdrawn, and does not mean withdrawn."))
 
     assert travel is not None and z_m is not None  # 上面已把 None 全挡掉
     # z_extend_sign = +1:伸长(朝样品)= Z 增大 ⇒ 收回端在低端;-1 反之。
@@ -234,18 +248,22 @@ def park_verdict_from_readings(
     gap_m = abs(float(z_m) - float(rail_m))
 
     if gap_m <= tol_m:
-        note = "" if module_status in (None, "Off") else f"(模块状态 {module_status})"
+        note = ("" if module_status in (None, "Off")
+                else tr(f"(模块状态 {module_status})", f" (module status {module_status})"))
         return _verdict(
             PARKED,
-            f"已退到静态安全态:Z 反馈环断开,Z 停在收回端{note}。",
+            tr(f"已退到静态安全态:Z 反馈环断开,Z 停在收回端{note}。",
+               f"Withdrawn to the static safe state: Z feedback open, Z at the retracted end{note}."),
             rail_m=rail_m, rail_side=rail_side, gap_m=gap_m, tol_m=tol_m)
 
     # 停在**伸长端**要单独说一句:那是朝样品的那一侧,和「还差一点」不是一回事。
     at_far_end = abs(float(z_m) - float(far_m)) <= tol_m
-    where = "而是顶在**伸长端**(朝样品那一侧)" if at_far_end else f"还差 {gap_m * 1e9:.1f} nm"
+    where = (tr("而是顶在**伸长端**(朝样品那一侧)", "but it is at the **extended end** (the sample side)")
+             if at_far_end else tr(f"还差 {gap_m * 1e9:.1f} nm", f"still {gap_m * 1e9:.1f} nm short"))
     return _verdict(
         NOT_PARKED,
-        f"Z 反馈环已断开,但 Z 没停在收回端 —— {where}。",
+        tr(f"Z 反馈环已断开,但 Z 没停在收回端 —— {where}。",
+           f"The Z feedback loop is open, but Z is not at the retracted end -- {where}."),
         rail_m=rail_m, rail_side=rail_side, gap_m=gap_m, tol_m=tol_m)
 
 

@@ -45,6 +45,8 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass, field
 
+from mast.i18n import tr
+
 
 def _rank():
     """安全级的严格程度序。**直接用 interpreter 的那一份。**"""
@@ -64,11 +66,14 @@ class RelaxationReport:
         return not self.problems
 
     def describe(self, rel: str) -> str:
-        lines = [f"覆盖层 {rel} 被拒绝（安全画像放松）："]
+        lines = [tr(f"覆盖层 {rel} 被拒绝（安全画像放松）：",
+                    f"Overlay {rel} rejected (it relaxes the safety profile):")]
         lines += [f"  · {p}" for p in self.problems]
-        lines.append(
+        lines.append(tr(
             "需要放宽包络请走「技能管理」里的管理员覆写（单独审计、PIN 门控），"
-            "不要走覆盖层。")
+            "不要走覆盖层。",
+            "To widen an envelope, use the admin override in Skill Management "
+            "(audited separately, PIN-gated), not an overlay."))
         return "\n".join(lines)
 
 
@@ -83,16 +88,20 @@ def check_not_relaxed(new_meta, base_meta) -> RelaxationReport:
     base_lvl = getattr(base_meta, "safety_level", None)
     if new_lvl is not None and base_lvl is not None:
         if rank.get(new_lvl, 1) < rank.get(base_lvl, 1):
-            rep.problems.append(
+            rep.problems.append(tr(
                 f"{new_meta.name}: safety_level {base_lvl.value} → {new_lvl.value}"
-                "（覆盖只能收紧，不能放松）")
+                "（覆盖只能收紧，不能放松）",
+                f"{new_meta.name}: safety_level {base_lvl.value} -> {new_lvl.value} "
+                "(an overlay may only tighten, never relax)"))
 
     lost = set(getattr(base_meta, "capabilities", ()) or ()) - \
         set(getattr(new_meta, "capabilities", ()) or ())
     if lost:
-        rep.problems.append(
+        rep.problems.append(tr(
             f"{new_meta.name}: 丢失能力标签 {'、'.join(sorted(lost))}"
-            "（SAFE/SEMI 模式闸门依赖它）")
+            "（SAFE/SEMI 模式闸门依赖它）",
+            f"{new_meta.name}: dropped capability tags {', '.join(sorted(lost))} "
+            "(the SAFE/SEMI mode gates depend on them)"))
 
     base_params = {p.name: p for p in (getattr(base_meta, "parameters", ()) or ())}
     new_params = {p.name: p for p in (getattr(new_meta, "parameters", ()) or ())}
@@ -102,29 +111,38 @@ def check_not_relaxed(new_meta, base_meta) -> RelaxationReport:
             continue                      # 删参数是接口变化，由三集合检查那边管
         if bp.min_value is not None and (
                 np_.min_value is None or np_.min_value < bp.min_value):
-            rep.problems.append(
+            rep.problems.append(tr(
                 f"{new_meta.name}.{pname}: 下界 {bp.min_value} → "
-                f"{np_.min_value}（超出内置包络）")
+                f"{np_.min_value}（超出内置包络）",
+                f"{new_meta.name}.{pname}: lower bound {bp.min_value} -> "
+                f"{np_.min_value} (outside the built-in envelope)"))
         if bp.max_value is not None and (
                 np_.max_value is None or np_.max_value > bp.max_value):
-            rep.problems.append(
+            rep.problems.append(tr(
                 f"{new_meta.name}.{pname}: 上界 {bp.max_value} → "
-                f"{np_.max_value}（超出内置包络）")
+                f"{np_.max_value}（超出内置包络）",
+                f"{new_meta.name}.{pname}: upper bound {bp.max_value} -> "
+                f"{np_.max_value} (outside the built-in envelope)"))
         if bp.allowed_values is not None:
             new_allowed = np_.allowed_values
             if new_allowed is None or not set(new_allowed) <= set(bp.allowed_values):
-                rep.problems.append(
+                rep.problems.append(tr(
                     f"{new_meta.name}.{pname}: 取值集合超出内置的 "
-                    f"{bp.allowed_values}")
+                    f"{bp.allowed_values}",
+                    f"{new_meta.name}.{pname}: allowed values go beyond the built-in "
+                    f"{bp.allowed_values}"))
         if bp.required and not np_.required:
-            rep.problems.append(
-                f"{new_meta.name}.{pname}: 必填 → 选填（放松）")
+            rep.problems.append(tr(
+                f"{new_meta.name}.{pname}: 必填 → 选填（放松）",
+                f"{new_meta.name}.{pname}: required -> optional (relaxation)"))
 
     if getattr(base_meta, "rollback_skill", None) and not getattr(
             new_meta, "rollback_skill", None):
-        rep.problems.append(
+        rep.problems.append(tr(
             f"{new_meta.name}: 去掉了回滚技能 "
-            f"{base_meta.rollback_skill}（去掉回滚是放松）")
+            f"{base_meta.rollback_skill}（去掉回滚是放松）",
+            f"{new_meta.name}: removed the rollback skill "
+            f"{base_meta.rollback_skill} (removing rollback is a relaxation)"))
     return rep
 
 
@@ -146,9 +164,11 @@ def check_parses(source: str, rel: str) -> SyntaxReport:
     except SyntaxError as exc:
         return SyntaxReport(
             ok=False,
-            error=f"{rel} 第 {exc.lineno} 行语法错误：{exc.msg}")
+            error=tr(f"{rel} 第 {exc.lineno} 行语法错误：{exc.msg}",
+                     f"{rel} line {exc.lineno}: syntax error: {exc.msg}"))
     except ValueError as exc:      # 源码里有 NUL 之类
-        return SyntaxReport(ok=False, error=f"{rel} 读不成源码：{exc}")
+        return SyntaxReport(ok=False,
+                            error=tr(f"{rel} 读不成源码：{exc}", f"{rel} cannot be read as source: {exc}"))
     return SyntaxReport()
 
 
@@ -163,12 +183,15 @@ class SetReport:
     def describe(self) -> str:
         bits = []
         if self.replaced:
-            bits.append(f"覆盖 {len(self.replaced)} 个：{'、'.join(sorted(self.replaced))}")
+            bits.append(tr(f"覆盖 {len(self.replaced)} 个：{'、'.join(sorted(self.replaced))}",
+                           f"replaces {len(self.replaced)}: {', '.join(sorted(self.replaced))}"))
         if self.added:
-            bits.append(f"新增 {len(self.added)} 个：{'、'.join(sorted(self.added))}")
+            bits.append(tr(f"新增 {len(self.added)} 个：{'、'.join(sorted(self.added))}",
+                           f"adds {len(self.added)}: {', '.join(sorted(self.added))}"))
         if self.dropped:
-            bits.append(f"移除 {len(self.dropped)} 个：{'、'.join(sorted(self.dropped))}")
-        return "；".join(bits) or "没有技能"
+            bits.append(tr(f"移除 {len(self.dropped)} 个：{'、'.join(sorted(self.dropped))}",
+                           f"removes {len(self.dropped)}: {', '.join(sorted(self.dropped))}"))
+        return tr("；", "; ").join(bits) or tr("没有技能", "no skills")
 
 
 def diff_sets(base_names: set[str], new_names: set[str]) -> SetReport:
@@ -192,11 +215,14 @@ def check_no_silent_removal(sets: SetReport, allow_removals) -> list[str]:
     unexpected = sorted(sets.dropped - allowed)
     if not unexpected:
         return []
-    return [
+    return [tr(
         f"这个模块不再提供 {'、'.join(unexpected)} —— 内置版里有。"
         "误删还是改名？确实要移除的话，在 overlay.json 里写 "
-        f'"allow_removals": {sorted(unexpected)}。'
-    ]
+        f'"allow_removals": {sorted(unexpected)}。',
+        f"This module no longer provides {', '.join(unexpected)} - the built-in version has it. "
+        "Accidental deletion or a rename? If you really mean to remove it, write "
+        f'"allow_removals": {sorted(unexpected)} in overlay.json.'
+    )]
 
 
 __all__ = ["RelaxationReport", "SetReport", "SyntaxReport", "check_no_silent_removal",

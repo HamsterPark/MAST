@@ -16,51 +16,54 @@ import {
 import { FetchBoard } from "@/components/literature/FetchBoard";
 import { PdfUploadPanel, ManualEntryPanel } from "@/components/literature/UploadManual";
 import { useStickyTab } from "@/hooks/useStickyTab";
+import { IncompleteBadge } from "@/components/shell/LegacyOnly";
+import { tr } from "@/lib/i18n";
 
-// 文献库 — Domain G. Full-parity port of the Gradio 文献库 tab
-// (mast.gui.literature_panel) over the typed FastAPI routes. Flat SubTabs (no
-// nested gr.Tabs → no freeze):
-//   1. 库管理     — list / create / rename / delete pointer-set libraries + add members
-//   2. 语义检索   — search the big library (optionally scoped to a library)
-//   3. 摘要查询   — fetch a full abstract directly by work_id
-//   4. 摄取与取文 — PDF ingest + DOI/URL fetch + readiness probe
-//   5. 取文请求板 — agent-asks-user full-text request board
-// 大库是真的库；其他库都是大库的指针。所有论文都进大库。
+// Literature page, over the typed FastAPI routes. Flat SubTabs (no nested tab
+// groups, so the UI cannot freeze):
+//   1. Libraries      — list / create / rename / delete pointer-set libraries + add members
+//   2. Semantic search — search the big library (optionally scoped to a library)
+//   3. Abstract lookup — fetch a full abstract directly by work_id
+//   4. Ingest & fetch  — PDF ingest + DOI/URL fetch + readiness probe
+//   5. Request board   — agent-asks-user full-text request board
+// The big library is the real library; every other library is a set of pointers
+// into it. All papers go into the big library.
 
 type View = "libraries" | "search" | "abstract" | "ingest" | "board";
 
 const VIEW_TABS: { id: View; label: string }[] = [
-  { id: "libraries", label: "库管理" },
-  { id: "search", label: "语义检索" },
-  { id: "abstract", label: "摘要查询" },
-  { id: "ingest", label: "摄取与取文" },
-  { id: "board", label: "取文请求板" },
+  { id: "libraries", label: tr("库管理", "Libraries") },
+  { id: "search", label: tr("语义检索", "Semantic search") },
+  { id: "abstract", label: tr("摘要查询", "Abstract lookup") },
+  { id: "ingest", label: tr("摄取与取文", "Ingest & fetch") },
+  { id: "board", label: tr("取文请求板", "Request board") },
 ];
 
 export default function LiteraturePage() {
-  // 「取文请求板」上有等着处理的请求(顶栏那个角标数的就是它),
-  // 每次回来被打回「库管理」等于每次重新点一遍去看那个角标指的东西。
+  // Remember the last sub-tab: the request board can hold pending requests (the
+  // top-bar badge counts them), and being sent back to the first tab on every
+  // return would force the user to click through to the thing the badge points at.
   const [view, setView] = useStickyTab<View>(
     "literature", VIEW_TABS.map((t) => t.id), "libraries");
-  // selected library id scopes 语义检索 / 摄取 / 加入成员 to that library.
+  // The selected library id scopes semantic search / ingest / adding members to
+  // that library.
   //
-  // null = 还没选过 → 用后端算出的**有效库**（当前实验的专属库；没有活跃实验时
-  // 是手动指针，再兜底到 reading）。后端的 schema 一直写着「active_library_id is
-  // the id the UI should pre-select」，旧 Gradio 版也确实预选了，但 React 版这里
-  // 硬编码成 null 且从不读它 —— 于是「后端的活动库」和「前端选中的库」是两个互不
-  // 相通的概念，AddMembers 只会甩一句「先在上方选择一个库」。
+  // null = nothing picked yet → use the backend's *effective* library (the
+  // current experiment's own library; the manual pointer when there is no active
+  // experiment, then the "reading" fallback). Without this the backend's active
+  // library and the frontend's selected library would be two unrelated concepts,
+  // and AddMembers could only say "select a library above first".
   const [pickedLibraryId, setPickedLibraryId] = useState<string | null>(null);
   const [abstractInput, setAbstractInput] = useState("");
   const [abstractWorkId, setAbstractWorkId] = useState<string | null>(null);
-  // a fetched PDF path can flow into the ingest panel.
+  // A fetched PDF path can flow into the ingest panel.
   const [fetchedPath, setFetchedPath] = useState<string | null>(null);
-  // 当前实验 —— 用来给还没建出来的实验专属库取名（见下方 libraryLabel）。
+  // Current experiment, used to name an experiment library that does not exist yet (see libraryLabel below).
   const scope = useCurrentScope();
 
-  // Pending full-text-request badge — auto-surfaces (poll 5 s) at the top of the
-  // tab regardless of which sub-view is open, mirroring the OLD Gradio
-  // render_fetch_badge_html banner (so the user sees agent requests without
-  // opening 取文请求板). Read-only, cheap, safe to poll.
+  // Pending full-text-request banner: surfaces (polled every 5 s) at the top of the
+  // page regardless of which sub-view is open, so the user sees agent requests
+  // without opening the request board. Read-only, cheap, safe to poll.
   const boardQ = useQuery({
     queryKey: ["literature", "fetch-board", ""],
     queryFn: async () => {
@@ -74,7 +77,8 @@ export default function LiteraturePage() {
   });
   const pending = boardQ.data?.pending_count ?? 0;
 
-  // 有效库：一实验一专属库，切实验就跟着变（后端每次现读 active_scope 算出来）。
+  // Effective library: one dedicated library per experiment, following experiment
+  // switches (the backend recomputes it from active_scope on every read).
   const libsQ = useQuery({
     queryKey: ["literature", "libraries", "effective"],
     queryFn: async () => {
@@ -88,10 +92,11 @@ export default function LiteraturePage() {
   const effectiveSource = libsQ.data?.effective_source ?? "";
   const selectedLibraryId = pickedLibraryId ?? effectiveId;
   const usingEffective = pickedLibraryId === null && !!effectiveId;
-  // 名字，不是编号。实验库是懒创建的，所以在这个实验第一次收录文献之前，
-  // effective_library_id 指向一个还没进 registry 的库 —— `find()` 落空，从前就
-  // 直接把 `exp_example` 摆给用户看。当前实验名走的是 TopBar 已经在
-  // 轮询的那个 queryKey，不额外发请求。
+  // Show a name, not an id. Experiment libraries are created lazily, so before the
+  // experiment's first paper is added effective_library_id points to a library
+  // that is not in the registry yet and `find()` misses; the experiment name is
+  // used instead of a bare exp_<id8>. The experiment name uses the queryKey the
+  // TopBar already polls, so no extra request.
   const label = libraryLabel(
     effectiveId ?? "",
     effectiveSource,
@@ -101,44 +106,57 @@ export default function LiteraturePage() {
 
   return (
     <div>
-      {/* OLD intro markdown (app.py gr.Markdown). */}
       <p className="mb-3 text-sm text-mast-muted">
-        <strong className="text-mast-text">文献库</strong> —
-        大库是唯一真实的库；其他库都是大库的指针(work_id)。用户添加的论文都促进进大库，库只持有引用。
+        <strong className="text-mast-text">{tr("文献库", "Literature")}</strong>
+        <IncompleteBadge /> —{" "}
+        {tr(
+          "大库是唯一真实的库；其他库都是大库的指针(work_id)。用户添加的论文都促进进大库，库只持有引用。",
+          "The big library is the only real library; every other library is a set of pointers (work_ids) into it. Papers you add are promoted into the big library, and a library only holds references.",
+        )}
       </p>
 
-      {/* OLD render_fetch_badge_html — auto-surfacing pending-request banner. */}
+      <div className="mb-3 rounded-lg border border-mast-warn-border bg-mast-warn-bg px-3 py-2 text-sm text-mast-warn">
+        {tr(
+          "文献库功能尚不完善，仍在开发中。MAST 不再内置文献语料：大库的语义检索与摘要查询在没有文献索引时没有内容可查，除非你自己构建或提供一个索引。你仍然可以创建文献库，并通过上传 / 摄取添加自己的论文。",
+          "The literature library is incomplete and still under development. MAST no longer ships a built-in literature corpus: semantic search and abstract lookup over the big library have nothing to search unless you build or provide an index yourself. You can still create libraries and add your own papers (upload / ingest).",
+        )}
+      </div>
+
       {pending > 0 && (
         <button
           onClick={() => setView("board")}
           className="mb-3 block w-full rounded-lg border border-mast-warn-border bg-mast-warn-bg px-3 py-2 text-left text-sm text-mast-warn hover:bg-mast-warn-border"
         >
-          📥 文献 agent 有 <b>{pending}</b> 条全文请求待你应答 —— 见「取文请求板」，上传 PDF / 取文即可满足。
+          📥{" "}
+          {tr(
+            `文献 agent 有 ${pending} 条全文请求待你应答 —— 见「取文请求板」，上传 PDF / 取文即可满足。`,
+            `The literature agent has ${pending} pending full-text request(s) for you — see "Request board"; upload the PDF or fetch it to fulfil them.`,
+          )}
         </button>
       )}
 
-      {/* 当前生效的库 —— 用户在任何子标签里都该看得见文献会落到哪儿。 */}
+      {/* Effective library: the user should see in every sub-tab where papers will land. */}
       {effectiveId && (
         <p className="mb-3 text-xs text-mast-muted">
-          当前生效的库：
+          {tr("当前生效的库：", "Effective library: ")}
           <b className="text-mast-text" title={effectiveId}>
             {label.text}
           </b>
           {effectiveSource === "experiment"
-            ? "（当前实验的专属库）"
+            ? tr("（当前实验的专属库）", " (the current experiment's own library)")
             : effectiveSource === "manual"
-              ? "（手动指定；当前没有活跃实验）"
-              : "（默认库）"}
-          {/* 名字是从实验推出来的，库本身还没落盘 —— 别让它看起来已经在那儿了。 */}
-          {label.pending && "，首次收录文献时自动建立"}
+              ? tr("（手动指定；当前没有活跃实验）", " (set manually; no active experiment)")
+              : tr("（默认库）", " (default library)")}
+          {/* The name is derived from the experiment and the library is not on disk yet; do not make it look as if it already exists. */}
+          {label.pending && tr("，首次收录文献时自动建立", ", created automatically when the first paper is added")}
           {!usingEffective && (
             <>
-              {" · 你已手动选择了别的库 "}
+              {tr(" · 你已手动选择了别的库 ", " · you picked another library ")}
               <button
                 className="underline decoration-dotted"
                 onClick={() => setPickedLibraryId(null)}
               >
-                恢复为生效库
+                {tr("恢复为生效库", "Restore effective library")}
               </button>
             </>
           )}
@@ -148,27 +166,27 @@ export default function LiteraturePage() {
       <SubTabs<View> value={view} onChange={setView} tabs={VIEW_TABS} />
 
       {view === "libraries" && (
-        <Section title="文献库管理">
+        <Section title={tr("文献库管理", "Library management")}>
           <div className="space-y-4">
             <LibraryManager
               selectedId={selectedLibraryId}
               onSelect={(id) => setPickedLibraryId(id)}
             />
             <AddMembers libraryId={selectedLibraryId} />
-            {/* #125 直接管理条目：手动新增一个不在 OpenAlex、也无 PDF 的条目。 */}
+            {/* Direct entry management: manually add an entry that is not in OpenAlex and has no PDF. */}
             <ManualEntryPanel libraryId={selectedLibraryId} />
           </div>
         </Section>
       )}
 
       {view === "search" && (
-        <Section title="语义检索（大库）">
+        <Section title={tr("语义检索（大库）", "Semantic search (big library)")}>
           <SearchPanel libraryId={selectedLibraryId} />
         </Section>
       )}
 
       {view === "abstract" && (
-        <Section title="摘要查询（按 work_id）">
+        <Section title={tr("摘要查询（按 work_id）", "Abstract lookup (by work_id)")}>
           <div className="space-y-4">
             <div className="flex items-end gap-2">
               <label className="flex flex-1 flex-col text-xs text-mast-muted">
@@ -180,7 +198,7 @@ export default function LiteraturePage() {
                     if (e.key === "Enter" && abstractInput.trim())
                       setAbstractWorkId(abstractInput.trim());
                   }}
-                  placeholder="例如：W2912345678"
+                  placeholder={tr("例如：W2912345678", "e.g. W2912345678")}
                   className="mt-1 w-full rounded border border-mast-border bg-mast-bg px-2 py-1 text-sm text-mast-text"
                 />
               </label>
@@ -189,7 +207,7 @@ export default function LiteraturePage() {
                 disabled={!abstractInput.trim()}
                 className="rounded bg-mast-accent/20 px-3 py-1.5 text-sm text-mast-accent hover:bg-mast-accent/30 disabled:opacity-40"
               >
-                查询摘要
+                {tr("查询摘要", "Look up abstract")}
               </button>
             </div>
             {abstractWorkId && <AbstractView workId={abstractWorkId} />}
@@ -198,10 +216,10 @@ export default function LiteraturePage() {
       )}
 
       {view === "ingest" && (
-        <Section title="摄取与取文">
+        <Section title={tr("摄取与取文", "Ingest & fetch")}>
           <div className="space-y-4">
             <IngestReadiness />
-            {/* #125 附加 PDF：浏览器直接上传 PDF（主路径）。 */}
+            {/* Attach a PDF: upload straight from the browser (primary path). */}
             <PdfUploadPanel libraryId={selectedLibraryId} />
             <FetchPanel onFetchedPath={(p) => setFetchedPath(p)} />
             <IngestPanel
@@ -210,7 +228,7 @@ export default function LiteraturePage() {
             />
             {fetchedPath && (
               <p className="text-xs text-mast-muted">
-                上次取到的 PDF：<code>{fetchedPath}</code>（可复制到上方摄取路径）
+                {tr("上次取到的 PDF：", "Last fetched PDF: ")}<code>{fetchedPath}</code>{tr("（可复制到上方摄取路径）", " (copy it into the ingest path above)")}
               </p>
             )}
           </div>
@@ -218,7 +236,7 @@ export default function LiteraturePage() {
       )}
 
       {view === "board" && (
-        <Section title="取文请求板（agent 请你取全文）">
+        <Section title={tr("取文请求板（agent 请你取全文）", "Request board (the agent asks you for full text)")}>
           <FetchBoard />
         </Section>
       )}

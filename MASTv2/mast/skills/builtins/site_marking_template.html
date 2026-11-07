@@ -1,0 +1,592 @@
+<title>__TITLE__</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: instrument workbench. The scan frame is the work surface on the left; a narrow control rail on the right drops below it under 900px. */
+:root {
+  --bg: #edf0f3;
+  --panel: #ffffff;
+  --ink: #16202a;
+  --muted: #5a6776;
+  --line: #d3dae2;
+  --accent: #0a7690;
+  --accent-ink: #ffffff;
+  --accent-soft: #dff1f5;
+  --ok: #1f7a48;
+  --warn: #9a5800;
+  --bad: #b3261e;
+  --scan-bg: #1c0700;
+  --on-scan: #ffffff;
+  --mark: #3ad7f7;
+  --mark-ref: #a8ff52;
+  --mark-run: #ffc24a;
+  --mark-done: #63e08f;
+  --font-ui: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --font-data: "IBM Plex Mono", "SFMono-Regular", Consolas, "Microsoft YaHei", monospace;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1318; --panel: #151c23; --ink: #e2e9ef; --muted: #93a2b2; --line: #28323d;
+    --accent: #45c8e3; --accent-ink: #052129; --accent-soft: #12303a;
+    --ok: #63d394; --warn: #f2ab4c; --bad: #ff8c82; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1318; --panel: #151c23; --ink: #e2e9ef; --muted: #93a2b2; --line: #28323d;
+  --accent: #45c8e3; --accent-ink: #052129; --accent-soft: #12303a;
+  --ok: #63d394; --warn: #f2ab4c; --bad: #ff8c82; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--ink); font: 14px/1.55 var(--font-ui); }
+.wrap {
+  max-width: 1320px; margin: 0 auto; display: grid; gap: 18px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+.mono { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+h1 { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; }
+h2 { font-size: 1rem; font-weight: 600; }
+h3 { font-size: 0.86rem; font-weight: 600; color: var(--muted); letter-spacing: 0.04em; margin-top: 10px; }
+p { margin: 0; }
+.top { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 28px; align-items: end; }
+.eyebrow { font: 500 0.74rem var(--font-data); letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; }
+.sub { color: var(--muted); max-width: 62ch; margin-top: 4px; }
+.frame-meta { display: grid; grid-template-columns: repeat(5, auto); gap: 4px 18px; margin: 0; }
+.frame-meta div { display: grid; gap: 0; }
+.frame-meta dt { font-size: 0.72rem; color: var(--muted); letter-spacing: 0.04em; }
+.frame-meta dd { margin: 0; font: 500 0.86rem var(--font-data); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.work { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 410px); gap: 22px; align-items: start; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; margin-bottom: 10px; }
+.toolbar label { display: inline-flex; gap: 6px; align-items: center; color: var(--ink); font-size: 0.86rem; }
+.toolbar input[type="range"] { width: 96px; accent-color: var(--accent); }
+.toolbar input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
+.plot { display: grid; grid-template-columns: 46px minmax(0, 1fr); grid-template-rows: auto 26px; column-gap: 6px; }
+.yaxis, .xaxis { position: relative; font: 11px var(--font-data); color: var(--muted); font-variant-numeric: tabular-nums; }
+.yaxis span { position: absolute; right: 4px; transform: translateY(-50%); }
+.xaxis { grid-column: 2; }
+.xaxis span { position: absolute; top: 4px; transform: translateX(-50%); }
+.xaxis .axis-title, .yaxis .axis-title { transform: none; font-size: 10.5px; color: var(--muted); }
+.frame { position: relative; width: 100%; max-width: 100%; aspect-ratio: 1; background: var(--scan-bg); border-radius: 4px; overflow: hidden; }
+.frame img { position: absolute; inset: 0; width: 100%; height: 100%; max-width: 100%; user-select: none; pointer-events: none; }
+.frame svg { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+.frame.noadd svg { cursor: default; }
+.scalebar { position: absolute; right: 3.5%; bottom: 3.5%; width: 16.667%; height: 4px; background: var(--on-scan); border-radius: 1px; pointer-events: none; }
+.scalebar span { position: absolute; left: 0; right: 0; bottom: 7px; text-align: center; color: var(--on-scan); font: 600 12px var(--font-data); text-shadow: 0 0 3px var(--scan-bg), 0 0 6px var(--scan-bg); }
+.below { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; margin-top: 4px; padding-left: 52px; }
+.readout { font: 12.5px var(--font-data); color: var(--ink); font-variant-numeric: tabular-nums; min-height: 1.5em; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.8rem; color: var(--muted); }
+.legend i { display: inline-block; width: 11px; height: 11px; border-radius: 50%; vertical-align: -1px; margin-right: 5px; border: 2px solid var(--accent); }
+.legend i.ref { border-radius: 0; border: none; background: linear-gradient(var(--ok), var(--ok)) center / 100% 2px no-repeat, linear-gradient(var(--ok), var(--ok)) center / 2px 100% no-repeat; }
+.legend i.done { background: var(--ok); border-color: var(--ok); }
+.rail { display: grid; gap: 14px; min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; display: grid; gap: 10px; min-width: 0; }
+.card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.hint { color: var(--muted); font-size: 0.84rem; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 1px 9px; border-radius: 999px; font-size: 0.76rem; font-weight: 500; background: var(--accent-soft); color: var(--ink); white-space: nowrap; }
+.pill.ok { color: var(--ok); } .pill.warn { color: var(--warn); } .pill.bad { color: var(--bad); }
+button { font: 500 0.86rem var(--font-ui); border-radius: 8px; padding: 7px 13px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button:focus-visible, select:focus-visible, input:focus-visible, tr:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.danger { color: var(--bad); }
+button.danger.solid { background: var(--bad); color: var(--panel); border-color: var(--bad); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+.row { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; }
+.field { display: grid; gap: 4px; }
+.field > span { font-size: 0.78rem; color: var(--muted); letter-spacing: 0.03em; }
+select, input[type="text"], textarea { font: 0.88rem var(--font-ui); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; width: 100%; box-sizing: border-box; }
+.checks { display: grid; gap: 4px; }
+.checks label { display: flex; gap: 8px; align-items: center; font-size: 0.88rem; }
+.checks input { accent-color: var(--accent); width: 16px; height: 16px; flex: none; }
+.table-wrap { overflow-x: auto; max-height: 360px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 0.8rem; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { position: sticky; top: 0; background: var(--panel); font-weight: 600; color: var(--muted); font-size: 0.74rem; letter-spacing: 0.03em; }
+td.num { font-family: var(--font-data); font-variant-numeric: tabular-nums; text-align: right; }
+tr.site-row { cursor: pointer; }
+tr.site-row:hover td, tr.site-row.sel td { background: var(--accent-soft); }
+.empty { color: var(--muted); padding: 14px 10px; font-size: 0.86rem; }
+.tc-blocks ul { margin: 4px 0 0; padding-left: 1.2em; display: grid; gap: 3px; }
+.tc-blocks li { font-size: 0.86rem; }
+.flash { min-height: 1.3em; font-size: 0.82rem; color: var(--warn); }
+textarea { font-family: var(--font-data); font-size: 0.75rem; min-height: 90px; }
+.live-text { font-size: 0.9rem; }
+@media (max-width: 900px) {
+  .work { grid-template-columns: minmax(0, 1fr); }
+  .top { grid-template-columns: minmax(0, 1fr); }
+  .frame-meta { grid-template-columns: repeat(3, auto); }
+}
+@media (max-width: 520px) {
+  .frame-meta { grid-template-columns: repeat(2, auto); }
+  .plot { grid-template-columns: 38px minmax(0, 1fr); }
+  .below { padding-left: 0; }
+}
+/* marks drawn on the scan (SVG user units are nanometres) */
+.site .dot { fill: none; stroke: var(--mark); stroke-width: 0.055; }
+.site .halo { fill: none; stroke: var(--scan-bg); stroke-width: 0.11; opacity: 0.55; }
+.site .hit { fill: transparent; stroke: none; cursor: grab; }
+.site.sel .dot { stroke: var(--on-scan); stroke-width: 0.075; }
+.site.running .dot { stroke: var(--mark-run); }
+.site.done .dot { fill: var(--mark-done); fill-opacity: 0.55; stroke: var(--mark-done); }
+.site.skipped .dot, .site.failed .dot { stroke-dasharray: 0.08 0.06; }
+.site text { font: 600 0.34px var(--font-data); fill: var(--on-scan); paint-order: stroke; stroke: var(--scan-bg); stroke-width: 0.09; pointer-events: none; }
+.site .ref { stroke: var(--mark-ref); stroke-width: 0.045; fill: none; pointer-events: none; }
+.site .link { stroke: var(--mark-ref); stroke-width: 0.03; stroke-dasharray: 0.07 0.05; pointer-events: none; }
+.mol { fill: none; stroke: var(--on-scan); stroke-opacity: 0.6; stroke-width: 0.03; pointer-events: none; }
+@media (prefers-reduced-motion: no-preference) {
+  .site.running .dot { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { stroke-opacity: 0.35; } }
+}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <p class="eyebrow">__EYEBROW__</p>
+      <h1>__H1__</h1>
+      <p class="sub">__T_SUB__</p>
+    </div>
+    <dl class="frame-meta">
+      <div><dt>__T_DT_IMAGE__</dt><dd id="m-file">frame.sxm</dd></div>
+      <div><dt>__T_DT_REC__</dt><dd id="m-rec"></dd></div>
+      <div><dt>__T_DT_COND__</dt><dd id="m-cond"></dd></div>
+      <div><dt>__T_DT_RANGE__</dt><dd id="m-range"></dd></div>
+      <div><dt>__T_DT_CENTER__</dt><dd id="m-center"></dd></div>
+    </dl>
+  </header>
+
+  <div class="work">
+    <section aria-label="__T_ARIA_IMAGE__">
+      <div class="toolbar">
+        <label for="add-mode"><input type="checkbox" id="add-mode" checked>__T_ADD_MODE__</label>
+        <label for="show-mol"><input type="checkbox" id="show-mol">__T_SHOW_MOL__</label>
+        <label for="contrast">__T_CONTRAST__<input type="range" id="contrast" min="0.6" max="2.2" step="0.05" value="1"></label>
+        <label for="bright">__T_BRIGHT__<input type="range" id="bright" min="0.6" max="1.7" step="0.05" value="1"></label>
+      </div>
+      <div class="plot">
+        <div class="yaxis" id="yaxis" aria-hidden="true"></div>
+        <div class="frame" id="frame">
+          <img id="scanimg" alt="frame.sxm __T_ALT__" src="data:image/png;base64,__IMG__">
+          <svg id="overlay" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" role="application" aria-label="__T_ARIA_OVERLAY__">
+            <g id="g-mol" hidden></g>
+            <g id="g-sites"></g>
+          </svg>
+          <div class="scalebar" aria-hidden="true"><span>__SCALEBAR__</span></div>
+        </div>
+        <div class="xaxis" id="xaxis" aria-hidden="true"></div>
+      </div>
+      <div class="below">
+        <div class="readout" id="readout">__T_READOUT_HINT__</div>
+        <div class="legend">
+          <span><i></i>__T_LEG_YOURS__</span>
+          <span><i class="ref"></i>__T_LEG_REFINED__</span>
+          <span><i class="done"></i>__T_LEG_DONE__</span>
+        </div>
+      </div>
+    </section>
+
+    <aside class="rail">
+      <section class="card" aria-live="polite">
+        <div class="card-head"><h2>__T_H2_PROGRESS__</h2><span class="pill" id="db-pill">__T_DB_CONNECTING__</span></div>
+        <p class="live-text" id="live-text">__T_LIVE_IDLE__</p>
+        <p class="hint mono" id="live-meta"></p>
+      </section>
+
+      <section class="card" id="editor" hidden>
+        <div class="card-head"><h2>__T_SITE__ <span id="ed-n" class="mono"></span></h2><span class="mono hint" id="ed-xy"></span></div>
+        <label class="field" for="ed-kind"><span>__T_KIND_FIELD__</span>
+          <select id="ed-kind"></select>
+        </label>
+        <div class="field"><span>__T_SPECTRA_FIELD__</span>
+          <div class="checks">
+            <label for="ed-wide"><input type="checkbox" id="ed-wide">__T_SPEC_WIDE__</label>
+            <label for="ed-low"><input type="checkbox" id="ed-low">__T_SPEC_LOW__</label>
+          </div>
+        </div>
+        <label class="field" for="ed-note"><span>__T_NOTE__</span>
+          <input type="text" id="ed-note" maxlength="200" placeholder="__T_NOTE_PH__">
+        </label>
+        <p class="hint" id="ed-ref"></p>
+        <div class="row">
+          <button type="button" class="danger" id="ed-del">__T_DEL_SITE__</button>
+          <button type="button" class="danger solid" id="ed-del-yes" hidden>__T_DEL_YES__</button>
+          <button type="button" id="ed-close">__T_CLOSE__</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>__T_H2_LIST__</h2><span class="hint" id="count"></span></div>
+        <p class="hint">__T_LIST_HINT__</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>#</th><th>x (nm)</th><th>y (nm)</th><th>__T_TH_KIND__</th><th>__T_TH_SPEC__</th><th>__T_TH_REFINE__</th><th>__T_TH_STATUS__</th></tr></thead>
+            <tbody id="tbody"></tbody>
+          </table>
+          <div class="empty" id="list-empty">__T_LIST_EMPTY__</div>
+        </div>
+        <div class="row">
+          <button type="button" class="primary" id="btn-done">__T_DONE_MARK__</button>
+          <span class="hint" id="done-state"></span>
+        </div>
+        <div class="row">
+          <button type="button" id="btn-copy">__T_COPY_BTN__</button>
+        </div>
+        <textarea id="copy-area" hidden readonly aria-label="__T_COPY_ARIA__"></textarea>
+        <p class="flash" id="flash" role="status"></p>
+      </section>
+
+      <section class="card" id="taskcard">
+        <div class="card-head"><h2 id="tc-title">__T_H2_CARD__</h2><span class="pill" id="tc-state">__T_CARD_WAIT__</span></div>
+        <p class="hint" id="tc-empty">__T_CARD_EMPTY__</p>
+        <div id="tc-body" hidden>
+          <p class="hint mono" id="tc-meta"></p>
+          <p id="tc-summary"></p>
+          <div class="tc-blocks" id="tc-blocks"></div>
+        </div>
+        <div class="row">
+          <button type="button" class="primary" id="btn-confirm" disabled>__T_CONFIRM_START__</button>
+          <span class="hint" id="confirm-hint"></span>
+        </div>
+      </section>
+    </aside>
+  </div>
+</div>
+
+<script>
+/* MAST 本地数据 shim —— 把页面用的 `window.claude.use("db")`（Artifact 运行时那套
+   firestore 式 API）改成打 MAST 本地端点：`GET /doc` 轮询当快照、`POST /doc` 发
+   patch op（set/update/delete）。页面主体不改，照用同一套 collection/doc/onSnapshot。
+   端点契约见 api/routes/site_marking.py（patch op: {target, id|path, op, data}）。 */
+(() => {
+  const PAGE_ID = "__PAGE_ID__";
+  const API_BASE = "__API_BASE__";               // 同源时留空
+  const DOC_URL = `${API_BASE}/api/site-marking/${encodeURIComponent(PAGE_ID)}/doc`;
+  const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const post = (op) => fetch(DOC_URL, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(op),
+  }).then((r) => { if (!r.ok) throw Object.assign(new Error("http " + r.status), { code: r.status }); return r.json(); });
+
+  // 一个共享轮询器，向所有 onSnapshot 监听分发（避免每个文档各轮询一遍）
+  const listeners = [];          // {kind:"sites"|"doc", path?, cb, onErr}
+  let last = null, timer = 0, failStreak = 0;
+  const fanout = (doc) => {
+    for (const L of listeners) {
+      try {
+        if (L.kind === "sites") L.cb({ docs: Object.entries(doc.sites || {}).map(([id, v]) => ({ id, data: () => v })) });
+        else L.cb({ exists: doc[L.path] != null, data: () => doc[L.path] });
+      } catch (e) { /* 单个监听出错不拖垮其余 */ }
+    }
+  };
+  const poll = async () => {
+    try {
+      const r = await fetch(DOC_URL, { headers: { Accept: "application/json" } });
+      if (!r.ok) throw new Error("http " + r.status);
+      last = await r.json(); failStreak = 0; fanout(last);
+    } catch (e) {
+      if (++failStreak === 3) for (const L of listeners) L.onErr && L.onErr(e);
+    } finally { timer = setTimeout(poll, 1200); }
+  };
+  const ensurePolling = () => { if (!timer) poll(); };
+  const addListener = (L) => {
+    listeners.push(L); ensurePolling();
+    if (last) try { L.kind === "sites"
+      ? L.cb({ docs: Object.entries(last.sites || {}).map(([id, v]) => ({ id, data: () => v })) })
+      : L.cb({ exists: last[L.path] != null, data: () => last[L.path] }); } catch (e) {}
+    return () => { const i = listeners.indexOf(L); if (i >= 0) listeners.splice(i, 1); };
+  };
+
+  const siteDoc = (id) => ({
+    set: (b) => post({ target: "sites", id, op: "set", data: b }),
+    update: (b) => post({ target: "sites", id, op: "update", data: b }),
+    delete: () => post({ target: "sites", id, op: "delete" }),
+  });
+  const sitesCol = {
+    onSnapshot: (cb, onErr) => addListener({ kind: "sites", cb, onErr }),
+    doc: (id) => { if (id) return siteDoc(id); const nid = genId(); return { id: nid, ...siteDoc(nid) }; },
+  };
+  const mastDb = {
+    collection: () => sitesCol,                   // 页面只用 "sites"
+    doc: (path) => ({
+      onSnapshot: (cb, onErr) => addListener({ kind: "doc", path, cb, onErr }),
+      set: (b) => post({ target: "doc", path, op: "set", data: b }),
+    }),
+  };
+  window.claude = { use: async (kind) => (kind === "db" ? mastDb : null) };
+})();
+</script>
+
+<script>
+(() => {
+  const META = __META__;
+  const MOLS = __MOLS__;
+  const KINDS = [
+    ["auto", "__T_KIND_AUTO__"],
+    ["mol", "__T_KIND_MOL__"],
+    ["hbond", "__T_KIND_HBOND__"],
+    ["edge", "__T_KIND_EDGE__"],
+    ["au", "__T_KIND_AU__"],
+    ["fixed", "__T_KIND_FIXED__"],
+  ];
+  const KIND_LABEL = Object.fromEntries(KINDS);
+  const STATUS = { todo: ["__T_ST_TODO__", ""], running: ["__T_ST_RUNNING__", "warn"], done: ["__T_ST_DONE__", "ok"], skipped: ["__T_ST_SKIPPED__", "warn"], failed: ["__T_ST_FAILED__", "bad"] };
+  const NS = "http://www.w3.org/2000/svg";
+  const $ = (id) => document.getElementById(id);
+  const svg = $("overlay");
+  const X0 = META.x0, Y1 = META.y1, W = META.w;
+  const S = { sites: new Map(), sel: null, db: null, card: null, confirm: null, marking: null, live: null, drag: null };
+
+  const r3 = (v) => Math.round(v * 1000) / 1000;
+  const fmt = (v, d = 3) => (v < 0 ? "−" : "") + Math.abs(v).toFixed(d);
+  const pad = (n) => String(n).padStart(2, "0");
+  const fmtTime = (iso) => { if (!iso) return ""; const t = new Date(iso); if (isNaN(t)) return String(iso); return `${pad(t.getMonth() + 1)}-${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}`; };
+  const el = (tag, text, cls) => { const e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; };
+  // 回写的 result 是 dict（done:{num_points,drift_nm,drift_mode…} / failed:{error} / skipped:{why}）。
+  // 直接 ${} 会变 [object Object]，这里摘成一行人读的（技术缩写不翻译）。
+  const resultText = (r) => {
+    if (r == null) return "";
+    if (typeof r !== "object") return String(r);
+    if (r.error) return String(r.error);
+    if (r.why) return String(r.why);
+    const b = [];
+    if (r.num_points != null) b.push(r.num_points + " pts");
+    if (Array.isArray(r.drift_nm)) b.push("drift " + r.drift_nm.map((v) => fmt(v)).join(", ") + " nm");
+    if (r.drift_mode) b.push(String(r.drift_mode));
+    return b.length ? b.join(" · ") : Object.keys(r).join(", ");
+  };
+  const sv = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+  const sorted = () => [...S.sites.values()].sort((a, b) => (a.n || 0) - (b.n || 0));
+  let flashTimer = 0;
+  const flash = (msg) => { $("flash").textContent = msg; clearTimeout(flashTimer); flashTimer = setTimeout(() => { $("flash").textContent = ""; }, 7000); };
+
+  // header facts and axes
+  $("m-rec").textContent = META.rec;
+  $("m-cond").textContent = `${META.bias_mv} mV · ${META.sp_pa} pA`;
+  $("m-range").textContent = `${W} × ${W} nm · ${META.px}²`;
+  $("m-center").textContent = `(${fmt(META.cx, 2)}, ${fmt(META.cy, 2)}) nm`;
+  svg.setAttribute("viewBox", `${X0} ${-Y1} ${W} ${W}`);
+  for (let t = Math.ceil(X0 / 2) * 2; t <= X0 + W + 1e-9; t += 2) { const s = el("span", fmt(t, 0)); s.style.left = ((t - X0) / W * 100) + "%"; $("xaxis").append(s); }
+  for (let t = Math.ceil((Y1 - W) / 2) * 2; t <= Y1 + 1e-9; t += 2) { const s = el("span", fmt(t, 0)); s.style.top = ((Y1 - t) / W * 100) + "%"; $("yaxis").append(s); }
+  const xt = el("span", "x / nm", "axis-title"); xt.style.right = "0"; xt.style.top = "13px"; $("xaxis").append(xt);
+  const yt = el("span", "y / nm", "axis-title"); yt.style.left = "0"; yt.style.top = "-18px"; $("yaxis").append(yt);
+  for (const [v, label] of KINDS) { const o = el("option", label); o.value = v; $("ed-kind").append(o); }
+  for (const m of MOLS) $("g-mol").append(sv("circle", { class: "mol", cx: m.x, cy: -m.y, r: 0.07 }));
+
+  // image display controls
+  const applyFilter = () => { $("scanimg").style.filter = `contrast(${$("contrast").value}) brightness(${$("bright").value})`; };
+  $("contrast").addEventListener("input", applyFilter);
+  $("bright").addEventListener("input", applyFilter);
+  $("show-mol").addEventListener("change", () => { $("g-mol").hidden = !$("show-mol").checked; });
+  $("add-mode").addEventListener("change", () => { $("frame").classList.toggle("noadd", !$("add-mode").checked); });
+
+  // writes: one at a time per document
+  const chains = new Map();
+  const queue = (key, fn) => {
+    const next = (chains.get(key) || Promise.resolve()).then(fn).catch((err) => {
+      flash(`__T_SAVE_FAIL_PRE__${err && err.code ? err.code : "__T_REASON_UNKNOWN__"}__T_SAVE_FAIL_POST__`);
+    });
+    chains.set(key, next);
+    return next;
+  };
+  const patchSite = (id, patch) => {
+    const s = S.sites.get(id); if (!s) return;
+    S.sites.set(id, { ...s, ...patch }); renderAll();
+    if (S.db && !id.startsWith("local-")) queue("sites/" + id, () => S.db.collection("sites").doc(id).update(patch));
+  };
+  const addSite = (x, y) => {
+    const n = 1 + Math.max(0, ...[...S.sites.values()].map((s) => s.n || 0));
+    const body = { n, x: r3(x), y: r3(y), kind: "auto", wide: true, low: true, note: "", created_at: new Date().toISOString() };
+    let id;
+    if (S.db) { const ref = S.db.collection("sites").doc(); id = ref.id; queue("sites/" + id, () => ref.set(body)); }
+    else id = "local-" + Date.now().toString(36);
+    S.sites.set(id, { id, ...body }); S.sel = id; renderAll();
+  };
+  const deleteSite = (id) => {
+    S.sites.delete(id); if (S.sel === id) S.sel = null; renderAll();
+    if (S.db && !id.startsWith("local-")) queue("sites/" + id, () => S.db.collection("sites").doc(id).delete());
+  };
+
+  // pointer handling on the scan (SVG user units are nm; y is drawn negated)
+  const toNm = (e) => { const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; const p = pt.matrixTransform(svg.getScreenCTM().inverse()); return { x: p.x, y: -p.y }; };
+  const clamp = (p) => ({ x: Math.min(X0 + W, Math.max(X0, p.x)), y: Math.min(Y1, Math.max(Y1 - W, p.y)) });
+  const nearestMol = (p) => { let best = Infinity; for (const m of MOLS) best = Math.min(best, Math.hypot(m.x - p.x, m.y - p.y)); return best; };
+  svg.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    const g = e.target.closest ? e.target.closest(".site") : null;
+    const p = clamp(toNm(e));
+    if (g) {
+      const s = S.sites.get(g.dataset.id); if (!s) return;
+      S.sel = s.id;
+      S.drag = { id: s.id, pid: e.pointerId, sx: e.clientX, sy: e.clientY, ox: s.x - p.x, oy: s.y - p.y, x: s.x, y: s.y, moved: false };
+      svg.setPointerCapture(e.pointerId); e.preventDefault(); renderAll();
+    } else if ($("add-mode").checked) {
+      addSite(p.x, p.y);
+    } else { S.sel = null; renderAll(); }
+  });
+  svg.addEventListener("pointermove", (e) => {
+    const p = clamp(toNm(e));
+    $("readout").textContent = `x ${fmt(p.x)} nm · y ${fmt(p.y)} nm · __T_NEAREST__ ${nearestMol(p).toFixed(2)} nm`;
+    const d = S.drag; if (!d || e.pointerId !== d.pid) return;
+    if (!d.moved && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 4) return;
+    d.moved = true; const q = clamp({ x: p.x + d.ox, y: p.y + d.oy }); d.x = q.x; d.y = q.y; renderMarks();
+  });
+  const endDrag = (e) => {
+    const d = S.drag; if (!d || e.pointerId !== d.pid) return; S.drag = null;
+    if (d.moved) patchSite(d.id, { x: r3(d.x), y: r3(d.y), rx: null, ry: null, rnote: null }); else renderAll();
+  };
+  svg.addEventListener("pointerup", endDrag);
+  svg.addEventListener("pointercancel", endDrag);
+  svg.addEventListener("pointerleave", () => { if (!S.drag) $("readout").textContent = "__T_READOUT_HINT__"; });
+
+  // editor
+  $("ed-kind").addEventListener("change", () => S.sel && patchSite(S.sel, { kind: $("ed-kind").value, rx: null, ry: null, rnote: null }));
+  $("ed-wide").addEventListener("change", () => S.sel && patchSite(S.sel, { wide: $("ed-wide").checked }));
+  $("ed-low").addEventListener("change", () => S.sel && patchSite(S.sel, { low: $("ed-low").checked }));
+  $("ed-note").addEventListener("change", () => S.sel && patchSite(S.sel, { note: $("ed-note").value.slice(0, 200) }));
+  $("ed-del").addEventListener("click", () => { $("ed-del").hidden = true; $("ed-del-yes").hidden = false; });
+  $("ed-del-yes").addEventListener("click", () => { if (S.sel) deleteSite(S.sel); });
+  $("ed-close").addEventListener("click", () => { S.sel = null; renderAll(); });
+
+  // marking done / copy / confirm
+  $("btn-done").addEventListener("click", () => {
+    const body = { done: !(S.marking && S.marking.done), at: new Date().toISOString(), count: S.sites.size };
+    S.marking = body; renderMarking();
+    if (S.db) queue("plan/marking", () => S.db.doc("plan/marking").set(body));
+    else flash("__T_NO_DB_COPY__");
+  });
+  $("btn-copy").addEventListener("click", async () => {
+    const txt = JSON.stringify(sorted().map((s) => ({ n: s.n, x: s.x, y: s.y, kind: s.kind, wide: s.wide, low: s.low, note: s.note || "" })));
+    try { await navigator.clipboard.writeText(txt); flash(`__T_COPIED_PRE__${S.sites.size}__T_COPIED_POST__`); }
+    catch { const ta = $("copy-area"); ta.hidden = false; ta.value = txt; ta.focus(); ta.select(); flash("__T_COPY_MANUAL__"); }
+  });
+  let armTimer = 0;
+  $("btn-confirm").addEventListener("click", () => {
+    if (!S.card) return;
+    const b = $("btn-confirm");
+    if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "__T_CONFIRM_ARM__"; armTimer = setTimeout(() => { delete b.dataset.armed; b.textContent = "__T_CONFIRM_START__"; }, 5000); return; }
+    clearTimeout(armTimer); delete b.dataset.armed; b.textContent = "__T_CONFIRM_START__";
+    const body = { version: S.card.version, at: new Date().toISOString() };
+    S.confirm = body; renderCard();
+    if (S.db) queue("plan/confirm", () => S.db.doc("plan/confirm").set(body));
+    else flash("__T_NO_DB_CONFIRM__");
+  });
+
+  // rendering
+  function renderMarks() {
+    const g = $("g-sites"); g.replaceChildren();
+    for (const s of sorted()) {
+      const dragging = S.drag && S.drag.id === s.id && S.drag.moved;
+      const x = dragging ? S.drag.x : s.x, y = dragging ? S.drag.y : s.y;
+      const grp = sv("g", { class: ["site", s.status || "", S.sel === s.id ? "sel" : ""].join(" ").trim(), "data-id": s.id });
+      if (s.rx != null && s.ry != null && !dragging) {
+        grp.append(sv("line", { class: "link", x1: x, y1: -y, x2: s.rx, y2: -s.ry }));
+        grp.append(sv("path", { class: "ref", d: `M${s.rx - 0.16} ${-s.ry}h0.32M${s.rx} ${-s.ry - 0.16}v0.32` }));
+        grp.append(sv("circle", { class: "ref", cx: s.rx, cy: -s.ry, r: 0.07 }));
+      }
+      grp.append(sv("circle", { class: "halo", cx: x, cy: -y, r: 0.17 }));
+      grp.append(sv("circle", { class: "dot", cx: x, cy: -y, r: 0.17 }));
+      grp.append(sv("circle", { class: "hit", cx: x, cy: -y, r: 0.3 }));
+      const t = sv("text", { x: x + 0.2, y: -y - 0.2 }); t.textContent = s.n; grp.append(t);
+      g.append(grp);
+    }
+  }
+  function renderTable() {
+    const tb = $("tbody"); tb.replaceChildren();
+    const list = sorted();
+    $("list-empty").hidden = list.length > 0;
+    $("count").textContent = list.length ? `${list.length}__T_CNT_UNIT__` : "";
+    for (const s of list) {
+      const tr = el("tr", null, "site-row" + (S.sel === s.id ? " sel" : ""));
+      tr.tabIndex = 0;
+      tr.append(el("td", String(s.n), "num"), el("td", fmt(s.x), "num"), el("td", fmt(s.y), "num"), el("td", KIND_LABEL[s.kind] || s.kind || ""));
+      tr.append(el("td", [s.wide ? "__T_WIDE_SHORT__" : "", s.low ? "__T_LOW_SHORT__" : ""].filter(Boolean).join(" + ") || "__T_NONE__"));
+      const ref = s.rx != null && s.ry != null ? `Δ ${Math.hypot(s.rx - s.x, s.ry - s.y).toFixed(2)} nm` : "—";
+      tr.append(el("td", ref, "num"));
+      const st = STATUS[s.status] || null; const td = el("td");
+      if (st) td.append(el("span", st[0], "pill " + st[1])); else td.textContent = "—";
+      if (s.result) td.title = resultText(s.result);
+      tr.append(td);
+      const pick = () => { S.sel = s.id; renderAll(); };
+      tr.addEventListener("click", pick);
+      tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+      tb.append(tr);
+    }
+  }
+  function renderEditor() {
+    const s = S.sel ? S.sites.get(S.sel) : null;
+    $("editor").hidden = !s;
+    if (!s) return;
+    if ($("editor").dataset.for !== s.id) { $("ed-del-yes").hidden = true; $("ed-del").hidden = false; }
+    $("editor").dataset.for = s.id;
+    $("ed-n").textContent = s.n;
+    $("ed-xy").textContent = `(${fmt(s.x)}, ${fmt(s.y)}) nm`;
+    if (document.activeElement !== $("ed-kind")) $("ed-kind").value = s.kind || "auto";
+    $("ed-wide").checked = !!s.wide; $("ed-low").checked = !!s.low;
+    if (document.activeElement !== $("ed-note")) $("ed-note").value = s.note || "";
+    const parts = [];
+    if (s.rx != null && s.ry != null) parts.push(`__T_REFINED_PRE__(${fmt(s.rx)}, ${fmt(s.ry)}) nm${s.rnote ? "__T_COMMA__" + s.rnote : ""}`);
+    if (s.result) parts.push(`__T_RESULT_PRE__${resultText(s.result)}`);
+    $("ed-ref").textContent = parts.join("__T_JOIN_SEP__");
+    $("ed-ref").hidden = parts.length === 0;
+  }
+  function renderMarking() {
+    const done = !!(S.marking && S.marking.done);
+    $("btn-done").textContent = done ? "__T_EDIT_MORE__" : "__T_DONE_MARK__";
+    $("btn-done").classList.toggle("primary", !done);
+    $("done-state").textContent = done ? `__T_SUBMITTED_PRE__${S.marking.count}__T_SUBMITTED_MID__${fmtTime(S.marking.at)}` : "";
+  }
+  function renderCard() {
+    const c = S.card;
+    $("tc-empty").hidden = !!c; $("tc-body").hidden = !c;
+    const ok = !!(c && S.confirm && S.confirm.version === c.version);
+    $("btn-confirm").disabled = !c || ok;
+    const pill = $("tc-state");
+    pill.className = "pill " + (ok ? "ok" : c ? "warn" : "");
+    pill.textContent = ok ? "__T_CONFIRMED__" : c ? "__T_TO_CONFIRM__" : "__T_CARD_WAIT__";
+    $("confirm-hint").textContent = ok ? `__T_CONFIRM_ON__${fmtTime(S.confirm.at)}` : "";
+    if (!c) return;
+    $("tc-title").textContent = c.title || "__T_H2_CARD__";
+    $("tc-meta").textContent = `__T_VER_PRE__${c.version}__T_VER_MID__${fmtTime(c.generated_at)}`;
+    $("tc-summary").textContent = c.summary || "";
+    const box = $("tc-blocks"); box.replaceChildren();
+    for (const b of c.blocks || []) {
+      box.append(el("h3", b.h || ""));
+      const ul = el("ul"); for (const it of b.items || []) ul.append(el("li", String(it))); box.append(ul);
+    }
+  }
+  function renderLive() {
+    const l = S.live;
+    if (!l) return;
+    $("live-text").textContent = l.text || "";
+    const bits = [];
+    if (l.done != null && l.total != null) bits.push(`__T_DONE_PRE__${l.done}/${l.total}`);
+    if (l.at) bits.push(`__T_UPDATED_AT__${fmtTime(l.at)}`);
+    $("live-meta").textContent = bits.join(" · ");
+  }
+  function renderAll() { renderMarks(); renderTable(); renderEditor(); renderMarking(); renderCard(); renderLive(); }
+  renderAll();
+
+  // shared store
+  const setDb = (txt, cls) => { const p = $("db-pill"); p.textContent = txt; p.className = "pill " + cls; };
+  const watchDoc = (path, key) => S.db.doc(path).onSnapshot((snap) => { S[key] = snap.exists ? snap.data() : null; renderAll(); }, () => setDb("__T_SYNC_LOST__", "bad"));
+  (async () => {
+    let db = null;
+    try { db = window.claude && window.claude.use ? await window.claude.use("db") : null; } catch { db = null; }
+    if (!db) { setDb("__T_LOCAL_ONLY__", "warn"); flash("__T_NO_SHARED_DB__"); return; }
+    S.db = db; setDb("__T_CONNECTED__", "ok");
+    db.collection("sites").onSnapshot((snap) => {
+      const m = new Map();
+      for (const d of snap.docs) { const v = d.data(); if (v) m.set(d.id, { id: d.id, ...v }); }
+      for (const [id, s] of S.sites) if (id.startsWith("local-")) m.set(id, s);
+      S.sites = m; if (S.sel && !m.has(S.sel)) S.sel = null; renderAll();
+    }, () => setDb("__T_SYNC_LOST__", "bad"));
+    watchDoc("plan/card", "card");
+    watchDoc("plan/confirm", "confirm");
+    watchDoc("plan/marking", "marking");
+    watchDoc("status/live", "live");
+  })();
+})();
+</script>

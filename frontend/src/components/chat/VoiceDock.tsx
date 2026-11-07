@@ -2,24 +2,25 @@ import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { tr } from "@/lib/i18n";
 import { useVoiceSession, type VoiceMode, type VoiceStatus } from "./voiceSessionStore";
 
 // VoiceDock — the full-duplex voice control surface (replaces VoiceControls).
 //   · 🎙 connect/disconnect the /ws/voice channel
-//   · mode: 按住说话 (PTT) · 唤醒词 (wake) · 全双工 (duplex)
+//   · mode: push-to-talk (PTT) · wake word (wake) · full duplex (duplex)
 //   · live ASR caption + streaming reply + execution narration
 //   · barge-in / stop while speaking
 // The heavy lifting lives in voiceSessionStore (module-scoped: survives tab
 // switches). This component is a thin, never-freezing view over it.
 
 const STATUS_LABEL: Record<VoiceStatus, string> = {
-  offline: "未连接",
-  idle: "就绪",
-  listening: "聆听中…",
-  transcribing: "识别中…",
-  thinking: "思考中…",
-  speaking: "播报中…",
-  degraded: "已降级",
+  offline: tr("未连接", "Disconnected"),
+  idle: tr("就绪", "Ready"),
+  listening: tr("聆听中…", "Listening…"),
+  transcribing: tr("识别中…", "Transcribing…"),
+  thinking: tr("思考中…", "Thinking…"),
+  speaking: tr("播报中…", "Speaking…"),
+  degraded: tr("已降级", "Degraded"),
 };
 
 const STATUS_DOT: Record<VoiceStatus, string> = {
@@ -33,9 +34,9 @@ const STATUS_DOT: Record<VoiceStatus, string> = {
 };
 
 const MODES: { id: VoiceMode; label: string }[] = [
-  { id: "ptt", label: "按住说话" },
-  { id: "wake", label: "唤醒词" },
-  { id: "duplex", label: "全双工" },
+  { id: "ptt", label: tr("按住说话", "Push to talk") },
+  { id: "wake", label: tr("唤醒词", "Wake word") },
+  { id: "duplex", label: tr("全双工", "Full duplex") },
 ];
 
 export function VoiceDock({ conversationId }: { conversationId: string | null }) {
@@ -82,9 +83,9 @@ export function VoiceDock({ conversationId }: { conversationId: string | null })
               ? "border-mast-accent bg-mast-accent/10 text-mast-accent"
               : "border-mast-border text-mast-muted hover:border-mast-accent hover:text-mast-accent",
           )}
-          title={s.connected ? "断开语音" : "连接语音"}
+          title={s.connected ? tr("断开语音", "Disconnect voice") : tr("连接语音", "Connect voice")}
         >
-          🎙 {s.connected ? "语音已开" : "语音"}
+          🎙 {s.connected ? tr("语音已开", "Voice on") : tr("语音", "Voice")}
         </button>
 
         <span className="flex items-center gap-1.5 text-xs text-mast-muted">
@@ -92,7 +93,7 @@ export function VoiceDock({ conversationId }: { conversationId: string | null })
           {STATUS_LABEL[s.status]}
           {s.connected && !s.degraded && (
             <span className="ml-1 rounded bg-mast-bg px-1 text-[10px] text-mast-faint">
-              {s.streaming ? "流式" : "批量"} · {s.voice}
+              {s.streaming ? tr("流式", "Streaming") : tr("批量", "Batch")} · {s.voice}
             </span>
           )}
         </span>
@@ -135,13 +136,13 @@ export function VoiceDock({ conversationId }: { conversationId: string | null })
                   : "border-mast-accent bg-mast-accent/10 text-mast-accent hover:bg-mast-accent/20",
               )}
             >
-              {listening ? "● 松开结束" : "按住说话"}
+              {listening ? tr("● 松开结束", "● Release to finish") : tr("按住说话", "Push to talk")}
             </button>
           )}
 
           {s.mode === "duplex" && (
             <div className="flex-1 rounded-md border border-mast-accent/40 bg-mast-accent/5 px-3 py-2 text-center text-sm text-mast-accent">
-              {listening ? "🎧 持续聆听中" : "全双工待命"}
+              {listening ? tr("🎧 持续聆听中", "🎧 Listening continuously") : tr("全双工待命", "Full duplex standby")}
             </div>
           )}
 
@@ -154,7 +155,7 @@ export function VoiceDock({ conversationId }: { conversationId: string | null })
                   : "border-mast-border bg-mast-bg text-mast-muted",
               )}
             >
-              {s.armed ? "🟢 已唤醒，请讲指令…" : "🎧 待命 · 说「MAST」唤醒"}
+              {s.armed ? tr("🟢 已唤醒，请讲指令…", "🟢 Awake, speak your command…") : tr("🎧 待命 · 说「MAST」唤醒", "🎧 Standby · say \"MAST\" to wake")}
             </div>
           )}
 
@@ -163,9 +164,9 @@ export function VoiceDock({ conversationId }: { conversationId: string | null })
               type="button"
               onClick={() => s.bargeIn()}
               className="shrink-0 rounded-md border border-mast-danger-border bg-mast-danger-bg px-3 py-2 text-sm text-mast-danger"
-              title="打断播报"
+              title={tr("打断播报", "Interrupt playback")}
             >
-              打断
+              {tr("打断", "Interrupt")}
             </button>
           )}
           {(s.status === "thinking" || s.status === "transcribing") && (
@@ -174,7 +175,7 @@ export function VoiceDock({ conversationId }: { conversationId: string | null })
               onClick={() => s.stop()}
               className="shrink-0 rounded-md border border-mast-border px-3 py-2 text-sm text-mast-muted hover:border-mast-danger-border hover:text-mast-danger"
             >
-              停止
+              {tr("停止", "Stop")}
             </button>
           )}
         </div>
@@ -190,7 +191,7 @@ export function VoiceDock({ conversationId }: { conversationId: string | null })
                 s.captionFinal ? "text-mast-text" : "italic text-mast-muted",
               )}
             >
-              <span className="mr-1 text-mast-faint">你：</span>
+              <span className="mr-1 text-mast-faint">{tr("你：", "You:")}</span>
               {s.caption}
             </div>
           )}
@@ -217,7 +218,10 @@ export function VoiceDock({ conversationId }: { conversationId: string | null })
 
       {s.degraded && (
         <p className="mt-2 rounded border border-mast-warn-border bg-mast-warn-bg px-2 py-1 text-xs text-mast-warn">
-          语音子系统已降级（{s.degradedReason || "缺少 DashScope 密钥或对话引擎"}）。可继续用文字输入。
+          {tr(
+            `语音子系统已降级（${s.degradedReason || "缺少 DashScope 密钥或对话引擎"}）。可继续用文字输入。`,
+            `Voice subsystem degraded (${s.degradedReason || "missing DashScope key or chat engine"}). You can keep typing.`,
+          )}
         </p>
       )}
       {s.error && <p className="mt-2 text-xs text-mast-danger">{s.error}</p>}

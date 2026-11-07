@@ -62,6 +62,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.skills.composite._base import CompositeSkillGraph
 from mast.skills.composite.graph_executor import (
     CompositeProgress,
@@ -157,20 +158,26 @@ def _check_attribution(path, basename: str,
     返回 ``(通过, 不通过的原因)``。
     """
     if not path:
-        return False, "AcquireSTS 没有返回 .dat 路径(autosave 关着 / 没落盘)"
+        return False, tr("AcquireSTS 没有返回 .dat 路径(autosave 关着 / 没落盘)",
+                         "AcquireSTS returned no .dat path (autosave off / nothing written)")
     name = Path(str(path)).name
     if basename and basename not in name:
-        return False, (f"落盘文件名 {name!r} 不含本点的 basename {basename!r} —— "
-                       f"这多半是上一个点的文件")
+        return False, tr(f"落盘文件名 {name!r} 不含本点的 basename {basename!r} —— "
+                         f"这多半是上一个点的文件",
+                         f"Saved file name {name!r} does not contain this point's "
+                         f"basename {basename!r} -- most likely the previous point's file")
     if watermark is None:
-        return False, "候选保存目录枚举不了,采前 mtime 水位未知,无法确认这是新文件"
+        return False, tr("候选保存目录枚举不了,采前 mtime 水位未知,无法确认这是新文件",
+                         "Candidate save directories cannot be enumerated, so the pre-acquisition mtime watermark is unknown and the file cannot be confirmed as new")
     try:
         mtime = Path(str(path)).stat().st_mtime
     except OSError as exc:
-        return False, f"读不到 {name!r} 的 mtime: {exc}"
+        return False, tr(f"读不到 {name!r} 的 mtime: {exc}", f"Cannot read mtime of {name!r}: {exc}")
     if not mtime > watermark:
-        return False, (f"{name!r} 的 mtime 不高于采集前的水位 —— 它在这一点开采"
-                       f"之前就已经存在")
+        return False, tr(f"{name!r} 的 mtime 不高于采集前的水位 —— 它在这一点开采"
+                         f"之前就已经存在",
+                         f"mtime of {name!r} is not above the pre-acquisition watermark "
+                         f"-- it already existed before this point started")
     return True, ""
 
 
@@ -183,7 +190,8 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
             version="1.0.0",
             category=SkillCategory.COMPOSITE,
             safety_level=SafetyLevel.CONFIRM,
-            description=(
+            description=tr(
+                (
                 "按一份**显式的位置列表**逐点采点谱(JSON 数组,元素是 "
                 "{x_m, y_m, [label]},单位**米**)。适用于坐标来自别处的场合 —— "
                 "用户、上游的一次搜索、一份 conduct spec —— 而不是来自规则网格"
@@ -196,28 +204,62 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
                 "指的是另一片表面。"
                 "部分成功是正常的,缺口会写在 summary 里;"
                 "一个点都没成功则算失败。"
+                ),
+                (
+                    "Acquire point spectra one by one at an **explicit position list** (JSON "
+                    "array of {x_m, y_m, [label]}, units **metres**). Use it when the "
+                    "coordinates come from elsewhere (the user, an upstream search, a conduct "
+                    "spec) rather than from a regular grid (that is GridSTS). Points where "
+                    "MoveToXY fails are **not** measured: a spectrum taken at the wrong place "
+                    "is worse than a missing one. Every .dat must prove it belongs to its own "
+                    "point (unique basename + mtime newer than the pre-acquisition "
+                    "watermark); a point that cannot prove it is recorded as unrated with no "
+                    "path, and **never** inherits the previous point's file. "
+                    "expected_coord_epoch is **required**; a mismatching epoch is refused, "
+                    "and so is a **current epoch that cannot be read** -- after a lateral "
+                    "coarse move the same (x, y) refers to a different piece of surface. "
+                    "Partial success is normal and the gaps are listed in the summary; zero "
+                    "successful points counts as failure."
+                ),
             ),
             parameters=[
                 ParameterSpec(
                     name="positions",
                     type="str",
-                    description=(
+                    description=tr(
+                        (
                         "由位置对象组成的 JSON 数组,每一项都要有 x_m 与 y_m,"
                         "单位**米**(label 可选)。例: "
                         '[{"x_m": 1e-8, "y_m": -2e-8, "label": "A"}, '
                         '{"x_m": 3e-8, "y_m": 0}]。最多 64 个点。'
+                        ),
+                        (
+                            "JSON array of position objects, each with x_m and y_m in **metres** "
+                            "(label optional). Example: [{\"x_m\": 1e-8, \"y_m\": -2e-8, \"label\": \"A\"}, "
+                            "{\"x_m\": 3e-8, \"y_m\": 0}]. At most 64 points."
+                        ),
                     ),
                     required=True,
                 ),
                 ParameterSpec(
                     name="expected_coord_epoch",
                     type="int",
-                    description=(
+                    description=tr(
+                        (
                         "这批位置是在哪一代坐标系下算出来的(取自它们来源的地图"
                         "标记 / 计划)。对不上、**或者**当前代次读不到,都拒绝"
                         "执行;那样的坐标会指向另一片表面。**不提供任何换算** —— "
                         "粗动步进是开环的,所以一个换算出来的坐标看上去和真坐标"
                         "一模一样,而它是编的。"
+                        ),
+                        (
+                            "The coordinate epoch these positions were computed in (taken from the "
+                            "map marker / plan they came from). A mismatch, **or** a current epoch "
+                            "that cannot be read, refuses the run; such coordinates would point at a "
+                            "different piece of surface. **No conversion is offered** -- coarse steps "
+                            "are open-loop, so a converted coordinate looks exactly like a real one, "
+                            "and it is made up."
+                        ),
                     ),
                     required=True,
                     min_value=0,
@@ -225,7 +267,8 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
                 ParameterSpec(
                     name="condition",
                     type="str",
-                    description=(
+                    description=tr(
+                        (
                         "采谱所依据的条件**组的名字** —— **不是数字**。稳定 bias "
                         "与 setpoint、扫描窗口、点数、调制幅度/频率,全都放在"
                         "那一个组里(core.sts_workflow)。挑一个组;**不要**自己编"
@@ -234,16 +277,37 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
                         "的字段还没标定的,同样拒绝,并**指名**到底缺哪几个:"
                         "稳定条件绝不编一个出厂值出来,因为编出来的那个跑起来完美"
                         "无缺,量的却是一个没有人声明过的假设。"
+                        ),
+                        (
+                            "The **name of the condition group** the spectra are taken under -- **not "
+                            "numbers**. Stabilisation bias and setpoint, scan window, point count, "
+                            "modulation amplitude/frequency all live in that one group "
+                            "(core.sts_workflow). Pick a group; **do not** invent these values or "
+                            "pass them in any other way -- there is no other way. An unknown name is "
+                            "refused **with the list of known groups**. A group whose "
+                            "sample-dependent fields are not yet calibrated is refused too, "
+                            "**naming** exactly which are missing: stabilisation conditions are never "
+                            "filled in with a factory value, because a made-up one runs flawlessly "
+                            "yet measures an assumption nobody declared."
+                        ),
                     ),
                     required=False, default=DEFAULT_CONDITION,
                 ),
                 ParameterSpec(
                     name="settle_s",
                     type="float",
-                    description=(
+                    description=tr(
+                        (
                         "**只**覆写所选条件组的整定时间,单位秒。它是一个时间"
                         "旋钮,不是一个物理设定值 —— 被测量本身不会因它而变。"
                         "省略就用组自己的值。其余一切都来自那个组。"
+                        ),
+                        (
+                            "**Only** overrides the settle time of the chosen condition group, in "
+                            "seconds. It is a timing knob, not a physical setpoint -- the measured "
+                            "quantity does not change with it. Omit it to use the group's own value. "
+                            "Everything else comes from the group."
+                        ),
                     ),
                     unit="s", required=False, default=None,
                     min_value=0.0, max_value=60.0,
@@ -251,9 +315,15 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
                 ParameterSpec(
                     name="spectral_family",
                     type="str",
-                    description=(
+                    description=tr(
+                        (
                         "原样转交给 AssessSpectrum:哪些子判据可以起闸。"
                         "留空 = unknown,而 unknown **不是** metallic。"
+                        ),
+                        (
+                            "Passed through unchanged to AssessSpectrum: which sub-criteria may gate. "
+                            "Empty = unknown, and unknown is **not** metallic."
+                        ),
                     ),
                     required=False, default="",
                     allowed_values=["", "metallic", "gapped", "unknown"],
@@ -261,18 +331,30 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
                 ParameterSpec(
                     name="assess",
                     type="bool",
-                    description=(
+                    description=tr(
+                        (
                         "对每一个采到的 .dat 跑一次 AssessSpectrum。"
                         "它只记账 —— 一个差的判定绝不会打断整批。"
+                        ),
+                        (
+                            "Run AssessSpectrum on every acquired .dat. It only keeps the books -- a "
+                            "bad verdict never interrupts the batch."
+                        ),
                     ),
                     required=False, default=True,
                 ),
                 ParameterSpec(
                     name="position_tol_nm",
                     type="float",
-                    description=(
+                    description=tr(
+                        (
                         "存下来的 .dat 头里的 xy 与下发的 xy 最多可以差多少;"
                         "差得超过这个值,这个点就被标成可疑。"
+                        ),
+                        (
+                            "How far the xy in the saved .dat header may differ from the commanded "
+                            "xy; beyond this the point is flagged suspect."
+                        ),
                     ),
                     unit="nm", required=False, default=2.0,
                     min_value=0.0, max_value=1000.0,
@@ -280,10 +362,17 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
                 ParameterSpec(
                     name="min_point_separation_nm",
                     type="float",
-                    description=(
+                    description=tr(
+                        (
                         "某个点与**同一批**里更早的某个点靠得比这个值还近,就把它"
                         "丢掉。0 = 每个点都保留。"
                         "重复测只是浪费时间,不会损坏任何东西。"
+                        ),
+                        (
+                            "Drop a point that lies closer than this to an earlier point **in the "
+                            "same batch**. 0 = keep every point. Repeat measurements only waste time "
+                            "and damage nothing."
+                        ),
                     ),
                     unit="nm", required=False, default=0.0,
                     min_value=0.0, max_value=10000.0,
@@ -291,11 +380,19 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
                 ParameterSpec(
                     name="stop_after_consecutive_discard",
                     type="int",
-                    description=(
+                    description=tr(
+                        (
                         "连续这么多次判成 'discard' 就停掉整批。0 = 永不停。"
                         "'unrated' **不**计入 —— 判不了不等于谱不好。"
                         "它不会尝试去补救什么;整批就是停下来,"
                         "并把这件事说出来。"
+                        ),
+                        (
+                            "Stop the whole batch after this many consecutive 'discard' verdicts. 0 = "
+                            "never stop. 'unrated' does **not** count -- being unable to judge does "
+                            "not mean the spectrum is bad. It does not try to remedy anything; the "
+                            "batch simply stops and says so."
+                        ),
                     ),
                     required=False, default=3,
                     min_value=0, max_value=64,
@@ -303,10 +400,17 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
                 ParameterSpec(
                     name="per_point_timeout_s",
                     type="float",
-                    description=(
+                    description=tr(
+                        (
                         "某一个点花的时间比这个值还长,就在开始下一个点**之前**"
                         "停下来。它打断不了一个已经在跑的子技能,所以它是在每个点"
                         "采完**之后**才检查的。"
+                        ),
+                        (
+                            "If a single point takes longer than this, stop **before** starting the "
+                            "next one. It cannot interrupt a sub-skill that is already running, so it "
+                            "is checked **after** each point finishes."
+                        ),
                     ),
                     unit="s", required=False, default=300.0,
                     min_value=1.0, max_value=7200.0,
@@ -314,10 +418,16 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
                 ParameterSpec(
                     name="run_tag",
                     type="str",
-                    description=(
+                    description=tr(
+                        (
                         "逐点 .dat 文件基名的前缀(为了可追溯)。"
                         "留空 = 用一个时间戳,这样重跑一次产生的文件"
                         "也能和这一次的区分开。"
+                        ),
+                        (
+                            "Prefix of the per-point .dat basenames (for traceability). Empty = use a "
+                            "timestamp, so a rerun produces files distinguishable from this run's."
+                        ),
                     ),
                     required=False, default="",
                 ),
@@ -340,36 +450,42 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
         """
         raw = params.get("positions")
         if raw is None or (isinstance(raw, str) and not raw.strip()):
-            return [], "positions 是必填项(一个 JSON 数组，元素含 x_m / y_m，单位米)。"
+            return [], tr("positions 是必填项(一个 JSON 数组，元素含 x_m / y_m，单位米)。",
+                          "positions is required (a JSON array of objects with x_m / y_m in metres).")
         if isinstance(raw, (list, tuple)):
             items: Any = list(raw)
         else:
             try:
                 items = json.loads(raw)
             except (ValueError, TypeError) as exc:
-                return [], f"positions 不是合法 JSON: {exc}"
+                return [], tr(f"positions 不是合法 JSON: {exc}", f"positions is not valid JSON: {exc}")
         if not isinstance(items, list):
-            return [], "positions 必须是一个 JSON 数组(list)。"
+            return [], tr("positions 必须是一个 JSON 数组(list)。", "positions must be a JSON array (list).")
         if not items:
-            return [], "positions 是空数组。"
+            return [], tr("positions 是空数组。", "positions is an empty array.")
         if len(items) > _MAX_POINTS:
-            return [], (f"点数过多({len(items)} > {_MAX_POINTS})。上限是 checkpoint "
-                        f"载荷与无人值守爆炸半径的限制，不是物理限制 —— "
-                        f"请拆成几批。")
+            return [], tr(f"点数过多({len(items)} > {_MAX_POINTS})。上限是 checkpoint "
+                          f"载荷与无人值守爆炸半径的限制，不是物理限制 —— "
+                          f"请拆成几批。",
+                          f"Too many points ({len(items)} > {_MAX_POINTS}). The cap limits "
+                          f"checkpoint payload size and unattended blast radius, not physics "
+                          f"-- split into several batches.")
         out: list[dict] = []
         for i, it in enumerate(items):
             if not isinstance(it, dict):
-                return [], f"第 {i} 个点不是一个对象。"
+                return [], tr(f"第 {i} 个点不是一个对象。", f"Point {i} is not an object.")
             try:
                 x = float(it["x_m"])
                 y = float(it["y_m"])
             except (KeyError, TypeError, ValueError):
-                return [], f"第 {i} 个点缺少数值型的 x_m / y_m(单位米)。"
+                return [], tr(f"第 {i} 个点缺少数值型的 x_m / y_m(单位米)。", f"Point {i} lacks numeric x_m / y_m (metres).")
             if not (math.isfinite(x) and math.isfinite(y)):
-                return [], f"第 {i} 个点的坐标不是有限数。"
+                return [], tr(f"第 {i} 个点的坐标不是有限数。", f"Point {i} has non-finite coordinates.")
             if not (abs(x) <= _MAX_ABS_XY and abs(y) <= _MAX_ABS_XY):
-                return [], (f"第 {i} 个点超出量程(|x|,|y| 必须 ≤ "
-                            f"{_MAX_ABS_XY:.0e} m) —— 检查一下是米还是纳米。")
+                return [], tr(f"第 {i} 个点超出量程(|x|,|y| 必须 ≤ "
+                            f"{_MAX_ABS_XY:.0e} m) —— 检查一下是米还是纳米。",
+                            f"Point {i} is out of range (|x|,|y| must be <= "
+                            f"{_MAX_ABS_XY:.0e} m) -- check whether it is metres or nanometres.")
             out.append({"x_m": x, "y_m": y,
                         "label": str(it.get("label") or f"P{i + 1}")})
         return out, ""
@@ -386,7 +502,7 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
 
         * 组名认不出来 ⇒ 报出已知的组名单子(「不知道有哪些」是最没用的回答)；
         * 覆写越界 ⇒ 拒绝，**不夹紧也不丢弃**(夹紧会让调用方以为自己设的是 X)；
-        * 组里的样品事实还没标定 ⇒ 拒绝并**点名缺哪几个**。这不是「还没做完」，
+        * 组里的样品事实还没标定 ⇒ 拒绝并**列出缺哪几个**。这不是「还没做完」，
           是「这个问题现在没有答案」——编一组稳定条件出来，整批谱会正常落盘、
           正常被判据吃掉，而它们测的是一个没人给过的假设。
         """
@@ -397,7 +513,8 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
             overrides["settle_s"] = params["settle_s"]
         res = resolve_condition(params.get("condition"), overrides or None)
         if not res.usable:
-            return None, (f"谱学条件组 {res.name!r} 用不了：{res.refusal_detail()}")
+            return None, tr(f"谱学条件组 {res.name!r} 用不了：{res.refusal_detail()}",
+                            f"Spectroscopy condition group {res.name!r} is unusable: {res.refusal_detail()}")
         return res.spec, ""
 
     #: 回读比对的相对容差。仪器把 5.000 mV 报成 5.0001 mV 是量化，不是没写进去；
@@ -422,9 +539,12 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
         data = dict(getattr(res, "data", None) or {}) if res is not None else {}
         executor.set_partial("lockin_readback", data)
         if res is None or not getattr(res, "success", False) or not data:
-            self._note_warning(executor,
-                               "lock-in 配置回读没跑成 —— 这一轮没有「写进去的调制"
-                               "真的是要的那个」这层保护。**读不到不等于不一致**。")
+            self._note_warning(executor, tr(
+                "lock-in 配置回读没跑成 —— 这一轮没有「写进去的调制"
+                "真的是要的那个」这层保护。**读不到不等于不一致**。",
+                "The lock-in config readback did not run -- this run lacks the check "
+                "that the modulation written is the one wanted. **Unreadable is not "
+                "the same as inconsistent.**"))
             return ""
         want = spec.lockin_config()
         # 键名以 GetLockInConfig 实际返回的为准(amplitude，不是 amplitude_v)——
@@ -443,21 +563,31 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
             target = want[want_key]
             if unit is None:
                 if bool(got) != bool(target):
-                    bad.append(f"{got_key}: 要 {bool(target)}，读回 {bool(got)}")
+                    bad.append(tr(f"{got_key}: 要 {bool(target)}，读回 {bool(got)}",
+                                  f"{got_key}: wanted {bool(target)}, read back {bool(got)}"))
                 continue
             if abs(float(got) - float(target)) > abs(float(target)) * self._LOCKIN_READBACK_RTOL:
-                bad.append(f"{got_key}: 要 {float(target):g} {unit}，"
-                           f"读回 {float(got):g} {unit}")
+                bad.append(tr(f"{got_key}: 要 {float(target):g} {unit}，"
+                              f"读回 {float(got):g} {unit}",
+                              f"{got_key}: wanted {float(target):g} {unit}, "
+                              f"read back {float(got):g} {unit}"))
         if bad:
-            return ("lock-in 回读与条件表对不上（" + "；".join(bad) + "）—— "
-                    "一帧都没有采。整批 dI/dV 会落在一个未知的调制幅度上，"
-                    "而每一条谱看上去都完全正常。先查 ConfigureLockIn 的写入"
-                    "（它自己不做写后回读，修复项 是这个结构缺口的症状）。")
+            return tr("lock-in 回读与条件表对不上（" + "；".join(bad) + "）—— "
+                      "一帧都没有采。整批 dI/dV 会落在一个未知的调制幅度上，"
+                      "而每一条谱看上去都完全正常。先查 ConfigureLockIn 的写入"
+                      "（它自己不做写后回读，这类不一致否则无从察觉）。",
+                      "The lock-in readback does not match the condition table (" + "; ".join(bad) + ") -- "
+                      "no frame was acquired. The whole dI/dV batch would sit at an unknown "
+                      "modulation amplitude while every spectrum looks perfectly normal. "
+                      "Check the ConfigureLockIn write first (it does no read-after-write "
+                      "itself, so such a mismatch would otherwise go unnoticed).")
         if unreadable:
             self._note_warning(
                 executor,
-                f"lock-in 回读里这几个字段读不到：{unreadable} —— "
-                f"这一轮它们没有对账。**读不到不等于对得上。**")
+                tr(f"lock-in 回读里这几个字段读不到：{unreadable} —— "
+                   f"这一轮它们没有对账。**读不到不等于对得上。**",
+                   f"These lock-in readback fields could not be read: {unreadable} -- "
+                   f"they were not reconciled this run. **Unreadable is not the same as matching.**"))
         return ""
 
     @staticmethod
@@ -599,7 +729,9 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
         for i, p in enumerate(positions):
             rec = self._record(i)
             if stop_reason:
-                self._finish(rec, "skipped", error=f"早停后未执行：{stop_reason}")
+                self._finish(rec, "skipped",
+                             error=tr(f"早停后未执行：{stop_reason}",
+                                      f"Not run after early stop: {stop_reason}"))
                 self._save()
                 continue
 
@@ -612,8 +744,10 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
                     None)
                 if near is not None:
                     self._finish(rec, "skipped",
-                                 error=(f"与本批第 {near + 1} 个已采点相距不足 "
-                                        f"{sep_nm:g} nm，按去重跳过"))
+                                 error=tr(f"与本批第 {near + 1} 个已采点相距不足 "
+                                         f"{sep_nm:g} nm，按去重跳过",
+                                         f"Closer than {sep_nm:g} nm to point {near + 1} "
+                                         f"already acquired in this batch; skipped as a duplicate"))
                     self._save()
                     continue
 
@@ -635,7 +769,8 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
                 # **移动失败就不采**(D11)。静态 plan 做不到这一点：它只能照采一条
                 # 位置是错的谱，然后事后标记。跳过既省一次采集，也不产生错数据。
                 self._finish(rec, "move_failed",
-                             error="移动到该点失败，未采谱(位置不对的谱不如没有)")
+                             error=tr("移动到该点失败，未采谱(位置不对的谱不如没有)",
+                                      "Move to the point failed; no spectrum taken (a spectrum at the wrong position is worse than none)"))
                 self._save()
                 continue
 
@@ -660,7 +795,8 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
 
             acq_res = executor.sub_results.get(acq_id)
             if acq_res is None and not executor.is_completed(acq_id):
-                self._finish(rec, "acquire_failed", error="采谱失败")
+                self._finish(rec, "acquire_failed",
+                             error=tr("采谱失败", "Spectrum acquisition failed"))
                 self._save()
                 taken.append((p["x_m"], p["y_m"]))
                 continue
@@ -676,7 +812,8 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
                 rec["verdict"] = "unrated"
                 rec["reason"] = "dat_attribution_failed"
                 self._finish(rec, "acquire_failed",
-                             error=f"谱文件归属校验未通过：{why}")
+                             error=tr(f"谱文件归属校验未通过：{why}",
+                                      f"Spectrum file attribution check failed: {why}"))
                 self._save()
                 continue
 
@@ -690,12 +827,16 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
             err = None
             if not arrived_ok:
                 status = "suspect"
-                err = ("MoveToXY 报成功但没有确认到位(arrived 不是 True)，"
-                       "这条谱的位置不可信")
+                err = tr("MoveToXY 报成功但没有确认到位(arrived 不是 True)，"
+                         "这条谱的位置不可信",
+                         "MoveToXY reported success but arrival was not confirmed "
+                         "(arrived is not True); the position of this spectrum is untrusted")
             elif check == "mismatch":
                 status = "suspect"
-                err = (f".dat 头里的 xy 与命令 xy 相差超过 {tol_nm:g} nm，"
-                       f"这条谱的位置不可信")
+                err = tr(f".dat 头里的 xy 与命令 xy 相差超过 {tol_nm:g} nm，"
+                         f"这条谱的位置不可信",
+                         f"The xy in the .dat header differs from the commanded xy by more "
+                         f"than {tol_nm:g} nm; the position of this spectrum is untrusted")
             self._finish(rec, status, error=err)
             self._save()
 
@@ -726,8 +867,10 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
                 # unrated：既不加也不清零 ——「读不到」不是「不合格」，也不是
                 # 「好转了」。
                 if stop_after > 0 and streak >= stop_after:
-                    stop_reason = (f"连续 {streak} 条谱被判为 discard "
-                                   f"(阈值 {stop_after})")
+                    stop_reason = tr(f"连续 {streak} 条谱被判为 discard "
+                                     f"(阈值 {stop_after})",
+                                     f"{streak} consecutive spectra judged discard "
+                                     f"(threshold {stop_after})")
 
             if point_budget_s > 0.0 and not stop_reason:
                 elapsed = time.monotonic() - t_point
@@ -735,8 +878,10 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
                     # 这是**预算**不是判决。它拦不住一个已经在跑的子技能(那需要
                     # 抢占，本层没有)，能做的只有「不开始下一个点」—— 所以判据
                     # 放在点**结束之后**，并如实说出它是事后检查。
-                    stop_reason = (f"第 {order} 个点耗时 {elapsed:.0f} s，"
-                                   f"超出每点预算 {point_budget_s:.0f} s")
+                    stop_reason = tr(f"第 {order} 个点耗时 {elapsed:.0f} s，"
+                                     f"超出每点预算 {point_budget_s:.0f} s",
+                                     f"Point {order} took {elapsed:.0f} s, "
+                                     f"over the per-point budget of {point_budget_s:.0f} s")
 
             if stop_reason:
                 executor.set_partial("stopped_early", True)
@@ -773,7 +918,7 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
                        "x_m": p.get("x_m"), "y_m": p.get("y_m"),
                        # 显式 False：缺省会被记录层当成 True。
                        "success": False, "status": "skipped",
-                       "error": "未执行到这一点", "path": None,
+                       "error": tr("未执行到这一点", "Never reached this point"), "path": None,
                        "verdict": None, "order": None,
                        "position_check": None, "arrived": None}
             points.append(rec)
@@ -915,14 +1060,18 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
         from mast.core import coord_epoch as ce
 
         verdict = ce.verify(params.get("expected_coord_epoch"),
-                            what="这批取谱坐标")
+                            what=tr("这批取谱坐标", "this batch of spectrum coordinates"))
         if verdict.verified:
             return None
         extra = ""
         if verdict.state in (ce.UNVERIFIABLE, ce.UNSTAMPED):
-            extra = ("——本技能在这里比通用策略更严：一批**别处算出来的**坐标，"
-                     "「查不到当前代次」不能当成「对得上」。请确认记录存储可用、"
-                     "或按当前代次重新规划后再跑。")
+            extra = tr("——本技能在这里比通用策略更严：一批**别处算出来的**坐标，"
+                       "「查不到当前代次」不能当成「对得上」。请确认记录存储可用、"
+                       "或按当前代次重新规划后再跑。",
+                       " -- this skill is stricter than the generic policy here: for a batch of "
+                       "coordinates **computed elsewhere**, an unavailable current epoch cannot "
+                       "count as a match. Make sure the record store is available, or re-plan "
+                       "under the current epoch and rerun.")
         return self.fail(
             f"{verdict.message}{extra}",
             refusal_code=verdict.state,
@@ -942,35 +1091,46 @@ class SpectroscopyAtPositions(CompositeSkillGraph):
         ok_n = int(data.get("success_count", 0) or 0)
         if planned > 0 and ok_n == 0:
             return self.fail(
-                f"0/{planned} 个点取到可用的谱 —— 每一个点都没成", **data)
+                tr(f"0/{planned} 个点取到可用的谱 —— 每一个点都没成",
+                   f"0/{planned} points yielded a usable spectrum -- every point failed"), **data)
 
         res = self.ok(**data)
         gaps: list[str] = []
-        for key, word in (("n_move_failed", "移动失败"),
-                          ("n_acquire_failed", "采集/归属失败"),
-                          ("n_suspect", "位置存疑"),
-                          ("n_skipped", "未执行")):
+        for key, word in (("n_move_failed", tr("移动失败", "move failed")),
+                          ("n_acquire_failed", tr("采集/归属失败", "acquisition/attribution failed")),
+                          ("n_suspect", tr("位置存疑", "position doubtful")),
+                          ("n_skipped", tr("未执行", "not run"))):
             n = int(data.get(key, 0) or 0)
             if n:
                 gaps.append(f"{word} {n}")
-        head = f"{ok_n}/{planned} 个点取谱成功"
+        head = tr(f"{ok_n}/{planned} 个点取谱成功", f"{ok_n}/{planned} points acquired")
         if gaps:
             # 失败数量及原因进入 summary，不能仅藏在 data 字段。
-            res.summary = f"部分完成：{head}（{'、'.join(gaps)}；详见 points[].error）。"
+            res.summary = tr(f"部分完成：{head}（{'、'.join(gaps)}；详见 points[].error）。",
+                             f"Partially complete: {head} ({', '.join(gaps)}; see points[].error).")
         else:
-            res.summary = f"{head}。"
+            res.summary = tr(f"{head}。", f"{head}.")
         if data.get("stopped_early"):
-            res.summary += (f" 早停：{data.get('stopped_reason')}"
-                            f"——本技能不做任何补救(不修针、不换点)，"
-                            f"剩下的点没有执行。")
+            res.summary += tr(f" 早停：{data.get('stopped_reason')}"
+                              f"——本技能不做任何补救(不修针、不换点)，"
+                              f"剩下的点没有执行。",
+                              f" Stopped early: {data.get('stopped_reason')}"
+                              f" -- this skill does no remediation (no tip conditioning, "
+                              f"no point swapping); the remaining points were not run.")
         n_unver = int(data.get("n_position_unverified", 0) or 0)
         if n_unver:
-            res.summary += (f" 另有 {n_unver} 个点的 .dat 头里读不到 xy，"
-                            f"它们的位置**没有被核对过**(既不是对得上，"
-                            f"也不是对不上)。")
+            res.summary += tr(f" 另有 {n_unver} 个点的 .dat 头里读不到 xy，"
+                              f"它们的位置**没有被核对过**(既不是对得上，"
+                              f"也不是对不上)。",
+                              f" Also, the xy could not be read from the .dat header of {n_unver} "
+                              f"points, so their positions were **not verified** (neither "
+                              f"matching nor mismatching).")
         if ok_n and not data.get("gated_criteria"):
-            res.summary += (" ⚠️ 这一批没有任何谱质量判据当闸(阈值全未标定)，"
-                            "所以「成功」只等于「采到了」，不等于「合格」。")
+            res.summary += tr(" ⚠️ 这一批没有任何谱质量判据当闸(阈值全未标定)，"
+                              "所以「成功」只等于「采到了」，不等于「合格」。",
+                              " Warning: no spectrum-quality criterion gated this batch (all "
+                              "thresholds uncalibrated), so 'success' only means 'acquired', "
+                              "not 'acceptable'.")
         return res
 
 

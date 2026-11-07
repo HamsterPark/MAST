@@ -16,6 +16,7 @@ import numpy as np
 from mast.core.types import ActionRecord
 from mast.logging.scope import ScopeChange, notify as _notify_scope
 from mast.logging.storage import ExperimentStorage
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -168,17 +169,17 @@ class ExperimentLog:
         if not exp:
             return ScopeChange(
                 ok=False, block_code="unknown_experiment",
-                error="实验不存在（记录库可能被替换过）。请在列表里选一个现有实验。")
+                error=tr("实验不存在（记录库可能被替换过）。请在列表里选一个现有实验。", "The experiment does not exist (the records database may have been replaced). Pick an existing experiment from the list."))
 
         if sample_id:
             smp = self._storage.get_sample(sample_id)
             if not smp:
                 return ScopeChange(ok=False, block_code="unknown_sample",
-                                   error="样品不存在。")
+                                   error=tr("样品不存在。", "The sample does not exist."))
             if smp.get("experiment_id") != experiment_id:
                 return ScopeChange(
                     ok=False, block_code="sample_mismatch",
-                    error="该样品不属于这个实验。")
+                    error=tr("该样品不属于这个实验。", "This sample does not belong to this experiment."))
             target_sample = sample_id
         else:
             last = self._storage.get_last_active_sample(experiment_id)
@@ -207,7 +208,7 @@ class ExperimentLog:
         smp = self._storage.get_sample(sample_id)
         if not smp:
             return ScopeChange(ok=False, block_code="unknown_sample",
-                               error="样品不存在。")
+                               error=tr("样品不存在。", "The sample does not exist."))
         eid = smp.get("experiment_id")
         if eid and eid != self._scope[0]:
             return self.switch_experiment(eid, sample_id=sample_id,
@@ -278,7 +279,7 @@ class ExperimentLog:
                 self._set_scope(None, None, source="restore", note="dangling pointer")
                 return ScopeChange(
                     ok=True, changed=True,
-                    error="上次的实验记录已找不到（记录库可能被替换），请选择或新建一个实验。")
+                    error=tr("上次的实验记录已找不到（记录库可能被替换），请选择或新建一个实验。", "The previous experiment record can no longer be found (the records database may have been replaced); select or create an experiment."))
             exp = self._storage.get_experiment(eid)
             seeded = True
 
@@ -332,7 +333,8 @@ class ExperimentLog:
 
         Ends any currently-running experiment (and its active sample) FIRST, so
         starting a new one doesn't leave the previous experiment stuck in the
-        'running' state forever — every prior experiment was orphaned as active. Mirrors start_sample's end-prior behaviour.
+        'running' state forever — every prior experiment was orphaned as active.
+        Mirrors start_sample's end-prior behaviour.
 
         ``reuse_open`` (opt-in, default False → unchanged create-always for every
         existing caller): when True, a start whose *name* matches an existing
@@ -367,9 +369,8 @@ class ExperimentLog:
         """DEPRECATED (2026-07-28)：实验没有「结束」这个动作。
 
         现在它只做一件事：**如果这个实验正是当前作用域，就把指针清掉**。它不再
-        写 ``end_time``/``status`` —— 用户明确否决了归档：「没必要做归档。有的
-        实验可能过了十年重启。何必归档呢？如果说要给一个实验写总结，写报告，
-        并不必以归档为前提。」
+        写 ``end_time``/``status`` —— 实验可以在任意久之后重启，不需要归档；
+        写总结或报告也不以归档为前提。
 
         保留这个方法只为不破坏零散调用点；agent 工具层已经把它移除了（在
         "什么都不会结束"的模型下留一个叫 end_experiment 的工具是主动的危害 ——

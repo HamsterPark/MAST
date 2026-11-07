@@ -15,13 +15,12 @@ import {
 import { Field, TextField, Button, Modal, useToast } from "@/components/controls";
 import { CompositeDag } from "./CompositeDag";
 import type { SpecNode } from "./compositeGraph";
+import { tr } from "@/lib/i18n";
 
-// ── 复合技能 — list + react-flow DAG + version history + clone/restore/delete ──
-// Reproduces the old composite_panel.py surface:
-//   composite list (dropdown→here a table) · metadata + 流程图(DAG) + 参数 ·
-//   版本历史 + 一键回滚(restore) · 克隆为新技能(clone) · 删除(delete).
-// NOTE: there is NO delete endpoint in the API (composite_panel.delete_composite
-// has no /api/composites/{name} DELETE). Delete is flagged as unavailable.
+// ── Composites — list + react-flow DAG + version history + clone/restore ──
+//   composite list (table) · metadata + flow chart (DAG) + parameters ·
+//   version history + one-click restore · clone as new skill.
+// NOTE: the API has no delete endpoint (no DELETE /api/composites/{name}), so delete is not offered.
 
 const SAFETY_TONE: Record<string, string> = {
   auto: "AUTO",
@@ -83,14 +82,14 @@ export function CompositesManager() {
 
   const cloneMut = useMutation({
     mutationFn: async () => {
-      if (!selected) throw new Error("未选择复合技能");
-      if (!cloneName.trim()) throw new Error("请填写新技能名称");
+      if (!selected) throw new Error(tr("未选择复合技能", "No composite selected"));
+      if (!cloneName.trim()) throw new Error(tr("请填写新技能名称", "Enter a name for the new skill"));
       const { data, error } = await api.POST("/api/composites/{name}/clone", {
         params: { path: { name: selected } },
         body: { new_name: cloneName.trim(), author: cloneAuthor.trim() },
       });
       if (error) throw error;
-      if (!data?.ok) throw new Error(data?.error || "克隆失败");
+      if (!data?.ok) throw new Error(data?.error || tr("克隆失败", "Clone failed"));
       return data;
     },
     onSuccess: (d) => {
@@ -98,48 +97,48 @@ export function CompositesManager() {
       setCloneOpen(false);
       setCloneName("");
       setCloneAuthor("");
-      toast(d?.message || "已克隆", "ok");
+      toast(d?.message || tr("已克隆", "Cloned"), "ok");
       if (d?.name) setSelected(d.name);
     },
-    onError: (e) => toast(e instanceof Error ? e.message : "克隆失败", "err"),
+    onError: (e) => toast(e instanceof Error ? e.message : tr("克隆失败", "Clone failed"), "err"),
   });
 
   const restoreMut = useMutation({
     mutationFn: async (version: number) => {
-      if (!selected) throw new Error("未选择复合技能");
+      if (!selected) throw new Error(tr("未选择复合技能", "No composite selected"));
       const { data, error } = await api.POST(
         "/api/composites/{name}/restore/{version}",
         { params: { path: { name: selected, version } } },
       );
       if (error) throw error;
-      if (!data?.ok) throw new Error(data?.error || "回滚失败");
+      if (!data?.ok) throw new Error(data?.error || tr("回滚失败", "Restore failed"));
       return data;
     },
     onSuccess: (d) => {
       qc.invalidateQueries({ queryKey: ["composites"] });
       qc.invalidateQueries({ queryKey: ["composite", selected] });
-      toast(d?.message || "已回滚", "ok");
+      toast(d?.message || tr("已回滚", "Restored"), "ok");
     },
-    onError: (e) => toast(e instanceof Error ? e.message : "回滚失败", "err"),
+    onError: (e) => toast(e instanceof Error ? e.message : tr("回滚失败", "Restore failed"), "err"),
   });
 
   const columns = useMemo<ColumnDef<CompRow, any>[]>(
     () => [
       {
         accessorKey: "name",
-        header: "名称",
+        header: tr("名称", "Name"),
         cell: (c) => <span className="font-medium text-mast-text">{c.getValue() as string}</span>,
       },
-      { accessorKey: "version", header: "版本", cell: (c) => `v${c.getValue() as number}` },
+      { accessorKey: "version", header: tr("版本", "Version"), cell: (c) => `v${c.getValue() as number}` },
       {
         accessorKey: "safety_level",
-        header: "安全等级",
+        header: tr("安全等级", "Safety level"),
         cell: (c) => (
           <Badge tone={SAFETY_TONE[c.getValue() as string] ?? "default"}>{c.getValue() as string}</Badge>
         ),
       },
-      { accessorKey: "n_nodes", header: "节点数" },
-      { accessorKey: "description", header: "说明" },
+      { accessorKey: "n_nodes", header: tr("节点数", "Nodes") },
+      { accessorKey: "description", header: tr("说明", "Description") },
       {
         id: "open",
         header: "",
@@ -148,7 +147,7 @@ export function CompositesManager() {
             onClick={() => setSelected(c.row.original.name)}
             className="rounded border border-mast-border px-2 py-0.5 text-xs text-mast-accent hover:bg-mast-accent/10"
           >
-            查看
+            {tr("查看", "View")}
           </button>
         ),
       },
@@ -158,7 +157,7 @@ export function CompositesManager() {
 
   if (q.isPending) return <Spinner />;
   if (q.isError) return <ErrorNote error={q.error} />;
-  if (q.data?.degraded) return <DegradedNote what="复合技能列表" />;
+  if (q.data?.degraded) return <DegradedNote what={tr("复合技能列表", "Composite list")} />;
 
   return (
     <div className="space-y-4">
@@ -167,13 +166,13 @@ export function CompositesManager() {
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="搜索复合技能…"
+          placeholder={tr("搜索复合技能…", "Search composites…")}
           className="w-64 rounded border border-mast-border bg-mast-bg px-3 py-1.5 text-sm text-mast-text placeholder:text-mast-muted"
         />
-        <span className="text-xs text-mast-muted">共 {rows.length} 个</span>
+        <span className="text-xs text-mast-muted">{tr(`共 ${rows.length} 个`, `${rows.length} total`)}</span>
       </div>
 
-      <DataTable data={rows} columns={columns} globalFilter={text} empty="暂无复合技能" />
+      <DataTable data={rows} columns={columns} globalFilter={text} empty={tr("暂无复合技能", "No composite skills")} />
 
       {selected && (
         <CompositeDetailPanel
@@ -189,18 +188,18 @@ export function CompositesManager() {
         />
       )}
 
-      <Modal open={cloneOpen} onClose={() => setCloneOpen(false)} title={`克隆为新复合技能（源：${selected}）`}>
+      <Modal open={cloneOpen} onClose={() => setCloneOpen(false)} title={tr(`克隆为新复合技能（源：${selected}）`, `Clone as new composite (source: ${selected})`)}>
         <div className="space-y-3">
-          <Field label="新技能名称" hint="将作为新蓝本（v1），可在列表中选择并编辑">
+          <Field label={tr("新技能名称", "New skill name")} hint={tr("将作为新蓝本（v1），可在列表中选择并编辑", "Becomes a new blueprint (v1); select and edit it from the list")}>
             <TextField value={cloneName} onChange={setCloneName} placeholder="MyNewWorkflow" />
           </Field>
-          <Field label="作者（可选）">
+          <Field label={tr("作者（可选）", "Author (optional)")}>
             <TextField value={cloneAuthor} onChange={setCloneAuthor} placeholder="" />
           </Field>
           <div className="flex justify-end gap-2 pt-1">
-            <Button variant="ghost" onClick={() => setCloneOpen(false)}>取消</Button>
+            <Button variant="ghost" onClick={() => setCloneOpen(false)}>{tr("取消", "Cancel")}</Button>
             <Button variant="primary" disabled={cloneMut.isPending} onClick={() => cloneMut.mutate()}>
-              {cloneMut.isPending ? "克隆中…" : "克隆"}
+              {cloneMut.isPending ? tr("克隆中…", "Cloning…") : tr("克隆", "Clone")}
             </Button>
           </div>
         </div>
@@ -237,19 +236,19 @@ function CompositeDetailPanel({
       return data;
     },
     onSuccess: (d) => {
-      if (d?.degraded) toast("校验后端不可用（degraded）", "err");
-      else if (d?.ok) toast("校验通过，无问题", "ok");
-      else toast(`校验发现 ${d?.problems?.length ?? 0} 个问题`, "err");
+      if (d?.degraded) toast(tr("校验后端不可用（degraded）", "Validation backend unavailable (degraded)"), "err");
+      else if (d?.ok) toast(tr("校验通过，无问题", "Validation passed, no problems"), "ok");
+      else toast(tr(`校验发现 ${d?.problems?.length ?? 0} 个问题`, `Validation found ${d?.problems?.length ?? 0} problem(s)`), "err");
       qc.setQueryData(["composite", name, "validate"], d);
     },
-    onError: (e) => toast(e instanceof Error ? e.message : "校验失败", "err"),
+    onError: (e) => toast(e instanceof Error ? e.message : tr("校验失败", "Validation failed"), "err"),
   });
 
   return (
     <Section
-      title={`复合技能详情：${name}`}
+      title={tr(`复合技能详情：${name}`, `Composite details: ${name}`)}
       actions={
-        <button onClick={onClose} className="text-xs text-mast-muted hover:text-mast-text">关闭</button>
+        <button onClick={onClose} className="text-xs text-mast-muted hover:text-mast-text">{tr("关闭", "Close")}</button>
       }
     >
       {toastNode}
@@ -258,9 +257,9 @@ function CompositeDetailPanel({
       ) : q.isError ? (
         <ErrorNote error={q.error} />
       ) : q.data?.degraded ? (
-        <DegradedNote what="复合技能详情" />
+        <DegradedNote what={tr("复合技能详情", "Composite details")} />
       ) : !q.data?.found ? (
-        <EmptyNote label={`未找到复合技能：${name}`} />
+        <EmptyNote label={tr(`未找到复合技能：${name}`, `Composite not found: ${name}`)} />
       ) : (
         (() => {
           const d = q.data!;
@@ -292,7 +291,7 @@ function CompositeDetailPanel({
                 )}
                 {!!params.length && (
                   <div>
-                    <h4 className="mb-1 text-sm font-medium text-mast-text">输入参数</h4>
+                    <h4 className="mb-1 text-sm font-medium text-mast-text">{tr("输入参数", "Input parameters")}</h4>
                     <div className="flex flex-wrap gap-2 text-xs text-mast-muted">
                       {params.map((p, i) => (
                         <span key={i} className="rounded border border-mast-border px-2 py-1">
@@ -306,9 +305,9 @@ function CompositeDetailPanel({
                   </div>
                 )}
                 <div className="flex flex-wrap gap-2 pt-1">
-                  <Button variant="primary" onClick={onClone}>克隆为新技能</Button>
+                  <Button variant="primary" onClick={onClone}>{tr("克隆为新技能", "Clone as new skill")}</Button>
                   <Button variant="default" disabled={validateMut.isPending} onClick={() => validateMut.mutate()}>
-                    {validateMut.isPending ? "校验中…" : "校验流程"}
+                    {validateMut.isPending ? tr("校验中…", "Validating…") : tr("校验流程", "Validate workflow")}
                   </Button>
                 </div>
               </Card>
@@ -316,7 +315,7 @@ function CompositeDetailPanel({
               {valReport && (
                 <Card className="space-y-2">
                   <h4 className="text-sm font-medium text-mast-text">
-                    校验结果 {valReport.ok ? <Badge tone="AUTO">通过</Badge> : <Badge tone="WARN">有问题</Badge>}
+                    {tr("校验结果", "Validation result")} {valReport.ok ? <Badge tone="AUTO">{tr("通过", "Passed")}</Badge> : <Badge tone="WARN">{tr("有问题", "Problems found")}</Badge>}
                   </h4>
                   {!!valReport.problems?.length && (
                     <ul className="list-disc space-y-0.5 pl-5 text-xs text-mast-danger">
@@ -328,10 +327,10 @@ function CompositeDetailPanel({
                       <table className="w-full text-xs">
                         <thead className="bg-mast-bg text-mast-muted">
                           <tr>
-                            <th className="px-2 py-1.5 text-left">节点</th>
-                            <th className="px-2 py-1.5 text-left">技能</th>
-                            <th className="px-2 py-1.5 text-left">错误</th>
-                            <th className="px-2 py-1.5 text-left">警告</th>
+                            <th className="px-2 py-1.5 text-left">{tr("节点", "Node")}</th>
+                            <th className="px-2 py-1.5 text-left">{tr("技能", "Skill")}</th>
+                            <th className="px-2 py-1.5 text-left">{tr("错误", "Errors")}</th>
+                            <th className="px-2 py-1.5 text-left">{tr("警告", "Warnings")}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -351,24 +350,24 @@ function CompositeDetailPanel({
               )}
 
               <Card>
-                <h4 className="mb-2 text-sm font-medium text-mast-text">控制流 DAG</h4>
+                <h4 className="mb-2 text-sm font-medium text-mast-text">{tr("控制流 DAG", "Control-flow DAG")}</h4>
                 <CompositeDag spec={spec} />
               </Card>
 
               <Card>
-                <h4 className="mb-2 text-sm font-medium text-mast-text">版本历史</h4>
+                <h4 className="mb-2 text-sm font-medium text-mast-text">{tr("版本历史", "Version history")}</h4>
                 {!d.versions?.length ? (
-                  <EmptyNote label="暂无版本历史" />
+                  <EmptyNote label={tr("暂无版本历史", "No version history")} />
                 ) : (
                   <div className="overflow-auto rounded border border-mast-border">
                     <table className="w-full text-xs">
                       <thead className="bg-mast-bg text-mast-muted">
                         <tr>
-                          <th className="px-2 py-1.5 text-left">版本</th>
-                          <th className="px-2 py-1.5 text-left">保存时间</th>
-                          <th className="px-2 py-1.5 text-left">节点数</th>
-                          <th className="px-2 py-1.5 text-left">说明</th>
-                          <th className="px-2 py-1.5 text-left">操作</th>
+                          <th className="px-2 py-1.5 text-left">{tr("版本", "Version")}</th>
+                          <th className="px-2 py-1.5 text-left">{tr("保存时间", "Saved at")}</th>
+                          <th className="px-2 py-1.5 text-left">{tr("节点数", "Nodes")}</th>
+                          <th className="px-2 py-1.5 text-left">{tr("说明", "Description")}</th>
+                          <th className="px-2 py-1.5 text-left">{tr("操作", "Action")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -384,7 +383,7 @@ function CompositeDetailPanel({
                                 onClick={() => onRestore(v.version)}
                                 className="rounded border border-mast-border px-2 py-0.5 text-xs text-mast-accent hover:bg-mast-accent/10 disabled:opacity-50"
                               >
-                                回滚到此版本
+                                {tr("回滚到此版本", "Restore this version")}
                               </button>
                             </td>
                           </tr>

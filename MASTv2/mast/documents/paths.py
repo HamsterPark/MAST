@@ -3,7 +3,7 @@
 设计文档：``docs/v2/design/document_and_library_management.md`` §2 / §3.6
 
 与 ``core/experiment_paths.py`` 同一条纪律：**每个函数懒解析**，绝不在 import 时
-把路径冻结成模块常量（冻结过的教训是 打包版所有数据路径指向
+把路径冻结成模块常量（冻结过的后果：打包版所有数据路径指向
 不存在的目录）。
 
 ``_unfiled`` 的存在理由（§3.6）
@@ -58,7 +58,7 @@ def storage(existing=None):
     库路径**故意**从 ``agents._shared.data_paths.experiment_db_path`` 取（懒 import，
     不成环）：那是 ``MAST_EXPERIMENT_DB`` env > ``<project_root>/experiments/
     mast_experiments.db`` 的唯一解析器，runtime 和 records 都走它。在这里再写一份
-    "env > 默认值" 的逻辑会立刻变成第二个真源，而路径分家这类 bug（）
+    "env > 默认值" 的逻辑会立刻变成第二个真源，而路径分家这类 bug
     正是这么来的。``core/runtime.py`` 里也有大量 ``mast.agents._shared`` 的懒 import，
     这个方向在本仓库是既有形态，不是新开的口子。
     """

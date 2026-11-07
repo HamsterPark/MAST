@@ -4,30 +4,28 @@ import { useLocation } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import clsx from "clsx";
 import { api } from "@/api/client";
-// 路由 → 「这条反馈在说哪一页」。判断住在 lib/ 里(纯函数、无 JSX),
-// 因为 node --test 剥不了 .tsx —— 而这几条判断错了没有任何症状,
-// 只有一张内容是错的反馈表(#77 那 108 行)。
+import { tr } from "@/lib/i18n";
+// Route -> which page the feedback refers to. Kept in lib/ as a pure function
+// (no JSX) so node --test can import it; a wrong mapping has no visible symptom
+// other than mislabelled feedback rows.
 import { subjectForPath } from "@/lib/feedbackSubject";
 
-// Draggable, always-visible conversation-feedback floating widget. Mirrors the
-// old Gradio 对话反馈悬浮窗 (build_feedback_panel + feedback_float_assets).
+// Draggable, always-visible conversation-feedback floating widget.
 //
-//   ratings + free comment → POST /api/feedback (rating/comment + agent + conv id)
-//   draggable by its title bar via DOCUMENT-LEVEL pointer event delegation
-//   (the proven approach from MEMORY feedback_gradio_drag_delegation —
-//   re-find the panel on each pointerdown, never bind to a node that React
-//   may rebuild). React owns the DOM here, but document-level delegation is
-//   still the robust pattern and survives re-renders.
+//   ratings + free comment -> POST /api/feedback (rating/comment + agent + conv id)
+//   draggable by its title bar via document-level pointer event delegation:
+//   the panel is re-found on each pointerdown instead of binding to a node that
+//   React may rebuild, so dragging survives re-renders.
 
 const RATINGS: { value: string; label: string }[] = [
-  { value: "good", label: "👍 很好" },
-  { value: "ok", label: "🙂 不错" },
-  { value: "neutral", label: "😐 一般" },
-  { value: "poor", label: "👎 较差" },
-  { value: "problem", label: "⚠️ 有问题" },
+  { value: "good", label: tr("👍 很好", "👍 Great") },
+  { value: "ok", label: tr("🙂 不错", "🙂 Good") },
+  { value: "neutral", label: tr("😐 一般", "😐 So-so") },
+  { value: "poor", label: tr("👎 较差", "👎 Poor") },
+  { value: "problem", label: tr("⚠️ 有问题", "⚠️ Problem") },
 ];
 
-// ITEM 2 — fighting-game combo window: a same-rating tap within this many ms of
+// Combo window: a same-rating tap within this many ms of
 // the previous one bumps the ×N multiplier; otherwise the counter resets to 1.
 const COMBO_IDLE_MS = 1200;
 
@@ -35,7 +33,7 @@ export function FeedbackFloat({ conversationId }: { conversationId: string | nul
   const panelRef = useRef<HTMLDivElement>(null);
   const [flash, setFlash] = useState<{ text: string; ok: boolean } | null>(null);
   const [comment, setComment] = useState("");
-  // ITEM 2 — combo state. `combo` is the live multiplier shown as a floating
+  // Combo state. `combo` is the live multiplier shown as a floating
   // ×N badge over the tapped button; it fades + clears after COMBO_IDLE_MS idle.
   // `bump` retriggers the pop animation on every tap (key changes).
   const [combo, setCombo] = useState<{ value: string; count: number; bump: number } | null>(null);
@@ -104,15 +102,15 @@ export function FeedbackFloat({ conversationId }: { conversationId: string | nul
     return () => clearTimeout(t);
   }, [flash]);
 
-  // ITEM 2 — clear the pending combo timer when the widget unmounts.
+  // Clear the pending combo timer when the widget unmounts.
   useEffect(() => () => {
     if (comboTimer.current) clearTimeout(comboTimer.current);
   }, []);
 
-  // Record WHERE the operator gave the feedback (// "对话反馈知道用户是在哪个界面反馈的吗？" — it didn't: agent was hardcoded
-  // and meta carried nothing, so all 108 rows looked like instrument_control
-  // chat feedback). useLocation re-renders on route change, so the pathname
-  // is always the page the widget was on at submit time.
+  // Record WHERE the feedback was given: the agent field is derived from the route
+  // and meta carries the page, so rows are not all attributed to the same chat.
+  // useLocation re-renders on route change, so the pathname is always the page the
+  // widget was on at submit time.
   const { pathname } = useLocation();
 
   const post = useMutation({
@@ -123,8 +121,8 @@ export function FeedbackFloat({ conversationId }: { conversationId: string | nul
           comment: body.comment ?? "",
           agent: subjectForPath(pathname),
           // A conversation id only means something on the chat surfaces; on
-          // 设置/记录/… it would falsely bind the note to whatever chat was
-          // last open.
+          // settings/records/... it would falsely bind the note to whatever chat
+          // was last open.
           conversation_id:
             pathname === "/" || pathname.startsWith("/agents") ? conversationId : null,
           experiment_id: null,
@@ -138,7 +136,7 @@ export function FeedbackFloat({ conversationId }: { conversationId: string | nul
   });
 
   function rate(value: string, label: string) {
-    // ITEM 2 — combo bookkeeping: same rating within the idle window bumps ×N.
+    // Combo bookkeeping: same rating within the idle window bumps ×N.
     const now = Date.now();
     const prev = lastRating.current;
     const count = prev.value === value && now - prev.t <= COMBO_IDLE_MS ? prev.count + 1 : 1;
@@ -156,9 +154,11 @@ export function FeedbackFloat({ conversationId }: { conversationId: string | nul
       {
         onSuccess: (d) =>
           setFlash(
-            d?.ok ? { text: `✓ 已记录 ${label}`, ok: true } : { text: "未记录（记录库不可用）", ok: false },
+            d?.ok
+              ? { text: tr(`✓ 已记录 ${label}`, `✓ Recorded ${label}`), ok: true }
+              : { text: tr("未记录（记录库不可用）", "Not recorded (store unavailable)"), ok: false },
           ),
-        onError: () => setFlash({ text: "记录失败", ok: false }),
+        onError: () => setFlash({ text: tr("记录失败", "Failed to record"), ok: false }),
       },
     );
   }
@@ -166,7 +166,7 @@ export function FeedbackFloat({ conversationId }: { conversationId: string | nul
   function submitComment() {
     const text = comment.trim();
     if (!text) {
-      setFlash({ text: "评论为空", ok: false });
+      setFlash({ text: tr("评论为空", "Comment is empty"), ok: false });
       return;
     }
     post.mutate(
@@ -175,12 +175,12 @@ export function FeedbackFloat({ conversationId }: { conversationId: string | nul
         onSuccess: (d) => {
           if (d?.ok) {
             setComment("");
-            setFlash({ text: "✓ 评论已记录", ok: true });
+            setFlash({ text: tr("✓ 评论已记录", "✓ Comment recorded"), ok: true });
           } else {
-            setFlash({ text: "未记录（记录库不可用）", ok: false });
+            setFlash({ text: tr("未记录（记录库不可用）", "Not recorded (store unavailable)"), ok: false });
           }
         },
-        onError: () => setFlash({ text: "记录失败", ok: false }),
+        onError: () => setFlash({ text: tr("记录失败", "Failed to record"), ok: false }),
       },
     );
   }
@@ -200,10 +200,10 @@ export function FeedbackFloat({ conversationId }: { conversationId: string | nul
       className="rounded-2xl border border-mast-border bg-mast-panel/95 p-3 shadow-2xl backdrop-blur"
     >
       <div className="mast-fb-handle flex cursor-grab touch-none select-none items-center justify-between border-b border-mast-border pb-2 active:cursor-grabbing">
-        <span className="text-sm font-semibold text-mast-text">💬 对话反馈</span>
-        <span className="text-[10px] text-mast-muted/60">⠿ 拖动</span>
+        <span className="text-sm font-semibold text-mast-text">{tr("💬 对话反馈", "💬 Feedback")}</span>
+        <span className="text-[10px] text-mast-muted/60">{tr("⠿ 拖动", "⠿ Drag")}</span>
       </div>
-      {/* ITEM 2 — combo badge animation (scoped). */}
+      {/* Combo badge animation (scoped). */}
       <style>{`
         @keyframes mastComboPop {
           0%   { transform: translate(50%, 0) scale(0.6); opacity: 0; }
@@ -248,7 +248,7 @@ export function FeedbackFloat({ conversationId }: { conversationId: string | nul
       <textarea
         value={comment}
         onChange={(e) => setComment(e.target.value)}
-        placeholder="写点评论…（随时）"
+        placeholder={tr("写点评论…（随时）", "Write a comment… (any time)")}
         rows={2}
         className="w-full resize-none rounded-md border border-mast-border bg-mast-bg px-2 py-1.5 text-xs text-mast-text outline-none focus:border-mast-accent"
       />
@@ -258,7 +258,7 @@ export function FeedbackFloat({ conversationId }: { conversationId: string | nul
         disabled={post.isPending}
         className="mt-2 w-full rounded-md bg-mast-accent/20 px-2 py-1.5 text-xs font-medium text-mast-accent hover:bg-mast-accent/30 disabled:opacity-50"
       >
-        提交评论
+        {tr("提交评论", "Submit comment")}
       </button>
     </div>,
     document.body,

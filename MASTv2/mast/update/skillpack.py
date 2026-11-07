@@ -44,6 +44,8 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from mast.i18n import tr
+
 logger = logging.getLogger(__name__)
 
 PACK_SCHEMA = 1
@@ -155,8 +157,10 @@ class VerifyResult:
     def describe(self) -> str:
         if self.ok and self.manifest is not None:
             return (f"{self.manifest.pack_id} v{self.manifest.version}"
-                    f"（{len(self.manifest.files)} 个文件，签名 {self.pubkey8}）")
-        return "包被拒绝：" + "；".join(self.reasons or ("原因不明",))
+                    + tr(f"（{len(self.manifest.files)} 个文件，签名 {self.pubkey8}）",
+                         f" ({len(self.manifest.files)} files, signature {self.pubkey8})"))
+        return (tr("包被拒绝：", "Pack rejected: ")
+                + tr("；", "; ").join(self.reasons or (tr("原因不明", "reason unknown"),)))
 
 
 def sha256_bytes(b: bytes) -> str:
@@ -189,7 +193,7 @@ def _check_entry_path(rel: str) -> str:
     if not ok:
         return f"{rel}：{why}"
     if P.normalise_rel(rel).split("/")[0] == P.PACKS_DIR:
-        return f"{rel}：包里不能再套 {P.PACKS_DIR}/"
+        return tr(f"{rel}：包里不能再套 {P.PACKS_DIR}/", f"{rel}: a pack cannot contain another {P.PACKS_DIR}/")
     return ""
 
 
@@ -214,33 +218,35 @@ def verify_pack(zip_path: Path | str, *, public_key_hex: str = "",
     res = VerifyResult()
     p = Path(zip_path)
     if not p.is_file():
-        res.reasons.append(f"文件不存在：{p}")
+        res.reasons.append(tr(f"文件不存在：{p}", f"File does not exist: {p}"))
         return res
     if p.stat().st_size > MAX_PACK_BYTES:
-        res.reasons.append(
+        res.reasons.append(tr(
             f"包 {p.stat().st_size / 1e6:.1f} MB，超过上限 "
-            f"{MAX_PACK_BYTES / 1e6:.0f} MB")
+            f"{MAX_PACK_BYTES / 1e6:.0f} MB",
+            f"Pack is {p.stat().st_size / 1e6:.1f} MB, over the "
+            f"{MAX_PACK_BYTES / 1e6:.0f} MB limit"))
         return res
 
     try:
         zf = zipfile.ZipFile(p)
     except (zipfile.BadZipFile, OSError) as exc:
-        res.reasons.append(f"打不开：{type(exc).__name__}: {exc}")
+        res.reasons.append(tr(f"打不开：{type(exc).__name__}: {exc}", f"Cannot open: {type(exc).__name__}: {exc}"))
         return res
 
     with zf:
         names = set(zf.namelist())
         if MANIFEST_NAME not in names:
-            res.reasons.append(f"包里没有 {MANIFEST_NAME}")
+            res.reasons.append(tr(f"包里没有 {MANIFEST_NAME}", f"The pack has no {MANIFEST_NAME}"))
             return res
         try:
             raw = zf.read(MANIFEST_NAME)
             doc = json.loads(raw)
         except (KeyError, ValueError, OSError) as exc:
-            res.reasons.append(f"{MANIFEST_NAME} 读不出来：{exc}")
+            res.reasons.append(tr(f"{MANIFEST_NAME} 读不出来：{exc}", f"Cannot read {MANIFEST_NAME}: {exc}"))
             return res
         if not isinstance(doc, dict):
-            res.reasons.append(f"{MANIFEST_NAME} 不是一个 JSON 对象")
+            res.reasons.append(tr(f"{MANIFEST_NAME} 不是一个 JSON 对象", f"{MANIFEST_NAME} is not a JSON object"))
             return res
 
         sig = ""
@@ -256,21 +262,26 @@ def verify_pack(zip_path: Path | str, *, public_key_hex: str = "",
         if require_signature:
             pub = public_key_hex or signing.get_release_public_key()
             if not pub:
-                res.reasons.append(
+                res.reasons.append(tr(
                     "这个构建里没有烘焙发布公钥 —— 验不了签就一个包都不装。"
-                    "「验不了」不能当成「通过」。")
+                    "「验不了」不能当成「通过」。",
+                    "This build has no baked-in release public key, so no pack can be "
+                    "verified and none is installed. 'Cannot verify' never counts as 'passed'."))
                 return res
             if not sig:
-                res.reasons.append(f"包里没有 {SIG_NAME}（未签名的包不装）")
+                res.reasons.append(tr(f"包里没有 {SIG_NAME}（未签名的包不装）", f"The pack has no {SIG_NAME} (unsigned packs are not installed)"))
                 return res
             if not signing.HAVE_CRYPTO:
-                res.reasons.append(
+                res.reasons.append(tr(
                     "本机没有 cryptography，验不了 Ed25519 签名 —— fail-closed，"
-                    "一个包都不装。")
+                    "一个包都不装。",
+                    "`cryptography` is not installed, so Ed25519 signatures cannot be "
+                    "verified; failing closed, no pack is installed."))
                 return res
             if not signing.verify_manifest(doc, sig, pub):
-                res.reasons.append(
-                    "签名验证不通过 —— manifest 被改过，或者签名者不是发布方。")
+                res.reasons.append(tr(
+                    "签名验证不通过 —— manifest 被改过，或者签名者不是发布方。",
+                    "Signature check failed: the manifest was modified, or the signer is not the publisher."))
                 return res
             res.pubkey8 = pub[:8]
 
@@ -278,59 +289,70 @@ def verify_pack(zip_path: Path | str, *, public_key_hex: str = "",
         man = PackManifest.from_dict(doc)
         res.manifest = man
         if int(doc.get(K.SCHEMA) or 0) != PACK_SCHEMA:
-            res.reasons.append(
-                f"schema 是 {doc.get(K.SCHEMA)!r}，本版认得的是 {PACK_SCHEMA}")
+            res.reasons.append(tr(
+                f"schema 是 {doc.get(K.SCHEMA)!r}，本版认得的是 {PACK_SCHEMA}",
+                f"schema is {doc.get(K.SCHEMA)!r}; this version understands {PACK_SCHEMA}"))
         if not is_valid_pack_id(man.pack_id):
-            res.reasons.append(
+            res.reasons.append(tr(
                 f"pack_id {man.pack_id!r} 不合法（小写字母数字，2–64 位，"
-                "可含 - 和 _）—— 它会成为磁盘上的目录名")
+                "可含 - 和 _）—— 它会成为磁盘上的目录名",
+                f"pack_id {man.pack_id!r} is invalid (lowercase letters and digits, "
+                "2-64 characters, may contain - and _); it becomes a directory name on disk"))
         if not man.version:
-            res.reasons.append("manifest 没有 version")
+            res.reasons.append(tr("manifest 没有 version", "The manifest has no version"))
         if not man.files:
-            res.reasons.append("包里一个文件都没有")
+            res.reasons.append(tr("包里一个文件都没有", "The pack contains no files"))
         if len(man.files) > MAX_FILES:
-            res.reasons.append(f"{len(man.files)} 个文件，超过上限 {MAX_FILES}")
+            res.reasons.append(tr(f"{len(man.files)} 个文件，超过上限 {MAX_FILES}", f"{len(man.files)} files, over the limit of {MAX_FILES}"))
 
         # ── ③ 版本范围 ──────────────────────────────────────────────
         if app_version:
             cur = _version_tuple(app_version)
             if man.min_app_version and cur < _version_tuple(man.min_app_version):
-                res.reasons.append(
+                res.reasons.append(tr(
                     f"这个包要求 MAST ≥ {man.min_app_version}，本机是 {app_version}"
-                    "（多半是它用到了本版还没有的 core 函数）")
+                    "（多半是它用到了本版还没有的 core 函数）",
+                    f"This pack requires MAST >= {man.min_app_version}; this machine has {app_version} "
+                    "(it probably uses a core function this version does not have)"))
             if man.max_app_version and cur > _version_tuple(man.max_app_version):
-                res.reasons.append(
+                res.reasons.append(tr(
                     f"这个包声明只支持到 MAST {man.max_app_version}，"
-                    f"本机是 {app_version}")
+                    f"本机是 {app_version}",
+                    f"This pack declares support only up to MAST {man.max_app_version}; "
+                    f"this machine has {app_version}"))
 
         # ── ④ 逐文件 ────────────────────────────────────────────────
         listed = {f.path for f in man.files}
         for f in man.files:
             why = _check_entry_path(f.path)
             if why:
-                res.reasons.append("路径不合法：" + why)
+                res.reasons.append(tr("路径不合法：", "Invalid path: ") + why)
                 continue
             arc = FILES_PREFIX + f.path
             if arc not in names:
-                res.reasons.append(f"manifest 里有 {f.path}，包里没有")
+                res.reasons.append(tr(f"manifest 里有 {f.path}，包里没有", f"The manifest lists {f.path}, but the pack does not contain it"))
                 continue
             try:
                 data = zf.read(arc)
             except (KeyError, OSError) as exc:
-                res.reasons.append(f"{f.path} 读不出来：{exc}")
+                res.reasons.append(tr(f"{f.path} 读不出来：{exc}", f"Cannot read {f.path}: {exc}"))
                 continue
             if len(data) > MAX_FILE_BYTES:
-                res.reasons.append(
-                    f"{f.path} {len(data)} 字节，超过单文件上限 {MAX_FILE_BYTES}")
+                res.reasons.append(tr(
+                    f"{f.path} {len(data)} 字节，超过单文件上限 {MAX_FILE_BYTES}",
+                    f"{f.path} is {len(data)} bytes, over the per-file limit of {MAX_FILE_BYTES}"))
                 continue
             if f.size and len(data) != f.size:
-                res.reasons.append(
-                    f"{f.path} 大小对不上（manifest {f.size}，实际 {len(data)}）")
+                res.reasons.append(tr(
+                    f"{f.path} 大小对不上（manifest {f.size}，实际 {len(data)}）",
+                    f"{f.path} size mismatch (manifest {f.size}, actual {len(data)})"))
             got = sha256_bytes(data)
             if got != f.sha256:
-                res.reasons.append(
+                res.reasons.append(tr(
                     f"{f.path} sha256 对不上 —— 文件被改过"
-                    f"（manifest {f.sha256[:12]}，实际 {got[:12]}）")
+                    f"（manifest {f.sha256[:12]}，实际 {got[:12]}）",
+                    f"{f.path} sha256 mismatch: the file was modified "
+                    f"(manifest {f.sha256[:12]}, actual {got[:12]})"))
 
         # ⑤ 包里有、manifest 里没有的文件 —— 夹带。签名覆盖不到它们。
         extra = sorted(n[len(FILES_PREFIX):] for n in names
@@ -338,8 +360,10 @@ def verify_pack(zip_path: Path | str, *, public_key_hex: str = "",
                        and n[len(FILES_PREFIX):] not in listed)
         if extra:
             res.reasons.append(
-                "包里夹带了 manifest 没登记的文件：" + "、".join(extra[:6])
-                + "。签名保护的是 manifest，登记外的文件不受任何保护 —— 整包拒绝。")
+                tr("包里夹带了 manifest 没登记的文件：", "The pack contains files the manifest does not list: ")
+                + tr("、", ", ").join(extra[:6])
+                + tr("。签名保护的是 manifest，登记外的文件不受任何保护 —— 整包拒绝。",
+                     ". The signature protects the manifest; unlisted files have no protection, so the whole pack is rejected."))
 
     res.ok = not res.reasons
     return res
@@ -384,17 +408,19 @@ def verify_installed(pack_dir: Path | str, *, public_key_hex: str = "",
     d = Path(pack_dir)
     mp = d / INSTALLED_MANIFEST
     if not mp.is_file():
-        res.reasons.append(
+        res.reasons.append(tr(
             f"{d.name} 里没有 {INSTALLED_MANIFEST} —— 它不是通过签名通道装进来的"
-            "（有人手工放的？）。这个目录下的东西会被标成「已签名」，所以整包拒绝。")
+            "（有人手工放的？）。这个目录下的东西会被标成「已签名」，所以整包拒绝。",
+            f"{d.name} has no {INSTALLED_MANIFEST}: it was not installed through the signed channel "
+            "(placed by hand?). Anything in this directory would be marked 'signed', so the whole pack is rejected."))
         return res
     try:
         doc = json.loads(mp.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        res.reasons.append(f"{INSTALLED_MANIFEST} 读不出来：{exc}")
+        res.reasons.append(tr(f"{INSTALLED_MANIFEST} 读不出来：{exc}", f"Cannot read {INSTALLED_MANIFEST}: {exc}"))
         return res
     if not isinstance(doc, dict):
-        res.reasons.append(f"{INSTALLED_MANIFEST} 不是一个 JSON 对象")
+        res.reasons.append(tr(f"{INSTALLED_MANIFEST} 不是一个 JSON 对象", f"{INSTALLED_MANIFEST} is not a JSON object"))
         return res
 
     sig = str(doc.get(K.SIGNATURE) or "")
@@ -402,14 +428,15 @@ def verify_installed(pack_dir: Path | str, *, public_key_hex: str = "",
     if require_signature:
         pub = public_key_hex or signing.get_release_public_key()
         if not pub:
-            res.reasons.append("这个构建里没有烘焙发布公钥 —— 验不了签就不加载。")
+            res.reasons.append(tr("这个构建里没有烘焙发布公钥 —— 验不了签就不加载。", "This build has no baked-in release public key; cannot verify, so not loading."))
             return res
         if not signing.HAVE_CRYPTO:
-            res.reasons.append("本机没有 cryptography，验不了签 —— fail-closed。")
+            res.reasons.append(tr("本机没有 cryptography，验不了签 —— fail-closed。", "`cryptography` is not installed, cannot verify signatures; failing closed."))
             return res
         if not signing.verify_manifest(doc, sig, pub):
-            res.reasons.append(
-                f"{INSTALLED_MANIFEST} 的签名不过 —— 它被本地改动过。")
+            res.reasons.append(tr(
+                f"{INSTALLED_MANIFEST} 的签名不过 —— 它被本地改动过。",
+                f"{INSTALLED_MANIFEST} signature check failed: it was modified locally."))
             return res
         res.pubkey8 = pub[:8]
 
@@ -418,16 +445,17 @@ def verify_installed(pack_dir: Path | str, *, public_key_hex: str = "",
     for f in man.files:
         fp = d / f.path
         if not fp.is_file():
-            res.reasons.append(f"{f.path} 不在了")
+            res.reasons.append(tr(f"{f.path} 不在了", f"{f.path} is missing"))
             continue
         try:
             got = sha256_bytes(fp.read_bytes())
         except OSError as exc:
-            res.reasons.append(f"{f.path} 读不出来：{exc}")
+            res.reasons.append(tr(f"{f.path} 读不出来：{exc}", f"Cannot read {f.path}: {exc}"))
             continue
         if got != f.sha256:
-            res.reasons.append(
-                f"{f.path} 被本地改动过（sha256 对不上）")
+            res.reasons.append(tr(
+                f"{f.path} 被本地改动过（sha256 对不上）",
+                f"{f.path} was modified locally (sha256 mismatch)"))
     res.ok = not res.reasons
     return res
 

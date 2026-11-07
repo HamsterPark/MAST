@@ -1,0 +1,31 @@
+# What `setup_clients.py codex` adds to Codex's config.toml (%USERPROFILE%\.codex\config.toml,
+# or CODEX_HOME\config.toml) for MAST installed in C:\MAST. Prefer running the tool, which fills
+# in the real paths, backs up config.toml and keeps the rest of it unchanged:
+#
+#     C:\MAST\MASTv2\pyruntime\python.exe C:\MAST\integrations\setup_clients.py codex
+#
+# To copy this by hand instead, replace C:\MAST with your MAST folder and <you> with your user
+# folder, and create the workspace folder named in `cwd`.
+
+[mcp_servers.mast]
+# Written by MAST's integrations/setup_clients.py (codex). Running it again rewrites
+# every [mcp_servers.mast...] table and --uninstall removes them, so whatever you add
+# inside these tables is lost then.
+command = 'C:\MAST\MASTv2\pyruntime\python.exe'
+args = ["-I", "-X", "utf8", 'C:\MAST\integrations\claude-code\server\run_server.py']
+cwd = 'C:\Users\<you>\Documents\MAST-agent'
+startup_timeout_sec = 30
+# mast_wait blocks inside MAST for up to 840 s; 900 s lets it come back by itself.
+# supports_parallel_tool_calls stays unset: Codex then queues MAST's write tools.
+tool_timeout_sec = 900
+# Every MAST tool runs without a Codex prompt. The protection is on MAST's side:
+# its safety gates check every action, and an act is refused unless it carries
+# the token of the latest observation. setup_clients.py codex --approve read_only
+# pre-approves only the read-only tools instead.
+default_tools_approval_mode = "approve"
+
+[mcp_servers.mast.env]
+MAST_URL = "http://127.0.0.1:7862"
+MAST_ACTOR = "codex"
+PYTHONUTF8 = "1"
+PYTHONIOENCODING = "utf-8"

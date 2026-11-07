@@ -42,7 +42,7 @@ def test_a_number_one_level_down_is_found():
 
 
 def test_a_bare_number_and_a_flat_list_still_work():
-    assert SKILL._first_number(25296.2) == pytest.approx(25296.2)
+    assert SKILL._first_number(25000.0) == pytest.approx(25000.0)
     assert SKILL._first_number(["", 34182.3]) == pytest.approx(34182.3)
 
 
@@ -76,7 +76,7 @@ def test_the_channels_come_back_in_the_order_the_sweep_needs():
             return_value = NAMES_REPLY
         return R()
 
-    chans, err = SKILL._channels({}, call)
+    chans, err = SKILL._channels({}, lambda: call("Signals_NamesGet"))
     assert err == ""
     names = NAMES_REPLY[2][2]
     assert names[chans[0]].lower().startswith("oc m1 freq")

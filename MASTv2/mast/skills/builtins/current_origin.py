@@ -16,6 +16,7 @@ import logging
 import math
 import time
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -96,7 +97,7 @@ def effective_exponent(points, floor_a):
 def classify(i_zero_a, exponent, i_max_a):
     """判别表。返回 (verdict, 一句话)。任何一项读不到都返回 undetermined。"""
     if i_max_a is None:
-        return "undetermined", "最大偏压下读不到电流 —— 判不了。**「读不到」不是「没有」。**"
+        return "undetermined", tr("最大偏压下读不到电流 —— 判不了。**「读不到」不是「没有」。**", "No current can be read at the maximum bias - cannot judge. **'Cannot read' is not 'none'.**")
     # ⚠ 这里用**绝对**下限，而且本函数**故意不收**自标定的噪声底。
     #   第一版收了，于是「与偏压无关」这一格（按定义与 I(0V) 同量级）
     #   被 3×|I(0V)| 的底恒判成「没有可测的电流」—— 判别表最该抓的格子被
@@ -105,42 +106,48 @@ def classify(i_zero_a, exponent, i_max_a):
     #   参数删掉而不是留着不用：留着的话下一个人会以为它在起作用。
     if abs(i_max_a) < _ABS_FLOOR_A:
         return ("no_measurable_current",
-                "所有偏压下都在噪声底以下 —— 没有可测的电流。"
-                "若针尖本该在隧穿，这说明它已经退开或反馈没 engage。")
+                tr("所有偏压下都在噪声底以下 —— 没有可测的电流。"
+                "若针尖本该在隧穿，这说明它已经退开或反馈没 engage。",
+                "Below the noise floor at every bias - there is no measurable current. If the tip should be tunnelling, this means it has withdrawn or the feedback is not engaged."))
     if i_zero_a is None:
-        return "undetermined", "0 V 下读不到 —— **0 V 那一点正是判别点**，缺了它判不了。"
+        return "undetermined", tr("0 V 下读不到 —— **0 V 那一点正是判别点**，缺了它判不了。", "Cannot read at 0 V - **the 0 V point is exactly the discriminating point**, and without it nothing can be judged.")
     if abs(i_zero_a) >= _ZERO_FLOOR_A:
         # 直接用原始读数的比值，不依赖拟合能不能算出来
         ratio = abs(i_max_a) / max(abs(i_zero_a), 1e-18)
         if ratio <= _FLAT_RATIO:
             return ("not_a_junction_current",
-                    "0 V 下仍有 %.3g A，而最大偏压下也只有 %.3g A（%.1f 倍）—— "
+                    tr("0 V 下仍有 %.3g A，而最大偏压下也只有 %.3g A（%.1f 倍）—— "
                     "**这不是结电流**：它几乎不随偏压变，而隧穿与场发射在 0 V 下"
                     "都必须是零。偏置漂移／某处串扰／前置放大器断了，三者都长这样；"
-                    "分开它们要另一个观察：把可疑的动作停下来看它消不消失。"
+                    "分开它们要另一个观察：把可疑的动作停下来看它消不消失。",
+                    "There is still %.3g A at 0 V, and only %.3g A at the maximum bias (%.1f times) - **this is not a junction current**: it barely changes with bias, whereas tunnelling and field emission must both be zero at 0 V. Bias offset drift / crosstalk somewhere / a broken preamp all look like this; telling them apart needs another observation: stop the suspect action and see whether it disappears.")
                     % (i_zero_a, i_max_a, ratio))
         if exponent is None or exponent < _N_FLAT:
             return ("not_a_junction_current",
-                    "0 V 下仍有 %.3g A —— **这不是（纯粹的）结电流**，"
+                    tr("0 V 下仍有 %.3g A —— **这不是（纯粹的）结电流**，"
                     "而偏压依赖又拟不出来（本底把点都盖住了）。"
-                    "先把 0 V 本底的来源找掉再判结。" % i_zero_a)
+                    "先把 0 V 本底的来源找掉再判结。",
+                    "There is still %.3g A at 0 V - **this is not (purely) a junction current**, and the bias dependence cannot be fitted (the background covers all the points). Find the source of the 0 V background before judging the junction.") % i_zero_a)
         return ("mixed",
-                "0 V 下有 %.3g A 的本底，但电流确实随偏压变（%.0f 倍，n=%.1f）—— "
-                "一个真的结电流叠在一个偏置上。先把本底的来源找掉再判结。"
+                tr("0 V 下有 %.3g A 的本底，但电流确实随偏压变（%.0f 倍，n=%.1f）—— "
+                "一个真的结电流叠在一个偏置上。先把本底的来源找掉再判结。",
+                "At 0 V there is a background of %.3g A, but the current does vary with bias (%.0f times, n=%.1f) - a real junction current sitting on an offset. Find the source of the background before judging the junction.")
                 % (i_zero_a, ratio, exponent))
     if exponent is None:
-        return "undetermined", "0 V 干净，但非零偏压的点不够（或都在噪声底上），拟不出指数。"
+        return "undetermined", tr("0 V 干净，但非零偏压的点不够（或都在噪声底上），拟不出指数。", "0 V is clean, but there are too few non-zero-bias points (or all are at the noise floor) to fit an exponential.")
     if exponent >= _N_FIELD_EMISSION:
         return ("field_emission",
-                "0 V 干净而电流随偏压极度超线性（n=%.1f）—— **场发射**，不是隧穿。"
+                tr("0 V 干净而电流随偏压极度超线性（n=%.1f）—— **场发射**，不是隧穿。"
                 "针尖离表面太远而偏压太高。降偏压或进针；"
-                "带着成像偏压做横移/粗动时最常撞见它。" % exponent)
+                "带着成像偏压做横移/粗动时最常撞见它。",
+                "0 V is clean and the current is extremely super-linear in bias (n=%.1f) - **field emission**, not tunnelling. The tip is too far from the surface and the bias too high. Lower the bias or engage; it is most often met when doing a lateral move / coarse motion with the imaging bias.") % exponent)
     if exponent < _N_FLAT:
         return ("not_a_junction_current",
-                "电流几乎不随偏压变（n=%.1f）而 0 V 下又是干净的 —— 自相矛盾，"
-                "多半是读数被别的东西钳住了。先查量程与增益。" % exponent)
+                tr("电流几乎不随偏压变（n=%.1f）而 0 V 下又是干净的 —— 自相矛盾，"
+                "多半是读数被别的东西钳住了。先查量程与增益。",
+                "The current barely changes with bias (n=%.1f) yet 0 V is clean - self-contradictory, most likely the reading is clamped by something else. Check the range and gain first.") % exponent)
     return ("junction_current",
-            "0 V 干净、电流随偏压近似线性（n=%.1f）—— 这是真的结电流（隧穿/接触）。"
+            tr("0 V 干净、电流随偏压近似线性（n=%.1f）—— 这是真的结电流（隧穿/接触）。", "0 V is clean and the current is roughly linear in bias (n=%.1f) - this is a real junction current (tunnelling/contact).")
             % exponent)
 
 
@@ -156,22 +163,40 @@ class ClassifyUnexplainedCurrent(BaseSkill):
             category=SkillCategory.WRITE,   # 要动偏压与 Z 控制器，虽然都还原
             safety_level=SafetyLevel.AUTO,
             description=(
-                "用偏压依赖区分可疑电流的来源：隧穿、场发射、偏置或串扰，以及放大器饱和。\n\n先检查饱和；满量程时不同偏压的读数都可能不变，不能因此判成串扰。零偏压读数用于检查偏压无关成分，解释时应结合偏置与噪声。\n\n测量期间关闭反馈，避免 Z 跟踪 setpoint 使 I(V) 变成反馈环响应；结束后还原偏压与反馈。observed_current_a 可提供引起怀疑的读数。静态测量无法复现时返回 transient，需要在触发该电流的过程中重新观察。"
+                tr("看到一股说不清来路的电流时，用**偏压依赖**判它是什么："
+                "隧穿／场发射／根本不是结电流（偏置或串扰）／放大器饱和。"
+                "\n\n**判别点是 0 V 那一个读数。** 它看着最没用："
+                "压电运动感生的位移电流不关心偏压，0 V 下照样在；"
+                "而隧穿与场发射在 0 V 下都必须是零。例如：横移拦截报出一个小电流，"
+                "怀疑是压电串扰 —— 而扫偏压得到 2.00 V 时远大于 1.00 V 时的电流、"
+                "0.00 V 时为零，偏压变 2 倍电流变数百倍（强烈超线性），"
+                "是场发射；0 V 干净这一点把串扰判掉了。"
+                "\n\n**先查饱和再判别。** 放大器满量程时每个偏压读数都一样，"
+                "落进判别表就成了「随偏压不变 ⇒ 串扰」，正好判反。"
+                "「读数不动」有两个原因：没有电流，或者量程满了。"
+                "\n\n**测量期间关反馈** —— 反馈开着时 Z 会去追 setpoint，"
+                "I(V) 描述的是反馈环不是结。结束后偏压与反馈都还原。"
+                "\n\n可选参数 `observed_current_a` 接「引起怀疑的那个读数」："
+                "静态复现不出来就判 `transient` —— 那股电流只在某件事发生时存在，"
+                "静态 I(V) 判不了它，**要在动的过程中重测**。",
+                "When you see a current of unclear origin, use the **bias dependence** to tell what it is: tunnelling / field emission / not a junction current at all (offset or crosstalk) / amplifier saturation.\n\n**The discriminating point is the 0 V reading.** It looks the least useful: the displacement current induced by piezo motion does not care about bias and is still there at 0 V; whereas tunnelling and field emission must both be zero at 0 V. Example: a lateral-move interception reported a small current and piezo crosstalk was suspected - sweeping the bias showed a current that rises by hundreds of times when the bias doubles and is zero at 0 V, so it was field emission; the clean 0 V reading ruled out crosstalk.\n\n**Check saturation before discriminating.** When the amplifier is at full scale every bias reads the same, and falling into the discrimination table it becomes 'does not change with bias => crosstalk', exactly backwards. 'The reading does not move' has two causes: no current, or the range is full.\n\n**Feedback is turned off during the measurement** - with the feedback on, Z chases the setpoint, and I(V) describes the feedback loop, not the junction. Afterwards the bias and feedback are both restored.\n\nThe optional parameter `observed_current_a` takes 'the reading that raised suspicion': if it cannot be reproduced statically it is judged `transient` - that current exists only while something is happening, a static I(V) cannot judge it, and **it must be re-measured while the action is in progress**.")
             ),
             parameters=[
                 ParameterSpec(
                     name="test_biases_v", type="str",
-                    description=("逗号分隔的测试偏压。**0 会被自动补上** —— "
-                                 "缺了它整个判别就立不住。"),
+                    description=(tr("逗号分隔的测试偏压。**0 会被自动补上** —— "
+                                 "缺了它整个判别就立不住。",
+                                 "Comma-separated test biases. **0 is added automatically** - without it the whole discrimination does not hold.")),
                     required=False, default="2.0,1.0,0.5,0.0"),
                 ParameterSpec(
                     name="observed_current_a", type="float", unit="A",
-                    description=("引起怀疑的那个电流读数。给了就与同偏压下的静态读数比："
-                                 "复现不出来 ⇒ 判 transient（只在动的时候存在）。"),
+                    description=(tr("引起怀疑的那个电流读数。给了就与同偏压下的静态读数比："
+                                 "复现不出来 ⇒ 判 transient（只在动的时候存在）。",
+                                 "The suspect current reading. If given, it is compared with the static reading at the same bias: not reproducible => judged transient (exists only while moving).")),
                     required=False, default=None),
                 ParameterSpec(
                     name="repeats", type="int",
-                    description="每个偏压读几次取中位数。",
+                    description=tr("每个偏压读几次取中位数。", "How many readings per bias, taking the median."),
                     required=False, default=3, min_value=1, max_value=15),
             ],
             estimated_duration_s=25.0,
@@ -205,11 +230,11 @@ class ClassifyUnexplainedCurrent(BaseSkill):
         except ValueError:
             return SkillResult(
                 skill_name="ClassifyUnexplainedCurrent", success=False,
-                error="test_biases_v 解析不了：%r —— 要逗号分隔的数。" % raw)
+                error=tr("test_biases_v 解析不了：%r —— 要逗号分隔的数。", "test_biases_v could not be parsed: %r - a comma-separated list of numbers is expected.") % raw)
         if not biases:
             return SkillResult(
                 skill_name="ClassifyUnexplainedCurrent", success=False,
-                error="test_biases_v 是空的。")
+                error=tr("test_biases_v 是空的。", "test_biases_v is empty."))
         zero_added = not any(abs(b) < 1e-9 for b in biases)
         if zero_added:
             biases.append(0.0)
@@ -226,10 +251,11 @@ class ClassifyUnexplainedCurrent(BaseSkill):
             return SkillResult(
                 skill_name="ClassifyUnexplainedCurrent", success=True,
                 data={"verdict": "amplifier_saturated", "current_a": first,
-                      "message": ("电流 %.4g A 贴在量程端点 —— 放大器**饱和**，"
+                      "message": (tr("电流 %.4g A 贴在量程端点 —— 放大器**饱和**，"
                                   "读的是端点不是电流。偏压依赖判别对饱和读数无效"
                                   "（每个偏压都会读到同一个数，看起来像「与偏压无关」）。"
-                                  "先跑 RecoverTipFromSaturation 把针尖退开。"
+                                  "先跑 RecoverTipFromSaturation 把针尖退开。",
+                                  "Current %.4g A is stuck at a range end - the amplifier is **saturated**, and what is read is the end stop, not the current. The bias-dependence discrimination is invalid for saturated readings (every bias reads the same number, which looks like 'independent of bias'). Run RecoverTipFromSaturation first to withdraw the tip.")
                                   % first),
                       "next_skill": "RecoverTipFromSaturation"})
 
@@ -249,9 +275,10 @@ class ClassifyUnexplainedCurrent(BaseSkill):
         if fb_was_on is None:
             return SkillResult(
                 skill_name="ClassifyUnexplainedCurrent", success=False,
-                error=("读不到 Z 反馈的当前状态（ZCtrl_OnOffGet）—— **判不了**它进来时"
+                error=(tr("读不到 Z 反馈的当前状态（ZCtrl_OnOffGet）—— **判不了**它进来时"
                        "是开还是关，也就无从还原。不做：万一用户本来关着反馈，"
-                       "我结束时替他开回来会把 Z 驱向 setpoint。"),
+                       "我结束时替他开回来会把 Z 驱向 setpoint。",
+                       "The current state of the Z feedback cannot be read (ZCtrl_OnOffGet) - **cannot tell** whether it was on or off on entry, so it cannot be restored. Not proceeding: if the user had the feedback off, turning it on again at the end would drive Z toward the setpoint.")),
                 data={"controller_on": None})
 
         # ④ 关反馈：开着的话 I(V) 描述的是反馈环不是结
@@ -262,9 +289,10 @@ class ClassifyUnexplainedCurrent(BaseSkill):
         if not fb_off:
             return SkillResult(
                 skill_name="ClassifyUnexplainedCurrent", success=False,
-                error=("关不掉 Z 反馈（读回 %r）—— **不在反馈开着的时候量 I(V)**："
+                error=(tr("关不掉 Z 反馈（读回 %r）—— **不在反馈开着的时候量 I(V)**："
                        "Z 会去追 setpoint，量到的是反馈环的响应不是结的性质，"
-                       "而它长得像一条很正常的曲线。"
+                       "而它长得像一条很正常的曲线。",
+                       "Cannot turn off the Z feedback (read back %r) - **I(V) is not measured with the feedback on**: Z would chase the setpoint, and what is measured is the response of the feedback loop, not a property of the junction, yet it looks like a perfectly normal curve.")
                        % zdata.get("z_controller_on")),
                 data={"z_controller_on": zdata.get("z_controller_on")})
 
@@ -326,10 +354,11 @@ class ClassifyUnexplainedCurrent(BaseSkill):
                     data["verdict"] = "transient"
                     data["static_verdict"] = verdict
                     data["message"] = (
-                        "静态复现不出来：被怀疑的读数 %.3g A，同偏压静止时只有 %.3g A"
+                        tr("静态复现不出来：被怀疑的读数 %.3g A，同偏压静止时只有 %.3g A"
                         "（差 %.0f 倍）—— 这股电流**只在某件事发生时存在**"
                         "（压电运动、偏压斜坡、扫描）。静态 I(V) 判不了它，"
-                        "**要在那个动作进行中重测**。这不是「没有」，是「没在这儿」。"
+                        "**要在那个动作进行中重测**。这不是「没有」，是「没在这儿」。",
+                        "Not reproducible statically: the suspect reading is %.3g A, but at the same bias at rest it is only %.3g A (%.0f times different) - this current **exists only while something is happening** (piezo motion, bias ramp, scanning). A static I(V) cannot judge it, **re-measure while that action is in progress**. This is not 'none', it is 'not here'.")
                         % (observed, static, ratio))
 
         return SkillResult(

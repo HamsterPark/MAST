@@ -9,9 +9,10 @@ no thread waking policy lives here — that authority stays in the core.
 Verdict translation lives in :mod:`mast.core.hitl_decision` (pure functions).
 It used to be reached via ``getattr(app, "_build_decision")``, but the Gradio
 removal (``7aa1996``) deleted that method without migrating it, so the lookup
-returned ``None`` on EVERY call and this endpoint silently answered "live
-decision builder unavailable" for every request. Translation is pure; gating
-it behind a live-object lookup was the design error.
+returned ``None`` on EVERY call and this endpoint answered "live decision
+builder unavailable" — **no human approval worked at all**
+until this was fixed. Translation is pure; gating it behind a
+live-object lookup was the design error.
 
 Endpoints:
   * POST /api/agents/{agent_id}/interrupts/{interrupt_id}/resolve
@@ -36,6 +37,7 @@ live app inside the handler; no gradio import, no orchestrator construction here
 
 from __future__ import annotations
 
+from mast.i18n import tr
 import logging
 import time as _time
 from typing import Any
@@ -83,8 +85,8 @@ def _record_approval(app, interrupt_id: str, pending: dict, body, decision) -> N
     """Write the operator's HITL verdict into the v2 ``approvals`` table.
 
     The table, its schema and ``ApprovalService.issue()`` have all existed since
-    the v2 logging layer landed. **Nothing ever called it.** 2026-07-27
-    forensics: 11 CONFIRM-level dangerous operations ran that session and
+    the v2 logging layer landed. **Nothing ever called it.** As a
+    result CONFIRM-level dangerous operations could run while
     ``approvals`` had 0 rows — from the audit trail there is no way to establish
     who authorised any of them, or whether anyone did.
 
@@ -398,13 +400,14 @@ def resolve_hitl_gates(
         from mast.core.diagnostics import record as _diag
 
         _diag("hitl_gate_operator_clear", "agents_control",
-              "用户显式清除了关键事件闸门（此前仍未解决）",
+              tr("用户显式清除了关键事件闸门（此前仍未解决）",
+                 "The user explicitly cleared the critical-event gate (it was still unresolved)"),
               reopened=n, gates_seen=seen, note=note)
     except Exception as exc:  # noqa: BLE001 — diagnostics never breaks the action
         logger.debug("agents_control: gate-clear diagnostic skipped: %s", exc)
     return ResolveGatesResponse(
         ok=True, reopened=n, gates_seen=seen, degraded=False,
-        detail=("没有闸门处于关闭状态（无需清除）" if n == 0 else None),
+        detail=(tr("没有闸门处于关闭状态（无需清除）", "No gate is closed (nothing to clear)") if n == 0 else None),
     )
 
 
@@ -492,8 +495,10 @@ def interject(
         # instruction back and believed it had been routed. Fail loudly instead.
         return InterjectResponse(
             agent_id=agent_id,
-            detail=(f"未知的智能体 id「{agent_id}」——插话未入队。"
-                    f"可用：{', '.join(_AGENT_IDS)} 或 __all__"),
+            detail=tr(f"未知的智能体 id「{agent_id}」——插话未入队。"
+                      f"可用：{', '.join(_AGENT_IDS)} 或 __all__",
+                      f"Unknown agent id \"{agent_id}\" - the interjection was not queued. "
+                      f"Available: {', '.join(_AGENT_IDS)} or __all__"),
             degraded=True,
         )
     if app is None:
@@ -506,15 +511,17 @@ def interject(
             agent_id=agent_id, detail="operator-control state not wired", degraded=True
         )
     # No live run → the queue has no consumer; a queued interjection would sit
-    # in a black hole while the operator believes it was delivered (2026-07-10
-    # #90: the STS run had silently died, the 15:42 interjection vanished, and
-    # nothing told the operator). Say so instead, with the actionable next step.
+    # in a black hole while the operator believes it was delivered (for example
+    # when the run had silently died and nothing told the operator). Say so instead, with the actionable next step.
     _task = api_state.get("task")
     if not (isinstance(_task, dict) and _task.get("active")):
         return InterjectResponse(
             agent_id=agent_id,
-            detail=("当前没有正在运行的任务——插话不会被送达。"
-                    "请直接在群聊输入框发送新指令（同一会话可点『继续』恢复）。"),
+            detail=tr("当前没有正在运行的任务——插话不会被送达。"
+                      "请直接在群聊输入框发送新指令（同一会话可点『继续』恢复）。",
+                      "There is no running task - the interjection will not be delivered. "
+                      "Send a new instruction in the group chat input instead (the same conversation "
+                      "can be resumed with \"Continue\")."),
             degraded=True,
         )
     # STAMP THE TASK (2026-07-28). The queue is a process-level singleton and its
@@ -548,7 +555,7 @@ def interject(
             if conv_id and conv_store is not None:
                 conv_store.append_message(
                     conv_id, kind="operator", agent_id=agent_id, role="user",
-                    text=f"[插话 → {agent_id}] {text}")
+                    text=tr(f"[插话 → {agent_id}] {text}", f"[interjection -> {agent_id}] {text}"))
         except Exception as exc:  # noqa: BLE001
             logger.debug("agents_control: interject transcript append failed: %s", exc)
         return InterjectResponse(

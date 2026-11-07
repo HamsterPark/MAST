@@ -37,6 +37,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 import itertools
 
+from mast.i18n import tr
+
 logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = "1.0.0"
@@ -275,74 +277,108 @@ def write_readme(exp_dir: Path) -> bool:
     samples = d.get("samples") or []
     act = d.get("activity") or {}
     lines = [
-        f"# {d.get('title') or '(未命名实验)'}",
+        f"# {d.get('title') or tr('(未命名实验)', '(unnamed experiment)')}",
         "",
-        f"- 实验 ID：`{d.get('id', '')}`",
-        f"- 创建时间：{d.get('created_at', '')}",
-        f"- 上次活动：{d.get('last_active_at', '')}",
+        tr(f"- 实验 ID：`{d.get('id', '')}`", f"- Experiment ID: `{d.get('id', '')}`"),
+        tr(f"- 创建时间：{d.get('created_at', '')}", f"- Created: {d.get('created_at', '')}"),
+        tr(f"- 上次活动：{d.get('last_active_at', '')}",
+           f"- Last active: {d.get('last_active_at', '')}"),
     ]
     if d.get("goal"):
-        lines.append(f"- 目标：{d['goal']}")
+        lines.append(tr(f"- 目标：{d['goal']}", f"- Goal: {d['goal']}"))
     if d.get("dir_name") and d["dir_name"] != d.get("title"):
-        lines.append(f"- 文件夹名（创建时冻结，不随改名变化）：`{d['dir_name']}`")
+        lines.append(tr(f"- 文件夹名（创建时冻结，不随改名变化）：`{d['dir_name']}`",
+                        f"- Folder name (frozen at creation, does not follow renames): "
+                        f"`{d['dir_name']}`"))
     hist = d.get("title_history") or []
     if hist:
-        old = "、".join(str(h.get("title", "")) for h in hist if h.get("title"))
-        lines.append(f"- 曾用名：{old}")
+        old = tr("、", ", ").join(str(h.get("title", "")) for h in hist if h.get("title"))
+        lines.append(tr(f"- 曾用名：{old}", f"- Former names: {old}"))
     lines += [
         "",
-        f"原始数据文件 {act.get('raw_file_count', 0)} 个"
-        f"（{_human_bytes(int(act.get('raw_bytes') or 0))}）。",
+        tr(f"原始数据文件 {act.get('raw_file_count', 0)} 个"
+           f"（{_human_bytes(int(act.get('raw_bytes') or 0))}）。",
+           f"{act.get('raw_file_count', 0)} raw data file(s) "
+           f"({_human_bytes(int(act.get('raw_bytes') or 0))})."),
         "",
-        "## 样品",
+        tr("## 样品", "## Samples"),
         "",
     ]
     if samples:
-        lines += ["| # | 名称 | 类型 | 文件夹 |", "|---|---|---|---|"]
+        lines += [tr("| # | 名称 | 类型 | 文件夹 |", "| # | Name | Type | Folder |"),
+                  "|---|---|---|---|"]
         for s in samples:
             lines.append(
                 f"| {s.get('index', '')} | {s.get('name', '')} | "
                 f"{s.get('sample_type', '') or '—'} | `samples/{s.get('dir_name', '')}` |"
             )
     else:
-        lines.append("（还没有样品）")
+        lines.append(tr("（还没有样品）", "(no samples yet)"))
     lines += [
         "",
-        "## 文件夹结构",
+        tr("## 文件夹结构", "## Folder layout"),
         "",
         "```",
-        "experiment.json            本实验的元数据（机器可读，本文件由它生成）",
-        "chats/                     还没选样品时开的对话（规划讨论）",
+        tr("experiment.json            本实验的元数据（机器可读，本文件由它生成）",
+           "experiment.json            metadata of this experiment (machine-readable; this file is generated from it)"),
+        tr("chats/                     还没选样品时开的对话（规划讨论）",
+           "chats/                     conversations opened before a sample is chosen (planning discussions)"),
         "samples/S01__.../",
-        "    sample.json            样品元数据",
-        "    raw/                   ★ Nanonis 原始文件副本",
-        "        _manifest.jsonl      每行一个文件：sha256 / 来源 / 时间 / 关联动作",
-        "        sxm/ dat/ 3ds/       按类型分（只含完整、已校验的文件）",
-        "        nanonis/             仅当把 Nanonis 保存目录指向了这里时存在",
-        "    derived/               分析产物（全部可再生）",
-        "    map/                   扫描地图标记",
-        "    chats/                 该样品下的对话",
-        "    env/                   该样品时段的环境记录",
-        "env/                       实验级环境记录（跨样品连续，按天分文件）",
-        "reports/                   文献报告 / 实验报告 / 论文草稿 / 评审报告",
-        "    _assets/                 本实验的图池（报告里的 ../_assets/x.png）",
-        "    <类型>__<日期>__<名字>__<id8>/   一个文档一个目录",
-        "        v001.md v002.md      ★ 版本，永不覆盖",
-        "        doc.json             文档元数据（标题、归属、关联实验）",
-        "        versions.jsonl       每行一个版本：sha256 / 作者 / 时间 / 来自哪次对话",
-        "plans/                     实验计划（同上结构）",
-        "    plan__.../progress.md    执行进度（视图，会被重写）",
-        "    plan__.../progress.jsonl 进度事件（只追加）",
-        "library/                   本实验的文献库",
-        "    members.jsonl            ★ 书目（只追加：加入/移除/全文就位）",
-        "exports/                   按需导出（HTML 报告、记录快照，多份共存）",
+        tr("    sample.json            样品元数据",
+           "    sample.json            sample metadata"),
+        tr("    raw/                   ★ Nanonis 原始文件副本",
+           "    raw/                   * copies of the raw Nanonis files"),
+        tr("        _manifest.jsonl      每行一个文件：sha256 / 来源 / 时间 / 关联动作",
+           "        _manifest.jsonl      one file per line: sha256 / source / time / linked action"),
+        tr("        sxm/ dat/ 3ds/       按类型分（只含完整、已校验的文件）",
+           "        sxm/ dat/ 3ds/       split by type (complete, verified files only)"),
+        tr("        nanonis/             仅当把 Nanonis 保存目录指向了这里时存在",
+           "        nanonis/             exists only if the Nanonis save directory points here"),
+        tr("    derived/               分析产物（全部可再生）",
+           "    derived/               analysis products (all regenerable)"),
+        tr("    map/                   扫描地图标记",
+           "    map/                   scan map markers"),
+        tr("    chats/                 该样品下的对话",
+           "    chats/                 conversations under this sample"),
+        tr("    env/                   该样品时段的环境记录",
+           "    env/                   environment records for this sample's time window"),
+        tr("env/                       实验级环境记录（跨样品连续，按天分文件）",
+           "env/                       experiment-level environment records (continuous across samples, one file per day)"),
+        tr("reports/                   文献报告 / 实验报告 / 论文草稿 / 评审报告",
+           "reports/                   literature reports / experiment reports / paper drafts / review reports"),
+        tr("    _assets/                 本实验的图池（报告里的 ../_assets/x.png）",
+           "    _assets/                 figure pool of this experiment (../_assets/x.png in reports)"),
+        tr("    <类型>__<日期>__<名字>__<id8>/   一个文档一个目录",
+           "    <type>__<date>__<name>__<id8>/   one directory per document"),
+        tr("        v001.md v002.md      ★ 版本，永不覆盖",
+           "        v001.md v002.md      * versions, never overwritten"),
+        tr("        doc.json             文档元数据（标题、归属、关联实验）",
+           "        doc.json             document metadata (title, ownership, linked experiments)"),
+        tr("        versions.jsonl       每行一个版本：sha256 / 作者 / 时间 / 来自哪次对话",
+           "        versions.jsonl       one version per line: sha256 / author / time / source conversation"),
+        tr("plans/                     实验计划（同上结构）",
+           "plans/                     experiment plans (same structure as above)"),
+        tr("    plan__.../progress.md    执行进度（视图，会被重写）",
+           "    plan__.../progress.md    execution progress (a view; it is rewritten)"),
+        tr("    plan__.../progress.jsonl 进度事件（只追加）",
+           "    plan__.../progress.jsonl progress events (append-only)"),
+        tr("library/                   本实验的文献库",
+           "library/                   literature library of this experiment"),
+        tr("    members.jsonl            ★ 书目（只追加：加入/移除/全文就位）",
+           "    members.jsonl            * bibliography (append-only: added / removed / full text in place)"),
+        tr("exports/                   按需导出（HTML 报告、记录快照，多份共存）",
+           "exports/                   on-demand exports (HTML reports, record snapshots; several can coexist)"),
         "```",
         "",
-        "> 这个实验没有「结束」或「归档」状态：它永远可以继续做。",
-        "> 写报告不需要先关闭实验。",
+        tr("> 这个实验没有「结束」或「归档」状态：它永远可以继续做。",
+           '> This experiment has no "finished" or "archived" state: it can always be continued.'),
+        tr("> 写报告不需要先关闭实验。",
+           "> Writing a report does not require closing the experiment first."),
         "",
-        "> 报告和计划的历史版本都在各自目录里（`v001.md`、`v002.md` …），",
-        "> 永远不会被覆盖。文献库里存的是文献指针，原文在本机的大库中。",
+        tr("> 报告和计划的历史版本都在各自目录里（`v001.md`、`v002.md` …），",
+           "> Earlier versions of reports and plans live in their own directories (`v001.md`, `v002.md` ...),"),
+        tr("> 永远不会被覆盖。文献库里存的是文献指针，原文在本机的大库中。",
+           "> and are never overwritten. The library holds literature pointers; the full texts are in the machine's main library."),
         "",
     ]
     try:

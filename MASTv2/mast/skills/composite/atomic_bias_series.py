@@ -1,8 +1,6 @@
 """AtomicBiasSeries —— 同一片原子、逐张变偏压，每一张都落账。
 
-设计文档:``docs/v2/design/`` 的「S2 偏压序列」设计,D4/D6/§3.2
-(文件名按「S2 偏压序列」检索;通用层注释不写样品名前缀 ——
-``stm_capability_vs_sample_layer.md`` 拍板④)。
+设计文档:``docs/v2/design/`` 里的偏压序列设计。
 
 账的格式与派生逻辑住在 :mod:`mast.core.s2_bias_ledger`(纯数据层),本模块只负责
 **跑**和**把每一次尝试写进去**。
@@ -18,7 +16,7 @@
 
 * **不做在线漂移闭环。** 接受漂移 + 逐帧记录标称中心与 .sxm 头里的真实中心 +
   事后对齐。仓里的 `TrackDrift_ReferenceScan` 用 `Scan_FrameDataGrab` 直读缓冲，
-  而缓冲与保存帧的同一性无法保证，因此不把 S2 建在
+  而缓冲同一性并不可靠(与同轮 .sxm 的全局最大相关很低)——不把本流程建在
   它上面。在线补偿的另一条路是每偏压多扫一张参考图，成本翻倍。
 * **不靠排序规避高偏压风险。** `order_series_monotonic` 单调走一遍，高 |V| 必然
   落在序列两端之一，排序救不了这件事。靠的是逐帧落账 + 帧间守卫 + 一个**用户
@@ -40,6 +38,7 @@ from typing import Any, Iterator
 
 from mast.core import s2_bias_ledger as ledger
 from mast.core.scan_planner import expand_series, order_series_monotonic
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -79,7 +78,7 @@ class AtomicBiasSeries(CompositeSkillGraph):
             # 它反复改偏压并在同一点上扫,是真动硬件的流程。
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "在**同一个**位置上逐个偏压成像，并按偏压逐条记录该偏压下有没有"
+                tr("在**同一个**位置上逐个偏压成像，并按偏压逐条记录该偏压下有没有"
                 "原子分辨 —— 写进一本**只追加**的账，账的键是**偏压**，不是帧序号"
                 "（planner 会重排整条序列，所以 frame 3 不是 bias 3）。"
                 "每个偏压各自拿到一个闭集结局：resolved / "
@@ -89,110 +88,159 @@ class AtomicBiasSeries(CompositeSkillGraph):
                 "对比度」），把前者折进后者是一句谎话，而这句谎话的结局是一根好针尖"
                 "被扰动。anchor 帧（回到起始偏压再扫一张）才是让「这一整段扫的是"
                 "同一片原子」事后可被证明的那个东西。"
-                "漂移只记录，绝不在线补偿。"
+                "漂移只记录，绝不在线补偿。",
+                "Image at the **same** position at each bias in turn, and record "
+                "per bias whether atomic resolution was seen -- written into an "
+                "**append-only** ledger keyed by **bias**, not by frame index (the "
+                "planner reorders the whole sequence, so frame 3 is not bias 3). "
+                "Each bias gets one outcome from a closed set: resolved / "
+                "absent_confirmed / undecided / blocked / tip_aborted. 'undecided' "
+                "and 'absent_confirmed' are NEVER merged -- the former means the "
+                "evidence was not good enough, the latter is a real scientific "
+                "conclusion (\"there is truly no atomic contrast at this bias\"); "
+                "folding the former into the latter is a lie, and the end result of"
+                " that lie is a good tip being disturbed. The anchor frame (one "
+                "more scan back at the starting bias) is what makes it provable "
+                "afterwards that the whole series imaged the same atoms. Drift is "
+                "only recorded, never compensated online.")
             ),
             parameters=[
                 ParameterSpec(
                     name="bias_values", type="str", required=False,
                     description=(
-                        "偏压序列，单位伏特，逗号分隔（例如 "
+                        tr("偏压序列，单位伏特，逗号分隔（例如 "
                         "'-0.4,-0.2,0.2,0.4'）。这个与 "
-                        "bias_start/bias_stop/bias_n 三件套二选一。"),
+                        "bias_start/bias_stop/bias_n 三件套二选一。",
+                        "Bias sequence in volts, comma separated (e.g. "
+                        "'-0.4,-0.2,0.2,0.4'). Use this or the bias_start/bias_stop/bias_n "
+                        "triple, not both.")),
                     default=""),
                 ParameterSpec(
                     name="bias_start", type="float", unit="V", required=False,
-                    description="序列起点（配合 bias_stop + bias_n 一起用）。",
+                    description=tr("序列起点（配合 bias_stop + bias_n 一起用）。", "Start of the sequence (use together with bias_stop + bias_n)."),
                     min_value=-10.0, max_value=10.0),
                 ParameterSpec(
                     name="bias_stop", type="float", unit="V", required=False,
-                    description="序列终点。", min_value=-10.0, max_value=10.0),
+                    description=tr("序列终点。", "End of the sequence."), min_value=-10.0, max_value=10.0),
                 ParameterSpec(
                     name="bias_n", type="int", required=False,
-                    description="这条序列里有几个偏压。",
+                    description=tr("这条序列里有几个偏压。", "Number of biases in the sequence."),
                     min_value=1, max_value=64),
                 ParameterSpec(
                     name="center_x_m", type="float", unit="m", required=True,
-                    description="要成像的位置 —— 每一个偏压都用**同一个**位置。"),
+                    description=tr("要成像的位置 —— 每一个偏压都用**同一个**位置。",
+                                "Position to image -- the **same** position is used for every bias.")),
                 ParameterSpec(
                     name="center_y_m", type="float", unit="m", required=True,
-                    description="要成像的位置。"),
+                    description=tr("要成像的位置。", "Position to image.")),
                 ParameterSpec(
                     name="size_m", type="float", unit="m", required=False,
                     default=5e-9, min_value=1e-10, max_value=1e-7,
                     description=(
-                        "视野大小。原子尺度闸门卡的是 nm/px，所以它和 'pixels' "
+                        tr("视野大小。原子尺度闸门卡的是 nm/px，所以它和 'pixels' "
                         "合起来决定这一帧到底撑不撑得起一个判定 —— 在扫任何一帧"
-                        "**之前**就先查。")),
+                        "**之前**就先查。",
+                        "Field of view. The atomic-scale gate checks nm/px, so this "
+                        "together with 'pixels' decides whether the frame can support a "
+                        "verdict at all -- checked **before** any frame is scanned."))),
                 ParameterSpec(
                     name="pixels", type="int", required=False,
                     min_value=64, max_value=2048,
                     description=(
-                        "每行像素数。留空 = 用 atomic_verify 这一档的值。"
+                        tr("每行像素数。留空 = 用 atomic_verify 这一档的值。"
                         "WARNING：只把 pixels 提上去而不把 "
                         "line_time_s 按同样的倍数一起提，买到的是一个更好看的 nm/px，"
                         "而每个采样点携带的信息**更少** —— 那是在骗过尺度闸门，"
-                        "不是通过它。")),
+                        "不是通过它。",
+                        "Pixels per line. Empty = use the value of this atomic_verify tier."
+                        " WARNING: raising only pixels without raising line_time_s by the "
+                        "same factor buys a nicer nm/px while every sample carries **less**"
+                        " information -- that fools the scale gate instead of passing it."))),
                 ParameterSpec(
                     name="line_time_s", type="float", unit="s", required=False,
                     min_value=0.01, max_value=60.0,
-                    description="留空 = 用 atomic_verify 这一档的值。"),
+                    description=tr("留空 = 用 atomic_verify 这一档的值。", "Empty = use the value of this atomic_verify tier.")),
                 ParameterSpec(
                     name="ledger_dir", type="str", required=True,
                     description=(
-                        "只追加的那本账放在哪个目录下"
+                        tr("只追加的那本账放在哪个目录下"
                         "（<dir>/.mast/s2_bias_ledger.jsonl）。账里存的是帧的"
                         "**绝对路径**，所以它不依赖 scan registry"
-                        "（后者扫过 50 张之后就开始淘汰）。"),
+                        "（后者扫过 50 张之后就开始淘汰）。",
+                        "Directory that holds the append-only ledger "
+                        "(<dir>/.mast/s2_bias_ledger.jsonl). The ledger stores the "
+                        "**absolute path** of each frame, so it does not depend on the scan"
+                        " registry (which starts evicting after 50 scans).")),
                     default=""),
                 ParameterSpec(
                     name="elevated_bias_abs_v", type="float", unit="V",
                     required=False, min_value=0.0, max_value=10.0,
                     description=(
-                        "|V| 高过这个值，扫完那一帧就强制插一次针尖复核。"
+                        tr("|V| 高过这个值，扫完那一帧就强制插一次针尖复核。"
                         "**由用户填**（OPERATOR-SUPPLIED）—— 这里不发明"
                         "默认值。留空则这个槽位**不生效**（INACTIVE），而且每一条账"
                         "都会把这件事说出来；它绝不会被悄悄当成"
-                        "「查过了，没问题」。")),
+                        "「查过了，没问题」。",
+                        "If |V| is above this value, a tip re-check is forced after that "
+                        "frame is scanned. **Supplied by the user** (OPERATOR-SUPPLIED) -- "
+                        "no default is invented here. If empty, this slot is INACTIVE, and "
+                        "every ledger row says so; it is never silently treated as "
+                        "\"checked, fine\"."))),
                 ParameterSpec(
                     name="anchor_every_n", type="int", required=False,
                     default=0, min_value=0, max_value=64,
                     description=(
-                        "每 N 个偏压插一张 anchor 复扫（回到起始偏压再扫一张）。"
+                        tr("每 N 个偏压插一张 anchor 复扫（回到起始偏压再扫一张）。"
                         "0 = 只在收尾扫那一张。收尾那张 anchor **永远都会扫** —— "
-                        "一张都没有的话，「这一段扫的是同一片原子」无从证明。")),
+                        "一张都没有的话，「这一段扫的是同一片原子」无从证明。",
+                        "Insert an anchor re-scan (one more scan back at the starting bias)"
+                        " every N biases. 0 = only the closing one. The closing anchor is "
+                        "**always scanned** -- without a single anchor, \"this series imaged"
+                        " the same atoms\" cannot be proven."))),
                 ParameterSpec(
                     name="max_attempts_per_bias", type="int", required=False,
                     default=DEFAULT_MAX_ATTEMPTS_PER_BIAS,
                     min_value=1, max_value=5,
-                    description="每个偏压在放弃之前最多扫几次。"),
+                    description=tr("每个偏压在放弃之前最多扫几次。", "Maximum number of scans per bias before giving up.")),
                 ParameterSpec(
                     name="max_undecidable_retries_per_bias", type="int",
                     required=False, default=DEFAULT_MAX_UNDECIDABLE_RETRIES,
                     min_value=0, max_value=5,
                     description=(
-                        "花在 'undecidable' 裁决上的重试次数，与失败**分开计**"
-                        "（SEPARATELY）—— 一张没能得出结论的帧不是一张失败的帧。")),
+                        tr("花在 'undecidable' 裁决上的重试次数，与失败**分开计**"
+                        "（SEPARATELY）—— 一张没能得出结论的帧不是一张失败的帧。",
+                        "Retries spent on 'undecidable' verdicts, counted SEPARATELY from "
+                        "failures -- a frame that could not reach a conclusion is not a "
+                        "failed frame."))),
                 ParameterSpec(
                     name="expected_coord_epoch", type="int", required=True,
                     description=(
-                        "这些帧中心是在哪一代坐标下规划的。**必填**，对不上要拒绝，"
+                        tr("这些帧中心是在哪一代坐标下规划的。**必填**，对不上要拒绝，"
                         "**而且**当前代次读不到时同样拒绝 —— 一次粗动会让同一组 "
                         "(x, y) 变成另一片表面，而这一步接着会对着它连扫几个小时。"
-                        "以前它可以省略，于是那道守卫悄无声息地形同虚设。")),
+                        "以前它可以省略，于是那道守卫悄无声息地形同虚设。",
+                        "Coordinate epoch under which these frame centers were planned. "
+                        "**Required**; a mismatch is refused, and so is the case where the "
+                        "current epoch cannot be read -- a coarse move turns the same (x, "
+                        "y) into a different surface, and this step then scans it for "
+                        "hours. It used to be optional, and that guard silently did "
+                        "nothing."))),
                 ParameterSpec(
                     name="evidence_epoch", type="int", required=False,
                     default=0,
-                    description="盖在每一条账上的证据代次。"),
+                    description=tr("盖在每一条账上的证据代次。", "Evidence epoch stamped on every ledger row.")),
                 ParameterSpec(
                     name="conduct_id", type="str", required=False, default="",
-                    description="归属的 conduct，每一行都记。"),
+                    description=tr("归属的 conduct，每一行都记。", "Owning conduct, recorded on every row.")),
                 ParameterSpec(
                     name="stage_id", type="str", required=False, default="",
-                    description="归属的 stage，每一行都记。"),
+                    description=tr("归属的 stage，每一行都记。", "Owning stage, recorded on every row.")),
                 ParameterSpec(
                     name="save_each", type="bool", required=False, default=True,
-                    description="每扫完一帧就 SaveScan（判据从头到尾"
-                                "只读**已保存**的 .sxm）。"),
+                    description=tr("每扫完一帧就 SaveScan（判据从头到尾"
+                                "只读**已保存**的 .sxm）。",
+                                "SaveScan after every frame (the criterion reads only the **saved**"
+                                " .sxm, throughout).")),
             ],
             estimated_duration_s=600.0,
             composition_level=4,
@@ -211,19 +259,23 @@ class AtomicBiasSeries(CompositeSkillGraph):
                 values = [float(tok) for tok in raw.replace(";", ",").split(",")
                           if tok.strip()]
             except ValueError:
-                return [], f"bias_values 里有解析不了的数:{raw!r}"
+                return [], tr(f"bias_values 里有解析不了的数:{raw!r}", f"bias_values contains a number that cannot be parsed: {raw!r}")
         else:
             spec = {k: params.get(f"bias_{k}") for k in ("start", "stop", "n")}
             if any(v is not None for v in spec.values()):
                 values = expand_series(spec)
                 if values is None:
-                    return [], (f"start/stop/n 展不成一个序列:{spec!r} —— "
-                                f"缺一个就展不开,而这里不替你补。")
+                    return [], (tr(f"start/stop/n 展不成一个序列:{spec!r} —— "
+                                f"缺一个就展不开,而这里不替你补。",
+                                f"start/stop/n do not expand into a sequence: {spec!r} -- one of "
+                                "them is missing and none is filled in here."))
         if not values:
-            return [], ("没有给偏压序列。给 bias_values（逗号分隔）"
-                        "或 bias_start/bias_stop/bias_n 三个一起。")
+            return [], (tr("没有给偏压序列。给 bias_values（逗号分隔）"
+                        "或 bias_start/bias_stop/bias_n 三个一起。",
+                        "No bias sequence given. Give bias_values (comma separated) or all "
+                        "three of bias_start/bias_stop/bias_n."))
         if any(v != v or math.isinf(v) for v in values):
-            return [], "偏压序列里有 NaN/inf。"
+            return [], tr("偏压序列里有 NaN/inf。", "The bias sequence contains NaN/inf.")
         # 去重按**规范化后的键**,不按浮点相等 —— 后者会让 -0.3 与
         # -0.30000000000000004 变成两个偏压。
         seen: dict[str, float] = {}
@@ -324,7 +376,7 @@ class AtomicBiasSeries(CompositeSkillGraph):
             if outcome == ledger.OUTCOME_TIP_ABORT:
                 # 针尖坏了之后每一帧都是废的。账停在这里,前面的全在。
                 aborted_tip = True
-                executor.set_partial("stopped_reason", "扫描中检测到针尖事件")
+                executor.set_partial("stopped_reason", tr("扫描中检测到针尖事件", "Tip event detected during scan"))
                 break
             if (anchor_every and anchor_bias is not None
                     and (pos + 1) % anchor_every == 0 and pos + 1 < len(ordered)):
@@ -373,8 +425,8 @@ class AtomicBiasSeries(CompositeSkillGraph):
                 # 安全门/包络拒了 —— 这是**拒绝**,不是「这里没有原子」。
                 self._write(params, executor, bias_v=bias_v, attempt=attempt,
                             role=role, outcome=ledger.OUTCOME_BLOCKED,
-                            note=(f"偏压变更被拒:"
-                                  f"{self._why_failed(executor, f'{sid}_bias')}"))
+                            note=tr("偏压变更被拒:%s", "Bias change refused: %s")
+                            % self._why_failed(executor, f'{sid}_bias'))
                 return ledger.OUTCOME_BLOCKED
 
             # ── 2) 扫 ──
@@ -404,7 +456,7 @@ class AtomicBiasSeries(CompositeSkillGraph):
                             nominal_center_m=(cx, cy), size_m=size_m,
                             pixels=pixels, line_time_s=_float_or_none(line_time_s),
                             resolver_warnings=resolver_warnings,
-                            note="撞针" if crash else "针尖事件")
+                            note=tr("撞针", "Tip crash") if crash else tr("针尖事件", "Tip event"))
                 return ledger.OUTCOME_TIP_ABORT
 
             if not self._ok(executor, f"{sid}_scan"):
@@ -419,8 +471,10 @@ class AtomicBiasSeries(CompositeSkillGraph):
                             nominal_center_m=(cx, cy), size_m=size_m,
                             pixels=pixels,
                             resolver_warnings=resolver_warnings,
-                            note=(f"扫描没成(本次针尖状态读不到):"
-                                  f"{self._why_failed(executor, f'{sid}_scan')}"))
+                            note=tr("扫描没成(本次针尖状态读不到):%s",
+                                    "The scan did not succeed (the tip state could not be read "
+                                    "this time): %s")
+                            % self._why_failed(executor, f'{sid}_scan'))
                 continue
 
             if save_each:
@@ -437,7 +491,9 @@ class AtomicBiasSeries(CompositeSkillGraph):
                             nominal_center_m=(cx, cy), size_m=size_m,
                             pixels=pixels,
                             resolver_warnings=resolver_warnings,
-                            note="扫完了但拿不到已保存的 .sxm 路径 —— 判据不吃缓冲")
+                            note=tr("扫完了但拿不到已保存的 .sxm 路径 —— 判据不吃缓冲",
+                                    "The scan finished but the saved .sxm path is unavailable -- "
+                                    "the criterion does not work from the buffer"))
                 continue
 
             # ── 3) 裁决 ──
@@ -482,12 +538,14 @@ class AtomicBiasSeries(CompositeSkillGraph):
                     params={"center_x_m": cx, "center_y_m": cy},
                     optional=True, checkpoint_after=True, tags=("tip", "check"))
                 if not self._ok(executor, f"{sid}_tipcheck"):
-                    # 复核不过 ⇒ 走 S1 绕道,**不重扫该偏压**。重扫等于在刚炸
+                    # 复核不过 ⇒ 走针尖修复绕道,**不重扫该偏压**。重扫等于在刚炸
                     # 出来的坑上再判一次。
                     self._write(params, executor, bias_v=bias_v,
                                 attempt=attempt + 1, role=role,
                                 outcome=ledger.OUTCOME_TIP_ABORT,
-                                note="高偏压后针尖复核未通过 —— 转 S1 绕道,不重扫本偏压")
+                                note=tr("高偏压后针尖复核未通过 —— 转针尖修复绕道,不重扫本偏压",
+                                        "The tip re-check after the high bias did not pass -- "
+                                        "switching to the tip-repair detour, not rescanning this bias"))
                     return ledger.OUTCOME_TIP_ABORT
 
             if verdict == ledger.VERDICT_RESOLVED:
@@ -528,8 +586,11 @@ class AtomicBiasSeries(CompositeSkillGraph):
             # 槽位没声明要**出声**。沉默会被读成「查过了,没有超标的偏压」。
             unreadable.append({
                 "what": "elevated_bias_abs_v",
-                "why": ("用户没有声明高偏压阈值 ⇒ 高偏压后的强制针尖复核"
-                        "**整条序列都没有生效**。这不是「没有高偏压」。")})
+                "why": tr("用户没有声明高偏压阈值 ⇒ 高偏压后的强制针尖复核"
+                          "**整条序列都没有生效**。这不是「没有高偏压」。",
+                          "The user has not declared a high-bias threshold, so the mandatory tip "
+                          "re-check after a high bias was **not in effect for the whole series**. "
+                          "This does not mean \"there was no high bias\".")})
         summary["unreadable"] = unreadable
 
         out = dict(summary)
@@ -552,8 +613,8 @@ class AtomicBiasSeries(CompositeSkillGraph):
 
         ## 在这之前它是一道**装得像在拦**的闸
 
-        `expected_coord_epoch` 的参数描述逐字写着「A coarse move invalidates
-        them」,而 2026-08-15 之前这个值**只被写进账本**(`_row` 里那一行),
+        `expected_coord_epoch` 的参数描述写着「A coarse move invalidates
+        them」,而早先这个值**只被写进账本**(`_row` 里那一行),
         全文件没有 `from mast.core.coord_epoch`,五个子步骤也都不查。
         也就是说:一个名字、一句描述、一列账,**没有任何东西会因为它停下来**。
         对照 `spectroscopy_at_positions._epoch_gate` —— 那道是真的。
@@ -569,14 +630,19 @@ class AtomicBiasSeries(CompositeSkillGraph):
         from mast.core import coord_epoch as ce
 
         verdict = ce.verify(params.get("expected_coord_epoch"),
-                            what="这一段逐偏压序列的帧中心")
+                            what=tr("这一段逐偏压序列的帧中心",
+                                    "the frame centers of this per-bias series"))
         if verdict.verified:
             return None
         extra = ""
         if verdict.state in (ce.UNVERIFIABLE, ce.UNSTAMPED):
-            extra = ("——本技能在这里比通用策略更严:这批中心坐标是**别处、别的"
-                     "时刻**定下的,而这一步要拿着它连扫几个小时,"
-                     "「查不到当前代次」不能当成「对得上」。")
+            extra = tr("——本技能在这里比通用策略更严:这批中心坐标是**别处、别的"
+                       "时刻**定下的,而这一步要拿着它连扫几个小时,"
+                       "「查不到当前代次」不能当成「对得上」。",
+                       " This skill is stricter than the general policy here: these center "
+                       "coordinates were fixed **elsewhere, at another time**, and this step then "
+                       "scans with them for hours, so \"the current generation cannot be found\" "
+                       "must not be taken as \"it matches\".")
         return self.fail(
             f"{verdict.message}{extra}",
             refusal_code=verdict.state,
@@ -595,7 +661,9 @@ class AtomicBiasSeries(CompositeSkillGraph):
             return self.fail(err, series_exit=ledger.EXIT_BLOCKED)
         if not str(params.get("ledger_dir") or "").strip():
             return self.fail(
-                "没有给 ledger_dir —— 逐偏压账没有落点,这条序列跑完也没有证据。",
+                tr("没有给 ledger_dir —— 逐偏压账没有落点,这条序列跑完也没有证据。",
+                   "No ledger_dir given -- the per-bias ledger has nowhere to be written, so there "
+                   "would be no evidence once this series finishes."),
                 series_exit=ledger.EXIT_BLOCKED)
 
         size_m = float(params.get("size_m") or 5e-9)
@@ -603,7 +671,7 @@ class AtomicBiasSeries(CompositeSkillGraph):
         if problem and scale not in ("full", "reduced"):
             # 下发之前就知道判不出来 —— 别花那一帧。
             return self.fail(
-                f"这组帧参数判不出原子相:{problem}",
+                tr(f"这组帧参数判不出原子相:{problem}", f"These frame parameters cannot resolve an atomic phase: {problem}"),
                 series_exit=ledger.EXIT_BLOCKED,
                 scale_precheck={"scale": scale, "problem": problem})
 
@@ -632,25 +700,32 @@ class AtomicBiasSeries(CompositeSkillGraph):
         ok = exit_state in (ledger.EXIT_COMPLETE, ledger.EXIT_PARTIAL)
         n = int(data.get("n_biases") or 0)
         parts = [
-            f"{n} 个偏压:{data.get('n_resolved', 0)} 个有原子分辨",
-            f"{data.get('n_absent_confirmed', 0)} 个确认没有对比度",
-            f"{data.get('n_undecided', 0)} 个证据不足",
+            tr(f"{n} 个偏压:{data.get('n_resolved', 0)} 个有原子分辨", f"{n} biases: {data.get('n_resolved', 0)} with atomic resolution"),
+            tr(f"{data.get('n_absent_confirmed', 0)} 个确认没有对比度", f"{data.get('n_absent_confirmed', 0)} confirmed without contrast"),
+            tr(f"{data.get('n_undecided', 0)} 个证据不足", f"{data.get('n_undecided', 0)} with insufficient evidence"),
         ]
         if data.get("n_blocked"):
-            parts.append(f"{data['n_blocked']} 个被拒")
+            parts.append(tr(f"{data['n_blocked']} 个被拒", f"{data['n_blocked']} refused"))
         if data.get("n_tip_aborted"):
-            parts.append(f"{data['n_tip_aborted']} 个因针尖事件中止")
-        summary = "；".join(parts) + f"。出口:{exit_state}"
+            parts.append(tr(f"{data['n_tip_aborted']} 个因针尖事件中止", f"{data['n_tip_aborted']} aborted by a tip event"))
+        summary = (tr("；", "; ").join(parts)
+                   + tr(f"。出口:{exit_state}", f". Exit: {exit_state}"))
 
         anchors = data.get("anchor_consistency") or {}
         if not anchors.get("n_anchors"):
-            summary += ("。⚠️ 没有任何 anchor 帧 —— "
-                        "「这一段扫的是同一片原子」这句话没有证据支撑。")
+            summary += (tr("。⚠️ 没有任何 anchor 帧 —— "
+                        "「这一段扫的是同一片原子」这句话没有证据支撑。",
+                        ". WARNING: no anchor frame at all -- there is no evidence behind "
+                        "the statement \"this series imaged the same atoms\"."))
         if data.get("unreadable"):
-            summary += f"。读不到 {len(data['unreadable'])} 项（未计入任何一栏）"
+            summary += tr(f"。读不到 {len(data['unreadable'])} 项（未计入任何一栏）",
+                       f". {len(data['unreadable'])} item(s) unreadable (not counted in any"
+                       " column)")
         if data.get("ledger_write_error"):
             ok = False
-            summary += f"。⚠️ 账没写进去:{data['ledger_write_error']}"
+            summary += tr(f"。⚠️ 账没写进去:{data['ledger_write_error']}",
+                       ". WARNING: the ledger was not written: "
+                       f"{data['ledger_write_error']}")
 
         if not ok:
             return self.fail(summary, **data)

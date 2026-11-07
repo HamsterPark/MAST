@@ -47,6 +47,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from mast.i18n import tr
 from mast.skills.overlay import checks, manifest as M, paths as P, provenance as PV
 
 logger = logging.getLogger(__name__)
@@ -69,15 +70,16 @@ class EntryResult:
 
     def describe(self) -> str:
         if not self.ok:
-            return f"{self.rel}：{self.reason}"
+            return tr(f"{self.rel}：{self.reason}", f"{self.rel}: {self.reason}")
         bits = []
         if self.replaced:
-            bits.append(f"覆盖 {len(self.replaced)}")
+            bits.append(tr(f"覆盖 {len(self.replaced)}", f"replaces {len(self.replaced)}"))
         if self.added:
-            bits.append(f"新增 {len(self.added)}")
+            bits.append(tr(f"新增 {len(self.added)}", f"adds {len(self.added)}"))
         if self.dropped:
-            bits.append(f"移除 {len(self.dropped)}")
-        return f"{self.rel}：{'、'.join(bits) or '无技能'}（sha {self.sha256[:8]}）"
+            bits.append(tr(f"移除 {len(self.dropped)}", f"removes {len(self.dropped)}"))
+        return tr(f"{self.rel}：{'、'.join(bits) or '无技能'}（sha {self.sha256[:8]}）",
+                  f"{self.rel}: {', '.join(bits) or 'no skills'} (sha {self.sha256[:8]})")
 
 
 @dataclass
@@ -97,25 +99,34 @@ class ReloadReport:
 
     def describe(self) -> str:
         if self.status == STATUS_BUSY:
-            return "已有一次重载在进行中，本次未执行。"
+            return tr("已有一次重载在进行中，本次未执行。",
+                      "A reload is already in progress; this one was not run.")
         if self.status == STATUS_QUEUED:
-            return self.note or "任务运行中，已排队。"
+            return self.note or tr("任务运行中，已排队。", "A task is running; queued.")
         if self.status == STATUS_NOCHANGE:
-            return "覆盖层没有变化（文件内容与上次加载完全一致）。"
+            return tr("覆盖层没有变化（文件内容与上次加载完全一致）。",
+                      "The overlay layer has not changed (file contents are identical to the last load).")
         lines = []
         if self.applied:
-            lines.append(f"已生效 {len(self.applied)} 个覆盖模块：")
+            lines.append(tr(f"已生效 {len(self.applied)} 个覆盖模块：",
+                            f"{len(self.applied)} overlay module(s) in effect:"))
             lines += [f"  · {r.describe()}" for r in self.applied]
         if self.restored:
-            lines.append(f"已恢复内置版 {len(self.restored)} 个："
-                         + "、".join(sorted(self.restored)))
+            lines.append(tr(f"已恢复内置版 {len(self.restored)} 个："
+                            + "、".join(sorted(self.restored)),
+                            f"Restored {len(self.restored)} built-in version(s): "
+                            + ", ".join(sorted(self.restored))))
         if self.failed:
-            lines.append(f"被拒绝 {len(self.failed)} 个：")
+            lines.append(tr(f"被拒绝 {len(self.failed)} 个：",
+                            f"{len(self.failed)} rejected:"))
             lines += [f"  · {r.describe()}" for r in self.failed]
         if self.baseline_drift:
-            lines.append("⚠ 基线自检发现下列技能不再是内置版且不由覆盖层解释："
-                         + "、".join(sorted(self.baseline_drift)))
-        return "\n".join(lines) or "覆盖层为空。"
+            lines.append(tr("⚠ 基线自检发现下列技能不再是内置版且不由覆盖层解释："
+                            + "、".join(sorted(self.baseline_drift)),
+                            "⚠ Baseline self-check found these skills are no longer the "
+                            "built-in version and are not explained by the overlay layer: "
+                            + ", ".join(sorted(self.baseline_drift))))
+        return "\n".join(lines) or tr("覆盖层为空。", "The overlay layer is empty.")
 
 
 @dataclass
@@ -194,7 +205,7 @@ class OverlayManager:
         mod_name = P.module_name(rel)
         spec = importlib.util.spec_from_file_location(mod_name, str(path))
         if spec is None or spec.loader is None:
-            return None, f"{rel}：建不出模块 spec"
+            return None, tr(f"{rel}：建不出模块 spec", f"{rel}: cannot build a module spec")
         mod = importlib.util.module_from_spec(spec)
         # 先进 sys.modules 再 exec：dataclass / typing / inspect.getsource /
         # traceback 都靠它。custom_loader 现在没这么做，是个既有小坑，这里不重复。
@@ -203,7 +214,8 @@ class OverlayManager:
             spec.loader.exec_module(mod)
         except BaseException as exc:  # noqa: BLE001 — 用户代码，什么都可能抛
             sys.modules.pop(mod_name, None)
-            return None, f"{rel}：加载时抛异常 {type(exc).__name__}: {exc}"
+            return None, tr(f"{rel}：加载时抛异常 {type(exc).__name__}: {exc}",
+                            f"{rel}: raised {type(exc).__name__} while loading: {exc}")
         return mod, ""
 
     @staticmethod
@@ -226,9 +238,12 @@ class OverlayManager:
             try:
                 attr()          # 必须无参可实例化，否则注册不了
             except Exception as exc:   # noqa: BLE001
-                problems.append(
+                problems.append(tr(
                     f"{attr.__name__} 无法无参实例化（{type(exc).__name__}: {exc}）"
-                    " —— 技能类的 __init__ 不能要参数")
+                    " —— 技能类的 __init__ 不能要参数",
+                    f"{attr.__name__} cannot be instantiated without arguments "
+                    f"({type(exc).__name__}: {exc}) - a skill class's __init__ must not "
+                    "take parameters"))
                 continue
             out.append(attr)
         return out, problems
@@ -248,9 +263,11 @@ class OverlayManager:
             try:
                 meta = SkillRegistry._get_metadata_raw(cls)
             except Exception as exc:  # noqa: BLE001
-                problems.append(
+                problems.append(tr(
                     f"{cls.__name__}.metadata() 抛了 {type(exc).__name__}: {exc}"
-                    " —— 不是「没有这个技能」，是它的元数据算不出来")
+                    " —— 不是「没有这个技能」，是它的元数据算不出来",
+                    f"{cls.__name__}.metadata() raised {type(exc).__name__}: {exc}"
+                    " - the skill is not missing, its metadata cannot be computed"))
                 continue
             out[meta.name] = cls
         return out, problems
@@ -301,13 +318,14 @@ def _prepare(registry, entry: M.Entry) -> tuple[EntryResult, dict | None]:
 
     path = P.entry_path(rel)
     if not path.is_file():
-        res.reason = "文件不存在（清单里启用了，盘上没有）"
+        res.reason = tr("文件不存在（清单里启用了，盘上没有）",
+                        "File does not exist (enabled in the manifest, missing on disk)")
         return res, None
 
     try:
         source = path.read_text(encoding="utf-8")
     except OSError as exc:
-        res.reason = f"读不出来：{exc}"
+        res.reason = tr(f"读不出来：{exc}", f"Cannot read it: {exc}")
         return res, None
 
     syn = checks.check_parses(source, rel)
@@ -330,9 +348,11 @@ def _prepare(registry, entry: M.Entry) -> tuple[EntryResult, dict | None]:
         # 「一个技能都没算出来」有两种完全不同的原因，修法也完全不同：
         # 文件里真的没有技能类 vs. 有但它们的 __init__/metadata() 抛异常。
         # 不分开说，用户会去找自己删了什么。
-        res.reason = ("；".join(broken) if broken else
-                      "这个文件里没有可注册的技能"
-                      "（没有 __module__ 指向本文件的 BaseSkill 子类）")
+        res.reason = (tr("；", "; ").join(broken) if broken else
+                      tr("这个文件里没有可注册的技能"
+                         "（没有 __module__ 指向本文件的 BaseSkill 子类）",
+                         "This file has no registrable skills (no BaseSkill subclass "
+                         "whose __module__ points at this file)"))
         return res, None
 
     overlay_of = P.overlay_of(rel)
@@ -352,7 +372,8 @@ def _prepare(registry, entry: M.Entry) -> tuple[EntryResult, dict | None]:
         try:
             new_meta = SkillRegistry._get_metadata_raw(cls)
         except Exception as exc:  # noqa: BLE001
-            problems.append(f"{name}: 元数据读不出来（{exc}）")
+            problems.append(tr(f"{name}: 元数据读不出来（{exc}）",
+                               f"{name}: metadata cannot be read ({exc})"))
             continue
         rep = checks.check_not_relaxed(new_meta, base_meta)
         problems.extend(rep.problems)
@@ -504,10 +525,11 @@ def _recheck_packs(pack_ids: list[str]) -> dict[str, str]:
         try:
             v = SPK.verify_installed(d)
         except Exception as exc:                     # noqa: BLE001
-            out[pid] = f"复核时出错：{type(exc).__name__}: {exc}"
+            out[pid] = tr(f"复核时出错：{type(exc).__name__}: {exc}",
+                          f"Error during re-verification: {type(exc).__name__}: {exc}")
             continue
         if not v.ok:
-            out[pid] = "；".join(v.reasons) or "复核不过"
+            out[pid] = tr("；", "; ").join(v.reasons) or tr("复核不过", "Re-verification failed")
         else:
             _PACK_PUBKEYS[pid] = v.pubkey8
     return out
@@ -523,8 +545,11 @@ def reload_skills(registry, *, reason: str = "manual",
     if task_busy:
         return ReloadReport(
             status=STATUS_QUEUED,
-            note="任务运行中，覆盖层重载已排队 —— 当前任务结束后自动生效"
-                 "（跑到一半的流程从头到尾用它启动时那一版）。")
+            note=tr("任务运行中，覆盖层重载已排队 —— 当前任务结束后自动生效"
+                    "（跑到一半的流程从头到尾用它启动时那一版）。",
+                    "A task is running; the overlay reload is queued and takes effect when "
+                    "the current task ends (a flow already under way keeps the version it "
+                    "started with)."))
 
     with mgr._lock:
         if mgr._busy:
@@ -535,8 +560,10 @@ def reload_skills(registry, *, reason: str = "manual",
         man = M.load()
         if man.unreadable:
             rep = ReloadReport(status=STATUS_OK)
-            rep.note = (f"覆盖层清单读不出来（{man.unreadable}）——"
-                        "本次不做任何改动，已生效的覆盖保持原样。")
+            rep.note = tr(f"覆盖层清单读不出来（{man.unreadable}）——"
+                          "本次不做任何改动，已生效的覆盖保持原样。",
+                          f"The overlay manifest cannot be read ({man.unreadable}) - "
+                          "no changes made this time; overlays already in effect stay as they are.")
             logger.error("覆盖层重载中止：%s", rep.note)
             with mgr._lock:
                 mgr._last = rep

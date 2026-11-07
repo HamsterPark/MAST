@@ -13,6 +13,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.skills.base import BaseSkill
 from mast.skills.builtins._tip_policy import (
     ALLOW_ON_QPLUS,
@@ -39,12 +40,14 @@ class TipShape(BaseSkill):
             # open-loop coarse stepper — so it cannot crash the instrument the way
             # a coarse sample approach can. Tip conditioning runs autonomously.
             safety_level=SafetyLevel.AUTO,
-            description="运行硬件的 tip shaper 流程（受控修针）。",
+            description=tr("运行硬件的 tip shaper 流程（受控修针）。",
+                           "Run the hardware tip shaper procedure (controlled tip conditioning)."),
             parameters=[
                 ParameterSpec(
                     name="switch_off_delay_s",
                     type="float",
-                    description="关闭 controller 之前，对 Z 位置做平均的时长",
+                    description=tr("关闭 controller 之前，对 Z 位置做平均的时长",
+                                   "Duration over which Z is averaged before the controller is switched off"),
                     unit="s",
                     required=False,
                     default=0.1,
@@ -53,13 +56,19 @@ class TipShape(BaseSkill):
                 ParameterSpec(
                     name="change_bias",
                     type="bool",
-                    description=(
+                    description=tr(
                         "在第一段 Z ramp 之前，把偏压跳变到 bias_v。"
                         "**默认关闭**（2026-08-11）。workflow 层本来就"
                         "拒绝这条路：TipShaper 只能**一步**改完偏压，"
                         "而一步跳变本身就是一记冲击"
                         "（_tip_phases.py）。请先自己把偏压设好（用带 slew rate "
-                        "的 SetBias），再在这一项关闭的情况下扎针。"
+                        "的 SetBias），再在这一项关闭的情况下扎针。",
+                        "Step the bias to bias_v before the first Z ramp. "
+                        "**Off by default** (2026-08-11). The workflow layer already "
+                        "refuses this route: TipShaper can only change the bias in **one** "
+                        "step, and a one-step jump is itself a shock "
+                        "(_tip_phases.py). Set the bias yourself first (SetBias with a "
+                        "slew rate), then poke with this option off.",
                     ),
                     required=False,
                     default=False,
@@ -67,11 +76,15 @@ class TipShape(BaseSkill):
                 ParameterSpec(
                     name="bias_v",
                     type="float",
-                    description=(
+                    description=tr(
                         "第一段 Z ramp 之前施加的偏压（仅当 "
                         "change_bias=True 时生效）。**省略**它则跟随**当前**的"
                         "成像偏压。没有 3 V 兜底：偏压若读不到，这个技能"
-                        "直接拒绝执行。"
+                        "直接拒绝执行。",
+                        "Bias applied before the first Z ramp (only effective when "
+                        "change_bias=True). **Omit** it to follow the **current** imaging "
+                        "bias. There is no 3 V fallback: if the bias cannot be read, this "
+                        "skill refuses to run.",
                     ),
                     unit="V",
                     required=False,
@@ -81,12 +94,17 @@ class TipShape(BaseSkill):
                 ParameterSpec(
                     name="tip_lift_m",
                     type="float",
-                    description=(
+                    description=tr(
                         "第一段 Z ramp 的距离（相对当前 Z 的相对量），单位"
                         "**米**。常用 -2n 到 2n（±2 nm）。硬上限 "
                         "±100n（±100 nm）—— 由 ±1 µm 收紧而来，那是常规扎针的 500×，"
-                        "而且没有任何全局兜底（2026-07-03 "
-                        "复审）。示例：-3n（= -3 nm）✓；5（= 5 米！）✗。"
+                        "而且没有任何全局兜底。"
+                        "示例：-3n（= -3 nm）✓；5（= 5 米！）✗。",
+                        "Distance of the first Z ramp (relative to the current Z), in "
+                        "**metres**. Typically -2n to 2n (±2 nm). Hard limit "
+                        "±100n (±100 nm) -- tightened from ±1 µm, which was 500x a normal poke "
+                        "and had no global backstop. "
+                        "Examples: -3n (= -3 nm) OK; 5 (= 5 metres!) wrong.",
                     ),
                     unit="m",
                     required=False,
@@ -97,7 +115,7 @@ class TipShape(BaseSkill):
                 ParameterSpec(
                     name="lift_time_1_s",
                     type="float",
-                    description="第一段 Z ramp 的时长",
+                    description=tr("第一段 Z ramp 的时长", "Duration of the first Z ramp"),
                     unit="s",
                     required=False,
                     default=0.1,
@@ -106,13 +124,19 @@ class TipShape(BaseSkill):
                 ParameterSpec(
                     name="bias_lift_v",
                     type="float",
-                    description=(
+                    description=tr(
                         "在第一段 Z ramp**刚结束之后**施加的偏压。⚠️ 与 "
                         "bias_v 不同，这一项是**无条件**施加的 —— change_bias "
                         "**不能**把它解除（厂商原文：'Bias (V) … if Change Bias "
                         "is True' 对比 'Bias Lift (V) … applied just after the "
                         "first Z ramping'）。**省略**它则跟随 bias_v，也就是"
-                        "当前的成像偏压。没有 3 V 兜底。"
+                        "当前的成像偏压。没有 3 V 兜底。",
+                        "Bias applied **just after** the first Z ramp. WARNING: unlike "
+                        "bias_v, this is applied **unconditionally** -- change_bias "
+                        "**cannot** disable it (vendor wording: 'Bias (V) … if Change Bias "
+                        "is True' versus 'Bias Lift (V) … applied just after the "
+                        "first Z ramping'). **Omit** it to follow bias_v, i.e. the "
+                        "current imaging bias. There is no 3 V fallback.",
                     ),
                     unit="V",
                     required=False,
@@ -122,7 +146,7 @@ class TipShape(BaseSkill):
                 ParameterSpec(
                     name="bias_settling_s",
                     type="float",
-                    description="施加偏压值之后的等待时长",
+                    description=tr("施加偏压值之后的等待时长", "Wait time after the bias is applied"),
                     unit="s",
                     required=False,
                     default=0.1,
@@ -131,13 +155,19 @@ class TipShape(BaseSkill):
                 ParameterSpec(
                     name="lift_height_m",
                     type="float",
-                    description=(
+                    description=tr(
                         "第二段 Z ramp 的高度，单位**米** —— 也就是**退回来**的那一段。"
                         "**省略**它则默认取 -tip_lift_m（扎进去 x，就拉"
                         "回来 x），这也是每个 composite 早已在用的"
                         "规则。常用 1n 到 5n（1–5 nm）。硬上限 ±100n"
-                        "（±100 nm）—— 由 ±1 µm 收紧而来（2026-07-03 复审）。"
-                        "示例：2n（= 2 nm）✓；1（= 1 米！）✗。"
+                        "（±100 nm）—— 由 ±1 µm 收紧而来。"
+                        "示例：2n（= 2 nm）✓；1（= 1 米！）✗。",
+                        "Height of the second Z ramp, in **metres** -- the part that "
+                        "**pulls back**. **Omit** it to default to -tip_lift_m (poke in by x, "
+                        "pull back by x), the rule every composite already uses. "
+                        "Typically 1n to 5n (1-5 nm). Hard limit ±100n "
+                        "(±100 nm) -- tightened from ±1 µm. "
+                        "Examples: 2n (= 2 nm) OK; 1 (= 1 metre!) wrong.",
                     ),
                     unit="m",
                     required=False,
@@ -147,7 +177,7 @@ class TipShape(BaseSkill):
                 ParameterSpec(
                     name="lift_time_2_s",
                     type="float",
-                    description="第二段 Z ramp 的时长",
+                    description=tr("第二段 Z ramp 的时长", "Duration of the second Z ramp"),
                     unit="s",
                     required=False,
                     default=0.1,
@@ -156,7 +186,7 @@ class TipShape(BaseSkill):
                 ParameterSpec(
                     name="end_wait_s",
                     type="float",
-                    description="恢复初始偏压之后的等待时长",
+                    description=tr("恢复初始偏压之后的等待时长", "Wait time after the initial bias is restored"),
                     unit="s",
                     required=False,
                     default=0.1,
@@ -165,19 +195,25 @@ class TipShape(BaseSkill):
                 ParameterSpec(
                     name="restore_feedback",
                     type="bool",
-                    description="结束时恢复 Z-controller 的初始状态",
+                    description=tr("结束时恢复 Z-controller 的初始状态",
+                                   "Restore the initial Z-controller state at the end"),
                     required=False,
                     default=True,
                 ),
                 ParameterSpec(
                     name=ALLOW_ON_QPLUS,
                     type="bool",
-                    description=(
+                    description=tr(
                         "在已登记的 qPlus 针尖上显式放行这个动作。Z "
                         "ramp 可能**不可逆地**毁掉石英音叉（传感器必须"
                         "物理更换并重新标定），所以除非设了这一项，"
                         "否则 qPlus 针尖一律**拒绝**。若没有登记针尖，"
-                        "则本项忽略。"
+                        "则本项忽略。",
+                        "Explicitly allow this action on a registered qPlus tip. The Z "
+                        "ramp can **irreversibly** destroy the quartz tuning fork (the "
+                        "sensor must be physically replaced and recalibrated), so unless "
+                        "this is set, a qPlus tip is always **refused**. If no tip is "
+                        "registered, this option is ignored.",
                     ),
                     required=False,
                     default=False,
@@ -185,7 +221,7 @@ class TipShape(BaseSkill):
                 ParameterSpec(
                     name="timeout_ms",
                     type="int",
-                    description="整个流程的超时（-1 = 永远等待）",
+                    description=tr("整个流程的超时（-1 = 永远等待）", "Timeout of the whole procedure (-1 = wait forever)"),
                     unit="ms",
                     required=False,
                     default=-1,
@@ -207,8 +243,8 @@ class TipShape(BaseSkill):
         gate = qplus_gate("TipShape", params, calls)
         if gate is not None:
             return gate
-        # bias 缺省 = 此刻的成像偏压,不是写死的 3 V(2026-08-10 要求：
-        # 「shaper 应该自带 bias 变成扫图 bias,而不是锁死 3V」)。
+        # bias 缺省 = 此刻的成像偏压,不是写死的 3 V(shaper 应自带 bias 变成扫图 bias,
+        # 而不是锁死 3V)。
         # 见 _tip_policy.shaper_bias_default。注意这一步在 apply_tip_policy **之前**:
         # 方案表若给了 shaper_bias_v,那是一个有主的值,照旧胜出。
         _bias_before_policy = params.get("bias_v")
@@ -218,7 +254,7 @@ class TipShape(BaseSkill):
         if plan is not None and not plan.ok:
             return SkillResult(
                 skill_name="TipShape", success=False,
-                error="；".join(plan.refusals), nanonis_calls=calls)
+                error=tr("；", "; ").join(plan.refusals), nanonis_calls=calls)
 
         # 方案表没给、调用方也没给 ⇒ 跟随**当前成像偏压**;读不到就拒绝,
         # **不回落到 3.0**(那个 3.0 追到 c307d16 的 stub,没有物理来源)。
@@ -230,8 +266,11 @@ class TipShape(BaseSkill):
             if bias_v is None:
                 return SkillResult(
                     skill_name="TipShape", success=False,
-                    error=(f"读不到当前偏压({why}),而 bias_v 既没有显式给出、"
-                           "方案表也没有 —— 拒绝用写死的 3 V 代替。"),
+                    error=tr(f"读不到当前偏压({why}),而 bias_v 既没有显式给出、"
+                             "方案表也没有 —— 拒绝用写死的 3 V 代替。",
+                             f"Cannot read the current bias ({why}), and bias_v was neither given "
+                             "explicitly nor provided by the policy table -- refusing to substitute "
+                             "a hard-coded 3 V."),
                     nanonis_calls=calls)
 
         # ⚠️ ``Bias Lift (V)`` 是**无条件**施加的 —— 厂商同一句话里一个带条件一个

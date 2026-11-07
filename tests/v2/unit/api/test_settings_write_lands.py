@@ -58,6 +58,7 @@ _SAMPLES: dict[str, object] = {
     ]},
     "zctrl_presets": [{"name": "探针样本组", "p_gain": "3p", "i_gain": "180n"}],
     "ingest_copy_mode": "hardlink",     # 只有 copy | hardlink 两个合法值
+    "station_profile": "optical",       # 只有 stm | optical 两个合法值（写入口拒绝其余）
     # 枚举式字符串
     "thinking": "off",
     "voice_mode": "wake",
@@ -230,6 +231,7 @@ def test_the_measured_defect_itself(rig):
     ("tool_refine_min_chars", 0),
     ("chat_model_calls_per_thread", -1),
     ("ingest_copy_mode", "hardlnk"),      # 打错一个字母
+    ("station_profile", "optic"),         # 读的一侧会把它当 stm：存下去 = 界面说成功而没切
 ])
 def test_a_value_the_core_would_silently_replace_is_refused(rig, key, bad):
     """这一组的坏值**存得下去，而且不会当场报错** —— 然后被换掉：
@@ -243,10 +245,14 @@ def test_a_value_the_core_would_silently_replace_is_refused(rig, key, bad):
     在任何界面上都看不出来。所以在写入口拒，并且整笔不写。
     """
     client, root = rig
-    r = client.post("/api/settings", json={key: bad})
+    payload = {key: bad}
+    if key in GUARDED_KEYS:                # 带上 PIN：要被拒的是**值**，不是缺 PIN
+        payload["admin_pin"] = _PIN
+    r = client.post("/api/settings", json=payload)
     assert r.status_code == 200
     body = r.json()
     assert body["ok"] is False and body["degraded"] is False
+    assert body["pin_required"] is False, f"{key}: 被拒的原因是 PIN，不是值：{body}"
     assert key in body["rejected"], f"{key}={bad!r} 没被拒：{body}"
     assert body["persisted"] == {}
     assert not (default_config_dir(root) / "ui_settings.json").exists(), \

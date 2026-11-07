@@ -1,18 +1,64 @@
-"""缓冲区关键事件只记录与通知，不在此处中断工具调用。
+"""缓冲区关键事件 → **只记录、只通知,不打断**。
 
-订阅 TIP_QUALITY_DROP / E_STOP，记录 event_refs、日志和诊断台账。
-本模块不调用 interrupt，也不关闭工具闸门；wrap_tool_call 透传。
-事件日志、ReadHardwareEvents 和面板仍可读取事件。
+## 这个模块现在做什么
 
-正常进针、脉冲和扎针会产生瞬态，通知与拒绝型防护必须分别处理。
-E_STOP / 用户中止走 register_critical_hook → abort 闩锁 → skill_adapter
-的独立通道。撞针状态机、SafetyGate、粗动电压限制、针尖包络和其他前置
-条件继续各自执行；本模块不替代或削弱它们。
+订阅 ``TIP_QUALITY_DROP`` / ``E_STOP``,把事件 id 送进 ``state["event_refs"]``,
+在日志和诊断台账里各留一条,**然后就结束了**。它不再:
 
-若改变通知策略，需要评估可检测的危险、现有拒绝型防护的覆盖与误报代价。
-REMEDY_TOOL_NAMES / REMEDY_TAGS 是退针词汇定义，与 instrument_lock 的绕过表
-保持一致。GATE_* 及 gate_states/reset_all_gates/resolve_all_gates 为调用方
-保留兼容接口，返回没有待处理闸门的开放状态。"""
+* 调用 ``interrupt()``(``langgraph`` 在这个模块里已经不被 import —— 没有调用点,
+  就没有「哪天又被接回去」的可能;测试对着模块源码钉这一条);
+* 关工具闸门(``wrap_tool_call`` 无条件透传,连 ``_unresolved`` 都不再存在)。
+
+事件本身**一个字节都没少**:照发射、照进 buffer 的 event_journal、照进
+``state["event_refs"]``、``ReadHardwareEvents`` 照读得到、面板照看得到。
+割掉的是**打断**,不是**记录**。
+
+## 为什么
+
+打断类确认框在这条链路上长期是误报,并把自动运行打成值守运行。
+
+实证(实机运行观察):这条链路弹出的
+确认框**零真阳性** —— 每一次都是操作瞬态(进针时电流从噪声底爬到设定点、脉冲和
+扎针在电流上打出的台阶),而它们打断的恰恰是正在正常工作的流程。真正拦下危险
+的是**拒绝型防护**(例如针尖包络拦下超包络深扎):不弹框、不等人、越界就说不。
+
+## 要把打断加回来,需要先回答什么
+
+不是「要不要更小心」,而是三个可查的问题:
+
+1. **哪一次真阳性?** 举出一个实例:这条链路弹出的确认框,阻止了一次真实的损害。
+   迄今**这样的实例一个都没有被观测到**(多次弹窗、零真阳性)
+   —— 这是「至今没被观测到」,不是「不可能存在」。
+2. **为什么拒绝型防护接不住它?** 每一个真正的物理越界都有自己的硬线(见下面
+   「谁还能拦住工作」)。要证明打断是必需的,得先证明那些硬线漏了这一类。
+3. **谁来付误报的代价?** 自动运行被打成值守运行的代价是可测的(曾出现过几分钟
+   一次弹窗)。加回来的那条判据,误报率必须先被测出来。
+
+三个问题都有答案的那天,把答案写在这里,再改回来。
+
+## 谁还能拦住工作(这条链路割掉之后仍然存在的停止权)
+
+* **E_STOP / 用户中止** —— 完全另一条通道:``BufferService.register_critical_hook``
+  → ``runtime._estop_sets_abort`` / ``pipeline.main`` 的同款钩子 → abort 闩锁 →
+  ``skill_adapter`` 的 0 号闸门拒绝一切新仪器动作。本模块从来不是 E_STOP 的执行
+  路径,只是在它上面又叠了一个「请确认你刚才按的急停」的对话框。割掉这个对话框
+  **不减少任何停止权**,只是不再要求人回答一个他刚刚已经回答过的问题。
+* **撞针状态机**(``core/tip_crash_tracker``)、**SafetyGate 包络** + 粗动电压四重锁
+  + Layer 0e、**针尖包络**(``_tip_policy``)、**AutoApproach 的 bias_nonzero 前置**、
+  ``is_coarse_sample_approach`` 硬闸 —— 全部原样保留,它们都是拒绝型的。
+
+## 保留下来的东西,以及它们为什么不是死配置
+
+``REMEDY_TOOL_NAMES`` / ``REMEDY_TAGS`` / :meth:`~BufferHITLMiddleware._is_remedy`
+不再被本模块消费(闸门没了),但**不是**死代码:``core/instrument_lock`` 的
+``BYPASS_TAGS`` / ``BYPASS_NAMES`` 是它们的姊妹表,并且有测试钉住「树里每一个退针
+技能都在表里」。这里是那份词汇的定义处。
+
+``GATE_*`` / :func:`gate_states` / :func:`reset_all_gates` / :func:`resolve_all_gates`
+是**兼容外壳**:``api/routes/agents_control``、``api/routes/orchestrator`` 和
+``skills/builtins/hardware_events`` 都在调它们。现在它们如实回答「没有闸门了」
+—— 一个恒为 open 的快照,而不是 404 或异常。
+"""
 
 from __future__ import annotations
 
@@ -157,6 +203,18 @@ REMEDY_TOOL_NAMES: frozenset[str] = frozenset({
     "ApproachTip",
     "EmergencyRetract",
     "SafeRetract",
+    # optics stops — mirrored from
+    # instrument_lock.BYPASS_NAMES, which must stay a subset of this table
+    "StopOpticalStage",
+    "StopSpectrometer",
+    "StopSatelliteDevices",
+    # manual panel stops, mirrored from BYPASS_NAMES
+    "StopSatelliteDevice",
+    "PicomotorAbort",
+    # WITec optical station stops, mirrored from BYPASS_NAMES
+    "StopWITec",
+    "CloseWITecShutter",
+    "ReleaseWITecWriteAccess",
 })
 
 #: 不靠名字、靠 metadata 标签认出来的解药。与 ``instrument_lock.BYPASS_TAGS`` 同义。
@@ -257,7 +315,7 @@ class BufferHITLMiddleware(AgentMiddleware):
         get_mode:
             实时操作模式读取器。只用来让通知里的「建议动作」不自相矛盾:
             SAFE 模式下 MAST 本来就拒绝修针,通知里还建议 ``tip_prep`` 就是在
-            推荐一件当前模式不允许自动执行的事。``None`` → 模式盲默认。
+            推荐一件系统自己不肯做的事。``None`` → 模式盲默认。
 
         Note
         ----
@@ -493,7 +551,7 @@ def _suggest_action(kind: VisionEventType, safe_mode: bool = False) -> str:
 
     ``safe_mode`` 只改一个答案,而且只因为 SAFE 模式改变了 MAST 自己肯做什么:
     在一个信念块写着「不修针」、SafetyGate 硬拦脉冲的模式里建议 ``tip_prep``,
-    是在推荐一件系统自己不肯做的事 —— 用户看到过并提了 #43。
+    是在推荐一件系统自己不肯做的事。
     """
     if kind is VisionEventType.E_STOP:
         return "halt"

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mast-stm"
-version = "6.5.0"
+version = "7.1.6"
 description = "Modular Autonomous SPM Toolkit — a multi-agent experiment companion for a Nanonis-controlled STM"
 readme = "README.md"
 license = { text = "MIT" }

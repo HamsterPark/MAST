@@ -78,6 +78,7 @@ from mast.core.types import (
 from mast.skills.composite._base import CompositeSkillGraph
 from mast.skills.composite._z_settle import ZSettle, settle_and_read_z
 from mast.skills.composite.graph_executor import CompositeStep, GraphExecutor
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -164,55 +165,95 @@ class RelocateCoarseXY(CompositeSkillGraph):
             # the model straight back to the primitive that checks nothing.
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "**换区专用**:把样品台横向粗动到一片新表面。这是唯一应该自主使用的换区方式,"
+                tr("**换区专用**:把样品台横向粗动到一片新表面。这是唯一应该自主使用的换区方式,"
                 "不要直接调 MotorMove 做横向移动。\n"
                 "顺序:前置检查(真空互锁/驱动电压读回核对/扫描已停/落点不与去过的站点重叠)"
                 " → 清障(收压电 + 粗动 Z 退针,逐级自检方向,并确认电流归零、qPlus 振幅恢复)"
                 " → 分块横移(每块之后看电流/振幅/真空,异常立即停并再退针)"
                 " → 步进计数器对账 → 可选重新进针。\n"
                 "成功后扫描地图自动进入**新的坐标代次**(旧坐标全部作废),"
-                "并在粗动大地图上留下一个新站点。用 get_coarse_map 决定往哪走、走多少步。"
+                "并在粗动大地图上留下一个新站点。用 get_coarse_map 决定往哪走、走多少步。",
+                   "**For changing area only**: coarse-move the sample stage laterally to a fresh "
+                   "surface. This is the only way of changing area that should be used autonomously; "
+                   "do not call MotorMove directly for lateral moves.\nOrder: preflight checks "
+                   "(vacuum interlock / drive-voltage readback check / scan stopped / landing spot "
+                   "does not overlap visited sites) -> clearance (retract the piezo + coarse Z "
+                   "retract, self-checking the direction at every stage and confirming that the "
+                   "current drops to zero and the qPlus amplitude recovers) -> lateral move in "
+                   "blocks (after each block look at current/amplitude/vacuum, stop at once and "
+                   "retract again on any anomaly) -> step-counter reconciliation -> optional "
+                   "re-approach.\nOn success the scan map automatically enters a **new coordinate "
+                   "epoch** (all old coordinates become void) and a new site is added to the coarse "
+                   "overview map. Use get_coarse_map to decide which way to go and how many steps.")
             ),
             parameters=[
                 ParameterSpec(
                     name="axis", type="str", required=True,
-                    description="横向轴:'x' 或 'y'",
+                    description=tr("横向轴:'x' 或 'y'", "Lateral axis: 'x' or 'y'"),
                     allowed_values=["x", "y"]),
                 ParameterSpec(
                     name="direction", type="str", required=True,
-                    description="方向:'+' 或 '-'",
+                    description=tr("方向:'+' 或 '-'", "Direction: '+' or '-'"),
                     allowed_values=["+", "-"]),
                 ParameterSpec(
                     name="steps", type="int", required=True,
                     description=(
-                        "横向粗动步数需足够使新区域离开当前压电覆盖范围。"
-                        "使用 get_coarse_map 的建议值，并通过 CheckPiezoRange 查询当前仪器量程；"
-                        "不要把其他仪器的范围作为当前设备的标定。"),
+                        tr("横向粗动步数。必须大到让新区域完全跳出压电量程,"
+                        "否则只是把旧区域挪进视野。用 get_coarse_map 的建议值。\n"
+                        "⚠️ 别在这里写死量程数字:量程因仪器而异"
+                        "(取决于 GetPiezoConfig 的 calibration <标定系数> x ±10 V),"
+                        "配置里存的值与真实量程也可能不一致。"
+                        "要真值就调 CheckPiezoRange,它直接问仪器。",
+                           "Number of lateral coarse steps. It must be large enough for the new area "
+                           "to leave the piezo range entirely, otherwise the old area is only "
+                           "shifted into view. Use the value suggested by get_coarse_map.\nWARNING: "
+                           "do not hard-code a range number here: the range differs between instruments "
+                           "(it follows GetPiezoConfig calibration <标定系数> x +/-10 V), "
+                           "and the value stored in the config may not match the real range either. "
+                           "For the true value call CheckPiezoRange, "
+                           "which asks the instrument directly.")),
                     min_value=1, max_value=100_000),
                 ParameterSpec(
                     name="reapproach", type="bool", required=False, default=True,
-                    description="移动完成后是否自动重新进针(AutoApproach)。"),
+                    description=tr("移动完成后是否自动重新进针(AutoApproach)。",
+                                   "Whether to re-approach automatically after the move "
+                                   "(AutoApproach).")),
                 ParameterSpec(
                     name="prewithdraw_steps", type="int", required=False,
                     default=None, min_value=0, max_value=100_000,
                     description=(
-                        "横向移动前的粗动退针步数(清障)。留空用 instrument_profile "
+                        tr("横向移动前的粗动退针步数(清障)。留空用 instrument_profile "
                         "的 xy_prewithdraw_steps(默认 100)。压电退针只有 1–2 µm,"
-                        "不足以让针尖躲开横移时的垂直跳动。")),
+                        "不足以让针尖躲开横移时的垂直跳动。",
+                           "Number of coarse retract steps before the lateral move (clearance). If "
+                           "empty, uses xy_prewithdraw_steps of instrument_profile (default 100). A "
+                           "piezo retract is only 1-2 um, not enough for the tip to avoid the "
+                           "vertical jitter of the lateral move."))),
                 ParameterSpec(
                     name="allow_revisit", type="bool", required=False, default=False,
                     description=(
-                        "允许落在已经去过的站点附近，**只跳过「别重复访问」这一条"
+                        tr("允许落在已经去过的站点附近，**只跳过「别重复访问」这一条"
                         "效率约束**（最小间距 200 步），安全检查一条不跳。"
                         "标定步长、微调位置这类动作本来就要走小步/回头路 —— "
-                        "2026-08-28 用户要六个方向的 nm/步，而每一个几步的移动"
-                        "都落在 200 步以内，于是全被那条规则拒掉。"
-                        "常规换区**不要**开它：重复用同一片表面是真的浪费。")),
+                        "例如逐方向测 nm/步时，每一个几步的移动"
+                        "都落在 200 步以内，会被那条规则拒掉。"
+                        "常规换区**不要**开它：重复用同一片表面是真的浪费。",
+                           "Allow landing near an already visited site, **skipping only the 'do not "
+                           "revisit' efficiency constraint** (minimum spacing 200 steps); not a "
+                           "single safety check is skipped. Actions like calibrating the step size "
+                           "or fine-tuning the position naturally need small steps / going back: on "
+                           "e.g. measuring nm/step per direction, where every move of "
+                           "a few steps falls within 200 steps and would be refused by that rule. For "
+                           "routine area changes **do not** enable it: reusing the same surface "
+                           "really is a waste."))),
                 ParameterSpec(
                     name="dry_run", type="bool", required=False, default=False,
                     description=(
-                        "跑完整条相位但**不发出任何移动命令** —— 用于无硬件验收:"
-                        "前置检查、看护逻辑、记录都会真的跑一遍。")),
+                        tr("跑完整条相位但**不发出任何移动命令** —— 用于无硬件验收:"
+                        "前置检查、看护逻辑、记录都会真的跑一遍。",
+                           "Run the whole phase sequence but **issue no motion command**, for "
+                           "acceptance without hardware: the preflight checks, the watch logic and "
+                           "the records all really run."))),
             ],
             preconditions=["vacuum_ok_for_coarse", "scan_not_running"],
             estimated_duration_s=180.0,
@@ -299,7 +340,25 @@ class RelocateCoarseXY(CompositeSkillGraph):
         if not verdict.allow:
             return SkillResult(
                 skill_name=_P_PREFLIGHT, success=False,
-                error=f"真空互锁拒绝粗动:{verdict.reason}", data={"checks": checks})
+                error=tr(f"真空互锁拒绝粗动:{verdict.reason}",
+                         f"Vacuum interlock refused the coarse motion: {verdict.reason}"), data={"checks": checks})
+
+        # 1b. WHICH motor group is the STM coarse drive (a PMD4 has several; the
+        #     others move mirrors and lenses), and is the drive known to be the
+        #     STM one — an optical-group move whose restore could not be verified
+        #     latches every coarse move until a readback shows it is back.
+        from mast.instruments.motor_groups import MotorGroupConfigError
+        from mast.skills.builtins.optics_motor_groups import check_drive_latch
+
+        try:
+            checks["motor_group"] = self._stm_group()
+        except MotorGroupConfigError as exc:
+            return SkillResult(skill_name=_P_PREFLIGHT, success=False, error=str(exc),
+                               data={"checks": checks})
+        latch_why = check_drive_latch(real_ctx, self._call_log)
+        if latch_why:
+            return SkillResult(skill_name=_P_PREFLIGHT, success=False, error=latch_why,
+                               data={"checks": checks})
 
         # 2. Drive amplitude AS IT IS NOW. The declared ceiling constrains what
         #    MAST writes; it says nothing about what somebody set in the Nanonis
@@ -316,7 +375,7 @@ class RelocateCoarseXY(CompositeSkillGraph):
                            "ok": ok, "note": why}
         if not ok:
             return SkillResult(skill_name=_P_PREFLIGHT, success=False,
-                               error=f"粗动驱动核对失败:{why}",
+                               error=tr(f"粗动驱动核对失败:{why}", f"Coarse-drive check failed: {why}"),
                                data={"checks": checks})
 
         # 3. Destination sanity against the coarse map. The LLM picked `steps`;
@@ -326,7 +385,7 @@ class RelocateCoarseXY(CompositeSkillGraph):
         if checks["destination"].get("blocked"):
             return SkillResult(
                 skill_name=_P_PREFLIGHT, success=False,
-                error=("目标落点被拒:" + str(checks["destination"].get("reason"))),
+                error=(tr("目标落点被拒:", "Target landing spot refused: ") + str(checks["destination"].get("reason"))),
                 data={"checks": checks})
 
         # 4. Conditions worth RECORDING rather than gating on. Coarse step size
@@ -367,9 +426,12 @@ class RelocateCoarseXY(CompositeSkillGraph):
         because the database is unreachable would strand a run over bookkeeping."""
         if bool(params.get("allow_revisit")):
             return {"blocked": False, "reason": (
-                "allow_revisit=True —— 跳过「别重复访问」这条效率约束"
+                tr("allow_revisit=True —— 跳过「别重复访问」这条效率约束"
                 "（标定步长、微调位置这类动作本来就要走回头路）。"
-                "安全检查一条没跳。")}
+                "安全检查一条没跳。",
+                   "allow_revisit=True: skipping the 'do not revisit' efficiency constraint (actions "
+                   "like calibrating the step size or fine-tuning the position naturally need to go "
+                   "back). Not a single safety check was skipped."))}
 
         try:
             from mast.io.coarse_map import (
@@ -378,7 +440,9 @@ class RelocateCoarseXY(CompositeSkillGraph):
 
             rows, cfg = self._map_inputs(real_ctx)
             if rows is None:
-                return {"blocked": False, "reason": "无法读取粗动记录,跳过落点复核"}
+                return {"blocked": False, "reason": tr("无法读取粗动记录,跳过落点复核",
+                                                       "Cannot read the coarse-motion records, "
+                                                       "landing-spot recheck skipped")}
             cfg = cfg or CoarseMapConfig()
             sites = derive_sites(rows, cfg)
             cur = sites[-1]
@@ -386,7 +450,7 @@ class RelocateCoarseXY(CompositeSkillGraph):
                 (str(params.get("axis")), str(params.get("direction"))))
             steps = int(params.get("steps", 0))
             if direction is None or steps <= 0:
-                return {"blocked": True, "reason": "轴/方向/步数无效"}
+                return {"blocked": True, "reason": tr("轴/方向/步数无效", "Axis/direction/step count invalid")}
             if not cur.position_known:
                 # Relative motion along one axis is still monotone with a broken
                 # odometer; a return trip is not, because it needs the absolute
@@ -394,29 +458,43 @@ class RelocateCoarseXY(CompositeSkillGraph):
                 last = self._last_direction(sites)
                 if last is not None and last != direction:
                     return {"blocked": True, "reason": (
-                        f"粗动里程表已失效(某次粗动缺方向/步数),此时只允许沿上一次的方向"
+                        tr(f"粗动里程表已失效(某次粗动缺方向/步数),此时只允许沿上一次的方向"
                         f"{last} 继续前进,不允许改向或回头 —— 回到某个位置需要绝对坐标,"
-                        f"而那个数字现在是假的。")}
-                return {"blocked": False, "reason": "里程表不确定,但方向与上次一致,放行",
+                        f"而那个数字现在是假的。",
+                           "The coarse odometer is no longer valid (some coarse move lacked "
+                           "direction/steps), so only continuing in the direction of the last move "
+                           f"({last}) is allowed, with no change of direction or going back: "
+                           "returning to a position needs absolute coordinates, and that number is "
+                           "now fake."))}
+                return {"blocked": False, "reason": tr("里程表不确定,但方向与上次一致,放行",
+                                                       "The odometer is uncertain, but the direction "
+                                                       "matches the last move, allowed"),
                         "position_known": False}
             nx = cur.x_steps + (SIGN_OF[direction] * steps if AXIS_OF[direction] == "x" else 0)
             ny = cur.y_steps + (SIGN_OF[direction] * steps if AXIS_OF[direction] == "y" else 0)
             travelled = abs(nx) if AXIS_OF[direction] == "x" else abs(ny)
             if travelled > cfg.axis_step_budget:
                 return {"blocked": True, "reason": (
-                    f"落点 {travelled} 步超出单轴行程预算 {cfg.axis_step_budget} 步 —— "
-                    "粗动台走到头只会空滑,但位置认知会全部丢失。")}
+                    tr(f"落点 {travelled} 步超出单轴行程预算 {cfg.axis_step_budget} 步 —— "
+                    "粗动台走到头只会空滑,但位置认知会全部丢失。",
+                       f"The landing spot at {travelled} steps exceeds the single-axis travel budget "
+                       f"of {cfg.axis_step_budget} steps: the coarse stage would just slip once it "
+                       "reaches the end, and all knowledge of the position would be lost."))}
             blocked, clearance = _blocked_by((nx, ny), sites, cfg)
             if blocked:
                 return {"blocked": True, "lands_at": [nx, ny], "reason": (
-                    f"落点 ({nx}, {ny}) 会压在已经去过的站点上"
+                    tr(f"落点 ({nx}, {ny}) 会压在已经去过的站点上"
                     f"(最小间距 {cfg.site_spacing_steps} 步,还要加上那个站点的"
-                    f"不确定半径)。用 get_coarse_map 取一个可用的方向/步数。")}
+                    f"不确定半径)。用 get_coarse_map 取一个可用的方向/步数。",
+                       f"The landing spot ({nx}, {ny}) would sit on an already visited site (minimum "
+                       f"spacing {cfg.site_spacing_steps} steps, plus the uncertainty radius of that "
+                       "site). Use get_coarse_map to pick a usable direction/step count."))}
             return {"blocked": False, "lands_at": [nx, ny],
                     "clearance_steps": round(clearance, 1)}
         except Exception as exc:  # noqa: BLE001 — bookkeeping must not strand a run
             logger.debug("destination check unavailable: %s", exc)
-            return {"blocked": False, "reason": f"落点复核不可用({exc}),放行"}
+            return {"blocked": False, "reason": tr(f"落点复核不可用({exc}),放行",
+                                                   f"Landing-spot recheck unavailable ({exc}), allowed")}
 
     @staticmethod
     def _last_direction(sites) -> str | None:
@@ -495,14 +573,31 @@ class RelocateCoarseXY(CompositeSkillGraph):
                 # costs a relocation; proceeding costs a tip.
                 return SkillResult(
                     skill_name=_P_CLEAR, success=False,
-                    error=("清障退针自检无法建立基线:" + baseline.why() + "。"
+                    error=(tr("清障退针自检无法建立基线:", "Clearance retract self-check cannot establish a baseline: ") + baseline.why() + tr("。"
                            "方向自检要拿「反馈稳定后的 Z」和退针后的同一个量比,"
                            "基线读不到就整条自检都不成立 —— 不会盲退。"
                            "若本机反馈确实比这个预算慢,到设置页把「退针 Z 稳定预算」"
-                           "(z_settle_timeout_s)调大。"),
+                           "(z_settle_timeout_s)调大。",
+                                                                 ". The direction self-check compares the "
+                                                                 "'Z after feedback settles' with the "
+                                                                 "same quantity after the retract; "
+                                                                 "without a baseline the whole self-check "
+                                                                 "does not hold, so it will not retract "
+                                                                 "blindly. If feedback on this machine "
+                                                                 "really is slower than this budget, "
+                                                                 "raise 'retract Z settle budget' "
+                                                                 "(z_settle_timeout_s) on the settings "
+                                                                 "page.")),
                     data={"baseline": baseline.as_dict()})
 
             dir_code = ip.get_retract_dir_code()
+            from mast.instruments.motor_groups import MotorGroupConfigError
+
+            try:
+                group = self._stm_group()
+            except MotorGroupConfigError as exc:
+                return SkillResult(skill_name=_P_CLEAR, success=False, error=str(exc),
+                                   data={"rungs": rungs})
             for n in self._clearance_ladder(prewithdraw_steps):
                 # Piezo out of the way BEFORE the coarse motor steps — a coarse
                 # step with the piezo extended is the crash this ladder is for.
@@ -510,12 +605,13 @@ class RelocateCoarseXY(CompositeSkillGraph):
                 # MEASUREMENT starting from a repeatable place; this one is the
                 # safety invariant, and it has to hold at this line.)
                 log.append(real_ctx.safe_call("ZCtrl_Withdraw", 1, -1))
-                rec = real_ctx.safe_call("Motor_StartMove", dir_code, n, 0, 1)
+                rec = real_ctx.safe_call("Motor_StartMove", dir_code, n, group, 1)
                 log.append(rec)
                 if rec.error:
                     return SkillResult(
                         skill_name=_P_CLEAR, success=False,
-                        error=f"清障退针失败({n} 步):{rec.error}",
+                        error=tr(f"清障退针失败({n} 步):{rec.error}",
+                                 f"Clearance retract failed ({n} steps): {rec.error}"),
                         data={"rungs": rungs})
 
                 after = self._settle(real_ctx, log)
@@ -551,8 +647,12 @@ class RelocateCoarseXY(CompositeSkillGraph):
                     return SkillResult(
                         skill_name=_P_CLEAR, success=False,
                         # 按拒绝依据给出处置建议，不能用 z_extend_sign 翻译出的结论反过来证明该符号正确。
-                        error=("清障退针自检失败:粗动 " + str(n) + " 步后判定针尖在"
-                               "**逼近**样品(" + why + ")。已停止粗动并撤针。"
+                        error=(tr("清障退针自检失败:粗动 ",
+                                  "Clearance retract self-check failed: after coarse motion of ") + str(n) + tr(" 步后判定针尖在"
+                               "**逼近**样品(",
+                                                            " steps the tip was judged to be "
+                                                            "**approaching** the sample (") + why + tr(")。已停止粗动并撤针。",
+                                                      "). Coarse motion stopped and tip withdrawn.")
                                + self._approach_prescription(why)),
                         data={"rungs": rungs})
                 if verdict == "unsettled":
@@ -568,12 +668,21 @@ class RelocateCoarseXY(CompositeSkillGraph):
                     self._panic(real_ctx)
                     return SkillResult(
                         skill_name=_P_CLEAR, success=False,
-                        error=("清障退针自检**没有得出结论**(不是判定为逼近):"
-                               + why + "。已停止粗动并撤针。"
+                        error=(tr("清障退针自检**没有得出结论**(不是判定为逼近):",
+                                  "Clearance retract self-check **reached no conclusion** (not "
+                                  "judged as approaching): ")
+                               + why + tr("。已停止粗动并撤针。"
                                "这一级读不到稳定的 Z,就无法判断针尖是远离还是靠近;"
                                "继续加大步数正是这条自检要挡住的事。"
                                "若本机反馈确实较慢,到设置页把「退针 Z 稳定预算」"
-                               "(z_settle_timeout_s)调大。"),
+                               "(z_settle_timeout_s)调大。",
+                                          ". Coarse motion stopped and tip withdrawn. Without a "
+                                          "stable Z at this stage it is impossible to tell whether "
+                                          "the tip is moving away or closing in; increasing the "
+                                          "steps further is exactly what this self-check is meant to "
+                                          "prevent. If feedback on this machine really is slower, "
+                                          "raise 'retract Z settle budget' (z_settle_timeout_s) on "
+                                          "the settings page.")),
                         data={"rungs": rungs})
                 if verdict == "no_sign":
                     # 与 ``unsettled`` 同样停梯子,但**处方完全不同**:那一条的方子是
@@ -582,12 +691,26 @@ class RelocateCoarseXY(CompositeSkillGraph):
                     self._panic(real_ctx)
                     return SkillResult(
                         skill_name=_P_CLEAR, success=False,
-                        error=("清障退针自检**无法进行**:" + why + "。已停止粗动并撤针。"
+                        error=(tr("清障退针自检**无法进行**:",
+                                  "Clearance retract self-check **cannot be performed**: ") + why + tr("。已停止粗动并撤针。"
                                "这一项没有可用的默认值,且因机型而异 —— "
                                "「猜一个」和「猜对了」长得一模一样。"
                                "判法:开反馈让压电去找表面,看 Z 读数往哪边走 —— "
                                "那一边就是**伸长**;再到设置页 → 退针 → "
-                               "`z_extend_sign` 如实填。"),
+                               "`z_extend_sign` 如实填。",
+                                                            ". Coarse motion stopped and tip "
+                                                            "withdrawn. This item has no usable "
+                                                            "default: the sign depends on the instrument model, "
+                                                            "and "
+                                                            "it differs between setups, "
+                                                            "so 'guessing one' "
+                                                            "and 'guessing right' look exactly the "
+                                                            "same. How to determine it: turn "
+                                                            "feedback on so the piezo looks for the "
+                                                            "surface and see which way the Z reading "
+                                                            "goes: that direction is **extend**; "
+                                                            "then fill in `z_extend_sign` honestly "
+                                                            "under Settings -> Retract.")),
                         data={"rungs": rungs})
 
             # The ladder finished. Did the stage actually GO anywhere?
@@ -610,7 +733,7 @@ class RelocateCoarseXY(CompositeSkillGraph):
         if proof.get("clear") is False:
             self._panic(real_ctx)
             return SkillResult(skill_name=_P_CLEAR, success=False,
-                               error=("脱离确认失败:" + str(proof.get("reason"))),
+                               error=(tr("脱离确认失败:", "Clearance confirmation failed: ") + str(proof.get("reason"))),
                                data={"rungs": rungs, "clearance": proof})
 
         # The tip is verified clear — the one moment the free-oscillation
@@ -619,7 +742,8 @@ class RelocateCoarseXY(CompositeSkillGraph):
         try:
             from mast.skills.builtins._tip_evidence import capture_qplus_baseline
             proof.update(capture_qplus_baseline(
-                real_ctx, note="横向粗动前确认脱离后记录"))
+                real_ctx, note=tr("横向粗动前确认脱离后记录",
+                                  "Recorded after confirming clearance before the lateral coarse move")))
         except Exception:  # noqa: BLE001
             pass
 
@@ -715,7 +839,7 @@ class RelocateCoarseXY(CompositeSkillGraph):
         if abs(dz) > thresh:
             return False, ""
         return True, (
-            f"粗动马达没有产生位移:下了 {commanded_steps} 步退针命令,"
+            tr(f"粗动马达没有产生位移:下了 {commanded_steps} 步退针命令,"
             f"而压电全程都握着隧道结、量到的总位移只有 {abs(dz) * 1e9:.2f} nm"
             f"(阈值 {thresh * 1e9:.2f} nm)。"
             "**这不是「测不出来」,是「测出来是零」** —— 每一级的基线与退针后读数都"
@@ -724,23 +848,48 @@ class RelocateCoarseXY(CompositeSkillGraph):
             "`Motor_StartMove` 照样返回成功)、驱动幅度低于起动阈、"
             "该轴走到行程尽头空滑、机械卡死。\n"
             "已停止粗动并撤针,**本次不计入粗动里程表**(坐标代次不推进,"
-            "粗动大地图不加站点)—— 记下一次没发生的位移,比不换区危险得多。")
+            "粗动大地图不加站点)—— 记下一次没发生的位移,比不换区危险得多。",
+               f"The coarse motor produced no displacement: {commanded_steps} steps of retract were "
+               "commanded, yet the piezo held the tunnelling junction throughout and the measured "
+               f"total displacement is only {abs(dz) * 1e9:.2f} nm (threshold {thresh * 1e9:.2f} nm). "
+               "**This is not 'cannot be measured', it is 'measured as zero'**: at every stage the "
+               "baseline and the after-retract reading were stable on a real tunnelling junction, so "
+               "the ruler is good, and it says the stage did not move.\nCommon causes: **the "
+               "coarse-approach high voltage is off** (the piezo motor does stick-slip steps on high "
+               "voltage; without it `Motor_StartMove` still returns success), drive amplitude below "
+               "the start threshold, the axis ran to the end of its travel and is slipping, a "
+               "mechanical jam.\nCoarse motion stopped and tip withdrawn, **this move is not counted "
+               "in the coarse odometer** (the coordinate epoch does not advance, no site is added to "
+               "the coarse overview map): recording a displacement that did not happen is far more "
+               "dangerous than not changing area."))
 
     @staticmethod
     def _approach_prescription(why: str) -> str:
         """按拒绝的证据给出处置建议：Z 方向与电流阈值分别解释，不能从下游判决反证极性配置正确。"""
-        from_current = ("阈值" in why) or ("满量程" in why)
+        from_current = any(k in why for k in ("阈值", "满量程", "trip threshold", "full scale"))
         if not from_current:
-            return ("—— 压电缩回就是针尖靠近了。请核对 instrument_profile 的"
-                    "退针方向 / z_extend_sign(**方向很可能配反**),再重试换区。")
-        return ("\n**下一步按上面那句话里的依据分**:\n"
+            return (tr("—— 压电缩回就是针尖靠近了。请核对 instrument_profile 的"
+                    "退针方向 / z_extend_sign(**方向很可能配反**),再重试换区。",
+                       ": a piezo retraction means the tip moved closer. Check the retract direction "
+                       "/ z_extend_sign in instrument_profile (**the direction is probably "
+                       "configured backwards**), then retry the area change."))
+        return (tr("\n**下一步按上面那句话里的依据分**:\n"
                 "• 若写着「未收敛」——反馈可能还在追,先把设置页的"
                 "「退针 Z 稳定预算」(z_settle_timeout_s)调大再重试;\n"
                 "• 若写着「由**绝对地板**决定」而你的工作点本来就跑在接近 1 nA ——"
                 "那个地板是照成像条件(~100 pA)定的,对这条流程不适用,"
                 "先把工作电流降到成像量级再换区;\n"
                 "• 若写着「由**相对项**决定」且读数已收敛 ——这才是真的在逼近,"
-                "去核对 instrument_profile 的退针方向 / z_extend_sign。")
+                "去核对 instrument_profile 的退针方向 / z_extend_sign。",
+                   "\n**The next step depends on the basis stated in the sentence above**:\n- If it "
+                   "says 'not converged': feedback may still be chasing; first raise 'retract Z "
+                   "settle budget' (z_settle_timeout_s) on the settings page and retry;\n- If it "
+                   "says 'decided by the **absolute floor**' while your working point already runs "
+                   "near 1 nA: that floor was set for imaging conditions (~100 pA) and does not "
+                   "apply to this flow; first lower the working current to the imaging level, then "
+                   "change area;\n- If it says 'decided by the **relative term**' and the reading "
+                   "has converged: this really is an approach, so check the retract direction / "
+                   "z_extend_sign in instrument_profile."))
 
     def _judge_recede(self, baseline: ZSettle, after: ZSettle) -> tuple[str, str]:
         """'receding' | 'approaching' | 'ambiguous' | 'unsettled' | 'no_sign'.
@@ -780,31 +929,46 @@ class RelocateCoarseXY(CompositeSkillGraph):
                     full_scale = None
                 if full_scale and abs(current) >= full_scale:
                     return "approaching", (
-                        f"电流 {abs(current):.3g} A 已达前置放大器满量程 "
+                        tr(f"电流 {abs(current):.3g} A 已达前置放大器满量程 "
                         f"{full_scale:.3g} A —— 放大器饱和,与工作点无关。"
                         "(读不到 setpoint,所以用的是这个与工作点无关的界,"
-                        "不是相对判据。)")
+                        "不是相对判据。)",
+                           f"Current {abs(current):.3g} A has reached the preamplifier full scale "
+                           f"{full_scale:.3g} A: the amplifier is saturated, independent of the "
+                           "working point. (The setpoint could not be read, so this "
+                           "working-point-independent bound is used, not the relative criterion.)"))
                 why_no_sp = (after.setpoint_why or baseline.setpoint_why
-                             or "两次读数都没有留下原因")
+                             or tr("两次读数都没有留下原因", "neither reading left a reason"))
                 skipped = (
-                    f"(电流 {abs(current):.3g} A 这一条**没判**:读不到 setpoint"
-                    f"[{why_no_sp}],相对判据 3×setpoint 无从算起;"
-                    + (f"满量程界 {full_scale:.3g} A 也没超。"
+                    tr(f"(电流 {abs(current):.3g} A 这一条**没判**:读不到 setpoint"
+                    f"[{why_no_sp}],相对判据 3×setpoint 无从算起;",
+                       f"(The current {abs(current):.3g} A was **not judged** on this item: the "
+                       f"setpoint could not be read [{why_no_sp}], so the relative criterion 3 x "
+                       "setpoint cannot be computed; ")
+                    + (tr(f"满量程界 {full_scale:.3g} A 也没超。",
+                          f"the full-scale bound {full_scale:.3g} A was not exceeded either. ")
                        if full_scale else
-                       "而 instrument_profile 也没声明 preamp_full_scale_a,"
-                       "没有与工作点无关的界可用。")
-                    + "已改用 Z 压电方向这条**主证据**。)")
+                       tr("而 instrument_profile 也没声明 preamp_full_scale_a,"
+                       "没有与工作点无关的界可用。",
+                          "and instrument_profile does not declare preamp_full_scale_a either, so "
+                          "there is no bound independent of the working point. "))
+                    + tr("已改用 Z 压电方向这条**主证据**。)",
+                         "The **primary evidence** of the Z piezo direction is used instead.)"))
                 self._current_trip_note = skipped
             else:
                 bar = max(rel, floor)
                 if abs(current) > bar:
-                    which = ("相对项 3×setpoint" if rel >= floor else "绝对地板")
-                    settled = ("读数已收敛" if after.usable
-                               else f"⚠️ **这次读数未收敛**({after.why()})")
+                    which = (tr("相对项 3×setpoint", "relative term 3 x setpoint") if rel >= floor else tr("绝对地板", "absolute floor"))
+                    settled = (tr("读数已收敛", "reading converged") if after.usable
+                               else tr(f"⚠️ **这次读数未收敛**({after.why()})",
+                                       f"WARNING: **this reading has not converged** ({after.why()})"))
                     return "approaching", (
-                        f"电流 {abs(current):.3g} A 高于阈值 {bar:.3g} A"
+                        tr(f"电流 {abs(current):.3g} A 高于阈值 {bar:.3g} A"
                         f"(由**{which}**决定:setpoint 读到 {float(setpoint):.3g} A,"
-                        f"相对项 {rel:.3g} A,地板 {floor:.3g} A);{settled}")
+                        f"相对项 {rel:.3g} A,地板 {floor:.3g} A);{settled}",
+                           f"Current {abs(current):.3g} A is above the trip threshold {bar:.3g} A "
+                           f"(decided by the **{which}**: setpoint read as {float(setpoint):.3g} A, "
+                           f"relative term {rel:.3g} A, floor {floor:.3g} A); {settled}"))
 
         # 2. The Z comparison — only between two readings that actually stopped.
         note = getattr(self, "_current_trip_note", "")
@@ -821,7 +985,7 @@ class RelocateCoarseXY(CompositeSkillGraph):
         if not after.usable:
             return _say("unsettled", after.why())
         if not baseline.usable:
-            return _say("unsettled", "基线 Z 不可用:" + baseline.why())
+            return _say("unsettled", tr("基线 Z 不可用:", "Baseline Z unavailable: ") + baseline.why())
 
         # **没声明就不判**(2026-08-11)。出厂 ``+1`` 在这里不是保守值,是两个互斥
         # 答案里的一个 —— 见 ``instrument_profile.z_extend_sign_or_none`` 的表:
@@ -831,9 +995,12 @@ class RelocateCoarseXY(CompositeSkillGraph):
         sign = ip.z_extend_sign_or_none()
         if sign is None:
             return _say("no_sign", (
-                "本机没有声明「压电伸长(趋向样品)对应 Z 读数符号」"
+                tr("本机没有声明「压电伸长(趋向样品)对应 Z 读数符号」"
                 "(设置 → 退针 → `z_extend_sign`),Z 读数变化无法翻译成"
-                "「在远离还是在靠近」"))
+                "「在远离还是在靠近」",
+                   "This machine has not declared 'the Z reading sign for piezo extension (toward "
+                   "the sample)' (Settings -> Retract -> `z_extend_sign`), so a change in the Z "
+                   "reading cannot be translated into 'moving away or closing in'")))
         dz = (after.z_m - baseline.z_m) * sign
         thresh = float(ip.get_config("z_recede_min_nm", 1.0)) * 1e-9
 
@@ -844,16 +1011,24 @@ class RelocateCoarseXY(CompositeSkillGraph):
             # a tip that had closed in would have pulled the piezo off the rail,
             # so the approaching half of the check is still live.
             return _say("ambiguous", (
-                "退针前后压电都到极限、量程内都没有表面 —— "
-                "与远离一致,但两次都是极限值,证明不了距离(没有逼近迹象)"))
+                tr("退针前后压电都到极限、量程内都没有表面 —— "
+                "与远离一致,但两次都是极限值,证明不了距离(没有逼近迹象)",
+                   "The piezo was at its limit both before and after the retract, with no surface "
+                   "within range: consistent with moving away, but both are limit values, which "
+                   "cannot prove the distance (no sign of approach)")))
         if dz > thresh:
             if after.at_rail:
                 # The piezo ran out of range looking for a surface that used to
                 # be within reach: receding, and the magnitude is a lower bound.
                 return _say("receding", (
-                    f"压电走到极限仍未找到表面,较基线至少远离 {dz * 1e9:.1f} nm"
-                    "(极限值,实际更远)"))
-            return _say("receding", f"Z 压电伸长 {dz * 1e9:.1f} nm(在追远离的样品)")
+                    tr(f"压电走到极限仍未找到表面,较基线至少远离 {dz * 1e9:.1f} nm"
+                    "(极限值,实际更远)",
+                       "The piezo reached its limit without finding the surface, so the tip is at "
+                       f"least {dz * 1e9:.1f} nm farther than at baseline (a limit value, the real "
+                       "distance is larger)")))
+            return _say("receding", tr(f"Z 压电伸长 {dz * 1e9:.1f} nm(在追远离的样品)",
+                                       f"Z piezo extended {dz * 1e9:.1f} nm (chasing a receding "
+                                       "sample)"))
         if dz < -thresh:
             if baseline.at_rail:
                 # Was beyond reach, now the loop can hold a junction: the tip
@@ -861,10 +1036,13 @@ class RelocateCoarseXY(CompositeSkillGraph):
                 # survives a railed baseline, which is why a rail is reported
                 # rather than treated as a failed reading.
                 return _say("approaching", (
-                    f"基线时量程内还没有表面,退针后反而找到了(Z 缩回 "
-                    f"{abs(dz) * 1e9:.1f} nm)—— 针尖是靠近了"))
-            return _say("approaching", f"Z 压电缩回 {abs(dz) * 1e9:.1f} nm")
-        return _say("ambiguous", "Z 压电几乎没动")
+                    tr(f"基线时量程内还没有表面,退针后反而找到了(Z 缩回 "
+                    f"{abs(dz) * 1e9:.1f} nm)—— 针尖是靠近了",
+                       "No surface was within range at baseline, but one was found after the retract "
+                       f"(Z retracted {abs(dz) * 1e9:.1f} nm): the tip moved closer")))
+            return _say("approaching", tr(f"Z 压电缩回 {abs(dz) * 1e9:.1f} nm",
+                                          f"Z piezo retracted {abs(dz) * 1e9:.1f} nm"))
+        return _say("ambiguous", tr("Z 压电几乎没动", "Z piezo barely moved"))
 
     def _prove_clear(self, real_ctx) -> dict:
         """Confirm the tip is off the surface. Two witnesses, neither sufficient alone.
@@ -882,17 +1060,25 @@ class RelocateCoarseXY(CompositeSkillGraph):
         out["current_a"] = current
         if current is None:
             out["clear"] = None
-            out["reason"] = ("读不到电流,无法确认针尖已脱离。"
+            out["reason"] = (tr("读不到电流,无法确认针尖已脱离。"
                              "读不到 ≠ 已脱离,但也不足以判定失败 —— "
-                             "继续依赖退针自检的结论。")
+                             "继续依赖退针自检的结论。",
+                                "Cannot read the current, so it cannot be confirmed that the tip has "
+                                "cleared. Unreadable is not cleared, but it is not enough to declare "
+                                "failure either: keep relying on the conclusion of the retract "
+                                "self-check."))
         elif abs(current) > _NOISE_FLOOR_A * 10:
             out["clear"] = False
-            out["reason"] = (f"退针后电流仍有 {abs(current):.3g} A(应到噪声底)"
-                             " —— 针尖可能还在隧穿距离内,**不要横向移动**。")
+            out["reason"] = (tr(f"退针后电流仍有 {abs(current):.3g} A(应到噪声底)"
+                             " —— 针尖可能还在隧穿距离内,**不要横向移动**。",
+                                f"After the retract the current is still {abs(current):.3g} A (should "
+                                "be at the noise floor): the tip may still be within tunnelling "
+                                "distance, **do not move laterally**."))
             return out
         else:
             out["clear"] = True
-            out["reason"] = f"电流已到噪声底({abs(current):.3g} A)"
+            out["reason"] = tr(f"电流已到噪声底({abs(current):.3g} A)",
+                               f"Current is at the noise floor ({abs(current):.3g} A)")
 
         try:
             from mast.skills.builtins._tip_evidence import qplus_recovered
@@ -916,7 +1102,9 @@ class RelocateCoarseXY(CompositeSkillGraph):
             #
             # 三态,和 `clear` 同款:True/False = 取到证了;None + note = 试过但没成。
             out["qplus_recovered"] = None
-            out["qplus_note"] = f"qPlus 取证未完成({type(exc).__name__}: {exc})"
+            out["qplus_note"] = tr(f"qPlus 取证未完成({type(exc).__name__}: {exc})",
+                                   f"qPlus evidence capture not completed ({type(exc).__name__}: "
+                                   f"{exc})")
             out["qplus_probe_failed"] = True
             logger.warning("relocate: qPlus 复原取证抛异常(按未取证处理): %r", exc)
         return out
@@ -933,7 +1121,7 @@ class RelocateCoarseXY(CompositeSkillGraph):
             (str(params.get("axis")), str(params.get("direction"))))
         if direction is None or n <= 0:
             return SkillResult(skill_name=_P_MOVE, success=False,
-                               error=f"无效的移动参数:{params}")
+                               error=tr(f"无效的移动参数:{params}", f"Invalid move parameters: {params}"))
         if params.get("dry_run"):
             self._moved_steps += n
             return SkillResult(skill_name=_P_MOVE, success=True,
@@ -941,13 +1129,23 @@ class RelocateCoarseXY(CompositeSkillGraph):
                                      "direction": direction,
                                      "cumulative": params.get("cumulative")})
 
-        rec = real_ctx.safe_call("Motor_StartMove", _DIR_CODE[direction], n, 0, 1)
+        from mast.instruments.motor_groups import MotorGroupConfigError
+
+        try:
+            group = self._stm_group()
+        except MotorGroupConfigError as exc:
+            self._panic(real_ctx)
+            return SkillResult(skill_name=_P_MOVE, success=False, error=str(exc),
+                               data={"moved_steps": self._moved_steps})
+        rec = real_ctx.safe_call("Motor_StartMove", _DIR_CODE[direction], n, group, 1)
         self._call_log.append(rec)
         if rec.error:
             self._panic(real_ctx)
             return SkillResult(
                 skill_name=_P_MOVE, success=False,
-                error=f"横向粗动失败(第 {params.get('index')} 块,{n} 步):{rec.error}",
+                error=tr(f"横向粗动失败(第 {params.get('index')} 块,{n} 步):{rec.error}",
+                         f"Lateral coarse move failed (block {params.get('index')}, {n} steps): "
+                         f"{rec.error}"),
                 data={"moved_steps": self._moved_steps})
         self._moved_steps += n
 
@@ -960,9 +1158,13 @@ class RelocateCoarseXY(CompositeSkillGraph):
             self._panic(real_ctx)
             return SkillResult(
                 skill_name=_P_MOVE, success=False,
-                error=(f"横向移动中检测到电流 {abs(current):.3g} A —— "
+                error=(tr(f"横向移动中检测到电流 {abs(current):.3g} A —— "
                        "针尖离表面太近(清障不足或样品倾斜)。已立即停止粗动并撤针。"
-                       f"已移动 {self._moved_steps} 步。"),
+                       f"已移动 {self._moved_steps} 步。",
+                          f"Current {abs(current):.3g} A detected during the lateral move: the tip is "
+                          "too close to the surface (insufficient clearance or tilted sample). "
+                          f"Coarse motion stopped at once and tip withdrawn. {self._moved_steps} "
+                          "steps moved.")),
                 data={"moved_steps": self._moved_steps, "watch": watch})
 
         try:
@@ -973,9 +1175,12 @@ class RelocateCoarseXY(CompositeSkillGraph):
                 self._panic(real_ctx)
                 return SkillResult(
                     skill_name=_P_MOVE, success=False,
-                    error=("横向移动中 qPlus 振幅塌了 —— 针尖已经接触表面。"
+                    error=(tr("横向移动中 qPlus 振幅塌了 —— 针尖已经接触表面。"
                            "已立即停止粗动并撤针。"
-                           f"已移动 {self._moved_steps} 步。"),
+                           f"已移动 {self._moved_steps} 步。",
+                              "qPlus amplitude collapsed during the lateral move: the tip has "
+                              "touched the surface. Coarse motion stopped at once and tip withdrawn. "
+                              f"{self._moved_steps} steps moved.")),
                     data={"moved_steps": self._moved_steps, "watch": watch})
         except Exception:  # noqa: BLE001
             pass
@@ -989,7 +1194,9 @@ class RelocateCoarseXY(CompositeSkillGraph):
                 self._panic(real_ctx)
                 return SkillResult(
                     skill_name=_P_MOVE, success=False,
-                    error=f"移动过程中真空互锁转为拒绝:{v.reason} 已停止粗动。",
+                    error=tr(f"移动过程中真空互锁转为拒绝:{v.reason} 已停止粗动。",
+                             f"Vacuum interlock turned to refuse during the move: {v.reason} Coarse "
+                             "motion stopped."),
                     data={"moved_steps": self._moved_steps, "watch": watch})
         except Exception:  # noqa: BLE001
             pass
@@ -1009,9 +1216,13 @@ class RelocateCoarseXY(CompositeSkillGraph):
         if rec.error:
             return SkillResult(skill_name=_P_VERIFY, success=True,
                                data={"counter": "unavailable",
-                                     "note": ("本控制器不支持步进计数器读回"
+                                     "note": (tr("本控制器不支持步进计数器读回"
                                               "(仅 Attocube ANC150 支持)—— "
-                                              "移动步数无法对账,这是如实记录,不是通过。")})
+                                              "移动步数无法对账,这是如实记录,不是通过。",
+                                                 "This controller does not support step-counter "
+                                                 "readback (only the Attocube ANC150 does): the "
+                                                 "moved steps cannot be reconciled; this is recorded "
+                                                 "as it is, not a pass."))})
         parsed = rec.return_value
         data: dict[str, Any] = {"counter": "read", "commanded_steps": self._moved_steps}
         if isinstance(parsed, (list, tuple)) and len(parsed) > 2:
@@ -1049,11 +1260,16 @@ class RelocateCoarseXY(CompositeSkillGraph):
             # can be checked, instead of narrating a bookkeeping step that runs
             # elsewhere, after this returns, and can fail on its own.
             error=None if ok else (
-                f"换区后重新进针失败:{getattr(res, 'error', 'unknown')}。"
+                tr(f"换区后重新进针失败:{getattr(res, 'error', 'unknown')}。"
                 f"**横向移动本身已经完成**(实际走了 {self._moved_steps} 步),"
                 "针尖现在是退开的 —— 重新进针即可,**不要再移动一次**。"
                 "旧的压电坐标已经不指向原来那片表面了;"
-                "账面位置用 get_coarse_map 核对,不要凭这句话推断。"),
+                "账面位置用 get_coarse_map 核对,不要凭这句话推断。",
+                   f"Re-approach after the area change failed: {getattr(res, 'error', 'unknown')}. "
+                   f"**The lateral move itself is complete** ({self._moved_steps} steps actually "
+                   "moved) and the tip is now retracted: just re-approach, **do not move again**. "
+                   "The old piezo coordinates no longer point at the original surface; check the "
+                   "bookkeeping position with get_coarse_map, do not infer it from this sentence.")),
             data={"approach": getattr(res, "data", None) or {}})
 
     def _lower_bias_for_move(self, real_ctx) -> None:
@@ -1084,6 +1300,19 @@ class RelocateCoarseXY(CompositeSkillGraph):
             self._call_log.append(real_ctx.safe_call("Bias_Set", float(want)))
         except Exception:  # noqa: BLE001
             logger.warning("恢复偏压到 %.3f V 失败 —— 请手动确认", want, exc_info=True)
+
+    def _stm_group(self) -> int:
+        """The Nanonis motor group every coarse step of this run uses.
+
+        Was a literal 0 once; now the configured STM coarse group
+        (``nanonis_motor_groups.json``, 0 when absent). Resolved once per run so
+        a config edit mid-relocation cannot split one move across two groups.
+        Raises ``MotorGroupConfigError`` when the file exists but is unusable."""
+        if getattr(self, "_motor_group", None) is None:
+            from mast.instruments.motor_groups import stm_coarse_group
+
+            self._motor_group = stm_coarse_group()
+        return int(self._motor_group)
 
     def _panic(self, real_ctx) -> None:
         """Stop the motor and withdraw. Best-effort, never raises.
@@ -1119,7 +1348,7 @@ class RelocateCoarseXY(CompositeSkillGraph):
                 self._panic_failures.append(f"{verb}: {exc}")
                 self._call_log.append(NanonisCallRecord(
                     method=verb, args=args,
-                    error=f"panic {verb} 未能下发: {exc}"))
+                    error=tr(f"panic {verb} 未能下发: {exc}", f"panic {verb} could not be issued: {exc}")))
                 logger.error("relocate 急停动作 %s 未能下发: %r", verb, exc)
         # 急停也要把偏压放回去 —— 否则一次失败的粗动会让调用方停在 0.5 V 上，
         # 而它自己以为还在原来的成像偏压。
@@ -1129,9 +1358,11 @@ class RelocateCoarseXY(CompositeSkillGraph):
         """急停没做成时,要顶到用户读的那句话里去的一行。空串 = 都发出去了。"""
         if not self._panic_failures:
             return ""
-        return ("\n⚠️ **紧急停止未能完整下发**(" + "；".join(self._panic_failures)
-                + ")。请立即到 Nanonis 界面确认马达已停、针尖已退开 —— "
-                "不要假设本技能已经把针尖收回去了。")
+        return (tr("\n⚠️ **紧急停止未能完整下发**(", "\nWARNING: **emergency stop was not fully issued** (") + tr("；", "; ").join(self._panic_failures)
+                + tr(")。请立即到 Nanonis 界面确认马达已停、针尖已退开 —— "
+                "不要假设本技能已经把针尖收回去了。",
+                     "). Check in the Nanonis interface at once that the motor has stopped and the "
+                     "tip is retracted: do not assume this skill has pulled the tip back."))
 
     # ── driver ──────────────────────────────────────────────────────────
 
@@ -1148,15 +1379,20 @@ class RelocateCoarseXY(CompositeSkillGraph):
         self._temperature_k: float | None = None
         #: 横移前被本流程降下去的偏压原值；None = 没降过 / 已放回。
         self._bias_restore: float | None = None
+        #: 本次运行所有粗动用的 Nanonis 电机组（预检时定一次，见 :meth:`_stm_group`）。
+        self._motor_group: int | None = None
 
         direction = _DIRECTIONS.get(
             (str(params.get("axis")), str(params.get("direction"))))
         if direction is None:
             return SkillResult(
                 skill_name=self._skill_name(), success=False,
-                error=(f"无效的轴/方向:axis={params.get('axis')!r} "
+                error=(tr(f"无效的轴/方向:axis={params.get('axis')!r} "
                        f"direction={params.get('direction')!r};"
-                       "轴取 'x'/'y',方向取 '+'/'-'。"))
+                       "轴取 'x'/'y',方向取 '+'/'-'。",
+                          f"Invalid axis/direction: axis={params.get('axis')!r} "
+                          f"direction={params.get('direction')!r}; axis must be 'x'/'y' and direction "
+                          "'+'/'-'.")))
 
         wrapped = _RelocatePhaseCtx(context, self)
         executor = GraphExecutor(
@@ -1224,7 +1460,7 @@ class RelocateCoarseXY(CompositeSkillGraph):
             # 那不是「成功」—— 针尖是不是退开的,本技能答不上来。
             return SkillResult(
                 skill_name=self._skill_name(), success=False,
-                error=("横向移动的各项判据都过了,但" + panic_note.lstrip("\n")),
+                error=(tr("横向移动的各项判据都过了,但", "All checks of the lateral move passed, but ") + panic_note.lstrip("\n")),
                 data=data, nanonis_calls=list(self._call_log))
         return SkillResult(skill_name=self._skill_name(), success=True,
                            data=data, nanonis_calls=list(self._call_log))

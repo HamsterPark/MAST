@@ -9,10 +9,11 @@ import { Button, useToast } from "@/components/controls";
 import { TimeTraceChart } from "@/components/experimental/TimeTraceChart";
 import { FftChart } from "@/components/vision/FftChart";
 import { fmtBytes, fmtSeconds, verdictView } from "@/lib/monitoring";
+import { langTag, tr } from "@/lib/i18n";
 
 type SegmentRow = components["schemas"]["SegmentRow"];
 
-// 段浏览器 — the corpus side of the page. Every second of recorded current is a
+// Segment browser — the corpus side of the page. Every second of recorded current is a
 // row here; pinning exempts one from the retention sweep and labelling records
 // a human verdict on it (which pins it too, backend-side: a judged segment with
 // its waveform swept away would be a label with nothing to train on).
@@ -20,11 +21,11 @@ type SegmentRow = components["schemas"]["SegmentRow"];
 const PAGE = 25;
 
 const FILTERS = [
-  { key: "all", label: "全部" },
-  { key: "pinned", label: "已钉住" },
-  { key: "good", label: "好针尖" },
-  { key: "bad", label: "坏针尖" },
-  { key: "unlabeled", label: "未标注" },
+  { key: "all", label: tr("全部", "All") },
+  { key: "pinned", label: tr("已钉住", "Pinned") },
+  { key: "good", label: tr("好针尖", "Good tip") },
+  { key: "bad", label: tr("坏针尖", "Bad tip") },
+  { key: "unlabeled", label: tr("未标注", "Unlabeled") },
 ] as const;
 
 type FilterKey = (typeof FILTERS)[number]["key"];
@@ -38,8 +39,8 @@ function filterParams(f: FilterKey): { pinned?: boolean; label?: string } {
 
 function LabelBadge({ label }: { label: string | null | undefined }) {
   if (!label) return null;
-  if (label === "good") return <Badge tone="AUTO">好针尖</Badge>;
-  if (label === "bad") return <Badge tone="DANGEROUS">坏针尖</Badge>;
+  if (label === "good") return <Badge tone="AUTO">{tr("好针尖", "Good tip")}</Badge>;
+  if (label === "bad") return <Badge tone="DANGEROUS">{tr("坏针尖", "Bad tip")}</Badge>;
   return <Badge tone="INFO">{label}</Badge>;
 }
 
@@ -80,10 +81,19 @@ function SegmentDetail({ segId }: { segId: number }) {
       return data;
     },
     onSuccess: (d) => {
-      toast(d?.pinned ? "已钉住，不会被保留策略清理" : "已取消钉住", d?.degraded ? "err" : "ok");
+      toast(
+        d?.pinned
+          ? tr("已钉住，不会被保留策略清理", "Pinned; the retention policy will not remove it")
+          : tr("已取消钉住", "Unpinned"),
+        d?.degraded ? "err" : "ok",
+      );
       invalidate();
     },
-    onError: (e) => toast(`操作失败：${String((e as Error)?.message ?? e)}`, "err"),
+    onError: (e) =>
+      toast(
+        tr(`操作失败：${String((e as Error)?.message ?? e)}`, `Action failed: ${String((e as Error)?.message ?? e)}`),
+        "err",
+      ),
   });
 
   const label = useMutation({
@@ -96,19 +106,28 @@ function SegmentDetail({ segId }: { segId: number }) {
       return data;
     },
     onSuccess: (d) => {
-      toast(d?.label ? `已标注为「${d.label}」并自动钉住` : "已清除标注", d?.degraded ? "err" : "ok");
+      toast(
+        d?.label
+          ? tr(`已标注为「${d.label}」并自动钉住`, `Labeled "${d.label}" and pinned automatically`)
+          : tr("已清除标注", "Label cleared"),
+        d?.degraded ? "err" : "ok",
+      );
       setNote("");
       invalidate();
     },
-    onError: (e) => toast(`标注失败：${String((e as Error)?.message ?? e)}`, "err"),
+    onError: (e) =>
+      toast(
+        tr(`标注失败：${String((e as Error)?.message ?? e)}`, `Labeling failed: ${String((e as Error)?.message ?? e)}`),
+        "err",
+      ),
   });
 
-  if (q.isPending) return <Spinner label="载入段数据…" />;
+  if (q.isPending) return <Spinner label={tr("载入段数据…", "Loading segment data…")} />;
   if (q.isError) return <ErrorNote error={q.error} />;
 
   const d = q.data;
   if (!d?.ok) {
-    return <EmptyNote label={d?.detail || "该段数据不可用。"} />;
+    return <EmptyNote label={d?.detail || tr("该段数据不可用。", "Data for this segment is unavailable.")} />;
   }
   const meta = d.meta;
   const envelope = d.source === "envelope";
@@ -117,21 +136,25 @@ function SegmentDetail({ segId }: { segId: number }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-mono text-sm text-mast-text">第 {d.seg_id} 段</span>
+        <span className="font-mono text-sm text-mast-text">{tr(`第 ${d.seg_id} 段`, `Segment ${d.seg_id}`)}</span>
         {meta && <Badge tone={verdictView(meta.verdict).tone}>{verdictView(meta.verdict).label}</Badge>}
-        {meta?.pinned && <Badge tone="INFO">已钉住</Badge>}
+        {meta?.pinned && <Badge tone="INFO">{tr("已钉住", "Pinned")}</Badge>}
         <LabelBadge label={meta?.label} />
         <span className="text-xs text-mast-muted">
-          {new Date(d.t0 * 1000).toLocaleString("zh-CN", { hour12: false })} · {d.fs_hz.toFixed(0)} Hz ·{" "}
-          {d.n_samples_raw} 点
-          {meta?.gap_s ? ` · 前置缺口 ${fmtSeconds(meta.gap_s)}` : ""}
+          {new Date(d.t0 * 1000).toLocaleString(langTag(), { hour12: false })} · {d.fs_hz.toFixed(0)} Hz ·{" "}
+          {tr(`${d.n_samples_raw} 点`, `${d.n_samples_raw} points`)}
+          {meta?.gap_s ? tr(` · 前置缺口 ${fmtSeconds(meta.gap_s)}`, ` · preceding gap ${fmtSeconds(meta.gap_s)}`) : ""}
         </span>
       </div>
 
       {(envelope || swept) && (
         <div className="rounded-mast-ctl border border-mast-warn-border bg-mast-warn-bg px-3 py-2 text-xs text-mast-warn">
-          原始数据已按保留策略清理，当前显示的是<strong>包络</strong>（每桶最小/最大值）。
-          形状与尖峰仍然可信，但细节与频谱不再可得。钉住的段不会被清理。
+          {tr("原始数据已按保留策略清理，当前显示的是", "Raw data was removed by the retention policy; what is shown is the ")}
+          <strong>{tr("包络", "envelope")}</strong>
+          {tr(
+            "（每桶最小/最大值）。形状与尖峰仍然可信，但细节与频谱不再可得。钉住的段不会被清理。",
+            " (min/max per bucket). Shape and spikes remain trustworthy, but detail and the spectrum are no longer available. Pinned segments are not removed.",
+          )}
         </div>
       )}
 
@@ -144,41 +167,46 @@ function SegmentDetail({ segId }: { segId: number }) {
 
       {d.psd ? (
         <div>
-          <div className="mb-1 text-sm font-medium text-mast-text">功率谱</div>
+          <div className="mb-1 text-sm font-medium text-mast-text">{tr("功率谱", "Power spectrum")}</div>
           <FftChart fft={d.psd} logY logX={false} dropDc />
         </div>
       ) : (
         <p className="text-xs text-mast-muted">
-          {envelope ? "包络无法反演频谱，故不显示。" : "该段未提供频谱。"}
+          {envelope
+            ? tr("包络无法反演频谱，故不显示。", "A spectrum cannot be recovered from an envelope, so none is shown.")
+            : tr("该段未提供频谱。", "No spectrum is available for this segment.")}
         </p>
       )}
 
       <div className="rounded-mast-card border border-mast-border bg-mast-panel-2 p-3">
-        <div className="mb-2 text-sm font-medium text-mast-text">人工判定</div>
+        <div className="mb-2 text-sm font-medium text-mast-text">{tr("人工判定", "Manual verdict")}</div>
         <input
           value={note}
           onChange={(e) => setNote(e.target.value)}
-          placeholder="备注（可选）：当时在做什么、为什么这么判"
+          placeholder={tr(
+            "备注（可选）：当时在做什么、为什么这么判",
+            "Note (optional): what was happening, and why this verdict",
+          )}
           className="mb-2 w-full rounded-mast-ctl border border-mast-border bg-mast-bg px-2 py-1.5 text-sm text-mast-text placeholder:text-mast-faint"
         />
         <div className="flex flex-wrap gap-2">
           <Button variant="primary" onClick={() => label.mutate("good")} loading={label.isPending}>
-            好针尖
+            {tr("好针尖", "Good tip")}
           </Button>
           <Button variant="danger" onClick={() => label.mutate("bad")} loading={label.isPending}>
-            坏针尖
+            {tr("坏针尖", "Bad tip")}
           </Button>
           <Button variant="ghost" onClick={() => label.mutate(null)} loading={label.isPending}>
-            清除标注
+            {tr("清除标注", "Clear label")}
           </Button>
           <span className="ml-auto">
             <Button onClick={() => pin.mutate(!meta?.pinned)} loading={pin.isPending}>
-              {meta?.pinned ? "取消钉住" : "钉住此段"}
+              {meta?.pinned ? tr("取消钉住", "Unpin") : tr("钉住此段", "Pin segment")}
             </Button>
           </span>
         </div>
         {meta?.label_note && (
-          <p className="mt-2 text-xs text-mast-muted">已有备注：{meta.label_note}</p>
+          <p className="mt-2 text-xs text-mast-muted">{tr("已有备注：", "Existing note: ")}{meta.label_note}</p>
         )}
       </div>
       {node}
@@ -191,8 +219,8 @@ function SegmentDetail({ segId }: { segId: number }) {
 export function SegmentBrowser({ degraded }: { degraded: boolean }) {
   const [filter, setFilter] = useState<FilterKey>("all");
   const [offset, setOffset] = useState(0);
-  // `?seg=` deep link (2026-08-04, ). A current-monitor event tile links
-  // here to show the full waveform behind its thumbnail curve. The detail pane
+  // `?seg=` deep link. A current-monitor event tile links here to show the full
+  // waveform behind its thumbnail curve. The detail pane
   // fetches by id and does NOT read the list, so a segment that is not on the
   // current page still opens — which matters, because the linked one is usually
   // old enough to have paged out.
@@ -203,9 +231,7 @@ export function SegmentBrowser({ degraded }: { degraded: boolean }) {
   );
 
   // The panel sits far below the fold on this page, so an arriving deep link
-  // has to bring itself into view — otherwise the click looks like it did
-  // nothing, which the house rule about dead links forbids just as much as a
-  // freeze does.
+  // has to bring itself into view — otherwise the click looks like it did nothing.
   const rootRef = useRef<HTMLDivElement | null>(null);
   // Only for an ARRIVING link. Scrolling on every selection would yank the page
   // under an operator who is just clicking down the list.
@@ -245,9 +271,10 @@ export function SegmentBrowser({ degraded }: { degraded: boolean }) {
 
   const segments: SegmentRow[] = list.data?.segments ?? [];
   const total = list.data?.total ?? 0;
-  // 传进来的 `degraded` 说的是 **status** 端点；段索引是另一个端点，它有自己的。
-  // 少了后半句，一次 `segments_query` 失败会画成「该筛选下没有段 · 共 0 段」——
-  // 三个数都是正面断言，而真相是一条都没读到。
+  // The `degraded` prop describes the status endpoint; the segment index is a
+  // separate endpoint with its own flag. Without the second half a failed
+  // `segments_query` would render as "no segments under this filter · 0 total",
+  // a positive claim when nothing was read at all.
   const unreadable = degraded || (list.data?.degraded ?? false);
 
   const pick = (f: FilterKey) => {
@@ -277,8 +304,11 @@ export function SegmentBrowser({ degraded }: { degraded: boolean }) {
         </div>
         <span className="text-xs text-mast-muted">
           {unreadable
-            ? "段索引读不到"
-            : `共 ${total} 段 · 已钉住 ${list.data?.pinned_count ?? 0} · 已标注 ${list.data?.labeled_count ?? 0}`}
+            ? tr("段索引读不到", "Segment index unreadable")
+            : tr(
+                `共 ${total} 段 · 已钉住 ${list.data?.pinned_count ?? 0} · 已标注 ${list.data?.labeled_count ?? 0}`,
+                `${total} segments · ${list.data?.pinned_count ?? 0} pinned · ${list.data?.labeled_count ?? 0} labeled`,
+              )}
         </span>
       </div>
 
@@ -289,8 +319,11 @@ export function SegmentBrowser({ degraded }: { degraded: boolean }) {
             <EmptyNote
               label={
                 list.data?.detail
-                  ? `读不到段索引：${list.data.detail}`
-                  : "读不到段索引（监控模块未装载，或查询失败）。"
+                  ? tr(`读不到段索引：${list.data.detail}`, `Cannot read the segment index: ${list.data.detail}`)
+                  : tr(
+                      "读不到段索引（监控模块未装载，或查询失败）。",
+                      "Cannot read the segment index (monitoring module not loaded, or the query failed).",
+                    )
               }
             />
           ) : list.isPending ? (
@@ -298,7 +331,7 @@ export function SegmentBrowser({ degraded }: { degraded: boolean }) {
           ) : list.isError ? (
             <ErrorNote error={list.error} />
           ) : segments.length === 0 ? (
-            <EmptyNote label="该筛选下没有段。" />
+            <EmptyNote label={tr("该筛选下没有段。", "No segments under this filter.")} />
           ) : (
             <div className="max-h-[560px] overflow-y-auto rounded-mast-card border border-mast-border">
               {segments.map((s) => {
@@ -315,16 +348,16 @@ export function SegmentBrowser({ degraded }: { degraded: boolean }) {
                     <span className="flex w-full items-center gap-2">
                       <span className="font-mono text-xs text-mast-text">#{s.seg_id}</span>
                       <Badge tone={v.tone}>{v.label}</Badge>
-                      {s.pinned && <span className="text-xs text-mast-info">钉</span>}
+                      {s.pinned && <span className="text-xs text-mast-info">{tr("钉", "Pin")}</span>}
                       <LabelBadge label={s.label} />
                       <span className="ml-auto text-[11px] text-mast-muted">
-                        {new Date(s.t_start * 1000).toLocaleTimeString("zh-CN", { hour12: false })}
+                        {new Date(s.t_start * 1000).toLocaleTimeString(langTag(), { hour12: false })}
                       </span>
                     </span>
                     <span className="text-[11px] text-mast-faint">
-                      {s.n_samples} 点 · {s.fs_hz.toFixed(0)} Hz ·{" "}
-                      {s.has_file ? fmtBytes(s.file_bytes) : "仅包络"}
-                      {s.discontinuity && " · 有断点"}
+                      {tr(`${s.n_samples} 点`, `${s.n_samples} pts`)} · {s.fs_hz.toFixed(0)} Hz ·{" "}
+                      {s.has_file ? fmtBytes(s.file_bytes) : tr("仅包络", "envelope only")}
+                      {s.discontinuity && tr(" · 有断点", " · has gaps")}
                     </span>
                   </button>
                 );
@@ -334,13 +367,13 @@ export function SegmentBrowser({ degraded }: { degraded: boolean }) {
 
           <div className="flex items-center gap-2 text-xs">
             <Button onClick={() => setOffset(Math.max(0, offset - PAGE))} disabled={offset === 0}>
-              上一页
+              {tr("上一页", "Previous")}
             </Button>
             <Button
               onClick={() => setOffset(offset + PAGE)}
               disabled={offset + PAGE >= total}
             >
-              下一页
+              {tr("下一页", "Next")}
             </Button>
             <span className="text-mast-muted">
               {total === 0 ? 0 : offset + 1}–{Math.min(offset + PAGE, total)} / {total}
@@ -351,7 +384,12 @@ export function SegmentBrowser({ degraded }: { degraded: boolean }) {
         {/* right: detail */}
         <div>
           {selected == null ? (
-            <EmptyNote label="从左侧选一段查看波形、频谱，并做人工判定。" />
+            <EmptyNote
+              label={tr(
+                "从左侧选一段查看波形、频谱，并做人工判定。",
+                "Pick a segment on the left to view its waveform and spectrum and give a manual verdict.",
+              )}
+            />
           ) : (
             <SegmentDetail key={selected} segId={selected} />
           )}

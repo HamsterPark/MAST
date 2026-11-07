@@ -91,7 +91,7 @@ class Conversation(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     last_message_preview: str = ""
-    # Where this chat was started, i.e. its place in 实验 → 样品 → 会话 .
+    # Where this chat was started, i.e. its place in 实验 → 样品 → 会话.
     # Both may be NULL: nothing was active, or the row predates the sample tag.
     # Grouping metadata only — lists are never confined to one experiment/sample.
     experiment_id: Optional[str] = None
@@ -115,7 +115,7 @@ class CreateConversationRequest(BaseModel):
     kind: str = "private"
     # Omit both and the server tags the chat with the experiment/sample that are
     # active right now — the usual case; an explicit value is for filing a chat
-    # under a specific sample from the records UI .
+    # under a specific sample from the records UI.
     experiment_id: Optional[str] = None
     sample_id: Optional[str] = None
 
@@ -199,7 +199,7 @@ class ChatMessage(BaseModel):
     #: 历史），不是「零时刻」。前端据此不显示时间 —— **绝不显示 1970**：
     #: 一个假时间比没有时间坏，因为它会被当成真的去推理。
     #:
-    #: 要求 agent 的发言也带上时间戳。
+    #: 这个字段让 agent 的发言也带上时间。
     #: 它必须在这里显式声明：``render_history`` 已经产出 ``t``，而这个模型
     #: **只搬它声明过的字段** —— 少写一行的后果不是报错，是这个键在传输层被
     #: 静默丢掉，前端永远收不到（本仓「生产方接上了、消费方不存在」的同形第五次）。

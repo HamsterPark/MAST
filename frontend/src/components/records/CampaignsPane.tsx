@@ -5,8 +5,9 @@ import { api } from "../../api/client";
 import type { components } from "../../api/schema";
 import { DegradedNote, ErrorNote, Section, Spinner } from "../ui";
 import { DataTable } from "../DataTable";
+import { tr } from "../../lib/i18n";
 import { StatusPill, fmtTime } from "./shared";
-// 这一列的文案是纯函数，和 conduct 面板共用一份 —— 三态的措辞不许有第二处。
+// Shared with the conduct panel so the three goal states are worded in one place.
 import { badgeTone, goalProgressText } from "../../lib/conduct";
 
 type CampaignSummary = components["schemas"]["CampaignSummary"];
@@ -64,26 +65,26 @@ export function CampaignsPane() {
   };
 
   const columns: ColumnDef<CampaignSummary, any>[] = [
-    { accessorKey: "title", header: "标题", cell: (c) => c.getValue() || "(未命名)" },
+    { accessorKey: "title", header: tr("标题", "Title"), cell: (c) => c.getValue() || tr("(未命名)", "(unnamed)") },
     {
       accessorKey: "hypothesis",
-      header: "假设",
+      header: tr("假设", "Hypothesis"),
       cell: (c) => c.getValue() || "—",
     },
     {
       accessorKey: "status",
-      header: "状态",
+      header: tr("状态", "Status"),
       cell: (c) => <StatusPill status={c.getValue() as string | null} />,
     },
     { accessorKey: "created_by", header: "Agent", cell: (c) => c.getValue() || "—" },
     {
       accessorKey: "created_at",
-      header: "创建时间",
+      header: tr("创建时间", "Created"),
       cell: (c) => fmtTime(c.getValue() as string | null),
     },
     {
       id: "goal",
-      header: "目标判据",
+      header: tr("目标判据", "Goal criterion"),
       cell: (c) => {
         const g = goalProgressText(c.row.original.goal_progress);
         return (
@@ -98,22 +99,22 @@ export function CampaignsPane() {
     },
     {
       id: "experiments",
-      header: "实验",
+      header: tr("实验", "Experiments"),
       cell: (c) => c.row.original.stats?.experiments ?? 0,
     },
     {
       id: "actions",
-      header: "动作",
+      header: tr("动作", "Actions"),
       cell: (c) => c.row.original.stats?.actions ?? 0,
     },
     {
       id: "observations",
-      header: "观测",
+      header: tr("观测", "Observations"),
       cell: (c) => c.row.original.stats?.observations ?? 0,
     },
     {
       id: "scans",
-      header: "扫描",
+      header: tr("扫描", "Scans"),
       cell: (c) => c.row.original.stats?.scans ?? 0,
     },
   ];
@@ -122,10 +123,10 @@ export function CampaignsPane() {
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
-    <Section title="Campaigns（研究活动）">
+    <Section title={tr("Campaigns（研究活动）", "Campaigns")}>
       <div className="mb-3 flex flex-wrap items-end gap-2">
         <label className="flex flex-col text-xs text-mast-muted">
-          状态
+          {tr("状态", "Status")}
           <input
             className={inputCls}
             value={draft.status}
@@ -134,7 +135,7 @@ export function CampaignsPane() {
           />
         </label>
         <label className="flex flex-col text-xs text-mast-muted">
-          起始日期
+          {tr("起始日期", "From date")}
           <input
             className={inputCls}
             value={draft.from}
@@ -143,7 +144,7 @@ export function CampaignsPane() {
           />
         </label>
         <label className="flex flex-col text-xs text-mast-muted">
-          截止日期
+          {tr("截止日期", "To date")}
           <input
             className={inputCls}
             value={draft.to}
@@ -164,29 +165,29 @@ export function CampaignsPane() {
           onClick={apply}
           className="rounded bg-mast-accent/20 px-3 py-1 text-sm text-mast-accent hover:bg-mast-accent/30"
         >
-          筛选
+          {tr("筛选", "Filter")}
         </button>
         <button
           onClick={reset}
           className="rounded border border-mast-border px-3 py-1 text-sm text-mast-muted hover:text-mast-text"
         >
-          重置
+          {tr("重置", "Reset")}
         </button>
       </div>
 
       {q.isPending && <Spinner />}
       {q.isError && <ErrorNote error={q.error} />}
-      {q.data?.degraded && <DegradedNote what="Campaigns 记录" />}
+      {q.data?.degraded && <DegradedNote what={tr("Campaigns 记录", "campaign records")} />}
       {q.data && !q.data.degraded && (
         <>
           <DataTable
             data={q.data.campaigns ?? []}
             columns={columns}
-            empty="无符合条件的 campaign"
+            empty={tr("无符合条件的 campaign", "No matching campaigns")}
           />
           <div className="mt-3 flex items-center justify-between text-sm text-mast-muted">
             <span>
-              共 {total} 条 · 第 {page} / {pageCount} 页
+              {tr(`共 ${total} 条 · 第 ${page} / ${pageCount} 页`, `${total} total · page ${page} / ${pageCount}`)}
             </span>
             <div className="flex gap-2">
               <button
@@ -194,14 +195,14 @@ export function CampaignsPane() {
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 className="rounded border border-mast-border px-3 py-1 disabled:opacity-40 hover:text-mast-text"
               >
-                上一页
+                {tr("上一页", "Previous")}
               </button>
               <button
                 disabled={page >= pageCount}
                 onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
                 className="rounded border border-mast-border px-3 py-1 disabled:opacity-40 hover:text-mast-text"
               >
-                下一页
+                {tr("下一页", "Next")}
               </button>
             </div>
           </div>

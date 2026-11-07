@@ -156,7 +156,7 @@ class TranscriptEntry(BaseModel):
     text: str = ""
     t: float = 0.0
     #: JSON sidecar for rows whose ``text`` is a SUMMARY, so the detail the
-    #: summary leaves out is still there to expand (— a
+    #: summary leaves out is still there to expand (a
     #: tool-call row carries ``{"tool", "args", "args_clipped"}``). Empty for
     #: every other row and for anything written before 2026-07-28.
     meta: str = ""
@@ -183,7 +183,7 @@ class GroupConversation(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     last_message_preview: str = ""
-    # Where this 群聊 was started — its slot in 实验 → 样品 → 群聊 ().
+    # Where this 群聊 was started — its slot in 实验 → 样品 → 群聊.
     # NULL when nothing was active, or (sample_id) when the row predates the tag.
     # The chat is never scoped/filtered by these — it still spans experiments; the
     # UI groups by them so the operator sees the real three-level structure.
@@ -202,7 +202,7 @@ class GroupConversationsResponse(BaseModel):
     run is currently streaming into (if any).
 
     Rows carry experiment/sample ids + names so the client can render the
-    实验 → 样品 → 群聊 hierarchy the operator actually works in ."""
+    实验 → 样品 → 群聊 hierarchy the operator actually works in."""
 
     conversations: list[GroupConversation] = Field(default_factory=list)
     active_conversation_id: Optional[str] = None

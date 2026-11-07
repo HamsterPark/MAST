@@ -3,21 +3,22 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Card, Badge, Spinner, ErrorNote, DegradedNote, EmptyNote } from "@/components/ui";
 import { Button, useToast } from "@/components/controls";
+import { tr } from "@/lib/i18n";
 import type { components } from "@/api/schema";
 
 type IngestResponse = components["schemas"]["IngestResponse"];
 
-// 取文请求板 — GET /api/literature/fetch-board. The literature agent posts a
-// full-text request here when the big library only has the abstract; the
+// Full-text request board — GET /api/literature/fetch-board. The literature agent
+// posts a full-text request here when the big library only has the abstract; the
 // operator satisfies it by uploading the PDF right on the request row.
 // Resolve via POST /api/literature/fetch-board/{request_id}/resolve
 // {action:done|dismissed}.
 //
-// Uploading in place, rather than sending the operator to the 摄取与取文 sub-page
+// Uploading in place, rather than sending the operator to the ingest sub-page
 // with a copied work_id, matters for more than convenience: the upload carries
 // the request's own work_id, so the paper is filed against the experiment frozen
-// on that request and the agent that asked gets woken up. A hand-retyped id in
-// another form is where that chain used to break.
+// on that request and the requesting agent is woken up. A hand-retyped id in
+// another form could break that chain.
 
 const STATUS_ICON: Record<string, string> = {
   pending: "🟡",
@@ -34,11 +35,11 @@ const STATUS_TONE: Record<string, string> = {
 };
 
 const FILTERS = [
-  { id: "", label: "全部" },
-  { id: "pending", label: "待处理" },
-  { id: "fulfilled", label: "已满足" },
-  { id: "failed", label: "失败" },
-  { id: "dismissed", label: "已忽略" },
+  { id: "", label: tr("全部", "All") },
+  { id: "pending", label: tr("待处理", "Pending") },
+  { id: "fulfilled", label: tr("已满足", "Fulfilled") },
+  { id: "failed", label: tr("失败", "Failed") },
+  { id: "dismissed", label: tr("已忽略", "Dismissed") },
 ] as const;
 
 /** Satisfy one request in place: upload its full text, then optionally its SI. */
@@ -68,17 +69,20 @@ function SatisfyRow({
         const woke = (d.fulfilled_requests ?? 0) > 0;
         onDone(
           woke
-            ? "全文已入库，取文请求已关闭 —— 文献 agent 会自动继续之前的工作。"
-            : "全文已入库。",
+            ? tr(
+                "全文已入库，取文请求已关闭 —— 文献 agent 会自动继续之前的工作。",
+                "Full text ingested and the request closed — the literature agent will resume its earlier work.",
+              )
+            : tr("全文已入库。", "Full text ingested."),
           true,
         );
       } else {
-        onDone(d.detail || d.status || "入库失败", false);
+        onDone(d.detail || d.status || tr("入库失败", "Ingest failed"), false);
       }
       qc.invalidateQueries({ queryKey: ["literature", "fetch-board"] });
       qc.invalidateQueries({ queryKey: ["literature", "libraries"] });
     } catch (e) {
-      onDone(`上传失败：${String((e as Error)?.message ?? e)}`, false);
+      onDone(tr(`上传失败：${String((e as Error)?.message ?? e)}`, `Upload failed: ${String((e as Error)?.message ?? e)}`), false);
     } finally {
       setBusy("");
       if (pdfInput.current) pdfInput.current.value = "";
@@ -95,11 +99,11 @@ function SatisfyRow({
       const resp = await fetch("/api/literature/attach-si", { method: "POST", body: fd });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const d = (await resp.json()) as { ok?: boolean; error?: string; duplicate?: boolean };
-      if (d.ok) onDone(d.duplicate ? "该补充材料已经挂过了。" : "补充材料已附加。", true);
-      else onDone(d.error || "附加失败", false);
+      if (d.ok) onDone(d.duplicate ? tr("该补充材料已经挂过了。", "This supplementary file is already attached.") : tr("补充材料已附加。", "Supplementary file attached."), true);
+      else onDone(d.error || tr("附加失败", "Attach failed"), false);
       qc.invalidateQueries({ queryKey: ["literature", "attachments", workId] });
     } catch (e) {
-      onDone(`附加失败：${String((e as Error)?.message ?? e)}`, false);
+      onDone(tr(`附加失败：${String((e as Error)?.message ?? e)}`, `Attach failed: ${String((e as Error)?.message ?? e)}`), false);
     } finally {
       setBusy("");
       if (siInput.current) siInput.current.value = "";
@@ -118,7 +122,7 @@ function SatisfyRow({
           if (f) void uploadPdf(f);
         }}
         className="max-w-[15rem] text-xs text-mast-muted file:mr-2 file:rounded file:border-0 file:bg-mast-accent/20 file:px-2 file:py-0.5 file:text-xs file:text-mast-accent disabled:opacity-40"
-        title="选择这篇论文的全文 PDF，直接满足该请求"
+        title={tr("选择这篇论文的全文 PDF，直接满足该请求", "Choose the full-text PDF of this paper to fulfil the request")}
       />
       <input
         ref={siInput}
@@ -130,10 +134,14 @@ function SatisfyRow({
           if (f) void uploadSi(f);
         }}
         className="max-w-[15rem] text-xs text-mast-muted file:mr-2 file:rounded file:border-0 file:bg-mast-bg/60 file:px-2 file:py-0.5 file:text-xs file:text-mast-muted disabled:opacity-40"
-        title="附加补充材料（SI）—— 需要先上传正文"
+        title={tr("附加补充材料（SI）—— 需要先上传正文", "Attach supplementary information (SI) — upload the main text first")}
       />
       <span className="text-mast-muted">
-        {busy === "pdf" ? "上传全文中…" : busy === "si" ? "附加 SI 中…" : "左：全文 PDF ｜ 右：补充材料 SI"}
+        {busy === "pdf"
+          ? tr("上传全文中…", "Uploading full text…")
+          : busy === "si"
+            ? tr("附加 SI 中…", "Attaching SI…")
+            : tr("左：全文 PDF ｜ 右：补充材料 SI", "Left: full-text PDF | Right: supplementary SI")}
       </span>
     </div>
   );
@@ -158,25 +166,25 @@ export function FetchBoard() {
     },
     onSuccess: (d, vars) => {
       if (d?.degraded) {
-        toast("取文请求板后端不可用，未能处理。", "err");
+        toast(tr("取文请求板后端不可用，未能处理。", "Fetch board backend unavailable; request not processed."), "err");
       } else if (d?.ok) {
-        toast(vars.action === "done" ? "已标记完成" : "已忽略", "ok");
+        toast(vars.action === "done" ? tr("已标记完成", "Marked done") : tr("已忽略", "Dismissed"), "ok");
       } else {
-        toast(d?.message || "未能处理该请求", "err");
+        toast(d?.message || tr("未能处理该请求", "Could not process the request"), "err");
       }
       qc.invalidateQueries({ queryKey: ["literature", "fetch-board"] });
     },
     onError: (e) =>
-      toast(`处理失败：${String((e as Error)?.message ?? e)}`, "err"),
+      toast(tr(`处理失败：${String((e as Error)?.message ?? e)}`, `Failed: ${String((e as Error)?.message ?? e)}`), "err"),
   });
 
   const copyWorkId = async (wid: string) => {
     if (!wid) return;
     try {
       await navigator.clipboard.writeText(wid);
-      toast(`已复制 work_id：${wid}`, "ok");
+      toast(tr(`已复制 work_id：${wid}`, `Copied work_id: ${wid}`), "ok");
     } catch {
-      toast("复制失败（剪贴板不可用）", "err");
+      toast(tr("复制失败（剪贴板不可用）", "Copy failed (clipboard unavailable)"), "err");
     }
   };
 
@@ -197,9 +205,9 @@ export function FetchBoard() {
     <Card>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <h3 className="text-sm font-semibold">取文请求板</h3>
+          <h3 className="text-sm font-semibold">{tr("取文请求板", "Full-text request board")}</h3>
           {q.data && q.data.pending_count > 0 && (
-            <Badge tone="WARN">{q.data.pending_count} 待处理</Badge>
+            <Badge tone="WARN">{q.data.pending_count} {tr("待处理", "pending")}</Badge>
           )}
         </div>
         <div className="flex flex-wrap gap-1">
@@ -218,16 +226,16 @@ export function FetchBoard() {
             </button>
           ))}
           <Button variant="ghost" onClick={() => q.refetch()}>
-            刷新
+            {tr("刷新", "Refresh")}
           </Button>
         </div>
       </div>
 
       {q.isPending && <Spinner />}
       {q.isError && <ErrorNote error={q.error} />}
-      {q.data?.degraded && <DegradedNote what="取文请求板" />}
+      {q.data?.degraded && <DegradedNote what={tr("取文请求板", "Full-text request board")} />}
       {q.data && !q.data.degraded && reqs.length === 0 && (
-        <EmptyNote label="取文请求板为空。文献 agent 需要某篇全文时会在此提交请求，你上传 PDF 或取文即可满足。" />
+        <EmptyNote label={tr("取文请求板为空。文献 agent 需要某篇全文时会在此提交请求，你上传 PDF 或取文即可满足。", "The request board is empty. When the literature agent needs the full text of a paper it posts a request here; upload the PDF or fetch it to fulfil it.")} />
       )}
 
       {q.data && !q.data.degraded && reqs.length > 0 && (
@@ -236,7 +244,7 @@ export function FetchBoard() {
             <div key={r.request_id || r.work_id} className="px-3 py-2 text-sm">
               <div className="flex flex-wrap items-center gap-1.5">
                 <span>{STATUS_ICON[r.status] ?? "•"}</span>
-                <code className="text-mast-accent">{r.work_id || "(无 work_id)"}</code>
+                <code className="text-mast-accent">{r.work_id || tr("(无 work_id)", "(no work_id)")}</code>
                 {r.title && <span className="text-mast-text">«{r.title}»</span>}
                 <Badge tone={STATUS_TONE[r.status] ?? "INFO"}>{r.status}</Badge>
                 <span className="text-xs text-mast-muted">
@@ -255,7 +263,7 @@ export function FetchBoard() {
                 </div>
               )}
               {r.reason && (
-                <div className="mt-0.5 text-mast-muted">理由：{r.reason}</div>
+                <div className="mt-0.5 text-mast-muted">{tr("理由：", "Reason: ")}{r.reason}</div>
               )}
               {r.note && (
                 <div className="mt-0.5 text-xs text-mast-muted">{r.note}</div>
@@ -266,7 +274,7 @@ export function FetchBoard() {
                   disabled={!r.work_id}
                   className="rounded px-2 py-0.5 text-xs text-mast-accent hover:bg-mast-accent/20 disabled:opacity-30"
                 >
-                  复制 work_id
+                  {tr("复制 work_id", "Copy work_id")}
                 </button>
                 <button
                   onClick={() =>
@@ -276,12 +284,12 @@ export function FetchBoard() {
                   disabled={!r.request_id || r.status !== "pending" || resolveM.isPending}
                   title={
                     r.request_id
-                      ? "标记此取文请求为已完成"
-                      : "该请求缺少 request_id，无法处理"
+                      ? tr("标记此取文请求为已完成", "Mark this full-text request as done")
+                      : tr("该请求缺少 request_id，无法处理", "This request has no request_id and cannot be processed")
                   }
                   className="rounded px-2 py-0.5 text-xs text-mast-accent hover:bg-mast-accent/20 disabled:opacity-30"
                 >
-                  标记完成
+                  {tr("标记完成", "Mark done")}
                 </button>
                 <button
                   onClick={() =>
@@ -294,12 +302,12 @@ export function FetchBoard() {
                   disabled={!r.request_id || r.status !== "pending" || resolveM.isPending}
                   title={
                     r.request_id
-                      ? "忽略此取文请求"
-                      : "该请求缺少 request_id，无法处理"
+                      ? tr("忽略此取文请求", "Dismiss this full-text request")
+                      : tr("该请求缺少 request_id，无法处理", "This request has no request_id and cannot be processed")
                   }
                   className="rounded px-2 py-0.5 text-xs text-mast-muted hover:bg-mast-bg/40 hover:text-mast-text disabled:opacity-30"
                 >
-                  忽略
+                  {tr("忽略", "Dismiss")}
                 </button>
               </div>
               {r.status === "pending" && (
@@ -314,10 +322,10 @@ export function FetchBoard() {
       )}
 
       <p className="mt-3 px-1 text-xs text-mast-muted">
-        提示：直接在请求行选择全文 PDF 即可满足它 —— 论文会入大库、请求自动关闭，提出请求的文献
-        agent 会自动继续之前的工作。右侧可再附加补充材料（SI，需先传正文），精读时会一并读。
-        也可切到「摄取与取文」子页按 DOI 取文；无需取文则点「忽略」（仅对待处理请求可用）。
-        「标记完成」只改状态、不代表全文已入库，因此不会唤醒 agent。
+        {tr(
+          "提示：直接在请求行选择全文 PDF 即可满足它 —— 论文会入大库、请求自动关闭，提出请求的文献 agent 会自动继续之前的工作。右侧可再附加补充材料（SI，需先传正文），精读时会一并读。也可切到「摄取与取文」子页按 DOI 取文；无需取文则点「忽略」（仅对待处理请求可用）。「标记完成」只改状态、不代表全文已入库，因此不会唤醒 agent。",
+          "Tip: pick the full-text PDF right on the request row to fulfil it — the paper is added to the big library, the request closes, and the requesting literature agent resumes its earlier work. You can also attach supplementary information (SI, main text first) with the right-hand picker; it is read along with the paper. Or switch to the Ingest & fetch sub-page to fetch by DOI; use \"Dismiss\" if no fetch is needed (pending requests only). \"Mark done\" only changes the status — it does not mean the full text was ingested, so it does not wake the agent.",
+        )}
       </p>
       {toastNode}
     </Card>

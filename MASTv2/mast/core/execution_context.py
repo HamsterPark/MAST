@@ -24,6 +24,7 @@ from collections.abc import Sequence  # noqa: F401 — used in a string annotati
 from typing import TYPE_CHECKING, Any
 
 from mast.core.types import NanonisCallRecord, SkillResult
+from mast.i18n import tr
 
 if TYPE_CHECKING:
     from mast.core.connection import ConnectionPool
@@ -211,7 +212,7 @@ class ExecutionContext:
         # private chat, signals API. Surfaced in the InstrumentBusy message so a
         # refused caller is told which of the three has the instrument, instead
         # of just "busy" (审计 致命一).
-        self.owner = str(owner or "未知入口")
+        self.owner = str(owner or "未知入口")  # identity, not display text: see instrument_lock.owner_label
         self.pool = pool
         self.state = state
         self._registry = registry
@@ -305,7 +306,8 @@ class ExecutionContext:
                 from mast.core.diagnostics import record
 
                 record("abort_block", method_name,
-                       "用户已中止——仪器写命令被拒（只放行读取与停止/退针）",
+                       tr("用户已中止——仪器写命令被拒（只放行读取与停止/退针）",
+                          "Aborted by the user -- instrument write refused (only reads and stop/retract are allowed)"),
                        args=list(args), run_id=self.run_id)
             except Exception:  # noqa: BLE001
                 pass
@@ -316,8 +318,8 @@ class ExecutionContext:
             )
         # **只在真要用的时候才往下传。** 无条件传 ``recv_timeout_s=None`` 会让
         # 每一个 duck-typed 的 pool（测试替身、别处的适配器）都必须跟着加这个
-        # 关键字，哪怕那次调用根本不需要预算 —— 2026-09-09 就是这么一口气弄红
-        # 了 5 个 abort-gate 测试的。默认路径保持与改动前逐字节相同；
+        # 关键字，哪怕那次调用根本不需要预算 —— 曾因此一次性弄红
+        # 5 个 abort-gate 测试。默认路径保持与改动前行为完全一致；
         # 显式要预算的调用方若碰上不支持的 pool，则**应该**当场炸出来。
         if recv_timeout_s is None:
             return self.pool.safe_call(method_name, *args, role=role)
@@ -425,8 +427,8 @@ class ExecutionContext:
         #
         # 分开之后:
         #   * **硬闸**(下面五条)照旧拒绝。它们不弹框、不等人,是拒绝型防护 ——
-        #     这些参数边界保留独立拒绝语义；显式手动路径由其自己的授权入口处理。
-        #     GUI / manual executor 使用 human approval_source。
+        #     实机里真正拦住危险的就是这一类,因此保留。出路是操作员用
+        #     手动路径(GUI / manual executor,那条路的 approval_source 就是 human)。
         #   * **基线 DANGEROUS**(``safety_level`` 派生)转成「执行 + 留痕 + 通知」,
         #     与 agent 顶层路径(``AutoApprovalNoticeMiddleware``)口径一致 ——
         #     同一个技能不该因为「是不是被复合技能调用的」而有两种安全语义。
@@ -477,22 +479,27 @@ class ExecutionContext:
         if is_coarse_sample_approach(skill_name, params):
             # 唯一一个物理上会毁东西的动作:开环粗动 Z 朝样品走(pan 型步进,
             # 没有反馈停止)。与技能自己的 safety_level 无关。
-            hard_gate = "开环粗动 Z 向样品进针（没有反馈能让它停下来）"
+            hard_gate = tr("开环粗动 Z 向样品进针（没有反馈能让它停下来）",
+                           "open-loop coarse Z approach toward the sample (no feedback can stop it)")
         elif is_protection_disable(skill_name, params):
             # 关掉硬件保护(SafeTip / Z 软限位)= 拆掉撞针安全网,工作流不许悄悄干
             # (2026-07-03 review)。
-            hard_gate = "关闭硬件保护（SafeTip / Z 软限位）"
+            hard_gate = tr("关闭硬件保护（SafeTip / Z 软限位）",
+                           "disabling hardware protection (SafeTip / Z soft limits)")
         elif is_calibration_change(skill_name, params):
             # 改写 bias/current 标定系数会一次性废掉下游每一条电压/电流边界。
-            hard_gate = "改写全局 bias/current 标定系数"
+            hard_gate = tr("改写全局 bias/current 标定系数",
+                           "overwriting the global bias/current calibration coefficients")
         elif is_coarse_drive_change(skill_name, params):
             # 粗动步进的驱动电压:设错不可恢复(有的控制器给 400 V,有的叠堆 300 V
             # 就烧),而没有任何读数能告诉你这是哪一台(2026-07-31)。
-            hard_gate = "设置粗动马达驱动电压/频率"
+            hard_gate = tr("设置粗动马达驱动电压/频率",
+                           "setting the coarse motor drive voltage/frequency")
         elif is_unguarded_lateral_coarse_move(skill_name, params):
             # 工作流直接去调裸的横向马达命令 = 绕开了有防护的换位路径。
             # RelocateCoarseXY 走 safe_call、不经过这里,所以只会逮到裸移动。
-            hard_gate = "裸横向粗动（未走 RelocateCoarseXY 的防护路径）"
+            hard_gate = tr("裸横向粗动（未走 RelocateCoarseXY 的防护路径）",
+                           "bare lateral coarse motion (not via the guarded RelocateCoarseXY path)")
 
         if hard_gate is not None and self._approval_source != "human":
             logger.info(
@@ -501,11 +508,17 @@ class ExecutionContext:
             )
             return SkillResult(
                 skill_name=skill_name, success=False,
-                error=(
+                error=tr(
                     f"硬闸拒绝：'{skill_name}' 属于「{hard_gate}」，"
                     "自主路径上一律不执行——这不是等待审批，没有任何批准会到来，"
                     "换参数也绕不过去。STOP retrying。"
-                    "确实需要时，请用户在 GUI 手动执行（手动路径本身就是人工授权）。"
+                    "确实需要时，请用户在 GUI 手动执行（手动路径本身就是人工授权）。",
+                    f"Hard gate refused: '{skill_name}' is classed as: {hard_gate}. "
+                    "It is never executed on autonomous paths -- this is not waiting for approval, "
+                    "no approval will ever come, and changing parameters cannot get around it. "
+                    "STOP retrying. "
+                    "If it is really needed, ask the user to run it manually in the GUI "
+                    "(the manual path is itself the human authorisation).",
                 ),
             )
 
@@ -517,8 +530,10 @@ class ExecutionContext:
 
                 _reason = would_have_asked(meta, tool_name=skill_name, args=params)
                 notify(skill_name,
-                       f"{_reason or 'DANGEROUS 技能'} —— 复合技能子步骤，"
-                       "已直接执行并通知，不再等待人工批准",
+                       tr(f"{_reason or 'DANGEROUS 技能'} —— 复合技能子步骤，"
+                          "已直接执行并通知，不再等待人工批准",
+                          f"{_reason or 'DANGEROUS skill'} -- composite sub-step, executed directly "
+                          "and notified; no human approval is pending"),
                        args=params, composite_substep=True,
                        approval_source=self._approval_source)
             except Exception:  # noqa: BLE001 — 通知坏了绝不能让子步骤失败
@@ -584,8 +599,9 @@ class ExecutionContext:
         try:
             with hold_for_skill(meta, skill_name, self.owner):
                 result = skill.execute(self, params)
-
-            # 与工具边界共用缓存写回实现，使 composite 后续子步骤读取刚完成的硬件状态。
+            # 写回缓存 —— 与 agent 工具边界(skill_adapter)**同一份实现**。
+            # 没有这一步,一个 composite 里「先开反馈、再移动」的两个子步骤之间
+            # 隔着一个最多 1 秒陈旧的快照,而第二步的前置就读那个快照。
             if getattr(result, "success", False):
                 from mast.core.state import patch_state_from_result
 

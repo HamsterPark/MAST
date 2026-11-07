@@ -17,6 +17,7 @@ import re
 from pathlib import Path
 
 import numpy as np
+from mast.i18n import tr
 
 HEADER_TAG = b":HEADER_END:"
 _FIRST_READ = 65536
@@ -50,7 +51,7 @@ def read_3ds(path: str | Path, data: bool = True) -> dict:
             head += fh.read(min(size, _MAX_HEADER) - len(head))
             idx = head.find(HEADER_TAG)
         if idx < 0:
-            raise ValueError("找不到 :HEADER_END:")
+            raise ValueError(tr("找不到 :HEADER_END:", "Cannot find :HEADER_END:"))
         end = idx + len(HEADER_TAG)
         if head[end:end + 2] == b"\r\n":
             end += 2
@@ -60,14 +61,14 @@ def read_3ds(path: str | Path, data: bool = True) -> dict:
 
         dims = re.split(r"\s*x\s*", hdr.get("Grid dim", "").strip())
         if len(dims) != 2:
-            raise ValueError(f"Grid dim 读不懂：{hdr.get('Grid dim')!r}")
+            raise ValueError(tr(f"Grid dim 读不懂：{hdr.get('Grid dim')!r}", f"Cannot parse Grid dim: {hdr.get('Grid dim')!r}"))
         nx, ny = int(dims[0]), int(dims[1])
         npar = int(hdr["# Parameters (4 byte)"])
         npts = int(hdr["Points"])
         chans = _split(hdr.get("Channels", ""))
         exp_size = int(hdr.get("Experiment size (bytes)", len(chans) * npts * 4))
         if nx <= 0 or ny <= 0 or npts <= 0 or npar < 0:
-            raise ValueError(f"网格尺寸不合法：{nx}×{ny}×{npts}，参数 {npar}")
+            raise ValueError(tr(f"网格尺寸不合法：{nx}×{ny}×{npts}，参数 {npar}", f"Invalid grid size: {nx}×{ny}×{npts}, {npar} parameters"))
         per = npar + exp_size // 4
         have = int(min((size - end) // (4 * per), nx * ny)) if per > 0 else 0
         gs = []
@@ -84,7 +85,7 @@ def read_3ds(path: str | Path, data: bool = True) -> dict:
         if data:
             if exp_size // 4 != len(chans) * npts:
                 raise ValueError(
-                    f"Experiment size {exp_size} 与 {len(chans)} 通道 × {npts} 点对不上")
+                    tr(f"Experiment size {exp_size} 与 {len(chans)} 通道 × {npts} 点对不上", f"Experiment size {exp_size} does not match {len(chans)} channels × {npts} points"))
             fh.seek(end)
             raw = fh.read(have * per * 4)
             body = np.frombuffer(raw, dtype=">f4", count=have * per).reshape(have, per)

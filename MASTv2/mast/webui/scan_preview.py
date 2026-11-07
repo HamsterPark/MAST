@@ -13,6 +13,8 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
+from mast.i18n import tr
+
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
@@ -22,21 +24,37 @@ logger = logging.getLogger(__name__)
 # Extensions the Data tab knows how to render.
 _SCAN_EXTS: tuple[str, ...] = (".sxm", ".sm4", ".dat", ".3ds", ".txt", ".csv", ".asc", ".tsv")
 
-#: Immediate parent directories containing telemetry rather than scan images.
-#: Environment sidecars receive frequent append writes, so an mtime-sorted scan
-#: listing would otherwise be dominated by telemetry. signals and monitors are
-#: separate immediate-parent names and require the same exclusion as env.
+#: Directory names that hold machine data but never *scans*, matched on a file's
+#: IMMEDIATE parent.
+#:
+#: ``env/`` is the environment sidecar: ``mast.environment.csv_sink`` appends one
+#: row per sensor every ~2 s to ``<exp>/env/<sensor>_<date>.csv`` and
+#: ``<exp>/samples/<sid>/env/<sensor>.csv``. Those files therefore carry an mtime
+#: of *now*, permanently, and this listing is mtime-desc — so they occupied the
+#: whole default window and the 数据 tab could not show a scan at all. Example:
+#: with 18 environment CSVs + 26 .sxm found,
+#: all 12 rows the tab rendered were CSVs. Excluding the sidecar is the fix at
+#: the source; a bigger window would only have delayed it.
+#:
+#: ``signals/`` and ``monitors/`` are the SAME mechanism one directory deeper:
+#: with only ``env/`` excluded, current-monitor CSVs still filled the listing.
+#: ``core.runtime.start_experimental_monitor`` appends a row every 5 s to
+#: ``<exp>/env/signals/monitor_<channel>_<epoch>.csv`` — or, with no active
+#: experiment, to ``<project_root>/experiments/monitors/`` — and the exclusion
+#: rule matches on the IMMEDIATE parent, which is ``signals`` / ``monitors``, not
+#: ``env``. A second writer of permanently-fresh telemetry that the first fix
+#: did not reach.
 _NON_SCAN_DIR_NAMES: frozenset[str] = frozenset({"env", "signals", "monitors"})
 
 #: How deep to walk from a search directory.
 #:
-#: FIVE, not three, and this is the other half of 「看不到 sxm 了」 —
-#: the scans were not merely buried, they were never listed at all. From
+#: FIVE, not three: besides being buried under telemetry CSVs, the scans were
+#: never listed at all with a shallower limit. From
 #: ``experiments_dir`` the MAST-managed layout puts a scan at
 #: ``<exp>/samples/<sample>/raw/sxm/<file>`` (``experiment_paths.fits_path_budget``
 #: calls that the deepest path there is), which is depth 5. The telemetry CSV at
 #: ``<exp>/env/signals/`` is depth 3. So the old limit could see the noise and
-#: could not see the signal — the exact inversion the operator reported.
+#: could not see the signal — the exact inversion of what the listing is for.
 _MAX_SEARCH_DEPTH = 5
 
 
@@ -163,7 +181,8 @@ def _collect_scans(
 # Collapse them into one entry that says how many copies exist and where. Note
 # what is NOT done here: nothing is dropped. A collapsed row still carries every
 # member path, because a listing that silently hides files is the failure this
-# codebase has already recorded twice in the other direction.
+# codebase has already hit twice in the other direction (files hidden from the
+# listing).
 
 #: Path segment the ingest sink uses for files it could not place.
 _QUARANTINE_SEG = "_quarantine"
@@ -381,7 +400,7 @@ def _flatten_frame(arr, mode: str, cache_key: tuple[str, int] | None = None,
                     tuple(plan.clip), list(plan.why))
     except Exception as exc:  # noqa: BLE001 — a picture beats a blank card
         logger.info("flatten %s failed, falling back to raw: %s", mode, exc)
-        return a, "raw", clip, [f"{mode} 处理失败，显示原始数据：{exc}"]
+        return a, "raw", clip, [tr(f"{mode} 处理失败，显示原始数据：{exc}", f"{mode} processing failed, showing raw data: {exc}")]
     return a, "raw", clip, []
 
 

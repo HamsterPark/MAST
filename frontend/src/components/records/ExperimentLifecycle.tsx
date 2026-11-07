@@ -2,11 +2,12 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { Button, Field, Modal, SelectField, TextField, useToast } from "../controls";
+import { tr } from "../../lib/i18n";
 
-// Experiment lifecycle controls reused by the 实验 tab:
-//   - 新建实验  POST /api/experiments {name, goal}
-//   - 结束实验  POST /api/experiments/{id}/end {status}
-// Both invalidate the experiments list so the table refreshes.
+// Experiment controls reused by the Experiments tab:
+//   - new experiment    POST /api/experiments {name, goal}
+//   - submit feedback   POST /api/feedback
+// Both invalidate the relevant queries so the views refresh.
 
 export function StartExperimentButton() {
   const qc = useQueryClient();
@@ -25,39 +26,39 @@ export function StartExperimentButton() {
     },
     onSuccess: (d) => {
       if (d.ok) {
-        toast("实验已创建");
+        toast(tr("实验已创建", "Experiment created"));
         setOpen(false);
         setName("");
         setGoal("");
         qc.invalidateQueries({ queryKey: ["experiments"] });
       } else {
-        toast(d.degraded ? "记录后端未连接（降级）" : "创建失败", "err");
+        toast(d.degraded ? tr("记录后端未连接（降级）", "Records backend not connected (degraded)") : tr("创建失败", "Creation failed"), "err");
       }
     },
-    onError: () => toast("创建失败", "err"),
+    onError: () => toast(tr("创建失败", "Creation failed"), "err"),
   });
 
   return (
     <>
       <Button variant="primary" onClick={() => setOpen(true)}>
-        新建实验
+        {tr("新建实验", "New experiment")}
       </Button>
-      <Modal open={open} onClose={() => setOpen(false)} title="新建实验">
+      <Modal open={open} onClose={() => setOpen(false)} title={tr("新建实验", "New experiment")}>
         <div className="space-y-4">
-          <Field label="名称">
-            <TextField value={name} onChange={setName} placeholder="实验名称" />
+          <Field label={tr("名称", "Name")}>
+            <TextField value={name} onChange={setName} placeholder={tr("实验名称", "Experiment name")} />
           </Field>
-          <Field label="目标">
-            <TextField value={goal} onChange={setGoal} placeholder="实验目标（可选）" />
+          <Field label={tr("目标", "Goal")}>
+            <TextField value={goal} onChange={setGoal} placeholder={tr("实验目标（可选）", "Experiment goal (optional)")} />
           </Field>
           <div className="flex justify-end gap-2">
-            <Button onClick={() => setOpen(false)}>取消</Button>
+            <Button onClick={() => setOpen(false)}>{tr("取消", "Cancel")}</Button>
             <Button
               variant="primary"
               onClick={() => m.mutate()}
               disabled={!name || m.isPending}
             >
-              {m.isPending ? "创建中…" : "创建"}
+              {m.isPending ? tr("创建中…", "Creating…") : tr("创建", "Create")}
             </Button>
           </div>
         </div>
@@ -67,19 +68,18 @@ export function StartExperimentButton() {
   );
 }
 
-// EndExperimentButton 与 STATUS_OPTIONS 已删除 (2026-07-28)。
+// There is no "end experiment" action: an experiment can always be resumed, even
+// years later, and writing a summary or report does not require archiving it. The
+// primary action on the records page is "switch to this experiment" (RecordsPage).
 //
-// 实验没有「结束」这个动作 —— 判据：「没必要做归档。有的实验可能过了
-// 十年重启。何必归档呢？如果说要给一个实验写总结，写报告，并不必以归档为
-// 前提。」记录页的主动作因此换成了「切换到此实验」(RecordsPage)。
-//
-// 后端的 POST /api/experiments/{id}/end 仍在（标了 deprecated，行为改成
-// 「仅在它是当前作用域时清指针」），只是 UI 不再提供入口。
+// The backend's POST /api/experiments/{id}/end still exists (marked deprecated;
+// it only clears the scope pointer when the experiment is the current one), but
+// the UI no longer offers it.
 
 const RATING_OPTIONS = [
-  { value: "up", label: "👍 好" },
-  { value: "down", label: "👎 差" },
-  { value: "neutral", label: "😐 中性" },
+  { value: "up", label: tr("👍 好", "👍 Good") },
+  { value: "down", label: tr("👎 差", "👎 Poor") },
+  { value: "neutral", label: tr("😐 中性", "😐 Neutral") },
 ];
 
 export function FeedbackButton({ experimentId }: { experimentId?: string | null }) {
@@ -106,32 +106,32 @@ export function FeedbackButton({ experimentId }: { experimentId?: string | null 
     },
     onSuccess: (d) => {
       if (d.ok) {
-        toast("反馈已记录");
+        toast(tr("反馈已记录", "Feedback recorded"));
         setOpen(false);
         setComment("");
         if (experimentId) qc.invalidateQueries({ queryKey: ["experiment", experimentId] });
       } else {
-        toast("记录失败", "err");
+        toast(tr("记录失败", "Failed to record"), "err");
       }
     },
-    onError: () => toast("记录失败", "err"),
+    onError: () => toast(tr("记录失败", "Failed to record"), "err"),
   });
 
   return (
     <>
-      <Button onClick={() => setOpen(true)}>提交反馈</Button>
-      <Modal open={open} onClose={() => setOpen(false)} title="用户反馈">
+      <Button onClick={() => setOpen(true)}>{tr("提交反馈", "Submit feedback")}</Button>
+      <Modal open={open} onClose={() => setOpen(false)} title={tr("用户反馈", "Feedback")}>
         <div className="space-y-4">
-          <Field label="评分">
+          <Field label={tr("评分", "Rating")}>
             <SelectField value={rating} onChange={setRating} options={RATING_OPTIONS} />
           </Field>
-          <Field label="评论">
-            <TextField value={comment} onChange={setComment} placeholder="可选评论" />
+          <Field label={tr("评论", "Comment")}>
+            <TextField value={comment} onChange={setComment} placeholder={tr("可选评论", "Optional comment")} />
           </Field>
           <div className="flex justify-end gap-2">
-            <Button onClick={() => setOpen(false)}>取消</Button>
+            <Button onClick={() => setOpen(false)}>{tr("取消", "Cancel")}</Button>
             <Button variant="primary" onClick={() => m.mutate()} disabled={m.isPending}>
-              {m.isPending ? "提交中…" : "提交"}
+              {m.isPending ? tr("提交中…", "Submitting…") : tr("提交", "Submit")}
             </Button>
           </div>
         </div>

@@ -1,8 +1,8 @@
 # 公开版本说明：保留能力、发布范围与验证记录
 
-本仓是 **MAST 6.5.0** 在 2026-09-21 导出的工作树审查快照。
-它是经过清理与本地软件验证的**公开精简源码版**，保留多智能体编排、通用仪器技能与执行约束、
-感知和数据处理框架、React 操作界面、外部 agent 接口及相应测试。
+本仓是 **MAST 7.1.6** 在 2026-11-07 导出的工作树审查快照。
+它是经过清理与本地软件验证的**公开精简源码版**，保留通用仪器技能与执行约束、VISTA 视觉层、TERS 与光学站控制、
+感知和数据处理框架、React 操作界面、外部 agent 接口及相应测试，也保留历史的多智能体编排代码。
 这些内容支持从高层任务协作一直读到控制器协议和界面通信的实现；下文记录已有成果、公开取舍及验证方法。
 
 ## 真机实践与版本范围
@@ -10,7 +10,7 @@
 **在 MAST 6.4.0 一轮已结束的实机实验中，外部 AI agent 控制真实 STM，带时间戳的记录从 2026-09-17 23:10:37 至 2026-09-22 02:08:10（北京时间），跨越约 99 小时。**
 这是项目已有的长时间仪器控制经历，涉及当时的外部控制路径。该经历由维护者提供；README 仅展示少量去除样品标识的选图，完整实验数据集和运行日志不随本快照发布。
 
-MAST 6.5.0 在已有实践基础上新增 `/api/ext/v1` 及配套 MCP 集成。新接口已有软件测试，尚待真机验证。
+MAST 6.5.0 在已有实践基础上新增 `/api/ext/v1` 及配套 MCP 集成；7.0–7.1 又加入 VISTA 视觉层、TERS 光学控制与卫星程序、光学站驱动。这些新路径已有软件测试，尚待真机验证。
 项目的真机实践与公开版的软件验证构成两类记录：约 99 小时记录对应 MAST 6.4.0 的实际部署，
 下文的测试数字对应本次公开源码；新增接口的真机验证是后续工作。
 
@@ -33,7 +33,7 @@ MAST 6.5.0 在已有实践基础上新增 `/api/ext/v1` 及配套 MCP 集成。�
 
 | 类别 | 未纳入内容 | 保留代码的处理方式 |
 |---|---|---|
-| **预存的机器参数** | 标定曲线与阈值、站点运行参数、Z 控制器预设、扫描档位表、锻针规程、光学台与 Nanonis 脚本配置、`config/overrides/` 及其历史、现场调试记录 | 读取这些文件的代码保留；文件缺席时按各自的缺省或「未标定」处理 |
+| **预存的机器参数** | 标定曲线与阈值、站点运行参数、Z 控制器预设、扫描档位表、锻针规程、光学台与 Nanonis 脚本配置、具体站点的光学设备清单与卫星配置、`config/overrides/` 及其历史、现场调试记录 | 读取这些文件的代码保留；文件缺席时按各自的缺省或「未标定」处理 |
 | **知识库** | 十个样品类型知识模块、实验设计 / 故障诊断 / 硬件 profile / 安全参考值 / 噪声知识、词汇表、文献先验、材料覆盖索引、chunk 检索 | `knowledge/lookups.py` 的材料注册表置空（所有查询返回「未知材料」）；其余调用点本来就是惰性 import 且带兜底 |
 | **文献库** | **保留通用实现，初始库为空。** 未纳入随仓数据：语料派生的材料覆盖索引与文献先验（`material_coverage.json`、`literature_priors.json`）。建索引的流水线 `scripts/openalex_pipeline/` 保留，语料本身（OpenAlex，CC0）自己拉 | 数据缺失时按实现降级：语义检索报「索引缺失」并指向流水线、语料计数为 0、库注册表不在就建一个空的全局库、先验文件不在返回空。PDF 取全文与 OCR 用的 PyMuPDF（AGPL）移到可选的 `MASTv2/requirements-pdf.txt` |
 | **移植自已发表文献的技能** | `skills/paper/` 共 21 个（DeepSPM、Scanbot、gpSTS、AtomAI、ASD-STM 等的移植）、其基准脚本与报告、v1 的 RL 针尖策略 | 数据处理 agent 里桥接它们的 18 个工具一并移除；两处引用其常量的地方就地保留常量 |
@@ -69,13 +69,12 @@ README 中少量去除样品标识的实测选图是这一范围说明的例外�
 | `MASTv2/mast/skills/composite/prescan_check.py` | line_check 技能不随仓发布，常量就地保留 |
 | `MASTv2/mast/vision/corrugation_gate.py` | line_check 技能不随仓发布，常量就地保留 |
 | `MASTv2/mast/conduct/templates/__init__.py` | 样品 campaign 模板不随仓发布 |
-| `MASTv2/mast/agents/research_director/prompts.py` | 示例假设去掉具体样品与其研究问题 |
-| `MASTv2/mast/agents/_shared/campaign_tools.py` | 示例假设去掉具体样品与其研究问题 |
 | `MASTv2/mast/api/tool_narration.py` | 解说表去掉随 skills/paper 移除的 compose_montage |
 | `tests/v2/unit/conduct/test_api_conducts.py` | 两条依赖 campaign 模板 coord_epoch 槽位的测试 |
 | `tests/v2/unit/conduct/test_compiler.py` | 一条依赖 campaign 模板 coord_epoch 槽位的测试 |
 | `installer/mast2_setup.iss` | 安装包的项目 URL 误写成了 anthropics 组织 |
 | `MASTv2/mast/vision/_legacy_wrapper.py` | training/（移植自论文的模型结构）不随仓，legacy 后端明确报未随仓 |
+| `satellite/README.md` | 去掉单台机器的维护窗口实测清单与待问厂家的问题（工作计划），保留构建、配置与排障 |
 | `docs/v2/skill-catalog.md` | 技能目录去掉模块不随仓的技能（论文移植包整包被排除），总数与分级计数随之改正 |
 | `MASTv2/requirements-v2.txt` | PyMuPDF 移到 requirements-pdf.txt（AGPL） |
 | `tests/v2/agents/literature/test_graph_smoke.py` | PyMuPDF 变成可选依赖后，夹具缺它要 skip 不要报错 |
@@ -87,7 +86,7 @@ README 中少量去除样品标识的实测选图是这一范围说明的例外�
 | `MASTv2/mast/gallery/figures/series.py` | 相关窗与搜索域限制在实际视野内，小视野也可默认叠加 |
 | `tests/v2/unit/gallery/figures/test_figures_stitch.py` | 默认拼接不携带任何实测 κ；显式参数测试仍保留 |
 | `mast2.spec` | 打包预导入及隐藏导入列表不再点名已移除的论文技能包 |
-| `MASTv2/mast/__init__.py` | 构建元信息不随仓时，公开快照的版本回退为 6.5.0 |
+| `MASTv2/mast/__init__.py` | 构建元信息不随仓时，公开快照的版本回退为 7.1.6 |
 | `MASTv2/mast/agents/_shared/artifacts.py` | 工具产物流图去掉不随仓的论文移植工具映射，保留真实性断言 |
 | `tests/v2/unit/agents/test_prompt_provenance_gate.py` | 溯源闸门使用运行时拼出的合成禁止标记，清洗不会消掉变异输入 |
 | `tests/v2/unit/agents/test_instrument_control_handoff.py` | 公开交接测试验证确定性派发与维护说明的位置，不依赖私有提交 |
@@ -96,19 +95,25 @@ README 中少量去除样品标识的实测选图是这一范围说明的例外�
 | `MASTv2/mast/skills/builtins/scan_prep.py` | 技能参数说明明确默认 profile 未标定，须由使用者另行验证 |
 | `tests/v2/unit/vision/test_scan_prep.py` | 合成图测试验证未标定声明及其完整传递，不再依赖私有样品 |
 | `tests/v2/unit/skills/builtins/test_scan_prep_skills.py` | 技能与报告测试确认默认 profile 身份、未标定声明及出处保持一致 |
-| `MASTv2/mast/skills/builtins/deltaf_curve.py` | 力谱采集的十种命令显式使用字面动词，使静态安全检查可见 |
-| `tests/v2/unit/io/test_exp_map_analysis_zero_footprint.py` | 完整零足迹回归集纳入只读谱文件的 FindSpectralPeaks，保留集合相等与行为断言 |
+| `tests/v2/unit/io/test_exp_map_analysis_zero_footprint.py` | 零足迹回归的说明改写成不依赖私有设计文档的表述，保留对照与行为断言 |
+| `tests/v2/unit/optical_layout/test_layout_trace_budget.py` | 光路图设计文档不随仓，只钉代码里的预算值 |
+| `tests/v2/unit/release/test_script_ascii.py` | 发布脚本不随仓，只查随仓的 setup-ai-ssh.ps1 |
+| `tests/v2/unit/test_installer_7_0.py` | 公开版 mast/ 下的数据文件更少，扫描口径的下限相应放低 |
+| `tests/v2/satellite/test_admin_launcher_entry.py` | 发布验证脚本不随仓，测它的两条去掉 |
+| `tests/v2/unit/skills/builtins/test_optics_motor_groups.py` | 站点电机组模板不随仓，只校验通用模板 |
+| `tests/v2/unit/skills/builtins/test_user_output.py` | 站点电机组模板不随仓，对比断言随之去掉 |
 
 ## 三、脱敏
 
 全部文本文件过同一张规则表（私有仓 `scripts/release/scrub_rules.py`）：开发机路径、站点机器名与地址、SSH 账户与私钥名、
 明文 key，注释和文档里「某人某天说过某句话」式的现场归属与交互记录，
 以及指向开发过程的标记（现场反馈编号、取证编号、审查日期、审查发现编号）。真名作为作者署名保留。
+站点机器名统一换成代号（`rig`、`rig1`–`rig3`），实验室网段换成 RFC 5737 文档地址，设备序列号换成假值。
 
 通用技术推理保留；本站未经脱敏的实验记录、样品身份与仪器标定值不作为公开叙事或测试夹具，README 中去除样品标识的选图除外。
 
 导出后全树再过一遍卫生扫描（判据表复用 `tests/v2/unit/test_release_hygiene.py`，外加第三方图像编号、私钥块等几条），
-命中必须为零，只允许写明理由的放行：讲 CGNAT 网段本身的 `net/tailscale.py`、用 `100.101.x.x` / `10.0.0.x` 作占位的几个测试。
+命中必须为零，只允许写明理由的放行：讲 CGNAT 网段本身的 `net/tailscale.py`、用 `100.101.x.x` / `10.0.0.x` 作占位的几个测试、测私有网段分类的几个测试。
 
 ## 四、import 闭包与测试
 
@@ -117,23 +122,18 @@ README 中少量去除样品标识的实测选图是这一范围说明的例外�
 - **无兜底**：生产代码里必须为零（靠上面的补丁表）；测试文件里有的话，该测试文件整个不收录。
 - **有兜底**（`try / except`）：保留，对应功能在缺席时降级。清单：
 
-- `MASTv2/mast/__init__.py:32` ← mast._buildinfo
-- `MASTv2/mast/__init__.py:33` ← mast._buildinfo
-- `MASTv2/mast/api/version.py:13` ← mast._buildinfo
 - `MASTv2/mast/llm/quickask.py:350` ← mast.knowledge.fault_diagnosis
 - `MASTv2/mast/llm/quickask.py:360` ← mast.knowledge.stm_noise
 - `MASTv2/mast/llm/quickask.py:395` ← mast.knowledge.reference_index
 - `MASTv2/mast/llm/quickask.py:409` ← mast.knowledge.reference_index
-- `MASTv2/mast/update/defaults.py:17` ← mast.update._defaults
-- `MASTv2/mast/update/defaults.py:23` ← mast.update._defaults
 - `MASTv2/mast/vision/_legacy_wrapper.py:71` ← mast.training.models, mast.training.models.architectures
 - `MASTv2/mast/api/routes/codex_reference.py:249` ← mast.knowledge.experiment_design
 - `MASTv2/mast/api/routes/codex_reference.py:276` ← mast.knowledge.hardware_profile
 - `MASTv2/mast/api/routes/codex_reference.py:314` ← mast.knowledge.safety_constraints
-- `MASTv2/mast/api/routes/settings_admin_write.py:155` ← mast.knowledge.fault_diagnosis
-- `MASTv2/mast/api/routes/settings_admin_write.py:159` ← mast.knowledge.experiment_design
-- `MASTv2/mast/api/routes/settings_admin_write.py:169` ← mast.knowledge.hardware_profile
-- `MASTv2/mast/api/routes/settings_admin_write.py:180` ← mast.knowledge.image_databases
+- `MASTv2/mast/api/routes/settings_admin_write.py:159` ← mast.knowledge.fault_diagnosis
+- `MASTv2/mast/api/routes/settings_admin_write.py:163` ← mast.knowledge.experiment_design
+- `MASTv2/mast/api/routes/settings_admin_write.py:173` ← mast.knowledge.hardware_profile
+- `MASTv2/mast/api/routes/settings_admin_write.py:184` ← mast.knowledge.image_databases
 - `MASTv2/mast/agents/_shared/meta_tools.py:705` ← mast.knowledge.fault_diagnosis
 - `MASTv2/mast/agents/_shared/meta_tools.py:719` ← mast.knowledge.stm_noise
 - `MASTv2/mast/agents/_shared/meta_tools.py:767` ← mast.knowledge.reference_index
@@ -154,40 +154,25 @@ README 中少量去除样品标识的实测选图是这一范围说明的例外�
 - `tests/v2/unit/skills/composite/test_verify_cannot_pass_a_dead_frame.py`
 - `tests/v2/unit/skills/test_frame_validity_guard.py`
 - `tests/v2/unit/test_misc_safety_findings.py`
+- `tests/v2/unit/test_public_release_defaults.py`
 - `tests/v2/unit/vision/test_corrugation_gate.py`
 
 以下结果针对本次公开快照；测试环境与范围随结果一并记录。
 
-2026-09-21，在 Windows / Python 3.13 环境中验证本次 MAST 6.5.0 公开快照，未连接仪器。
+2026-11-07，在 Windows / Python 3.13 环境中验证本次 MAST 7.1.6 公开快照，未连接仪器。
 
-整树受测源码基线为 `9884ff5`。后续文档、文档生成模板及 agent 提示文案的修订另行检查；本记录不替代修改后源码的整树复测。
-
-- 后端整树：**14,356 通过、0 失败、46 跳过、2 个预期失败**。命令为 `python -m pytest tests -q -n 8 --dist loadfile -m "not hardware and not live_llm"`，`PYTHONPATH` 指向本快照的 `MASTv2`。
-- 前端：`npm run build`（含类型检查）通过，`npm run test:unit` **985 / 985 通过**。
-- OpenAPI 与公开后端一致：302 条路径、577 个 schema；前端生成类型已同步。
-- 全树 Python 语法检查、import 闭包及公开卫生扫描通过；三份 Nanonis 格式夹具可从随仓生成器逐字节复现。
+- 后端整树：**19,755 通过、1 失败、68 跳过、2 个预期失败**。那 1 条失败是 `tests/v2/live/test_ws_live.py::test_spectra_are_rate_limited_to_the_latest_frame`，测试在后台线程写入结果之前就读了它，高负载下才会撞上；单独连跑 5 次与 `tests/v2/live` 整组（117 条）都通过。命令为 `python -m pytest tests -q -n 3 --dist loadfile -m "not hardware and not live_llm"`，`PYTHONPATH` 指向本快照的 `MASTv2`。
+- 前端：类型检查与构建通过，`npm run test:unit` **1,931 / 1,931 通过**。
+- 卫星端 C#（`satellite/MastSatellite`）用 .NET 8 SDK 编译通过（0 警告、0 错误），离线自检 21 通过、1 跳过（跳过项需要不随仓的 LightField 文件尾样例）。
+- OpenAPI 与公开后端一致：329 条路径、654 个 schema；前端生成类型已同步。
+- 全树 Python 语法检查、import 闭包及公开卫生扫描通过。三份 Nanonis 格式夹具可从随仓生成器复现。
+- GitHub 投稿 CI 的两步（`skill_check --all-contrib` 与所选测试）在屏蔽了 `MASTv2/requirements-ci.txt` 之外依赖的环境中通过。
 
 跳过与预期失败按测试自身标记统计，不计为通过。本结果覆盖无需硬件和真实 LLM 的测试范围，不代表真机验证。
 
-### 公开读者文档修订检查
-
-2026-09-21，基于 `9884ff5` 的公开候选工作树完成文档、插件配置说明及 agent 提示文案修订。
-Python 文件改动经 AST 比较确认仅涉及文本常量与注释，插件 manifest 仅修改两处字段说明。
-
-- 双语文档结构、指南镜像、API 参考生成、外部概览与 MCP 集成检查：**92 通过、1 跳过**。
-  使用所选 Python 3.13 环境运行 `-m pytest tests/v2/unit/docs/test_external_docs_bilingual.py tests/v2/unit/docs/test_external_docs_sync.py tests/v2/unit/api_ext/test_ext_api_reference.py tests/v2/unit/api_ext/test_ext_overview.py tests/v2/unit/integrations -q`。
-- 跳过项为嵌入式 Python 的启动测试；公开源码包不含 `MASTv2/pyruntime/python.exe`。
-- 最后一处工具说明调整后，另复查工具清单与 schema 测试，**1 项通过**。
-- API 文档生成一致性、18 份插件指南镜像、公开文档本地链接与文本扫描通过。
-
-检查使用测试替身、临时文件及本地测试服务，未连接仪器或真实模型服务；未重复运行整树后端与前端套件。
-
-随后将当前项目名称统一为 **MAST**，同步文档、agent 自称与服务展示文字；路径、配置键和兼容标识保持原样。
-命名修订后的双语结构与指南镜像检查 **8 项通过**，Python 改动仍仅涉及文字与注释，前端包仅更新描述字段。
-
 ### 复现验证时的前提
 
-上述并行命令中的 `-n 8 --dist loadfile` 由 `pytest-xdist` 提供，它不在主依赖清单中。
+上述并行命令中的 `-n 3 --dist loadfile` 由 `pytest-xdist` 提供，它不在主依赖清单中。
 如需同样的并行方式，先用所选虚拟环境的 Python 执行 `-m pip install pytest-xdist`。
 无需并行时，省略这两个参数即可；默认串行命令见根目录 AGENTS。
 
@@ -214,4 +199,5 @@ Python 文件改动经 AST 比较确认仅涉及文本常量与注释，插件 m
 
 - 代码注释里引用的 `docs/v2/design/*.md`、`HANDOFF`、`PROGRESS` 等文档都不随仓；公开说明保留通用机制，未附带实验记录或私有设计稿。
 - `config/composite_skills/` 保留公开的复合技能声明式规格；具体清单以目录内容为准。
+- 注释和测试里的 `rig`、`rig1`、`rig2`、`rig3` 是开发时几台仪器电脑的代号，不对应本仓的任何配置。
 - 代码里的通用算法与合成测试不代表任何仪器的标定结果；使用者必须自行提供仪器配置、数据与标定。

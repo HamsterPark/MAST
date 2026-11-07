@@ -27,6 +27,7 @@ import numpy as np
 from mast.gallery import paths as _paths
 from mast.gallery.figures import common as C
 from mast.gallery.figures import spectra as SP
+from mast.i18n import tr
 
 VER = 1
 CAT = "sts_stitch"
@@ -72,9 +73,9 @@ def factor_to_core(core: dict, piece: dict, key: str, W: float = SEAM_W,
     with np.errstate(all="ignore"):
         if near.sum() >= min_inside:
             return (float(np.mean(np.interp(Vp[near], Vc, Dc)) / np.mean(Dp[near])),
-                    "%+.2f V 内侧 %d 点均值比" % (Vj, near.sum()))
+                    tr("%+.2f V 内侧 %d 点均值比", "ratio of means, inner side of %+.2f V, %d points") % (Vj, near.sum()))
         side = 1 if up else -1
-        return edge_val(Vc, Dc, Vj, -side) / edge_val(Vp, Dp, Vj, side), "%+.2f V 两侧各 5 点外推到接缝" % Vj
+        return edge_val(Vc, Dc, Vj, -side) / edge_val(Vp, Dp, Vj, side), tr("%+.2f V 两侧各 5 点外推到接缝", "extrapolated to the seam from 5 points on each side of %+.2f V") % Vj
 
 
 def li_ratio_bins(D, Dn, nb: int = 5) -> list[float]:
@@ -109,24 +110,24 @@ def make_stitch(lay: _paths.Layout, doc: dict, marks: dict, ids: list[str], opti
     def skip(k, why):
         skipped.append({"id": k, "why": why})
         if report is not None:
-            report(k, "跳过：" + why)
+            report(k, tr("跳过：", "Skipped: ") + why)
 
     S = []
     for k in ids:
         it = by.get(k)
         if not it:
-            skip(k, "索引里没有这一项")
+            skip(k, tr("索引里没有这一项", "Not in the index"))
         elif it.get("k") != "s":
-            skip(k, "不是谱")
+            skip(k, tr("不是谱", "Not a spectrum"))
         elif it.get("ex"):
-            skip(k, "不是偏压谱（%s）" % it["ex"])
+            skip(k, tr("不是偏压谱（%s）", "Not a bias spectrum (%s)") % it["ex"])
         else:
             try:
                 S.append(SP.load_spectrum(it, cache))
             except Exception as exc:  # noqa: BLE001
                 skip(k, str(exc)[:200])
     if not S:
-        raise C.JobError("没有能拼的偏压谱" + ("（%d 条全部跳过）" % len(skipped) if skipped else ""))
+        raise C.JobError(tr("没有能拼的偏压谱", "No bias spectra to stitch") + (tr("（%d 条全部跳过）", " (all %d skipped)") % len(skipped) if skipped else ""))
     S.sort(key=lambda s: (s["t"] or 0, s["id"]))
     keys = [s["id"] for s in S]
 
@@ -136,7 +137,7 @@ def make_stitch(lay: _paths.Layout, doc: dict, marks: dict, ids: list[str], opti
         o = np.argsort(s["V"])
         Dn = C.deriv_by_volts(s["V"][o], s["I"][o])
         P.append(dict(V=s["V"][o], I=s["I"][o], D=s["D"][o] if li else Dn, Dn=Dn))
-    dname, dunit = (S[0]["dname"], "fA") if li else ("dI/dV · 电流数值求导", "pA/V")
+    dname, dunit = (S[0]["dname"], "fA") if li else (tr("dI/dV · 电流数值求导", "dI/dV · numerical derivative of current"), "pA/V")
     ranges = [(round(np.min(s["V"]), 2), round(np.max(s["V"]), 2), round(s["zoff"])) for s in S]
     covers0 = [i for i, (a, b, _z) in enumerate(ranges) if a < 0 < b]
 
@@ -186,11 +187,11 @@ def make_stitch(lay: _paths.Layout, doc: dict, marks: dict, ids: list[str], opti
                 continue
             col, fac = C.INK_HEX, 1.0
             Vuse, Iuse, Duse = core["V"], core["I"], core["D"]
-            table.append("%s  %+.2f→%+.2f V · Zoff %.0f pm · %s sweeps   核心 ×1%s" % (
+            table.append(tr("%s  %+.2f→%+.2f V · Zoff %.0f pm · %s sweeps   核心 ×1%s", "%s  %+.2f→%+.2f V · Zoff %.0f pm · %s sweeps   core ×1%s") % (
                 "+".join(S[i]["fn"][:-4] if i == core_ids[0] else S[i]["fn"][-9:-4] for i in core_ids),
                 s["V"][0], s["V"][-1], s["zoff"], s["sweeps"],
-                "（%d 条平均）" % len(core_ids) if len(core_ids) > 1 else ""))
-            draw = dict(col=col, dotted=None, dashed=None, leg="%s 核心 ×1" % core_short)
+                tr("（%d 条平均）", " (mean of %d)") % len(core_ids) if len(core_ids) > 1 else ""))
+            draw = dict(col=col, dotted=None, dashed=None, leg=tr("%s 核心 ×1", "%s core ×1") % core_short)
             segs.append(dict(seg, role="core", factor=1.0))
         else:
             col = cols[1 + (n_i % (len(cols) - 1))]
@@ -204,12 +205,14 @@ def make_stitch(lay: _paths.Layout, doc: dict, marks: dict, ids: list[str], opti
             rb = li_ratio_bins(p["D"][use], p["Dn"][use]) if li and use.sum() >= 15 else []
             dashed = None
             if len(rb) >= 2 and max(rb) / min(rb) > LI_VARY:
-                dashed = (Vuse, p["Dn"][use] * resp * fac, "%s 电流数值求导×%.1f（参照）" % (s["fn"][-9:-4], resp))
-                warn = ("\n      注意：这段 LI/数值导数 在 %.1f–%.1f 之间变（核心 %.1f），LI 形状可能失真；"
-                        "虚线＝该段电流数值求导×%.1f×%.3g" % (min(rb), max(rb), resp, resp, fac))
-            table.append("%s  %+.2f→%+.2f V · Zoff %.0f pm · %s sweeps   ×%.3g  [%s]   电流在接缝的比 ×%.3g%s%s" % (
+                dashed = (Vuse, p["Dn"][use] * resp * fac, tr("%s 电流数值求导×%.1f（参照）", "%s numerical derivative of current ×%.1f (reference)") % (s["fn"][-9:-4], resp))
+                warn = tr("\n      注意：这段 LI/数值导数 在 %.1f–%.1f 之间变（核心 %.1f），LI 形状可能失真；"
+                          "虚线＝该段电流数值求导×%.1f×%.3g",
+                          "\n      Note: the LI/numerical-derivative ratio of this segment varies between %.1f and %.1f (core %.1f), so the LI shape may be distorted; "
+                          "dashed line = numerical derivative of this segment's current ×%.1f×%.3g") % (min(rb), max(rb), resp, resp, fac)
+            table.append(tr("%s  %+.2f→%+.2f V · Zoff %.0f pm · %s sweeps   ×%.3g  [%s]   电流在接缝的比 ×%.3g%s%s", "%s  %+.2f→%+.2f V · Zoff %.0f pm · %s sweeps   ×%.3g  [%s]   current ratio at the seam ×%.3g%s%s") % (
                 s["fn"][:-4], s["V"][0], s["V"][-1], s["zoff"], s["sweeps"], fac, how, fac_i,
-                " · Zoff 差估 ×%.3g" % th if th is not None and abs(s["zoff"] - S[ci]["zoff"]) > 1 else "", warn))
+                tr(" · Zoff 差估 ×%.3g", " · Zoff difference estimate ×%.3g") % th if th is not None and abs(s["zoff"] - S[ci]["zoff"]) > 1 else "", warn))
             draw = dict(col=col, dotted=(p["V"], p["I"], p["D"]), dashed=dashed, leg="%s ×%.3g" % (s["fn"][-9:-4], fac))
             segs.append(dict(seg, role="piece", factor=fac, how=how, factor_I=fac_i, theory=th, li_bins=rb,
                              dashed=dashed is not None))
@@ -281,24 +284,31 @@ def make_stitch(lay: _paths.Layout, doc: dict, marks: dict, ids: list[str], opti
                 leg = ax.legend(loc="best", prop=_bold(10.5), framealpha=0.85, edgecolor=C.EDGE)
                 for t in leg.get_texts():
                     t.set_color(C.INK_HEX)
-        axIl.set_title("线性纵轴", color=C.TEAL, fontproperties=_bold(11.5))
-        axIs.set_title("symlog 纵轴（|y| < x₀ 段线性；x₀：Current %g pA，dI/dV %g %s）" % (x0I, x0D, dunit),
+        axIl.set_title(tr("线性纵轴", "Linear y axis"), color=C.TEAL, fontproperties=_bold(11.5))
+        axIs.set_title(tr("symlog 纵轴（|y| < x₀ 段线性；x₀：Current %g pA，dI/dV %g %s）", "symlog y axis (linear for |y| < x₀; x₀: Current %g pA, dI/dV %g %s)") % (x0I, x0D, dunit),
                        color=C.TEAL, fontproperties=_bold(11.5))
         for ax in (axIl, axIs):
             ax.tick_params(labelbottom=False)
         for ax in (axDl, axDs):
-            ax.set_xlabel("偏压 (V)", color=C.INK_HEX, fontproperties=C.fp(10))
+            ax.set_xlabel(tr("偏压 (V)", "Bias (V)"), color=C.INK_HEX, fontproperties=C.fp(10))
         axT.text(0.0, 1.0, "\n".join(table), transform=axT.transAxes, va="top", ha="left", color=C.INK_HEX,
                  fontproperties=C.fp(9.5, mono=True))
-        axT.text(0.0, 0.0, "拼接：每段在接缝处按 %s 对齐求系数 ×k（写在图例里），电流乘同一个 k；symlog 图里点线＝边缘段原始值，灰虚线＝核心段两端。\n"
-                           "「电流在接缝的比」和 k 差得多，说明两段在接缝处的谱形不同（如峰位随针尖高度移动），电流图接缝处就有台阶，"
-                           "这一侧的相对高低要谨慎看；%s" % (SP.dshort(dname),
-                           ("Zoff 差估按指定的 κ = %g nm⁻¹ 算，仅作参照。" % kappa
-                            if kappa is not None else "未指定 κ，不计算 Zoff 理论倍率。")),
+        axT.text(0.0, 0.0, tr("拼接：每段在接缝处按 %s 对齐求系数 ×k（写在图例里），电流乘同一个 k；symlog 图里点线＝边缘段原始值，灰虚线＝核心段两端。\n"
+                              "「电流在接缝的比」和 k 差得多，说明两段在接缝处的谱形不同（如峰位随针尖高度移动），电流图接缝处就有台阶，"
+                              "这一侧的相对高低要谨慎看；%s",
+                              "Stitching: each segment is aligned at the seam by %s to get a factor ×k (given in the legend), and the current is multiplied by the same k; in the symlog plots, dotted line = raw edge segment, grey dashed line = ends of the core segment.\n"
+                              "If the \"current ratio at the seam\" differs a lot from k, the spectral shapes of the two segments differ at the seam (e.g. peak position shifts with tip height), "
+                              "the current plot then has a step at the seam, and the relative height on that side should be read with care; %s") % (SP.dshort(dname),
+                              (tr("Zoff 差估按指定的 κ = %g nm⁻¹ 算，仅作参照。",
+                                  "the Zoff difference estimate uses the given κ = %g nm⁻¹ and is for reference.") % kappa
+                               if kappa is not None else
+                               tr("未指定 κ，不计算 Zoff 理论倍率。",
+                                  "κ was not given, so no Zoff theoretical ratio is computed."))),
                  transform=axT.transAxes, va="bottom", ha="left", color=C.DIM_HEX, fontproperties=C.fp(9.5))
-        fig.suptitle("单根标记谱拼接 · 目录 %s · %s → %s · 以 %s 为核心、按 %s 拼到 %+.2f…%+.2f V\n各段压电坐标最大相距 %.2f nm%s · 左图＝各段系定的 STM" % (
+        fig.suptitle(tr("单根标记谱拼接 · 目录 %s · %s → %s · 以 %s 为核心、按 %s 拼到 %+.2f…%+.2f V\n各段压电坐标最大相距 %.2f nm%s · 左图＝各段系定的 STM",
+                        "Single marked-spectrum stitch · directory %s · %s → %s · core %s, stitched by %s to %+.2f…%+.2f V\nmax piezo-coordinate distance between segments %.2f nm%s · left image = the STM tied to each segment") % (
             dlast, C.local(t0, "%m-%d %H:%M"), C.local(t1, "%m-%d %H:%M"), core_short, SP.dshort(dname), lo_all, hi_all,
-            spread, "（不是同一点，中间隔了几小时、有漂移，拼接只作参考）" if spread > 0.3 else "（同一点）"),
+            spread, tr("（不是同一点，中间隔了几小时、有漂移，拼接只作参考）", " (not the same point: hours apart with drift in between, so the stitch is for reference only)") if spread > 0.3 else tr("（同一点）", " (same point)")),
             color=C.INK_HEX, fontproperties=C.fp(13), y=0.975)
         data = C.savefig_bytes(fig, DPI)
 
@@ -309,16 +319,17 @@ def make_stitch(lay: _paths.Layout, doc: dict, marks: dict, ids: list[str], opti
         base = C.safe_name("单根谱拼接_%s_%s-%s" % (dlast, S[0]["fn"][-9:-4], S[-1]["fn"][-9:-4]))
     name = base + ".png"
     C.write_bytes(lay, CAT, name, data)
-    summary = {"段数": len(S), "核心": core_short, "范围 V": "%+.2f…%+.2f" % (lo_all, hi_all),
-               "dI/dV": SP.dshort(dname).replace("dI/dV", "").strip("（）"), "相距 nm": round(spread, 2)}
+    summary = {tr("段数", "Segments"): len(S), tr("核心", "Core"): core_short,
+               tr("范围 V", "Range V"): "%+.2f…%+.2f" % (lo_all, hi_all),
+               "dI/dV": SP.dshort(dname).replace("dI/dV", "").strip("（）()"), tr("相距 nm", "Distance nm"): round(spread, 2)}
     for sg in segs:
         if sg["role"] == "piece":
             summary["×k " + sg["fn"][-9:-4]] = float("%.3g" % sg["factor"])
     if skipped:
-        summary["跳过"] = len(skipped)
+        summary[tr("跳过", "Skipped")] = len(skipped)
     detail = {"segments": segs, "core": [S[i]["id"] for i in core_ids], "li": li, "resp": resp,
               "x0": {"I": x0I, "D": x0D}, "span_nm": spread, "kappa": kappa, "table": table, "dir": d,
               "skipped": skipped}
-    return C.write_figure_json(lay, CAT, base, kind="sts_stitch", title="单根谱拼接 · %s" % C.dir_title(d),
+    return C.write_figure_json(lay, CAT, base, kind="sts_stitch", title=tr("单根谱拼接 · %s", "Single-spectrum stitch · %s") % C.dir_title(d),
                                files=[name], ids=keys, options=options, summary=summary, detail=detail,
                                maker_version=VER)

@@ -72,11 +72,18 @@ class _FakeSock:
 
 
 @pytest.fixture
-def pool():
+def pool(unused_tcp_ports):
     from mast.config import NanonisConfig
     from mast.core.connection import ConnectionPool
 
-    return ConnectionPool(NanonisConfig(host="127.0.0.1", timeout_s=1.0))
+    # Ports with no listener by construction (tests/v2/unit/core/conftest.py). With the
+    # defaults (6501–6504), the reconnect inside urgent_call really dialled a
+    # Nanonis simulator when it was running — "nothing real is listening" below was an
+    # assumption, not a fact.
+    main, monitor, data, emergency = unused_tcp_ports(4)
+    return ConnectionPool(NanonisConfig(host="127.0.0.1", timeout_s=1.0, port_main=main,
+                                        port_monitor=monitor, port_data=data,
+                                        port_emergency=emergency))
 
 
 def _install(pool, role, gate):

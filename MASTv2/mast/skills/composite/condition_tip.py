@@ -35,6 +35,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.agents._shared.skill_adapter import wrap_skill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -60,17 +61,22 @@ class ConditionTip(CompositeSkillGraph):
             capabilities=frozenset({"bias_pulse"}),
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "修针自动闭环：脉冲 → 扫描 → FFT 评质，重复到达标为止。"
+                tr("修针自动闭环：脉冲 → 扫描 → FFT 评质，重复到达标为止。", "Automatic tip-conditioning loop: pulse -> scan -> FFT quality check, repeated until the target is met.")
             ),
             parameters=[
                 ParameterSpec(
                     name="pulse_v",
                     type="float",
-                    description=(
+                    description=tr(
                         "修针用的偏压脉冲电压。**没有具体理由就别填** —— 留空时，"
                         "它按已登记针尖（材料 × 制法 × 形态）从针尖策略表里取。"
                         "你**填了**的值会被采用，但超出该针尖的安全包络时是"
-                        "**拒绝**（不是夹紧）。"
+                        "**拒绝**（不是夹紧）。",
+                        "Bias pulse voltage for tip conditioning. **Leave it empty unless you have a "
+                        "specific reason** - when empty it is taken from the tip policy table for the "
+                        "registered tip (material x preparation x shape). A value you **do** give is "
+                        "used, but if it lies outside that tip's safety envelope it is **rejected** "
+                        "(not clamped).",
                     ),
                     unit="V",
                     required=False,
@@ -81,7 +87,7 @@ class ConditionTip(CompositeSkillGraph):
                     name="max_attempts",
                     type="int",
                     description=(
-                        "脉冲+扫描的最大轮次（留空 → 针尖策略表）"
+                        tr("脉冲+扫描的最大轮次（留空 → 针尖策略表）", "Maximum pulse + scan rounds (empty -> tip policy table)")
                     ),
                     required=False,
                     default=5,
@@ -91,7 +97,7 @@ class ConditionTip(CompositeSkillGraph):
                 ParameterSpec(
                     name="target_quality",
                     type="float",
-                    description="FFT 质量分阈值（0-1）",
+                    description=tr("FFT 质量分阈值（0-1）", "FFT quality-score threshold (0-1)"),
                     required=False,
                     default=0.3,
                     min_value=0.0,
@@ -100,21 +106,21 @@ class ConditionTip(CompositeSkillGraph):
                 ParameterSpec(
                     name="center_x_m",
                     type="float",
-                    description="测试扫描中心 X（默认：当前位置）",
+                    description=tr("测试扫描中心 X（默认：当前位置）", "Test scan center X (default: current position)"),
                     unit="m",
                     required=False,
                 ),
                 ParameterSpec(
                     name="center_y_m",
                     type="float",
-                    description="测试扫描中心 Y（默认：当前位置）",
+                    description=tr("测试扫描中心 Y（默认：当前位置）", "Test scan center Y (default: current position)"),
                     unit="m",
                     required=False,
                 ),
                 ParameterSpec(
                     name="scan_width_m",
                     type="float",
-                    description="测试扫描宽度",
+                    description=tr("测试扫描宽度", "Test scan width"),
                     unit="m",
                     required=False,
                     default=10e-9,
@@ -141,7 +147,7 @@ class ConditionTip(CompositeSkillGraph):
     ) -> Iterator[CompositeStep]:
         """Yield configure→set_speed→start_scan, wait for completion inline, then
         yield assess. On scan timeout, STOP the still-running scan (the wait
-        helper only stops on abort, not timeout — 审查). When
+        helper only stops on abort, not timeout). When
         ``abort_on_timeout`` is False (the best-effort initial assessment), a
         timeout just stops the scan and returns WITHOUT the assess step, so the
         caller falls through to conditioning instead of aborting the whole run."""

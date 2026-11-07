@@ -2,10 +2,12 @@
 
 [中文](AGENTS.zh.md)
 
-MAST (Modular Autonomous SPM Toolkit) is a full-stack multi-agent system that operates
-a scanning tunnelling microscope (STM) through a Nanonis controller. It connects
-experiment planning, instrument skills, deterministic execution checks, perception,
-data analysis and a React operator interface. **In a completed MAST 6.4.0
+MAST (Modular Autonomous SPM Toolkit) connects external AI agents to a scanning
+tunnelling microscope (STM) on a Nanonis controller and to optical components for
+TERS. It provides instrument skills, deterministic execution checks, visual evidence
+and measurement tools, data analysis and a React operator interface; the earlier
+built-in multi-agent orchestration remains in the tree as historical code.
+**In a completed MAST 6.4.0
 real-instrument campaign, an external AI agent's timestamped STM record spanned
 about 99 hours (2026-09-17 23:10:37–2026-09-22 02:08:10 CST).**
 
@@ -50,7 +52,9 @@ implementations with regression tests. All paths are relative to the repository 
 | What actually crosses an agent handoff? | `MASTv2/mast/agents/state.py` (`DocRef`, reducers), `MASTv2/mast/agents/_shared/handoff.py`, `MASTv2/mast/agents/_shared/artifact_channel.py` | `tests/v2/agents/orchestrator/test_artifact_channel.py` |
 | How do fast observations reach slower reasoning, including missing-model behavior? | `MASTv2/mast/buffer/service.py`, `MASTv2/mast/vision/module.py`, `MASTv2/mast/agents/_shared/buffer_tools.py` | `tests/v2/buffer/test_buffer_service.py`, `tests/v2/vision/test_mock_backend.py`, `tests/v2/unit/agents/test_scan_progress_liveness.py` |
 | How does the operator distinguish completion from a broken stream? | `MASTv2/mast/api/sse.py`, `MASTv2/mast/api/ws.py`, `frontend/src/lib/sse.ts`, `frontend/src/lib/ws.ts` | `tests/v2/unit/api/test_sse_keepalive.py`, `tests/v2/unit/api/test_sse_client_contract.py`, `frontend/test/ws.reconnect.test.ts` |
-| How does the **new 6.5.0 external interface** handle retries and restarts? **Software-tested; hardware validation pending.** | `MASTv2/mast/api/ext/jobs.py`: `JobManager.submit`, `fingerprint`, `_ensure_loaded` | `tests/v2/unit/api_ext/test_ext_jobs.py` |
+| How does the **external interface** handle retries and restarts? **Software-tested; hardware validation pending.** | `MASTv2/mast/api/ext/jobs.py`: `JobManager.submit`, `fingerprint`, `_ensure_loaded` | `tests/v2/unit/api_ext/test_ext_jobs.py` |
+| How does the visual harness hold an agent to one act per observation? **Software-tested; hardware validation pending.** | `MASTv2/mast/vista/service.py`, `MASTv2/mast/vista/gate.py`, `MASTv2/mast/vista/wait.py`, `MASTv2/mast/api/ext/vista.py` | `tests/v2/vista/test_gate.py`, `tests/v2/vista/test_wait.py`, `tests/v2/vista/test_actions.py` |
+| How are optical instruments gated, including emission? **Software-tested; hardware validation pending.** | `MASTv2/mast/instruments/emission_safety.py`, `MASTv2/mast/instruments/witec/microscope.py`, `MASTv2/mast/station.py`, `MASTv2/mast/satellite/hub.py` | `tests/v2/station/`, `tests/v2/instruments/witec/`, `tests/v2/satellite/` |
 
 The agent tool wrapper and manual executor acquire instrument ownership at their
 own entry points; composite substeps use `ExecutionContext.run`. Follow these
@@ -85,15 +89,18 @@ and [external-agent integration](docs/external/).
   record spanned about 99 hours. The maintainer reports this
   deployment experience. Selected de-identified figures appear in the README;
   complete experimental datasets and full logs remain outside this release.
-- **Public 6.5.0 software validation:** on 2026-09-21, the Windows / Python 3.13
-  run for source baseline `9884ff5` recorded **14,356 backend passes, zero failures,
-  46 skips and two expected failures**; **985 frontend unit tests** and the frontend
-  build with typechecking passed. Commands, environment and scope are recorded in
+- **Public 7.1.6 software validation:** on 2026-11-07, the Windows / Python 3.13
+  run on the exported tree recorded **19,755 passed**; 1 timing-dependent failure that passed on rerun, 68 skipped and 2 expected failures; **1,931 frontend unit tests**
+  and the frontend build with typechecking passed. Commands, environment and scope are recorded in
   [the snapshot notes](docs/OPEN_SOURCE_NOTES.md).
-- **New external interface:** `/api/ext/v1` and its MCP integration extend the
+- **External interface:** `/api/ext/v1` and its MCP integration extend the
   project's external-agent capabilities with a public interface. They have
-  undergone software testing; hardware validation of this new path is pending.
+  undergone software testing; hardware validation of this path is pending.
   The approximately 99-hour record used the MAST 6.4.0 control path.
+- **VISTA and optical control (7.0–7.1):** the visual harness (`MASTv2/mast/vista/`),
+  the TERS workflows and satellite (`MASTv2/mast/satellite/`, `satellite/`) and the
+  optical station (`MASTv2/mast/instruments/witec/`) have software tests with
+  instrument doubles; their hardware validation is pending.
 - **Experimental extensions:** `MASTv2/mast/conduct/`, `MASTv2/mast/agentruntime/`,
   `MASTv2/mast/goals/`, the skill workshop/market and qPlus paths explore longer
   planning, execution and instrument capabilities; hardware validation is pending.

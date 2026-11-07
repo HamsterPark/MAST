@@ -58,6 +58,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +117,7 @@ class AssessSpectrum(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "判断一条已保存的单点谱学 .dat 值不值得留。只读，不碰硬件。verdict "
+                tr("判断一条已保存的单点谱学 .dat 值不值得留。只读，不碰硬件。verdict "
                 "是一个封闭的四态集合：keep / keep_flagged / discard / unrated —— 「判不了」"
                 "绝不（NEVER）被折叠进「失败」。哪些子判据有资格否决，取决于 spectral_family：饱和、"
                 "谱 SNR、正/反扫迟滞永远否决（它们是仪器事实）；尖峰计数与反对称性只在 METALLIC "
@@ -126,49 +127,49 @@ class AssessSpectrum(BaseSkill):
                 "只能给出 'unrated'，绝不给出坏结论 —— gated_criteria/ungated_criteria "
                 "说明实际是哪几条做的判决。gap_ev 会报出来，但绝不（NEVER）参与否决，"
                 "它也不是一次带隙测量。倒置的 dI/dV 会被标出来，绝不悄悄翻转。success=true "
-                "只表示这个文件读得出来；判断在 data.verdict 里。"
+                "只表示这个文件读得出来；判断在 data.verdict 里。", "Judge whether a saved single-point spectroscopy .dat is worth keeping. Read-only, does not touch hardware. verdict is a closed four-state set: keep / keep_flagged / discard / unrated - \"cannot tell\" is NEVER folded into \"fail\". Which sub-criteria are entitled to veto depends on spectral_family: saturation, spectral SNR and forward/backward hysteresis always veto (they are instrument facts); spike count and antisymmetry veto only on METALLIC substrates - on gapped substrates they would judge every good spectrum bad, and are blind to tip jumps. spectral_family='' means UNKNOWN, which is not the same as metallic: only the three family-independent criteria veto. Every threshold left empty is UNCALIBRATED and can only give 'unrated', never a bad verdict - gated_criteria/ungated_criteria say which ones actually made the decision. gap_ev is reported but NEVER takes part in a veto, and it is not a band-gap measurement. An inverted dI/dV is flagged, never silently flipped. success=true only means the file could be read; the judgment is in data.verdict.")
             ),
             parameters=[
                 ParameterSpec(name="dat_path", type="str",
-                              description="已保存的 .dat 谱文件路径。",
+                              description=tr("已保存的 .dat 谱文件路径。", "Path of the saved .dat spectrum file."),
                               required=True),
                 ParameterSpec(
                     name="kind", type="str",
-                    description=("auto / iv / iz。'auto' 从 DATA 本身判断（哪一列在被扫）；"
-                                 "文件头只用来交叉核对。"),
+                    description=(tr("auto / iv / iz。'auto' 从 DATA 本身判断（哪一列在被扫）；"
+                                 "文件头只用来交叉核对。", "auto / iv / iz. 'auto' judges from the DATA itself (which column is being swept); the file header is used only for cross-checking.")),
                     required=False, default="auto",
                     allowed_values=["auto", "iv", "iz"]),
                 ParameterSpec(
                     name="spectral_family", type="str",
-                    description=("metallic / gapped / unknown。留空 = unknown。"
+                    description=(tr("metallic / gapped / unknown。留空 = unknown。"
                                  "从已登记衬底推断这条线还没接上，所以留空是真的表示 unknown —— "
-                                 "它绝不会被当成 metallic。"),
+                                 "它绝不会被当成 metallic。", "metallic / gapped / unknown. Empty = unknown. Inference from the registered substrate is not wired up yet, so empty really means unknown - it will never be treated as metallic.")),
                     required=False, default="",
                     allowed_values=["", "metallic", "gapped", "unknown"]),
                 ParameterSpec(
                     name="min_snr", type="float",
-                    description=("谱 SNR 的下限（点间噪声上的 5-95 百分位跨度）。默认 UNCALIBRATED "
-                                 "—— 留空则这条判据只报一个数。纯白噪声量出来是 3.0-5.3。"),
+                    description=(tr("谱 SNR 的下限（点间噪声上的 5-95 百分位跨度）。默认 UNCALIBRATED "
+                                 "—— 留空则这条判据只报一个数。纯白噪声量出来是 3.0-5.3。", "Lower limit of the spectral SNR (5-95 percentile span over the point-to-point noise). Default UNCALIBRATED - if empty this criterion only reports a number. Pure white noise measures 3.0-5.3.")),
                     required=False, min_value=0.0, max_value=1e9),
                 ParameterSpec(
                     name="max_saturation_frac", type="float",
-                    description=("允许多大比例的点贴死在电流轨上。默认 UNCALIBRATED。"),
+                    description=(tr("允许多大比例的点贴死在电流轨上。默认 UNCALIBRATED。", "What fraction of points may be pinned to the current rail. Default UNCALIBRATED.")),
                     required=False, min_value=0.0, max_value=1.0),
                 ParameterSpec(
                     name="max_hysteresis_outlier_frac", type="float",
-                    description=("允许正扫与反扫之间有多大比例的点不一致 —— "
+                    description=(tr("允许正扫与反扫之间有多大比例的点不一致 —— "
                                  "这是唯一对「针尖在扫的中途变了」有分辨力的判据。默认 "
-                                 "UNCALIBRATED。"),
+                                 "UNCALIBRATED。", "What fraction of points may disagree between forward and backward sweeps - this is the only criterion able to resolve \"the tip changed in the middle of the scan\". Default UNCALIBRATED.")),
                     required=False, min_value=0.0, max_value=1.0),
                 ParameterSpec(
                     name="min_smoothness", type="float",
-                    description=("曲线平滑度下限。留空：这个数会随点数漂（同一条曲线，40 点时 0.79，"
+                    description=(tr("曲线平滑度下限。留空：这个数会随点数漂（同一条曲线，40 点时 0.79，"
                                  "1000 点时 0.99），所以一个固定阈值只对某一个 num_points 有效。"
-                                 "归一化方案仍然悬着。"),
+                                 "归一化方案仍然悬着。", "Lower limit of curve smoothness. Empty: this number drifts with the number of points (the same curve gives 0.79 at 40 points and 0.99 at 1000 points), so a fixed threshold is only valid for one num_points. The normalization scheme is still open.")),
                     required=False, min_value=0.0, max_value=1.0),
                 ParameterSpec(
                     name="require_backward", type="bool",
-                    description=("没有反扫列的谱，拒绝给它评级。"),
+                    description=(tr("没有反扫列的谱，拒绝给它评级。", "A spectrum with no backward-sweep column is refused a rating.")),
                     required=False, default=False),
             ],
             estimated_duration_s=2.0,
@@ -183,7 +184,7 @@ class AssessSpectrum(BaseSkill):
         path = str(params["dat_path"])
         if not Path(path).exists():
             return SkillResult(skill_name=name, success=False,
-                               error=f"文件不存在: {path}")
+                               error=tr(f"文件不存在: {path}", f"File does not exist: {path}"))
 
         try:
             import numpy as np
@@ -196,19 +197,19 @@ class AssessSpectrum(BaseSkill):
             )
         except ImportError as exc:
             return SkillResult(skill_name=name, success=False,
-                               error=f"缺依赖: {exc}")
+                               error=tr(f"缺依赖: {exc}", f"Missing dependency: {exc}"))
 
         try:
             dat = read_dat(path)
         except Exception as exc:  # noqa: BLE001
             return SkillResult(skill_name=name, success=False,
-                               error=f".dat 读取失败: {exc}")
+                               error=tr(f".dat 读取失败: {exc}", f"Failed to read .dat: {exc}"))
 
         header = dat.get("header") or {}
         columns = dat.get("columns") or {}
         if not columns:
             return SkillResult(skill_name=name, success=False,
-                               error=f"{path} 里没有数据列（[DATA] 段是空的）")
+                               error=tr(f"{path} 里没有数据列（[DATA] 段是空的）", f"No data columns in {path} (the [DATA] section is empty)"))
 
         bias_col = _pick_directional(columns, _BIAS_PATTERNS, backward=False)
         z_col = _pick_directional(columns, _Z_PATTERNS, backward=False)
@@ -252,10 +253,10 @@ class AssessSpectrum(BaseSkill):
             return SkillResult(
                 skill_name=name, success=True,
                 data={**base, **_result_fields(res),
-                      "kind_resolved": "", "kind_evidence": "没有电流列",
+                      "kind_resolved": "", "kind_evidence": tr("没有电流列", "No current column"),
                       "spectral_family_source": "n/a"},
-                summary=(f"判不了：{path} 里没有电流列。"
-                         f"现有列: {sorted(columns)}"))
+                summary=(tr(f"判不了：{path} 里没有电流列。"
+                         f"现有列: {sorted(columns)}", f"Cannot tell: no current column in {path}. Existing columns: {sorted(columns)}")))
 
         # ── kind:内容判据,头只交叉检验 ────────────────────────────
         want = str(params.get("kind") or "auto").strip().lower()
@@ -265,14 +266,14 @@ class AssessSpectrum(BaseSkill):
         extra_warnings: list[str] = []
         if want in ("iv", "iz"):
             kind = want
-            evidence = f"调用方显式指定 {want}；数据侧：{evidence}"
+            evidence = tr(f"调用方显式指定 {want}；数据侧：{evidence}", f"Caller explicitly specified {want}; data side: {evidence}")
         else:
             kind = data_kind
         if kind and hdr_kind and hdr_kind != kind:
             # 「用内容判据不用文件判据」——不一致时以数据为准并点名,而不是
             # 悄悄跟着头走。
             extra_warnings.append("kind_disagrees_with_header")
-            evidence += f"；头里写的是 {hdr_raw!r}（不一致，以数据为准）"
+            evidence += tr(f"；头里写的是 {hdr_raw!r}（不一致，以数据为准）", f"; the header says {hdr_raw!r} (inconsistent, the data takes precedence)")
 
         family_raw = str(params.get("spectral_family") or "").strip().lower()
         family = family_raw if family_raw else "unknown"
@@ -349,16 +350,16 @@ def _result_fields(res) -> dict:
 
 
 def _summarise(res, path: str) -> str:
-    gated = "、".join(res.gated_criteria) if res.gated_criteria else "无"
-    tail = f"（当闸的判据：{gated}）"
+    gated = "、".join(res.gated_criteria) if res.gated_criteria else tr("无", "none")
+    tail = tr(f"（当闸的判据：{gated}）", f"(criteria that gated: {gated})")
     if res.verdict == "unrated":
-        why = "、".join(res.reasons) or "无可用判据"
-        return (f"判不了（{why}）—— 这既不算合格也不算不合格。{tail}")
+        why = "、".join(res.reasons) or tr("无可用判据", "no usable criteria")
+        return (tr(f"判不了（{why}）—— 这既不算合格也不算不合格。{tail}", f"Cannot tell ({why}) - this counts neither as pass nor as fail. {tail}"))
     if res.verdict == "discard":
-        return f"不值得留（{'、'.join(res.reasons)}）。{tail}"
+        return tr(f"不值得留（{'、'.join(res.reasons)}）。{tail}", f"Not worth keeping ({', '.join(res.reasons)}). {tail}")
     if res.verdict == "keep_flagged":
-        return (f"可用，但有事要看：{'、'.join(res.warnings)}。{tail}")
-    return f"可用。{tail}"
+        return (tr(f"可用，但有事要看：{'、'.join(res.warnings)}。{tail}", f"Usable, but needs a look: {', '.join(res.warnings)}. {tail}"))
+    return tr(f"可用。{tail}", f"Usable. {tail}")
 
 
 def make_tools(context_provider):

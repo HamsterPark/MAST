@@ -50,7 +50,7 @@ DEFAULT_THRESHOLDS: tuple[float, ...] = (
 # How often to MEASURE the scan front (one frame grab). Progress and every
 # milestone key off this measurement, not off Nanonis's time estimate — see
 # ScanVisionMonitor._measure_acquired_frac for why the estimate cannot be
-# trusted (/ #94). 15 s over a multi-minute scan is a
+# trusted. 15 s over a multi-minute scan is a
 # few dozen grabs on the dedicated "data" socket: cheap next to the 8 milestone
 # grabs it makes correct.
 _PROBE_EVERY_S = 15.0
@@ -282,9 +282,10 @@ class ScanVisionMonitor:
         When the estimate runs short (routinely), that ratio saturates: ``frac``
         pins at 0.999, all seven partial milestones burn inside the first slice of
         the real scan, and the vision pulse then goes SILENT for the rest of it.
-        The operator's report is the bug read back verbatim: "读取了第一张 1/4 的
-        图像之后，就不再读取新扫的图了，一直分析这张图，直到扫描结束才分析了一张
-        全图。" (#94's "511/512" is the same bug's fingerprint — round(0.999·512).)
+        Symptom: after analysing the first quarter-scan image the monitor read no
+        further images, and only analysed the full frame once the scan ended. A
+        reported "511/512" line count is the same bug's fingerprint —
+        round(0.999·512).
         A clock cannot know how far a scan has got. The scan buffer can.
         """
         arr = self._extract_frame(
@@ -481,7 +482,7 @@ class ScanVisionMonitor:
                 saw_idle = True  # the scan STOPPED — finished OR aborted early
                 # Distinguish the two with a fresh NaN-front measurement so an
                 # early-stopped scan is never recorded as a completed 100 % scan
-                #. Positive evidence of incompleteness only —
+                # Positive evidence of incompleteness only —
                 # a normal finish (buffer filled → no NaN) still confirms.
                 completed = self._confirm_complete()
                 break
@@ -535,7 +536,7 @@ class ScanVisionMonitor:
         # The 100 % milestone (full coarse+fine+segment) fires ONLY when the
         # scan actually COMPLETED — NOT on an operator abort, a supersede/stop,
         # the timeout backstop, and NOT when Scan_StatusGet went idle because the
-        # scan was stopped EARLY (confirmed by the NaN front, ).
+        # scan was stopped EARLY (confirmed by the NaN front).
         # Those must never narrate a bogus "scan complete".
         if saw_idle and completed:
             # Loop-side progress is capped at frac 0.999 (an estimate must never
@@ -607,7 +608,7 @@ class ScanVisionMonitor:
                 severity=Severity.WARN, payload=payload,
                 cause_ref=f"scan#{self._scan_id}",
             ))
-            # 「提前停下」和「扫完了」必须是**两句话**（# 「停止」≠「达标」）。这里发的是 scan_stopped_early，模板里连
+            # 「提前停下」和「扫完了」必须是**两句话**（停止 ≠ 达标）。这里发的是 scan_stopped_early，模板里连
             # 「没有记为完成」都写进句子了 —— 让用户一眼看出这不是一次成功。
             if self._narration is not None:
                 self._narration.narrate(
@@ -981,8 +982,7 @@ class ScanVisionMonitor:
 
         ``frame_png`` is the persisted PNG of the frame this verdict was made
         on. It is not decoration: these alerts are the ones that stop a scan and
-        ask for a tip repair, and they were for a while the only vision
-        publisher that shipped without one — 「这一条为什么不显示图像」.
+        ask for a tip repair, and without one the alert shows no image.
         """
         buf = self._buf()
         if buf is None:
@@ -1087,7 +1087,7 @@ class ScanVisionMonitor:
         """Write the EXACT frame this milestone analysed to a small PNG and
         return its path (None on any failure — never blocks the milestone).
 
-        Why : milestone events used to carry no
+        Why: milestone events used to carry no
         image, so the UI's 近期帧 strip borrowed whatever .sxm was newest on
         disk — during a scan every "pulse" showed the PREVIOUS scan's image,
         and once the new full frame was saved, ALL history thumbnails silently
@@ -1115,8 +1115,8 @@ class ScanVisionMonitor:
             # An all-zero / blank frame is NOT a real image: the unacquired region
             # is filled with EXACTLY 0.0 (see _grab_frame), so a frame with no
             # non-zero pixel has nothing acquired yet. Persisting it would write a
-            # black square the operator reads as fabricated history (feedback
-            # #141 "图片全黑" / #143). Skip it — a real milestone always has data.
+            # black square that reads as fabricated history. Skip it — a real
+            # milestone always has data.
             if finite.size == 0 or not np.any(finite != 0.0):
                 return None
             vmin, vmax = self._contrast_range(a)
@@ -1315,6 +1315,9 @@ def start_scan_vision_monitor(
         import time as _time
         if os.environ.get("MAST_SCAN_VISION_MONITOR", "1").strip() == "0":
             return None
+        from mast.vision.module import vision_models_enabled
+        if not vision_models_enabled():
+            return None  # vision models disabled → no model-driven monitor
         from mast.buffer.active import get_active_buffer
         buf = get_active_buffer()
         if buf is None:

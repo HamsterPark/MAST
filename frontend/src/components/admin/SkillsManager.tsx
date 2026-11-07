@@ -2,16 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type { components } from "@/api/schema";
+import { getLang, tr } from "@/lib/i18n";
 import { Badge, Card, DegradedNote, EmptyNote, ErrorNote, Spinner } from "@/components/ui";
 import { Button, Field, SelectField, TextField, useToast } from "@/components/controls";
 
-/** 技能管理 — catalog browser + per-skill metadata editor (full parity with the
- *  old admin/tabs/skills_tab.py 技能编辑 sub-tab): safety_level / estimated
- *  duration / rollback skill / preconditions / postconditions / per-parameter
- *  fields, persisted via POST /api/skills/{name}/override (whole-file
+/** Skill management: catalog browser + per-skill metadata editor: safety_level /
+ *  estimated duration / rollback skill / preconditions / postconditions /
+ *  per-parameter fields, persisted via POST /api/skills/{name}/override (whole-file
  *  skill_overrides.json relay → core merge + hot-reload). Reset clears the
- *  override (empty payload ⇒ revert to code defaults). NO Dataframe — params are
- *  an HTML table + a per-parameter form (matching the freeze-safe Gradio rebuild).
+ *  override (empty payload ⇒ revert to code defaults). No Dataframe: params are an
+ *  HTML table + a per-parameter form.
  *
  *  Catalog: GET /api/skills/catalog (index). Detail: GET /api/skills/{name}
  *  (full card; already merged with any active override at the registry). */
@@ -86,10 +86,19 @@ export function SkillsManager() {
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["override", "skill"] });
       queryClient.invalidateQueries({ queryKey: ["skills", "detail", selected] });
-      if (res?.degraded) toast("写入未生效（内核未接入）。", "err");
-      else toast(`已保存覆盖（${(res?.fields ?? []).length} 个字段），重启主服务后对运行中的 agent 生效。`, "ok");
+      if (res?.degraded) toast(tr("写入未生效（内核未接入）。", "Write not applied (core not attached)."), "err");
+      else {
+        const n = (res?.fields ?? []).length;
+        toast(
+          tr(
+            `已保存覆盖（${n} 个字段），重启主服务后对运行中的 agent 生效。`,
+            `Override saved (${n} field(s)). Restart the main service for running agents to pick it up.`,
+          ),
+          "ok",
+        );
+      }
     },
-    onError: (e) => toast(`保存失败：${String((e as Error)?.message ?? e)}`, "err"),
+    onError: (e) => toast(`${tr("保存失败：", "Save failed: ")}${String((e as Error)?.message ?? e)}`, "err"),
   });
 
   const resetOverride = useMutation({
@@ -104,9 +113,9 @@ export function SkillsManager() {
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["override", "skill"] });
       queryClient.invalidateQueries({ queryKey: ["skills", "detail", selected] });
-      res?.degraded ? toast("重置未生效（内核未接入）。", "err") : toast("已恢复为代码默认值。", "ok");
+      res?.degraded ? toast(tr("重置未生效（内核未接入）。", "Reset not applied (core not attached)."), "err") : toast(tr("已恢复为代码默认值。", "Restored to the code defaults."), "ok");
     },
-    onError: (e) => toast(`重置失败：${String((e as Error)?.message ?? e)}`, "err"),
+    onError: (e) => toast(`${tr("重置失败：", "Reset failed: ")}${String((e as Error)?.message ?? e)}`, "err"),
   });
 
   return (
@@ -114,15 +123,15 @@ export function SkillsManager() {
       {/* ── catalog list ── */}
       <Card>
         <div className="mb-2 flex items-center gap-2">
-          <span className="text-sm font-medium text-mast-text">技能目录</span>
+          <span className="text-sm font-medium text-mast-text">{tr("技能目录", "Skill catalog")}</span>
           <Badge tone="INFO">{index.length}</Badge>
         </div>
-        <TextField value={filter} onChange={setFilter} placeholder="搜索技能…" />
+        <TextField value={filter} onChange={setFilter} placeholder={tr("搜索技能…", "Search skills…")} />
         {catQ.isPending && <Spinner />}
         {catQ.error && <ErrorNote error={catQ.error} />}
-        {catQ.data?.degraded && <DegradedNote what="技能目录" />}
+        {catQ.data?.degraded && <DegradedNote what={tr("技能目录", "Skill catalog")} />}
         {catQ.data && !catQ.data.degraded && (
-          filtered.length === 0 ? <EmptyNote label="无匹配技能" /> : (
+          filtered.length === 0 ? <EmptyNote label={tr("无匹配技能", "No matching skills")} /> : (
             <ul className="mt-2 max-h-[60vh] space-y-0.5 overflow-auto pr-1">
               {filtered.map((s) => {
                 const ovrLevel = skillOvr[s.name]?.safety_level;
@@ -149,13 +158,13 @@ export function SkillsManager() {
 
       {/* ── detail ── */}
       <Card>
-        {!selected && <EmptyNote label="从左侧选择一个技能查看详情。" />}
+        {!selected && <EmptyNote label={tr("从左侧选择一个技能查看详情。", "Select a skill on the left to see its details.")} />}
         {selected && detailQ.isPending && <Spinner />}
         {selected && detailQ.error && <ErrorNote error={detailQ.error} />}
-        {selected && detailQ.data?.degraded && <DegradedNote what="技能详情" />}
+        {selected && detailQ.data?.degraded && <DegradedNote what={tr("技能详情", "Skill details")} />}
         {selected && detailQ.data && !detailQ.data.degraded && (
           detailQ.data.found === false ? (
-            <EmptyNote label={`未找到技能：${selected}`} />
+            <EmptyNote label={tr(`未找到技能：${selected}`, `Skill not found: ${selected}`)} />
           ) : (
             <SkillDetail
               card={detailQ.data}
@@ -202,8 +211,7 @@ function cardParamsToRows(params: any[]): ParamRow[] {
 }
 
 /** Diff edited rows against the card's current values; emit only changed fields
- *  per param, mapping min/max → min_value/max_value (the override store's keys,
- *  mirroring admin/tabs/skills_data.py:table_to_param_overrides). */
+ *  per param, mapping min/max → min_value/max_value (the override store's keys). */
 function rowsToParamOverride(
   rows: ParamRow[],
   base: any[],
@@ -230,10 +238,10 @@ function rowsToParamOverride(
       } else {
         try {
           const parsed = JSON.parse(r.allowed_values);
-          if (!Array.isArray(parsed)) return { override: {}, error: `参数「${r.name}」的 allowed_values 必须是 JSON 数组` };
+          if (!Array.isArray(parsed)) return { override: {}, error: tr(`参数「${r.name}」的 allowed_values 必须是 JSON 数组`, `allowed_values of parameter “${r.name}” must be a JSON array`) };
           diff.allowed_values = parsed;
         } catch {
-          return { override: {}, error: `参数「${r.name}」的 allowed_values JSON 解析失败` };
+          return { override: {}, error: tr(`参数「${r.name}」的 allowed_values JSON 解析失败`, `allowed_values of parameter “${r.name}” is not valid JSON`) };
         }
       }
     }
@@ -318,55 +326,59 @@ function SkillDetail({
       <div>
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="font-mono text-sm font-semibold text-mast-text">{card.name}</h3>
-          {card.zh && <span className="text-sm text-mast-muted">{card.zh}</span>}
+          {card.zh && getLang() === "zh" && <span className="text-sm text-mast-muted">{card.zh}</span>}
           {card.category && <Badge tone="INFO">{card.category}</Badge>}
           {card.domain && <Badge>{card.domain}</Badge>}
           {card.version && <span className="text-xs text-mast-muted">v{card.version}</span>}
-          {hasOverride ? <Badge tone="WARN">已覆盖</Badge> : <Badge tone="AUTO">代码默认</Badge>}
+          {hasOverride ? <Badge tone="WARN">{tr("已覆盖", "Overridden")}</Badge> : <Badge tone="AUTO">{tr("代码默认", "Code default")}</Badge>}
         </div>
         {(card.description_zh || card.description) && (
-          <p className="mt-1 text-sm text-mast-muted">{card.description_zh || card.description}</p>
+          <p className="mt-1 text-sm text-mast-muted">
+            {getLang() === "zh"
+              ? card.description_zh || card.description
+              : card.description || card.description_zh}
+          </p>
         )}
       </div>
 
       {/* top-level governed fields */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Field label="安全级别">
+        <Field label={tr("安全级别", "Safety level")}>
           <SelectField value={level} onChange={setLevel} options={LEVELS.map((l) => ({ value: l, label: l.toUpperCase() }))} />
           <span className="mt-1 block text-xs text-mast-muted">
-            生效 <Badge tone={SAFETY_TONE[baseLevel] ?? "INFO"}>{baseLevel.toUpperCase()}</Badge>
+            {tr("生效", "Effective")} <Badge tone={SAFETY_TONE[baseLevel] ?? "INFO"}>{baseLevel.toUpperCase()}</Badge>
           </span>
         </Field>
-        <Field label="预计时长 (秒)">
+        <Field label={tr("预计时长 (秒)", "Estimated duration (s)")}>
           <TextField value={duration} onChange={setDuration} placeholder="—" />
         </Field>
-        <Field label="回滚技能">
+        <Field label={tr("回滚技能", "Rollback skill")}>
           <SelectField
             value={rollback}
             onChange={setRollback}
-            options={rollbackChoices.map((n) => ({ value: n, label: n === "" ? "（无）" : n }))}
+            options={rollbackChoices.map((n) => ({ value: n, label: n === "" ? tr("（无）", "(none)") : n }))}
           />
         </Field>
       </div>
 
       {/* parameters: read-only table + per-parameter form */}
       <div>
-        <h4 className="mb-1 text-sm font-medium text-mast-text">参数</h4>
+        <h4 className="mb-1 text-sm font-medium text-mast-text">{tr("参数", "Parameters")}</h4>
         {params.length === 0 ? (
-          <EmptyNote label="无参数" />
+          <EmptyNote label={tr("无参数", "No parameters")} />
         ) : (
           <>
             <div className="overflow-auto rounded-md border border-mast-border">
               <table className="w-full text-xs">
                 <thead className="text-mast-muted">
                   <tr className="border-b border-mast-border">
-                    <th className="px-2 py-1 text-left">名称</th>
-                    <th className="px-2 py-1 text-left">类型</th>
-                    <th className="px-2 py-1 text-left">单位</th>
-                    <th className="px-2 py-1 text-center">必填</th>
-                    <th className="px-2 py-1 text-left">默认</th>
-                    <th className="px-2 py-1 text-left">范围</th>
-                    <th className="px-2 py-1 text-left">允许值</th>
+                    <th className="px-2 py-1 text-left">{tr("名称", "Name")}</th>
+                    <th className="px-2 py-1 text-left">{tr("类型", "Type")}</th>
+                    <th className="px-2 py-1 text-left">{tr("单位", "Unit")}</th>
+                    <th className="px-2 py-1 text-center">{tr("必填", "Required")}</th>
+                    <th className="px-2 py-1 text-left">{tr("默认", "Default")}</th>
+                    <th className="px-2 py-1 text-left">{tr("范围", "Range")}</th>
+                    <th className="px-2 py-1 text-left">{tr("允许值", "Allowed values")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -399,7 +411,7 @@ function SkillDetail({
                 <SelectField
                   value={selParam}
                   onChange={setSelParam}
-                  options={[{ value: "", label: "选择参数编辑…" }, ...params.map((p) => ({ value: p.name, label: p.name }))]}
+                  options={[{ value: "", label: tr("选择参数编辑…", "Select a parameter to edit…") }, ...params.map((p) => ({ value: p.name, label: p.name }))]}
                 />
               </div>
               {cur && (
@@ -420,10 +432,10 @@ function SkillDetail({
                     <Field label="min"><TextField value={cur.min} onChange={(v) => patchCur({ min: v })} /></Field>
                     <Field label="max"><TextField value={cur.max} onChange={(v) => patchCur({ max: v })} /></Field>
                   </div>
-                  <Field label="allowed_values (JSON 数组)">
+                  <Field label={tr("allowed_values (JSON 数组)", "allowed_values (JSON array)")}>
                     <TextField value={cur.allowed_values} mono onChange={(v) => patchCur({ allowed_values: v })} />
                   </Field>
-                  <Field label="说明">
+                  <Field label={tr("说明", "Description")}>
                     <TextField value={cur.description} onChange={(v) => patchCur({ description: v })} />
                   </Field>
                 </div>
@@ -435,7 +447,7 @@ function SkillDetail({
 
       {/* preconditions / postconditions */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="前置条件（每行一个）">
+        <Field label={tr("前置条件（每行一个）", "Preconditions (one per line)")}>
           <textarea
             value={preconds}
             rows={4}
@@ -444,7 +456,7 @@ function SkillDetail({
             className="w-full resize-y rounded-md border border-mast-border bg-mast-bg px-2.5 py-1.5 font-mono text-xs text-mast-text outline-none focus:border-mast-accent"
           />
         </Field>
-        <Field label="后置条件（每行一个）">
+        <Field label={tr("后置条件（每行一个）", "Postconditions (one per line)")}>
           <textarea
             value={postconds}
             rows={4}
@@ -459,14 +471,17 @@ function SkillDetail({
 
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="primary" disabled={saving} onClick={submit}>
-          {saving ? "保存中…" : "保存覆盖"}
+          {saving ? tr("保存中…", "Saving…") : tr("保存覆盖", "Save override")}
         </Button>
         <Button variant="danger" disabled={resetting || !hasOverride} onClick={onReset}>
-          {resetting ? "恢复中…" : "恢复默认"}
+          {resetting ? tr("恢复中…", "Restoring…") : tr("恢复默认", "Reset to default")}
         </Button>
       </div>
       <p className="text-xs text-mast-muted">
-        注：保存只持久化与代码默认不同的字段（经 skill_overrides.json 热重载）；参数仅可覆盖已存在的代码参数，不能新增/删除。
+        {tr(
+          "注：保存只持久化与代码默认不同的字段（经 skill_overrides.json 热重载）；参数仅可覆盖已存在的代码参数，不能新增/删除。",
+          "Note: only fields that differ from the code defaults are persisted (hot-reloaded via skill_overrides.json). Parameters can only override existing code parameters; they cannot be added or removed.",
+        )}
       </p>
     </div>
   );

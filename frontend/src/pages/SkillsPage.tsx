@@ -19,16 +19,17 @@ import { CodexReference } from "@/components/skills/CodexReference";
 import { SkillOverlayManager } from "@/components/skills/SkillOverlayManager";
 import { MarketView } from "@/components/skills/MarketView";
 import { useStickyTab } from "@/hooks/useStickyTab";
+import { tr } from "@/lib/i18n";
 
-// ── 技能 (full parity) ───────────────────────────────────────────────────────
-// SubTabs reproduce the old nested Gradio surfaces (flat React state, no freeze):
-//   技能目录   — catalog table + 来源/领域/安全 筛选 + 客户端搜索 + 行点详情
-//   技能详情编辑 — 参数/前后置/时长/回滚/安全级 编辑, 经 admin overrides 写
-//   复合技能   — 列表 + react-flow DAG + 版本史 + clone/restore/validate
-//   覆盖层     — 用 <data>/config/skill_overlay 里的 .py 覆盖内置技能,
-//                重载即生效(不重启); 首要职责是回答「现在生效了吗」
-//   百科       — 领域分组 + intent 映射 / 配方
-//   参考/Codex — 只读 IC 工作流/决策树/指南/顾问/实验设计/硬件参考/意图映射
+// Skills page. Sub-tabs (flat React state, no freeze):
+//   catalog    — catalog table + source/domain/safety filters + client-side search + row detail
+//   editor     — edit params, pre/post-conditions, duration, rollback, safety level via admin overrides
+//   composites — list + react-flow DAG + version history + clone/restore/validate
+//   overlay    — override built-in skills with .py files in <data>/config/skill_overlay;
+//                reload takes effect without restart; primarily answers "is it in effect now?"
+//   encyclopedia — domain grouping + intent mapping / recipes
+//   codex      — read-only IC workflows / decision trees / guides / advisors / experiment design /
+//                hardware reference / intent mapping
 
 type View =
   | "catalog"
@@ -39,19 +40,19 @@ type View =
   | "encyclopedia"
   | "codex";
 
-// 一份数据同时喂 tab 条和 useStickyTab 的合法名单。
+// One list feeds both the tab bar and the valid names for useStickyTab.
 const VIEW_TABS: { id: View; label: string }[] = [
-  { id: "catalog", label: "技能目录" },
-  // 市场：全体技能是市场，订阅列表才是 agent 日常的装载面。紧挨「技能目录」——
-  // 目录回答「有什么」，市场回答「他要用哪些」，是同一件事的两半。
-  { id: "market", label: "市场" },
-  { id: "editor", label: "技能详情编辑" },
-  { id: "composites", label: "复合技能" },
-  // 覆盖层：改 skill 不用发新版本。放在「复合技能」之后、「百科」之前 ——
-  // 它和上面三个一样是**改东西**的地方，而后两个是查资料的地方。
-  { id: "overlay", label: "覆盖层" },
-  { id: "encyclopedia", label: "百科" },
-  { id: "codex", label: "参考/Codex" },
+  { id: "catalog", label: tr("技能目录", "Catalog") },
+  // Market sits right after the catalog: the catalog answers "what exists", the market answers
+  // "which ones the agent loads" (the subscription list).
+  { id: "market", label: tr("市场", "Market") },
+  { id: "editor", label: tr("技能详情编辑", "Skill editor") },
+  { id: "composites", label: tr("复合技能", "Composites") },
+  // Overlay edits skills without shipping a new version; it belongs with the editing tabs,
+  // before the two reference tabs.
+  { id: "overlay", label: tr("覆盖层", "Overlay") },
+  { id: "encyclopedia", label: tr("百科 · 不完善", "Encyclopedia · incomplete") },
+  { id: "codex", label: tr("参考/Codex · 不完善", "Codex reference · incomplete") },
 ];
 
 const SAFETY_TONE: Record<string, string> = {
@@ -103,7 +104,7 @@ function FilterSelect({
         onChange={(e) => setValue(e.target.value)}
         className="rounded border border-mast-border bg-mast-bg px-2 py-1 text-sm text-mast-text"
       >
-        <option value="all">全部</option>
+        <option value="all">{tr("全部", "All")}</option>
         {options.map((o) => (
           <option key={o} value={o}>{o}</option>
         ))}
@@ -112,7 +113,7 @@ function FilterSelect({
   );
 }
 
-// ── 技能目录 ─────────────────────────────────────────────────────────────────
+// ── Catalog ──────────────────────────────────────────────────────────────────
 function CatalogView() {
   const q = useCatalog();
   const [text, setText] = useState("");
@@ -148,22 +149,22 @@ function CatalogView() {
     () => [
       {
         accessorKey: "name",
-        header: "名称",
+        header: tr("名称", "Name"),
         cell: (c) => <span className="font-medium text-mast-text">{c.getValue() as string}</span>,
       },
-      { accessorKey: "domain", header: "领域" },
-      { accessorKey: "source", header: "来源" },
+      { accessorKey: "domain", header: tr("领域", "Domain") },
+      { accessorKey: "source", header: tr("来源", "Source") },
       {
         accessorKey: "safety_level",
-        header: "安全等级",
+        header: tr("安全等级", "Safety level"),
         cell: (c) => (
           <Badge tone={SAFETY_TONE[c.getValue() as string] ?? "default"}>{c.getValue() as string}</Badge>
         ),
       },
-      { id: "composition_level", header: "层级", accessorFn: (r) => r.composition_level ?? "—" },
+      { id: "composition_level", header: tr("层级", "Level"), accessorFn: (r) => r.composition_level ?? "—" },
       {
         accessorKey: "summary",
-        header: "摘要",
+        header: tr("摘要", "Summary"),
         cell: (c) => <span className="text-mast-muted">{(c.getValue() as string) || "—"}</span>,
       },
       {
@@ -174,7 +175,7 @@ function CatalogView() {
             onClick={() => setSelected(c.row.original.name)}
             className="rounded border border-mast-border px-2 py-0.5 text-xs text-mast-accent hover:bg-mast-accent/10"
           >
-            查看
+            {tr("查看", "View")}
           </button>
         ),
       },
@@ -184,7 +185,7 @@ function CatalogView() {
 
   if (q.isPending) return <Spinner />;
   if (q.isError) return <ErrorNote error={q.error} />;
-  if (q.data?.degraded) return <DegradedNote what="技能目录" />;
+  if (q.data?.degraded) return <DegradedNote what={tr("技能目录", "Skill catalog")} />;
 
   return (
     <div className="space-y-4">
@@ -192,28 +193,27 @@ function CatalogView() {
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="搜索技能名 / 领域 / 摘要…"
+          placeholder={tr("搜索技能名 / 领域 / 摘要…", "Search skill name / domain / summary…")}
           className="w-64 rounded border border-mast-border bg-mast-bg px-3 py-1.5 text-sm text-mast-text placeholder:text-mast-muted"
         />
-        <FilterSelect label="来源" value={source} setValue={setSource} options={sources} />
-        <FilterSelect label="领域" value={domain} setValue={setDomain} options={domains} />
-        <FilterSelect label="安全" value={safety} setValue={setSafety} options={safeties} />
+        <FilterSelect label={tr("来源", "Source")} value={source} setValue={setSource} options={sources} />
+        <FilterSelect label={tr("领域", "Domain")} value={domain} setValue={setDomain} options={domains} />
+        <FilterSelect label={tr("安全", "Safety")} value={safety} setValue={setSafety} options={safeties} />
         {levels.length > 0 && (
-          <FilterSelect label="层级" value={level} setValue={setLevel} options={levels} />
+          <FilterSelect label={tr("层级", "Level")} value={level} setValue={setLevel} options={levels} />
         )}
-        <span className="text-xs text-mast-muted">共 {filtered.length} / {rows.length}</span>
+        <span className="text-xs text-mast-muted">{tr("共", "Total")} {filtered.length} / {rows.length}</span>
       </div>
 
-      <DataTable data={filtered} columns={columns} globalFilter={text} empty="无匹配技能" />
+      <DataTable data={filtered} columns={columns} globalFilter={text} empty={tr("无匹配技能", "No matching skills")} />
 
-      {/* Skill detail opens in a modal instead of expanding
-          inline below the table. Modal returns null while closed, so
-          SkillCardDetail (and its on-demand query) only mounts when a row is
-          selected — same lifecycle as the old inline guard. */}
+      {/* Skill detail opens in a modal rather than expanding inline below the table. Modal
+          returns null while closed, so SkillCardDetail (and its on-demand query) only mounts
+          when a row is selected. */}
       <Modal
         open={!!selected}
         onClose={() => setSelected(null)}
-        title={selected ? `技能详情：${selected}` : "技能详情"}
+        title={selected ? tr(`技能详情：${selected}`, `Skill details: ${selected}`) : tr("技能详情", "Skill details")}
         wide
       >
         {selected && <SkillCardDetail name={selected} />}
@@ -222,27 +222,27 @@ function CatalogView() {
   );
 }
 
-// ── 技能详情编辑 wrapper (provides the skill-name list from the catalog) ──────
+// ── Editor wrapper (provides the skill-name list from the catalog) ──────
 function EditorView() {
   const q = useCatalog();
   const rows = (q.data?.index ?? []) as SkillRow[];
   const names = useMemo(() => rows.map((r) => r.name).sort(), [rows]);
 
   if (q.isError) return <ErrorNote error={q.error} />;
-  if (q.data?.degraded) return <DegradedNote what="技能目录" />;
+  if (q.data?.degraded) return <DegradedNote what={tr("技能目录", "Skill catalog")} />;
 
   return <SkillOverrideEditor names={names} loadingNames={q.isPending} />;
 }
 
 export default function SkillsPage() {
-  // 五个子页里「参考/Codex」和「百科」都是要翻着看的长文档,
-  // 每次回来被打回「技能目录」等于每次重新找一遍。
+  // Remember the last sub-tab: the Codex reference and encyclopedia are long documents that
+  // are read in several visits, and resetting to the catalog each time forces a re-search.
   const [view, setView] = useStickyTab<View>(
     "skills", VIEW_TABS.map((t) => t.id), "catalog");
 
   return (
     <div>
-      <Section title="技能">
+      <Section title={tr("技能", "Skills")}>
         <SubTabs tabs={VIEW_TABS} value={view} onChange={setView} />
         {view === "catalog" && <CatalogView />}
         {view === "market" && <MarketView />}

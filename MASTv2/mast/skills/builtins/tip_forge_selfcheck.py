@@ -30,6 +30,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.skills.base import BaseSkill
 
 logger = logging.getLogger(__name__)
@@ -61,16 +62,22 @@ class TipForgeSelfCheck(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description=(
+            description=tr(
                 "特异化针尖配方（MakeSpectroscopyTip / MakeAtomicResolutionTip）的预检：技能在这个 "
                 "build 里在不在、衬底能不能解出 Shockley onset、评估帧到底分不分得开晶格、"
                 "判据模块能不能工作。只读；除一次 Tip Shaper 探测外无需硬件。结论看 data.ready ，"
-                "不是 success。"
+                "不是 success。",
+                "Pre-flight for the specialised tip recipes (MakeSpectroscopyTip / "
+                "MakeAtomicResolutionTip): whether the skills exist in this build, whether the "
+                "substrate yields a Shockley onset, whether the evaluation frame can actually "
+                "resolve the lattice, and whether the criterion modules work. Read-only; needs no "
+                "hardware except one Tip Shaper probe. Read the verdict from data.ready, not success.",
             ),
             parameters=[
                 ParameterSpec(
                     name="substrate", type="str",
-                    description=("用来对照检查的衬底。留空则用已登记的样品。"),
+                    description=tr("用来对照检查的衬底。留空则用已登记的样品。",
+                                   "Substrate to check against. Leave empty to use the registered sample."),
                     required=False, default=""),
             ],
             estimated_duration_s=4.0,
@@ -95,9 +102,11 @@ class TipForgeSelfCheck(BaseSkill):
         registry = getattr(context, "_registry", None)
         installed = registered_skill_names(registry)
         missing = [n for n in REQUIRED_SKILLS if n not in installed]
-        add("技能齐全", not missing,
-            f"全部就位（本机注册 {len(installed)} 个）" if not missing
-            else f"缺 {len(missing)} 个: {', '.join(missing)}",
+        add(tr("技能齐全", "Skills complete"), not missing,
+            tr(f"全部就位（本机注册 {len(installed)} 个）",
+               f"All present ({len(installed)} registered on this machine)") if not missing
+            else tr(f"缺 {len(missing)} 个: {', '.join(missing)}",
+                    f"{len(missing)} missing: {', '.join(missing)}"),
             blocking=True)
 
         # ── 2. 衬底 → 判据期望值 ───────────────────────────────────────
@@ -110,24 +119,33 @@ class TipForgeSelfCheck(BaseSkill):
             facts = resolve_substrate(params.get("substrate") or None)
             substrate_name = facts.material or ""
             if not facts.available:
-                add("衬底可解析", False,
-                    f"{facts.reason}（配方 1 会直接拒绝执行；配方 2 只是少一项"
-                    f"晶格常数核对，仍可跑）", blocking=False)
+                add(tr("衬底可解析", "Substrate resolvable"), False,
+                    tr(f"{facts.reason}（配方 1 会直接拒绝执行；配方 2 只是少一项"
+                       f"晶格常数核对，仍可跑）",
+                       f"{facts.reason} (recipe 1 will refuse to run; recipe 2 only loses the "
+                       f"lattice-constant check and can still run)"), blocking=False)
             elif facts.surface_state_onset_v is None:
-                add("衬底可解析", True,
-                    f"{facts.material}（来源：{facts.source}）")
-                add("有肖克利表面态", False,
-                    f"{facts.material} 没有表面态 —— 配方 1（STS 金属性针尖）"
-                    f"在这块衬底上不适用，用台阶锐度判据代替。")
+                add(tr("衬底可解析", "Substrate resolvable"), True,
+                    tr(f"{facts.material}（来源：{facts.source}）",
+                       f"{facts.material} (source: {facts.source})"))
+                add(tr("有肖克利表面态", "Has Shockley surface state"), False,
+                    tr(f"{facts.material} 没有表面态 —— 配方 1（STS 金属性针尖）"
+                       f"在这块衬底上不适用，用台阶锐度判据代替。",
+                       f"{facts.material} has no surface state -- recipe 1 (STS metallic tip) "
+                       f"does not apply on this substrate; use the step-sharpness criterion instead."))
             else:
-                add("衬底可解析", True,
-                    f"{facts.material}（来源：{facts.source}）")
-                add("有肖克利表面态", True,
-                    f"onset 期望 {facts.surface_state_onset_v * 1000:.0f} mV"
-                    + (f"，原子行间距 {facts.row_spacing_nm:.3f} nm"
+                add(tr("衬底可解析", "Substrate resolvable"), True,
+                    tr(f"{facts.material}（来源：{facts.source}）",
+                       f"{facts.material} (source: {facts.source})"))
+                add(tr("有肖克利表面态", "Has Shockley surface state"), True,
+                    tr(f"onset 期望 {facts.surface_state_onset_v * 1000:.0f} mV",
+                       f"expected onset {facts.surface_state_onset_v * 1000:.0f} mV")
+                    + (tr(f"，原子行间距 {facts.row_spacing_nm:.3f} nm",
+                          f", atomic row spacing {facts.row_spacing_nm:.3f} nm")
                        if facts.row_spacing_nm else ""))
         except Exception as exc:  # noqa: BLE001
-            add("衬底可解析", None, f"查不了（{exc}）")
+            add(tr("衬底可解析", "Substrate resolvable"), None,
+                tr(f"查不了（{exc}）", f"cannot check ({exc})"))
 
         # ── 3. 评估帧的像素尺度 ────────────────────────────────────────
         # 判不出原子相的帧不值得扫。这一项在开工前就能算,不需要硬件。
@@ -136,12 +154,15 @@ class TipForgeSelfCheck(BaseSkill):
 
             problem = ATOMIC_TIP.scale_problem()
             nmpp = ATOMIC_TIP.eval_pixel_size_nm()
-            add("评估帧能分辨原子", not problem,
-                (f"{ATOMIC_TIP.eval_frame_nm:g} nm / {ATOMIC_TIP.eval_pixels} px "
-                 f"= {nmpp:.4f} nm/px（满权重档）") if not problem else problem,
+            add(tr("评估帧能分辨原子", "Evaluation frame resolves atoms"), not problem,
+                tr(f"{ATOMIC_TIP.eval_frame_nm:g} nm / {ATOMIC_TIP.eval_pixels} px "
+                   f"= {nmpp:.4f} nm/px（满权重档）",
+                   f"{ATOMIC_TIP.eval_frame_nm:g} nm / {ATOMIC_TIP.eval_pixels} px "
+                   f"= {nmpp:.4f} nm/px (full-weight tier)") if not problem else problem,
                 blocking=bool(problem))
         except Exception as exc:  # noqa: BLE001
-            add("评估帧能分辨原子", None, f"查不了（{exc}）")
+            add(tr("评估帧能分辨原子", "Evaluation frame resolves atoms"), None,
+                tr(f"查不了（{exc}）", f"cannot check ({exc})"))
 
         # ── 4. 判据模块干跑(合成数据,不碰硬件) ─────────────────────────
         # 「判据模块坏了」应该在开工前暴露,而不是等真机上拿到一条谱之后。
@@ -160,12 +181,14 @@ class TipForgeSelfCheck(BaseSkill):
             noise = np.random.default_rng(0).normal(0.0, 1.0, v.size)
             bad = assess_shockley_onset(v, noise, expected_onset_v=-0.49)
             ok = bool(good.passed) and not bad.passed
-            add("表面态判据自测", ok,
-                "合成台阶通过、纯噪声被拒" if ok
-                else f"异常：台阶 passed={good.passed}、噪声 passed={bad.passed}",
+            add(tr("表面态判据自测", "Surface-state criterion self-test"), ok,
+                tr("合成台阶通过、纯噪声被拒", "synthetic step passed, pure noise rejected") if ok
+                else tr(f"异常：台阶 passed={good.passed}、噪声 passed={bad.passed}",
+                        f"abnormal: step passed={good.passed}, noise passed={bad.passed}"),
                 blocking=True)
         except Exception as exc:  # noqa: BLE001
-            add("表面态判据自测", None, f"跑不了（{exc}）")
+            add(tr("表面态判据自测", "Surface-state criterion self-test"), None,
+                tr(f"跑不了（{exc}）", f"cannot run ({exc})"))
 
         try:
             import math
@@ -185,13 +208,16 @@ class TipForgeSelfCheck(BaseSkill):
                 np.random.default_rng(0).normal(0, 2e-12, (n, n)),
                 nm_per_px=nmpp2)
             ok = bool(g.passed) and not b.passed
-            add("原子相判据自测", ok,
-                "合成晶格通过、纯噪声被拒" if ok
-                else f"异常：晶格 passed={g.passed}（{g.reasons}）、"
-                     f"噪声 passed={b.passed}",
+            add(tr("原子相判据自测", "Atomic-phase criterion self-test"), ok,
+                tr("合成晶格通过、纯噪声被拒", "synthetic lattice passed, pure noise rejected") if ok
+                else tr(f"异常：晶格 passed={g.passed}（{g.reasons}）、"
+                        f"噪声 passed={b.passed}",
+                        f"abnormal: lattice passed={g.passed} ({g.reasons}), "
+                        f"noise passed={b.passed}"),
                 blocking=True)
         except Exception as exc:  # noqa: BLE001
-            add("原子相判据自测", None, f"跑不了（{exc}）")
+            add(tr("原子相判据自测", "Atomic-phase criterion self-test"), None,
+                tr(f"跑不了（{exc}）", f"cannot run ({exc})"))
 
         # ── 5. 扎针深度在针尖包络内 ────────────────────────────────────
         try:
@@ -202,12 +228,14 @@ class TipForgeSelfCheck(BaseSkill):
             _, plan = apply_tip_policy({"poke_deep_depth_m": depth_m},
                                        ("poke_deep_depth_m",))
             allowed = plan is None or bool(getattr(plan, "ok", True))
-            add(f"{SPECTROSCOPY_TIP.poke_depth_nm:g} nm 浅扎在包络内", allowed,
-                "允许" if allowed
-                else "；".join(getattr(plan, "refusals", []) or ["被包络拒绝"]),
+            add(tr(f"{SPECTROSCOPY_TIP.poke_depth_nm:g} nm 浅扎在包络内",
+                   f"{SPECTROSCOPY_TIP.poke_depth_nm:g} nm shallow poke within envelope"), allowed,
+                tr("允许", "allowed") if allowed
+                else tr("；", "; ").join(
+                    getattr(plan, "refusals", []) or [tr("被包络拒绝", "refused by envelope")]),
                 blocking=True)
         except Exception as exc:  # noqa: BLE001
-            add("扎针包络", None, f"查不了（{exc}）")
+            add(tr("扎针包络", "Poke envelope"), None, tr(f"查不了（{exc}）", f"cannot check ({exc})"))
 
         # ── 6. 偏压扰动会不会被电流监控读成异常 ────────────────────────
         # 扰动期间电流本来就会跳。监控那半边靠技能名子串豁免,名字改了就会每一发
@@ -219,22 +247,32 @@ class TipForgeSelfCheck(BaseSkill):
             names = ("MakeAtomicResolutionTip", "MakeSpectroscopyTip", "BiasWiggle")
             uncovered = [n for n in names
                          if not any(p in n.lower() for p in SUPPRESS_SKILL_PATTERNS)]
-            add("电流监控已豁免锻造流程", not uncovered,
-                "三个技能名都被豁免表覆盖" if not uncovered
-                else f"{uncovered} 不在 SUPPRESS_SKILL_PATTERNS 里 —— "
-                     f"扰动会被读成电流异常并中止配方")
+            add(tr("电流监控已豁免锻造流程", "Current monitor exempts the forge workflows"),
+                not uncovered,
+                tr("三个技能名都被豁免表覆盖", "all three skill names are covered by the exemption table")
+                if not uncovered
+                else tr(f"{uncovered} 不在 SUPPRESS_SKILL_PATTERNS 里 —— "
+                        f"扰动会被读成电流异常并中止配方",
+                        f"{uncovered} not in SUPPRESS_SKILL_PATTERNS -- "
+                        f"the perturbation would be read as a current anomaly and abort the recipe"))
             # ⑰-C1(2026-08-09):后果那句原文是「扎完针扫图会触发 CRITICAL 并把配方
             # 自己中止」—— 视觉 halt 整条割掉之后那已经不会发生了,留着就是给用户
             # 一句假话。这张表**没有作废**,它换了消费者:现在管的是「修针期间电流的
             # **瞬变**类不中止流程」(⑰-C2)和通知措辞。后果因此改成真实的那个。
             unmarked = [n for n in names if not is_tip_work(n)]
-            add("修针令牌已覆盖锻造流程", not unmarked,
-                "三个技能名都在 TIP_WORK_PATTERNS 里" if not unmarked
-                else f"{unmarked} 不在 tip_intent.TIP_WORK_PATTERNS 里 —— "
-                     f"脉冲/扎针打出的电流瞬变不会被认成本职动作，"
-                     f"会当成物理越界把配方自己中止")
+            add(tr("修针令牌已覆盖锻造流程", "Tip-work token covers the forge workflows"),
+                not unmarked,
+                tr("三个技能名都在 TIP_WORK_PATTERNS 里", "all three skill names are in TIP_WORK_PATTERNS")
+                if not unmarked
+                else tr(f"{unmarked} 不在 tip_intent.TIP_WORK_PATTERNS 里 —— "
+                        f"脉冲/扎针打出的电流瞬变不会被认成本职动作，"
+                        f"会当成物理越界把配方自己中止",
+                        f"{unmarked} not in tip_intent.TIP_WORK_PATTERNS -- "
+                        f"current transients from pulses/pokes would not be recognised as the "
+                        f"recipe's own action and would be treated as a physical limit "
+                        f"violation that aborts the recipe"))
         except Exception as exc:  # noqa: BLE001
-            add("监控豁免", None, f"查不了（{exc}）")
+            add(tr("监控豁免", "Monitor exemption"), None, tr(f"查不了（{exc}）", f"cannot check ({exc})"))
 
         # ── 7. 地图标记会不会记成损伤 ──────────────────────────────────
         try:
@@ -250,20 +288,25 @@ class TipForgeSelfCheck(BaseSkill):
             wrong = {n: _kind(n) for n in
                      ("MakeSpectroscopyTip", "MakeAtomicResolutionTip")
                      if _kind(n) != "tip_shape"}
-            add("扎针落点记为损伤", not wrong,
-                "两个配方都归入 tip_shape（会生成避让圆）" if not wrong
-                else f"归类错误 {wrong} —— 扎出的坑不会产生避让圆，"
-                     f"下一次 FindCleanSpot 会把它当干净表面")
+            add(tr("扎针落点记为损伤", "Poke sites recorded as damage"), not wrong,
+                tr("两个配方都归入 tip_shape（会生成避让圆）",
+                   "both recipes map to tip_shape (an avoidance circle is generated)") if not wrong
+                else tr(f"归类错误 {wrong} —— 扎出的坑不会产生避让圆，"
+                        f"下一次 FindCleanSpot 会把它当干净表面",
+                        f"misclassified {wrong} -- the pits left by poking produce no avoidance "
+                        f"circle, so the next FindCleanSpot would treat them as clean surface"))
         except Exception as exc:  # noqa: BLE001
-            add("地图标记归类", None, f"查不了（{exc}）")
+            add(tr("地图标记归类", "Map marker classification"), None,
+                tr(f"查不了（{exc}）", f"cannot check ({exc})"))
 
         # ── 8. Tip Shaper 模块(唯一一次硬件读) ─────────────────────────
         rec = context.safe_call("TipShaper_PropsGet")
         calls.append(rec)
         shaper_ok = not getattr(rec, "error", "")
-        add("Tip Shaper 模块", shaper_ok,
-            "在跑" if shaper_ok
-            else f"读不到: {getattr(rec, 'error', '')}（Nanonis 里把 Tip Shaper 打开）",
+        add(tr("Tip Shaper 模块", "Tip Shaper module"), shaper_ok,
+            tr("在跑", "running") if shaper_ok
+            else tr(f"读不到: {getattr(rec, 'error', '')}（Nanonis 里把 Tip Shaper 打开）",
+                    f"unreadable: {getattr(rec, 'error', '')} (open Tip Shaper in Nanonis)"),
             blocking=True)
 
         # ── 9. 运行模式 ────────────────────────────────────────────────
@@ -273,22 +316,26 @@ class TipForgeSelfCheck(BaseSkill):
 
             mode = current_operating_mode()
             if mode == OperatingMode.SAFE:
-                add("操作模式", False,
-                    "SAFE —— 改针尖的操作被整类硬拦，两条流程都跑不了",
+                add(tr("操作模式", "Operating mode"), False,
+                    tr("SAFE —— 改针尖的操作被整类硬拦，两条流程都跑不了",
+                       "SAFE -- tip-modifying operations are blocked as a class; neither workflow can run"),
                     blocking=True)
             elif mode == OperatingMode.SEMI:
-                add("操作模式", True,
-                    "SEMI —— 偏压扰动会按电学修针逐次等人确认")
+                add(tr("操作模式", "Operating mode"), True,
+                    tr("SEMI —— 偏压扰动会按电学修针逐次等人确认",
+                       "SEMI -- bias perturbations wait for confirmation each time, like electrical tip conditioning"))
             else:
-                add("操作模式", True, "AUTO —— 一次批准跑完整条流程")
+                add(tr("操作模式", "Operating mode"), True,
+                    tr("AUTO —— 一次批准跑完整条流程", "AUTO -- one approval runs the whole workflow"))
         except Exception:  # noqa: BLE001
             pass          # 读不到模式不是问题，门控自己会说话
 
         ready = not blockers
-        lines = [("✅ 可以开工" if ready else "❌ 还不能开工")]
+        lines = [(tr("✅ 可以开工", "✅ Ready to start") if ready
+                  else tr("❌ 还不能开工", "❌ Not ready to start"))]
         for c in checks:
             mark = {True: "✅", False: "❌", None: "⚠"}[c["ok"]]
-            lines.append(f"{mark} {c['check']}：{c['detail']}")
+            lines.append(tr(f"{mark} {c['check']}：{c['detail']}", f"{mark} {c['check']}: {c['detail']}"))
         return SkillResult(
             skill_name="TipForgeSelfCheck",
             success=True,          # 体检本身成功了；结论在 data.ready 里

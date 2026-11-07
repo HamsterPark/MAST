@@ -1,23 +1,22 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import { tr } from "@/lib/i18n";
 
-// Model + thinking quick-display — a read-only strip showing the global default
+// Model + thinking quick-display: a read-only strip showing the global default
 // model and the IC agent's model + thinking level, with a link to the settings
-// page where they are actually changed. Mirrors the old Gradio 全局/IC 模型 +
-// thinking 快显 (which in the old UI were dropdowns; here they are read-only per
-// the brief — "只读链接到设置").
+// page where they are actually changed.
 
 const AGENT_ID = "instrument_control";
 
 const THINKING_LABEL: Record<string, string> = {
-  none: "无",
-  fixed: "固定",
-  off: "关闭",
-  low: "低",
-  medium: "中",
-  high: "高",
-  max: "最高",
+  none: tr("无", "None"),
+  fixed: tr("固定", "Fixed"),
+  off: tr("关闭", "Off"),
+  low: tr("低", "Low"),
+  medium: tr("中", "Medium"),
+  high: tr("高", "High"),
+  max: tr("最高", "Max"),
 };
 
 function Pill({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
@@ -57,17 +56,17 @@ export function ModelStrip() {
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Pill k="全局模型" v={globalAlias} mono />
-      <Pill k="IC 模型" v={icModel} mono />
-      <Pill k="思考" v={icThinking} />
+      <Pill k={tr("全局模型", "Global model")} v={globalAlias} mono />
+      <Pill k={tr("IC 模型", "IC model")} v={icModel} mono />
+      <Pill k={tr("思考", "Thinking")} v={icThinking} />
       {agentModels.data?.degraded && (
-        <span className="text-xs text-mast-warn">（模型信息降级）</span>
+        <span className="text-xs text-mast-warn">{tr("（模型信息降级）", "(model info degraded)")}</span>
       )}
       <Link
         to="/settings/general"
         className="ml-auto rounded-md border border-mast-border px-2 py-1 text-xs text-mast-accent hover:border-mast-accent"
       >
-        在设置中修改 →
+        {tr("在设置中修改 →", "Change in settings →")}
       </Link>
     </div>
   );

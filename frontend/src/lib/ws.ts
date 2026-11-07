@@ -1,22 +1,22 @@
 // ════════════════════════════════════════════════════════════════════════════
 // ws.ts — the ONE WebSocket the app keeps open to /ws/events.
 //
-// This module moves live readings onto WebSocket push. Tailscale is what makes push worth it: the box is
-// reachable from anywhere, so the UI no longer has to poll a LAN address it can
-// only see from the lab.
+// Tailscale is what makes push worth it: the box is reachable from anywhere, so
+// the UI no longer has to poll a LAN address it can only see from the lab.
 //
 // It is also what makes reconnection non-optional. The same link roams between
 // Wi-Fi / cellular / sleep, and a WireGuard re-route kills the TCP connection
-// underneath a live socket. That is the same failure sse.ts was written for,
-// and this module takes the same position:
+// underneath a live socket. That is the same failure sse.ts was written for
+// (a network change leaving a conversation stuck), and this module takes the
+// same position:
 //
 //   a transport that dies quietly is worse than one that never connected,
 //   because the screen keeps showing numbers that stopped being true.
 //
 // So every path here ends in a state the consumer can act on, and the consumer
-// is always told whether to fall back to polling. 项目铁律「UI 绝不冻结」 means
-// specifically: there is no combination of network failures that leaves the
-// readings frozen with no polling and no notice.
+// is always told whether to fall back to polling. The UI must never freeze:
+// there is no combination of network failures that leaves the readings frozen
+// with no polling and no notice.
 //
 // ── Contract (server side: MASTv2/mast/api/ws.py) ──────────────────────────
 //   GET /ws/events?since=<seq>          WebSocket upgrade

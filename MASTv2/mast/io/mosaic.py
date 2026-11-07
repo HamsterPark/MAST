@@ -127,6 +127,17 @@ def px_to_m(px_x: float, px_y: float, *, nx: int, ny: int,
       少了旋转这一步,一张转过 30° 的图上算出的坐标会落在别处 ——
       而调用方拿着它去移动针尖。
 
+    ## 旋转方向(符号)
+
+    **正 SCAN_ANGLE = 扫描框相对压电坐标顺时针转**(``data_gallery.md`` T6:
+    用一组转角系列帧验证,「帧内晶格角 − SCAN_ANGLE」集中,
+    「+」不集中)。本函数是帧内坐标 → 压电坐标,是图库
+    :func:`mast.gallery.figures.common.to_frame`(压电 → 帧内,``frame = R(+θ)·offset``)
+    的**逆**,所以这里用 ``R(−θ)``。
+    若误用 ``R(+θ)``(逆时针)则与 ``to_frame`` 同向而非互逆,θ≠0 时会把
+    针尖目标算到镜像位置。``tests/v2/unit/io/test_px_to_m_rotation.py`` 用
+    「px_to_m∘to_frame = 恒等」把这个符号钉死,再翻就当场红。
+
     ⚠️ ``angle_deg`` 请从 :func:`parse_xy_meta` 取,并且**把它的
     ``angle_known`` 一起传下去**:角度解析失败时它返回 0.0,而下游
     「是不是转过」的判据通常是 ``abs(angle) > 1`` —— 0.0 恰好让那道提示不触发。
@@ -135,7 +146,8 @@ def px_to_m(px_x: float, px_y: float, *, nx: int, ny: int,
     sa = math.sin(math.radians(angle_deg))
     dx = (px_x + 0.5) / nx * w_m - w_m * 0.5
     dy = h_m * 0.5 - (px_y + 0.5) / ny * h_m
-    return (cx_m + dx * ca - dy * sa, cy_m + dx * sa + dy * ca)
+    # R(−θ):顺时针(正 SCAN_ANGLE)。是 to_frame 的 R(+θ) 的逆。
+    return (cx_m + dx * ca + dy * sa, cy_m - dx * sa + dy * ca)
 
 
 def _pick_channel(channels: dict, channel: str, direction: str):

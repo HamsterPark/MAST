@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -32,32 +33,41 @@ class AssessAtomicLines(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "对正在进行的扫描中已经完成的行分析规则起伏。返回 advisory：单条线不能区分二维晶格与一维条纹，最终晶格判定仍由 AssessAtomicResolution 给出。读取 Z 通道，无需停止扫描。"
+                tr("对正在进行的扫描中**已经扫完**的那些线打分，看有没有规则的"
+                "起伏（即检查扫描线这一步）。"
+                "返回的是一条 ADVISORY —— **单条线分不出 2-D 晶格与 1-D 波纹**；"
+                "下判定的仍然是 AssessAtomicResolution。"
+                "它读 Z 通道（比电流更灵敏），而且**不用停扫**就能做，"
+                "所以一轮只花几十秒，而不是等一整帧。",
+                "Score the lines of the scan in progress that have **already been scanned**, looking for regular undulation (the scan-line check). Returns an ADVISORY - **a single line cannot tell a 2-D lattice from 1-D ripple**; the decision still belongs to AssessAtomicResolution. It reads the Z channel (more sensitive than current) and **needs no scan stop**, so a round costs tens of seconds, not a whole frame.")
             ),
             parameters=[
                 ParameterSpec(
                     name="direction", type="int",
-                    description="1 = 正扫，0 = 反扫（与 .sxm 的 forward / backward 对应）。",
+                    description=tr("1 = 正扫，0 = 反扫（与 .sxm 的 forward / backward 对应）。", "1 = forward scan, 0 = backward scan (corresponding to forward / backward of the .sxm)."),
                     required=False, default=1, min_value=0, max_value=1),
                 ParameterSpec(
                     name="n_recent_lines", type="int",
                     description=(
-                        "只给最近扫出来的这么多行打分；0 = 全部已扫出的行。"
+                        tr("只给最近扫出来的这么多行打分；0 = 全部已扫出的行。"
                         "打磨环里要的是**刚扫的那几行**，整帧的中位会被扰动之前"
-                        "那些行拖住。"),
+                        "那些行拖住。",
+                        "Score only this many of the most recently scanned rows; 0 = all rows scanned so far. A polishing loop wants **the rows just scanned**; the median of the whole frame is dragged by the rows from before the disturbance.")),
                     required=False, default=0, min_value=0, max_value=4096),
                 ParameterSpec(
                     name="advisory_snr", type="float",
                     description=(
-                        "建议线，默认 80，为未标定的工作点。只提供建议，不用于否决；请按当前成像条件验证。"
-                        ),
+                        tr("建议线。出厂 80，是未充分标定的工作点。"
+                        "**样本很薄，它只建议不否决。**",
+                        "Advisory line. Factory value 80, a working point that is not fully calibrated. **The sample is thin; it only advises and does not veto.**")),
                     required=False, default=80.0,
                     min_value=1.0, max_value=100000.0),
                 ParameterSpec(
                     name="channel_index", type="int",
                     description=(
-                        "强行指定信号索引（不是缓冲位）。-1 = 自己去 Scan_BufferGet "
-                        "找 Z。填错的通道会得到一个对不齐的回包。"),
+                        tr("强行指定信号索引（不是缓冲位）。-1 = 自己去 Scan_BufferGet "
+                        "找 Z。填错的通道会得到一个对不齐的回包。",
+                        "Force a signal index (not a buffer slot). -1 = look for Z yourself via Scan_BufferGet. A wrongly chosen channel gives a reply that does not line up.")),
                     required=False, default=-1, min_value=-1, max_value=127),
             ],
             estimated_duration_s=2.0,
@@ -90,16 +100,17 @@ class AssessAtomicLines(BaseSkill):
         if arr is None:
             return SkillResult(
                 skill_name="AssessAtomicLines", success=False,
-                error=("取不到通道 %d 的帧：%s%s"
+                error=(tr("取不到通道 %d 的帧：%s%s", "Cannot get the frame of channel %d: %s%s")
                        % (ch, why,
-                          ("　（扫描缓冲里的通道是 %s —— 这个参数要的是**信号索引**，"
-                           "不是缓冲位）" % chans) if chans else "")),
+                          (tr("　（扫描缓冲里的通道是 %s —— 这个参数要的是**信号索引**，"
+                           "不是缓冲位）",
+                           " (the channels in the scan buffer are %s - this parameter wants a **signal index**, not a buffer slot)") % chans) if chans else "")),
                 nanonis_calls=calls)
 
         img = np.asarray(arr, dtype=float)
         if img.ndim != 2:
             return SkillResult(skill_name="AssessAtomicLines", success=False,
-                               error="帧不是二维：shape=%s" % (img.shape,),
+                               error=tr("帧不是二维：shape=%s", "Frame is not 2-D: shape=%s") % (img.shape,),
                                nanonis_calls=calls)
 
         filled = usable_rows(img)
@@ -125,7 +136,7 @@ class AssessAtomicLines(BaseSkill):
         })
         if not out.get("ok"):
             return SkillResult(skill_name="AssessAtomicLines", success=False,
-                               error=out.get("why") or "线级判读没算出结果",
+                               error=out.get("why") or tr("线级判读没算出结果", "The line-level reading produced no result"),
                                data=out, nanonis_calls=calls)
         return SkillResult(
             skill_name="AssessAtomicLines", success=True, data=out,

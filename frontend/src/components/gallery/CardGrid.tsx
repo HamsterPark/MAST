@@ -1,15 +1,19 @@
-// 卡片网格 + 增量渲染（旧版兼容格式 app.js 的 renderCards / moreCards / pump）。
+// Card grid with incremental rendering.
 //
-// 每批 150 张，哨兵离视口底部 1500 px 以内就再加一批。IntersectionObserver 只在相交
-// 状态**变化**时回调：加完一批后哨兵可能仍在 1500 px 以内，所以每次「已显示」变化都
-// 重新 observe 一次，让它立刻按当前状态再报一次——否则一屏很高的窗口会停在第一批。
+// Cards render in batches of 150; another batch is added whenever the sentinel is within
+// 1500 px of the viewport bottom. IntersectionObserver only fires when the intersection
+// state *changes*: after a batch is added the sentinel may still be within 1500 px, so the
+// observer is re-created on every change of the shown count to report the current state
+// again. Otherwise a very tall window would stall after the first batch.
 //
-// 滚动容器是 AppLayout 的 <main>，不是 window；observer 的 root 用视口即可（相交按
-// 视口算，main 滚动时哨兵在视口里移动）。
+// The scroll container is AppLayout's <main>, not window; using the viewport as the observer
+// root is enough (intersection is computed against the viewport, and the sentinel moves
+// through it as <main> scrolls).
 
 import { useEffect, useRef, useState } from "react";
 import type { GalleryItem } from "@/lib/gallery/types";
 import { GalleryCard } from "./GalleryCard";
+import { tr } from "@/lib/i18n";
 
 const BATCH = 150;
 
@@ -28,14 +32,14 @@ export function CardGrid({
   cw: number;
   showDir: boolean;
   currentId: string | null;
-  /** 至少渲染到第几张（大图翻到后面、关大图后要滚到某一张时）。 */
+  /** Render at least this many cards (when the lightbox has paged ahead and the grid must scroll to a card on close). */
   minShown: number;
   lastBatch: string;
   numOf: (id: string) => string | null;
   onOpen: (j: number) => void;
   onPick: (j: number, shift: boolean, checked: boolean) => void;
 }) {
-  // 换了列表就从第一批重新开始（在渲染期间重置，避免先闪一帧旧的数量）。
+  // Restart from the first batch when the list changes (reset during render to avoid flashing the old count).
   const [st, setSt] = useState({ list, shown: BATCH });
   if (st.list !== list) setSt({ list, shown: BATCH });
   const shown = st.list === list ? st.shown : BATCH;
@@ -79,10 +83,10 @@ export function CardGrid({
       </div>
       <div ref={sentinel} className="mx-auto my-[18px] text-center text-sm text-mast-muted">
         {need < list.length
-          ? `已显示 ${need} / ${list.length}，往下滚继续`
+          ? tr(`已显示 ${need} / ${list.length}，往下滚继续`, `Showing ${need} / ${list.length}, scroll down for more`)
           : list.length
             ? ""
-            : "没有符合条件的文件"}
+            : tr("没有符合条件的文件", "No matching files")}
       </div>
     </>
   );

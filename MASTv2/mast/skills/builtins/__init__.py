@@ -113,6 +113,14 @@ from mast.skills.builtins.imaging import (
     StartScan,
     StopScan,
 )
+# 位点标注：显式 import 才能在冻结（PyInstaller）构建里被 registry 发现
+# （walk_packages 在冻结包里枚举不到，见 core/registry.py 的 frozen 回退）。
+from mast.skills.builtins.site_marking import (
+    PrepareSiteMarkingPage,
+)
+from mast.skills.builtins.site_marking_read import ReadSiteMarks
+# 分子配准漂移追踪技能（冻结包只认这里显式 import 过的）。
+from mast.skills.builtins.drift_register import RegisterDriftByMolecules
 from mast.skills.builtins.lockin import (
     ConfigureLockIn,
     ConfigureLockInDemod,
@@ -139,16 +147,75 @@ from mast.skills.builtins.motor import (
     StopMotor,
 )
 from mast.skills.builtins.navigation import MoveToXY
+from mast.skills.builtins.optics_alignment import (
+    GetPicomotorSteps,
+    MoveXYZStage,
+    PicomotorJog,
+)
+from mast.skills.builtins.optics_aotf_pmt import ReadPmt, SetAotfWavelength, SetPmtHighVoltage
+from mast.skills.builtins.optics_camera import (
+    CameraSnapshot,
+    CameraStartLive,
+    CameraStopLive,
+    ConnectCamera,
+    DisconnectCamera,
+    GetCameraStatus,
+    SetCameraExposure,
+    SetCameraGain,
+    SetCameraROI,
+)
+from mast.skills.builtins.optics_motor_groups import (
+    ListNanonisMotorGroups,
+    NanonisMotorGroupMove,
+)
+from mast.skills.builtins.optics_polarization import (
+    GetPolarizerAngle,
+    HomePolarizer,
+    SetPolarizerAngle,
+)
 from mast.skills.builtins.optics_pump_probe import PumpProbeScan
+from mast.skills.builtins.optics_satellite_manual import (
+    GetSatelliteDeviceStatus,
+    IdentifySatelliteDevice,
+    PicomotorAbort,
+    PicomotorMoveAbs,
+    PicomotorSetZero,
+    SetPicomotorAccel,
+    SetPicomotorVelocity,
+    SetPolarizerVelocity,
+    StopSatelliteDevice,
+)
 from mast.skills.builtins.optics_scan import AcquireSignalPoint, OpticalStageScan
+from mast.skills.builtins.optics_spectro import (
+    AcquireSpectrum,
+    ConfigureSpectrometer,
+    GetSpectrometerStatus,
+    ListSatellites,
+    SetSpectrometerCenter,
+    SetSpectrometerExitPort,
+    SetSpectrometerGrating,
+    StopSatelliteDevices,
+    StopSpectrometer,
+)
+# 光学站点（docs/v2/design/optical_station_witec.md）：模块级导入，冻结版靠它发现技能
+from mast.skills.builtins import (  # noqa: F401
+    operator_skills,
+    optics_protocols,
+    optics_sources,
+    optics_witec,
+)
 from mast.skills.builtins.optics_stage import (
     DelayLineGetDelay,
     DelayLineMoveTo,
+    DisconnectOpticalDevice,
+    GetOpticalStageStatus,
     HomeOpticalStage,
     ListOpticalDevices,
     OpticalStageGetPos,
     OpticalStageMove,
+    OpticalStageServo,
     OpticalStageWiggle,
+    SetOpticalStageVelocity,
     StopOpticalStage,
 )
 from mast.skills.builtins.pattern import (
@@ -461,6 +528,10 @@ __all__ = [
     "CheckScanForCrash",
     "ReadTipOscillationAmplitude",
     "CheckTipCrashByAmplitude",
+    # 位点标注
+    "PrepareSiteMarkingPage",
+    "ReadSiteMarks",
+    "RegisterDriftByMolecules",
     # Imaging / Scan
     "ConfigureScan",
     "GetScanXYPosition",
@@ -687,4 +758,52 @@ __all__ = [
     "PumpProbeScan",
     "AcquireSignalPoint",
     "OpticalStageScan",
+    # 手动控制面板（TERS 契约 §13.1）：本机光学台的状态、速度、伺服与断开
+    "GetOpticalStageStatus",
+    "SetOpticalStageVelocity",
+    "OpticalStageServo",
+    "DisconnectOpticalDevice",
+    # TERS optics: satellite spectrometer / polariser / alignment,
+    # AOTF / PMT, Nanonis optical motor groups — the `ters_optics` hardware module
+    "ListSatellites",
+    "GetSpectrometerStatus",
+    "ConfigureSpectrometer",
+    "SetSpectrometerGrating",
+    "SetSpectrometerCenter",
+    "SetSpectrometerExitPort",
+    "AcquireSpectrum",
+    "StopSpectrometer",
+    "StopSatelliteDevices",
+    "GetPolarizerAngle",
+    "SetPolarizerAngle",
+    "HomePolarizer",
+    "GetPicomotorSteps",
+    "PicomotorJog",
+    "MoveXYZStage",
+    "ListNanonisMotorGroups",
+    "NanonisMotorGroupMove",
+    "SetAotfWavelength",
+    "ReadPmt",
+    "SetPmtHighVoltage",
+    # 手动控制面板（TERS 契约 §13.1）：卫星设备的停、识别、读数与几个厂家软件里的基本按钮
+    "StopSatelliteDevice",
+    "PicomotorAbort",
+    "IdentifySatelliteDevice",
+    "GetSatelliteDeviceStatus",
+    "SetPolarizerVelocity",
+    "PicomotorMoveAbs",
+    "SetPicomotorVelocity",
+    "SetPicomotorAccel",
+    "PicomotorSetZero",
+    # 对光相机（TERS 契约 §13.1，Thorlabs Zelux）：不碰 Nanonis，不取仪器令牌
+    # （instrument_lock.OFF_INSTRUMENT_NAMES）
+    "ConnectCamera",
+    "DisconnectCamera",
+    "CameraStartLive",
+    "CameraStopLive",
+    "CameraSnapshot",
+    "SetCameraExposure",
+    "SetCameraGain",
+    "SetCameraROI",
+    "GetCameraStatus",
 ]

@@ -16,6 +16,7 @@ several audiences, exactly like the scan-map analysis.
 
 from __future__ import annotations
 
+from mast.i18n import tr
 from mast.core.types import (
     SafetyLevel,
     SkillCategory,
@@ -35,12 +36,13 @@ class GetChamberPressure(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读取腔体压强(Pa)并给出**粗动互锁裁决**:现在能不能动粗动马达,以及理由。\n"
+                tr("读取腔体压强(Pa)并给出**粗动互锁裁决**:现在能不能动粗动马达,以及理由。\n"
                 "在中间真空区(约 0.1–1000 Pa = 1e-3–10 mbar,Paschen 极小值附近)给粗动"
                 "压电加几百伏会打火击穿叠堆 —— 抽气和放气途中正好穿过这个区间。\n"
                 "**allow=false 时不要重试粗动**:这是硬闸门,不是建议。"
                 "读不到真空计也会是 false(读不到 ≠ 真空好);那种情况需要用户在界面上"
-                "签署一次「当前气压安全」,你不能替他签。"
+                "签署一次「当前气压安全」,你不能替他签。",
+                "Read the chamber pressure (Pa) and give the **coarse-motion interlock verdict**: whether the coarse motor may move now, and why.\nIn the intermediate vacuum range (about 0.1-1000 Pa = 1e-3-10 mbar, around the Paschen minimum), applying a few hundred volts to the coarse piezo will arc and break down the stack; pumping down and venting pass straight through this range.\n**When allow=false, do not retry coarse motion**: this is a hard gate, not advice. If the vacuum gauge cannot be read, allow is also false (unreadable is not good vacuum); in that case the user must sign 'current pressure is safe' once in the UI, and you cannot sign it for them.")
             ),
             parameters=[],
             estimated_duration_s=0.2,

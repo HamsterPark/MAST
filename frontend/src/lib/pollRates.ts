@@ -2,13 +2,11 @@
 // pollRates.ts — how often the UI asks for live instrument readings, and WHY
 // that number is what it is.
 //
-// Whether the update rate could go faster, closer to real-time, once conditions
-// allow it. The answer is yes, but only up to a hard ceiling that lives on
-// the other side of the API — so this constant exists mainly to stop the next
-// person from "just" cranking it to 100 ms and thinking that helps.
+// The refresh rate can be raised toward near-real-time, but only up to a hard
+// ceiling that lives on the other side of the API — so this constant exists
+// mainly to stop anyone from cranking it to 100 ms and expecting a gain.
 //
-// THE CHAIN (measured 2026-07-28, see tests/v2/unit/api/test_live_readings_
-// no_hardware_io.py):
+// THE CHAIN (see tests/v2/unit/api/test_live_readings_no_hardware_io.py):
 //
 //   Nanonis ──TCP(monitor port)──▶ InstrumentState.refresh()  every ~1 s
 //                                        │  10 calls per cycle
@@ -36,14 +34,14 @@
 //
 // WHY WE DID NOT SPEED UP THE PRODUCER INSTEAD. The monitor TCP port is shared,
 // serialised behind one per-role lock (core/connection.py), and already busy:
-//   · SafetyWatchdog      0.5 s × 1 call   =  2 calls/s  ← tip-crash → 紧急退针
+//   · SafetyWatchdog      0.5 s × 1 call   =  2 calls/s  ← tip-crash → emergency withdraw
 //   · InstrumentState     1.0 s × 10 calls = ~10 calls/s
 //   · ScanMonitor         0.5 s × ≤4 calls = ≤8 calls/s  (only while scanning)
 // ≈20 transactions/s during a scan — which is precisely when the operator most
 // wants live numbers. Halving the InstrumentState interval would take lock time
 // away from the tip-crash watchdog, on a TCP port the project treats as fragile
-// by rule. That trade needs a real-rig latency measurement we do not have, so
-// the producer stays at 1 s.
+// by rule. That trade needs a real-rig latency measurement, so the producer stays
+// at 1 s.
 // ════════════════════════════════════════════════════════════════════════════
 
 /**
@@ -79,7 +77,7 @@ export const LIVE_READINGS_STALE_AFTER_MS = 15_000;
 export const LIVE_READINGS_WS_KEEPALIVE_POLL_MS = 10_000;
 
 // ════════════════════════════════════════════════════════════════════════════
-// 电流监控 (pages/MonitoringPage.tsx) — a DIFFERENT budget from the one above,
+// Current monitoring (pages/MonitoringPage.tsx) — a DIFFERENT budget from the one above,
 // and it is worth saying why, because the numbers look inconsistent otherwise.
 //
 // The chain has no instrument in it at all:
@@ -94,13 +92,13 @@ export const LIVE_READINGS_WS_KEEPALIVE_POLL_MS = 10_000;
 // is explicitly zero-TCP. So unlike live-readings, polling here cannot take
 // lock time from the tip-crash watchdog no matter what number we pick; the only
 // cost is bytes on the wire, which matters solely because remote access runs
-// over a Tailscale tunnel .
+// over a Tailscale tunnel.
 //
 // That is what the WS keep-alive rates are buying: while push is healthy the
 // polls drop to a slow floor and save the tunnel ~5× the traffic. They do not
 // stop, for the same reason the top bar's do not — a socket killed by a NAT
 // rebind looks open until WS_IDLE_MS (45 s), and a chart that keeps drawing a
-// frozen line for most of a minute is the failure 「UI 绝不冻结」 forbids.
+// frozen line for most of a minute must not happen.
 // ════════════════════════════════════════════════════════════════════════════
 
 /**
@@ -127,13 +125,19 @@ export const MONITORING_TRACE_WS_KEEPALIVE_POLL_MS = 10_000;
  */
 export const MONITORING_STATUS_POLL_MS = 3_000;
 
+/** Records page: a running experiment's actions and details should appear by themselves. */
+export const RECORDS_DETAIL_POLL_MS = 3_000;
+/** Records page: list of experiments, and the slower scan listing. */
+export const RECORDS_LIST_POLL_MS = 5_000;
+export const RECORDS_SCANS_POLL_MS = 10_000;
+
 /** Status floor while /ws/events is OPEN. Still well under WS_IDLE_MS (45 s),
  *  so a silently dead socket is caught by data, not only by the watchdog. */
 export const MONITORING_STATUS_WS_KEEPALIVE_POLL_MS = 15_000;
 
 /**
  * How old the newest segment may get before the page stops presenting it as
- * live — the verdict banner greys out to 「无数据」 and the chart says so.
+ * live — the verdict banner greys out to "no data" and the chart says so.
  *
  * 15 s ≈ 15 segments. Long enough that a GC pause, a retention sweep or one
  * dropped request never flashes a false stale; short enough that a stalled
@@ -144,7 +148,7 @@ export const MONITORING_STATUS_WS_KEEPALIVE_POLL_MS = 15_000;
 export const MONITORING_STALE_AFTER_MS = 15_000;
 
 /**
- * Poll interval for the 环境历史 series/spectra queries.
+ * Poll interval for the environment-history series/spectra queries.
  *
  * Deliberately slow, and NOT because the endpoint is expensive — it reads
  * SQLite and issues zero TCP. It is slow because the DATA is: the underlying

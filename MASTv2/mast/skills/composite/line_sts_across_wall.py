@@ -33,6 +33,7 @@ from mast.core.types import (
 )
 from mast.skills.composite._base import CompositeSkillGraph
 from mast.skills.composite.graph_executor import CompositeProgress, CompositeStep
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +126,7 @@ class LineSTSAcrossWall(CompositeSkillGraph):
             category=SkillCategory.COMPOSITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "沿一条线**跨过**一道畴界采一串 STS 谱 —— 这道畴界是此前一次畴界"
+                tr("沿一条线**跨过**一道畴界采一串 STS 谱 —— 这道畴界是此前一次畴界"
                 "搜索用 bracket 夹出来的。用 id 指向那次搜索 —— `domain_search_id` "
                 "加 `bracket_id` —— 它自己会从实验地图里把 bracket 的两个端点读出来;"
                 "**不要**递给它猜出来的坐标。点位近墙密、远墙疏,而且按由近及远的顺序"
@@ -136,74 +137,116 @@ class LineSTSAcrossWall(CompositeSkillGraph):
                 "下列情况一律拒绝:坐标代次变了、bracket 的判定是 undetermined、"
                 "没有人确认过畴参照系、或者这道畴界只定位到了**粗动步数**"
                 "(不存在米坐标 —— 必须先把它挪进单个站点之内)。置 `dry_run` 可以"
-                "只拿到点位表与时间预估,不碰针尖。"
+                "只拿到点位表与时间预估,不碰针尖。",
+                   "Acquire a series of STS spectra along a line **across** a domain wall that an "
+                   "earlier wall search clamped with a bracket. Point at that search by id "
+                   "(`domain_search_id` plus `bracket_id`); the skill reads the two bracket "
+                   "endpoints from the experiment map itself. **Do not** pass it guessed "
+                   "coordinates. Points are dense near the wall and sparse far from it, and are "
+                   "taken from near to far, so that piezo drift damages the least important (far) "
+                   "points. The fine-sampling window is **never narrower than** the position "
+                   "uncertainty of that search: a narrower window could put every dense point on the "
+                   "**same side** of the wall and burn a whole night on good-looking spectra that "
+                   "answer nothing. Refused when: the coordinate epoch changed, the bracket verdict "
+                   "is undetermined, nobody has confirmed the domain reference frame, or the wall "
+                   "was only located to **coarse-motion steps** (no metre coordinates; first move it "
+                   "inside a single site). Set `dry_run` to get only the point table and a time "
+                   "estimate without touching the tip.")
             ),
             parameters=[
                 ParameterSpec(
                     name="domain_search_id", type="str",
-                    description=("几何存在这次畴界搜索的标记里 —— 给它的 id。"
-                                 "这是首选输入形态:说一个 id,别说坐标。"),
+                    description=(tr("几何存在这次畴界搜索的标记里 —— 给它的 id。"
+                                 "这是首选输入形态:说一个 id,别说坐标。",
+                                    "The geometry is stored in the markers of this domain-wall "
+                                    "search: pass its id. This is the preferred input form: give an "
+                                    "id, not coordinates.")),
                     required=False, default=""),
                 ParameterSpec(
                     name="bracket_id", type="str",
-                    description=("那次搜索下面的哪一个 bracket(它的 lo/hi 一对"
+                    description=(tr("那次搜索下面的哪一个 bracket(它的 lo/hi 一对"
                                  "确定了原点与轴向)。**只有**在目标是一帧判定为 "
-                                 "'mixed' 的帧时才可以省略。"),
+                                 "'mixed' 的帧时才可以省略。",
+                                    "Which bracket under that search (its lo/hi pair fixes the "
+                                    "origin and axis). May be omitted **only** when the target is a "
+                                    "frame judged 'mixed'.")),
                     required=False, default=""),
                 ParameterSpec(
                     name="expected_coord_epoch", type="int",
-                    description=("这批坐标属于哪一代坐标系。对不上、或者地图读"
+                    description=(tr("这批坐标属于哪一代坐标系。对不上、或者地图读"
                                  "不到,都拒绝 —— 横向粗动之后,同样的 (x,y) 指的"
-                                 "是另一片表面。"),
+                                 "是另一片表面。",
+                                    "Which coordinate epoch these coordinates belong to. Refused if "
+                                    "it does not match or the map cannot be read: after a lateral "
+                                    "coarse move the same (x,y) refers to a different surface.")),
                     required=True, min_value=0),
                 ParameterSpec(
                     name="origin_x_m", type="float", unit="m",
-                    description=("显式给出的线中心 X。只给用户 / conduct spec "
-                                 "用;用 id 的时候留空。"),
+                    description=(tr("显式给出的线中心 X。只给用户 / conduct spec "
+                                 "用;用 id 的时候留空。",
+                                    "Explicit line centre X. For the user / conduct spec only; leave "
+                                    "empty when using an id.")),
                     required=False),
                 ParameterSpec(
                     name="origin_y_m", type="float", unit="m",
-                    description="显式给出的线中心 Y。", required=False),
+                    description=tr("显式给出的线中心 Y。", "Explicit line centre Y."), required=False),
                 ParameterSpec(
                     name="axis_deg", type="float", unit="deg",
-                    description=("显式给出的轴方位角,与 x/y 在**同一个**参照系里"
+                    description=(tr("显式给出的轴方位角,与 x/y 在**同一个**参照系里"
                                  "(+x = 0 deg)。目标是一帧 'mixed' 而又没有 "
                                  "bracket 时必填。这是**搜索**轴,不是畴界法向,"
-                                 "而且绝不拿扫描角来代替它。"),
+                                 "而且绝不拿扫描角来代替它。",
+                                    "Explicit axis azimuth, in the **same** reference frame as x/y "
+                                    "(+x = 0 deg). Required when the target is a 'mixed' frame "
+                                    "without a bracket. This is the **search** axis, not the wall "
+                                    "normal, and the scan angle is never used in its place.")),
                     required=False, min_value=-360.0, max_value=360.0),
                 ParameterSpec(
                     name="uncertainty_m", type="float", unit="m",
-                    description=("畴界的位置沿轴向有多大的不确定度。用显式几何时"
+                    description=(tr("畴界的位置沿轴向有多大的不确定度。用显式几何时"
                                  "**必填** —— 省掉它会把密集窗静默地缩回流程表里"
-                                 "的缺省值。用 id 时它由 bracket 的跨度得出。"),
+                                 "的缺省值。用 id 时它由 bracket 的跨度得出。",
+                                    "How uncertain the wall position is along the axis. **Required** "
+                                    "with explicit geometry: omitting it would silently shrink the "
+                                    "dense window back to the default in the workflow table. With an "
+                                    "id it is derived from the bracket span.")),
                     required=False, min_value=0.0),
                 ParameterSpec(
                     name="fine_spacing_nm", type="float", unit="nm",
-                    description=("密集窗**之内**的点间距。取自流程表 / conduct "
-                                 "spec —— 语言模型不许自己编这个数。"),
+                    description=(tr("密集窗**之内**的点间距。取自流程表 / conduct "
+                                 "spec —— 语言模型不许自己编这个数。",
+                                    "Point spacing **inside** the dense window. Taken from the "
+                                    "workflow table / conduct spec; the language model must not "
+                                    "invent this number.")),
                     required=False, min_value=0.01, max_value=100.0),
                 ParameterSpec(
                     name="coarse_spacing_nm", type="float", unit="nm",
-                    description="密集窗**之外**的点间距。",
+                    description=tr("密集窗**之外**的点间距。", "Point spacing **outside** the dense window."),
                     required=False, min_value=0.01, max_value=1000.0),
                 ParameterSpec(
                     name="fine_half_width_nm", type="float", unit="nm",
-                    description=("密集半窗的**下限**。实际用的值是 max(这个数, "
-                                 "搜索自身的位置不确定度)。"),
+                    description=(tr("密集半窗的**下限**。实际用的值是 max(这个数, "
+                                 "搜索自身的位置不确定度)。",
+                                    "**Lower limit** of the dense half-window. The value actually "
+                                    "used is max(this number, the position uncertainty of the "
+                                    "search).")),
                     required=False, min_value=0.0, max_value=1000.0),
                 ParameterSpec(
                     name="line_half_length_nm", type="float", unit="nm",
-                    description="整条线的半长。",
+                    description=tr("整条线的半长。", "Half-length of the whole line."),
                     required=False, min_value=0.01, max_value=5000.0),
                 ParameterSpec(
                     name="max_points", type="int",
-                    description="这条线的点数预算。",
+                    description=tr("这条线的点数预算。", "Point budget for this line."),
                     required=False, min_value=1, max_value=400),
                 ParameterSpec(
                     name="require_confirmed_reference", type="bool",
-                    description=("除非有人确认过那些判定所依据的那一版畴参照系,"
+                    description=(tr("除非有人确认过那些判定所依据的那一版畴参照系,"
                                  "否则拒绝执行。默认 true —— 一道没人确认过的"
-                                 "「畴界」可能白白花掉一整晚。"),
+                                 "「畴界」可能白白花掉一整晚。",
+                                    "Refuse to run unless someone has confirmed the version of the "
+                                    "domain reference frame those verdicts rest on. Default true: an "
+                                    "unconfirmed 'wall' can waste a whole night.")),
                     required=False, default=True),
                 # ── 采谱条件:一个**组名**,本壳一个数都不发明也不转发 ──
                 # 2026-08-15 由六个显式数值参数换成组名(S4 STS 设计 D19)。
@@ -213,50 +256,69 @@ class LineSTSAcrossWall(CompositeSkillGraph):
                 ParameterSpec(
                     name="condition", type="str",
                     description=(
-                        "线上每一个点是在哪一个采谱条件**组**下采的 —— 给**组名**,"
+                        tr("线上每一个点是在哪一个采谱条件**组**下采的 —— 给**组名**,"
                         "**不是数字**。稳定 bias/setpoint、扫描窗口、点数与调制"
                         "全都住在那个组里(core.sts_workflow)。名字不认识、"
                         "覆写值越界、或者组里样品相关的字段还没标定 —— 这三种"
-                        "逐点引擎都会**拒绝**,并指名是哪里不对。"),
+                        "逐点引擎都会**拒绝**,并指名是哪里不对。",
+                           "Which spectroscopy condition **group** every point on the line is taken "
+                           "under: give the **group name**, **not numbers**. Stable bias/setpoint, "
+                           "scan window, point count and modulation all live in that group "
+                           "(core.sts_workflow). The per-point engine **refuses** an unknown name, "
+                           "an out-of-range override, or a group whose sample-dependent fields are "
+                           "not yet calibrated, and names what is wrong.")),
                     required=False, default=DEFAULT_CONDITION),
                 ParameterSpec(
                     name="settle_s", type="float", unit="s",
-                    description=("**只**覆写那个组的整定时间,单位秒。它是一个"
+                    description=(tr("**只**覆写那个组的整定时间,单位秒。它是一个"
                                  "时间旋钮,不是一个物理设定值,而且它还要喂给"
-                                 "时间预估。省略就用组自己的值。"),
+                                 "时间预估。省略就用组自己的值。",
+                                    "Override **only** the settling time of that group, in seconds. "
+                                    "It is a timing knob, not a physical setpoint, and it also feeds "
+                                    "the time estimate. Omit it to use the group's own value.")),
                     required=False, min_value=0.0, max_value=60.0),
                 ParameterSpec(
                     name="spectral_family", type="str",
-                    description=("哪些谱的子判据可以起闸。留空 = unknown,"
-                                 "而 unknown **不是** metallic。"),
+                    description=(tr("哪些谱的子判据可以起闸。留空 = unknown,"
+                                 "而 unknown **不是** metallic。",
+                                    "Which spectrum sub-criteria may trigger the gate. Empty = "
+                                    "unknown, and unknown is **not** metallic.")),
                     required=False, default="",
                     allowed_values=["", "metallic", "gapped", "unknown"]),
                 ParameterSpec(
                     name="assess", type="bool",
-                    description="逐点跑一遍谱质量闸。",
+                    description=tr("逐点跑一遍谱质量闸。", "Run the spectrum quality gate on each point."),
                     required=False, default=True),
                 ParameterSpec(
                     name="stop_after_consecutive_discard", type="int",
-                    description=("连续这么多次判成 'discard' 就停。0 = 永不停。"
-                                 "'unrated' 不计入。"),
+                    description=(tr("连续这么多次判成 'discard' 就停。0 = 永不停。"
+                                 "'unrated' 不计入。",
+                                    "Stop after this many consecutive 'discard' verdicts. 0 = never "
+                                    "stop. 'unrated' does not count.")),
                     required=False, min_value=0, max_value=64),
                 ParameterSpec(
                     name="per_point_timeout_s", type="float", unit="s",
-                    description="每个点的时间上限,每采完一个点检查一次。",
+                    description=tr("每个点的时间上限,每采完一个点检查一次。",
+                                   "Time limit per point, checked after each point is acquired."),
                     required=False, min_value=1.0, max_value=7200.0),
                 ParameterSpec(
                     name="run_tag", type="str",
-                    description="逐点 .dat 文件基名的前缀。",
+                    description=tr("逐点 .dat 文件基名的前缀。", "Prefix of the per-point .dat file base names."),
                     required=False, default=""),
                 ParameterSpec(
                     name="per_point_acquire_s", type="float", unit="s",
-                    description=("每条谱的**实测**秒数,只用于时间预估。留空表示"
-                                 "**未知**,预估会如实说明,而不是悄悄按 0 算。"),
+                    description=(tr("每条谱的**实测**秒数,只用于时间预估。留空表示"
+                                 "**未知**,预估会如实说明,而不是悄悄按 0 算。",
+                                    "**Measured** seconds per spectrum, used only for the time "
+                                    "estimate. Empty means **unknown**; the estimate says so instead "
+                                    "of silently counting 0.")),
                     required=False, min_value=0.0, max_value=3600.0),
                 ParameterSpec(
                     name="dry_run", type="bool",
-                    description=("只算点位与时间预估,一条谱都不采。在把一整晚"
-                                 "押给这条线之前先用它。"),
+                    description=(tr("只算点位与时间预估,一条谱都不采。在把一整晚"
+                                 "押给这条线之前先用它。",
+                                    "Compute only the point table and time estimate; acquire no "
+                                    "spectrum. Use it before committing a whole night to this line.")),
                     required=False, default=False),
             ],
             preconditions=["z_controller_on"],
@@ -286,7 +348,7 @@ class LineSTSAcrossWall(CompositeSkillGraph):
         return resolve_line_geometry(
             "explicit", origin_xy=(ox, oy), axis_deg=params.get("axis_deg"),
             uncertainty_m=params.get("uncertainty_m"),
-            source_note="显式几何(用户 / conduct spec)")
+            source_note=tr("显式几何(用户 / conduct spec)", "Explicit geometry (user / conduct spec)"))
 
     def _geometry_from_map(self, params: dict) -> "tuple[Any, dict] | SkillResult":
         """按 ``(domain_search_id, bracket_id)`` 从地图标记里取几何。
@@ -303,25 +365,35 @@ class LineSTSAcrossWall(CompositeSkillGraph):
             # 读不到记录 ≠ 代次一致。这条闸的全部意义就是不让「不知道」放行。
             return self._refuse(
                 "markers_unavailable",
-                "读不到实验地图记录(没有活动实验或存储不可用),因此**无法确认**"
+                tr("读不到实验地图记录(没有活动实验或存储不可用),因此**无法确认**"
                 "这批坐标属于哪一代坐标系。「读不到」不是「一致」⇒ 不跑。"
-                "请先打开实验记录,或用显式几何参数并自行确认坐标代次。")
+                "请先打开实验记录,或用显式几何参数并自行确认坐标代次。",
+                   "Cannot read the experiment map records (no active experiment or storage "
+                   "unavailable), so it **cannot be confirmed** which coordinate epoch these "
+                   "coordinates belong to. 'Unreadable' is not 'consistent' => not running. Open the "
+                   "experiment record first, or use explicit geometry and confirm the epoch yourself."))
 
         expected = params.get("expected_coord_epoch")
         if expected is not None and int(expected) != int(epoch):
             return self._refuse(
                 "coord_epoch_mismatch",
-                f"这批坐标属于第 {int(expected)} 代坐标系,而当前是第 {int(epoch)} 代"
+                tr(f"这批坐标属于第 {int(expected)} 代坐标系,而当前是第 {int(epoch)} 代"
                 "(中间发生过横向粗动)。同样的 (x, y) 现在指的是另一片表面 ⇒ 拒绝。"
                 "跨代次换算在本仓有意不存在:请重新定位畴界。",
+                   f"These coordinates belong to epoch {int(expected)}, but the current epoch is "
+                   f"{int(epoch)} (a lateral coarse move happened in between). The same (x, y) now "
+                   "refers to a different surface => refused. Cross-epoch conversion intentionally "
+                   "does not exist here: locate the domain wall again."),
                 expected_coord_epoch=int(expected), current_coord_epoch=int(epoch))
 
         mine = [m for m in markers if str(_meta(m).get("domain_search_id") or "") == search_id]
         if not mine:
             return self._refuse(
                 "search_not_found",
-                f"当前坐标代次里没有 domain_search_id={search_id!r} 的采样标记。"
-                "请确认 id,或者先跑一次畴界搜索。")
+                tr(f"当前坐标代次里没有 domain_search_id={search_id!r} 的采样标记。"
+                "请确认 id,或者先跑一次畴界搜索。",
+                   "The current coordinate epoch has no sampling markers for "
+                   f"domain_search_id={search_id!r}. Check the id, or run a domain-wall search first."))
 
         if bracket_id:
             return self._bracket_geometry(mine, search_id, bracket_id)
@@ -332,16 +404,21 @@ class LineSTSAcrossWall(CompositeSkillGraph):
         if not same:
             return self._refuse(
                 "bracket_not_found",
-                f"搜索 {search_id!r} 下没有 bracket_id={bracket_id!r} 的标记。")
+                tr(f"搜索 {search_id!r} 下没有 bracket_id={bracket_id!r} 的标记。",
+                   f"Search {search_id!r} has no marker for bracket_id={bracket_id!r}."))
 
         cross = [m for m in same if looks_like_cross_site(
             _meta(m), x_m=getattr(m, "x_m", None), y_m=getattr(m, "y_m", None))]
         if cross:
             return self._refuse(
                 "cross_site_no_metres",
-                "这条畴界只定位到粗动步数(站点之间 ±N 步),没有米坐标,线谱无从"
+                tr("这条畴界只定位到粗动步数(站点之间 ±N 步),没有米坐标,线谱无从"
                 f"布点。{CROSS_SITE_HINT}:在两站之间做一次半步长粗动把新站点插"
-                "进去,再在单个站点内重新定位。不去就近编一个坐标。")
+                "进去,再在单个站点内重新定位。不去就近编一个坐标。",
+                   "This wall was only located to coarse-motion steps (+/-N steps between sites), "
+                   f"with no metre coordinates, so a line cannot be laid out. {CROSS_SITE_HINT}: do a "
+                   "half-step coarse move between the two sites to insert a new site, then locate "
+                   "again inside a single site. No nearby coordinate is made up."))
 
         ends: dict[str, Any] = {}
         for role in ("lo", "hi"):
@@ -349,15 +426,20 @@ class LineSTSAcrossWall(CompositeSkillGraph):
             if not cand:
                 return self._refuse(
                     "bracket_not_found",
-                    f"bracket {bracket_id!r} 缺 {role} 端的标记 —— 二分没跑完,"
-                    "或者标记没落库。")
+                    tr(f"bracket {bracket_id!r} 缺 {role} 端的标记 —— 二分没跑完,"
+                    "或者标记没落库。",
+                       f"bracket {bracket_id!r} has no marker for its {role} end: the bisection did "
+                       "not finish, or the marker was not stored."))
             picked, ordered = _latest(cand)
             if not ordered:
                 return self._refuse(
                     "bracket_ambiguous",
-                    f"bracket {bracket_id!r} 的 {role} 端有 {len(cand)} 条标记,"
+                    tr(f"bracket {bracket_id!r} 的 {role} 端有 {len(cand)} 条标记,"
                     "而时间戳定不出先后 ⇒ 不知道哪一条是当前端点,**不猜**。"
-                    "请指定一个更细的 bracket_id。")
+                    "请指定一个更细的 bracket_id。",
+                       f"The {role} end of bracket {bracket_id!r} has {len(cand)} markers and the "
+                       "timestamps cannot order them => it is unknown which is the current endpoint, "
+                       "**not guessing**. Specify a finer bracket_id."))
             ends[role] = picked
 
         for role, m in ends.items():
@@ -365,16 +447,22 @@ class LineSTSAcrossWall(CompositeSkillGraph):
             if not v or v == _VERDICT_UNDETERMINED:
                 return self._refuse(
                     "verdict_undetermined",
-                    f"bracket {bracket_id!r} 的 {role} 端判定是 "
+                    tr(f"bracket {bracket_id!r} 的 {role} 端判定是 "
                     f"{v or '(空)'} —— 「判不了」不等于「在畴 X 里」。"
                     "先把这一端重扫/重判,再跑线谱。",
+                       f"The verdict at the {role} end of bracket {bracket_id!r} is {v or '(empty)'}: "
+                       "'undecidable' does not mean 'inside domain X'. Rescan/re-judge this end "
+                       "first, then run the line."),
                     verdict_reason=_meta(m).get("verdict_reason"))
         if str(_meta(ends["lo"]).get("verdict")) == str(_meta(ends["hi"]).get("verdict")):
             return self._refuse(
                 "bracket_verdicts_agree",
-                f"bracket {bracket_id!r} 两端的判定相同"
+                tr(f"bracket {bracket_id!r} 两端的判定相同"
                 f"({_meta(ends['lo']).get('verdict')!r}),中间并没有确立一道畴界。"
-                "在这条线上跑一晚只会得到一族一模一样的谱。")
+                "在这条线上跑一晚只会得到一族一模一样的谱。",
+                   f"Both ends of bracket {bracket_id!r} have the same verdict "
+                   f"({_meta(ends['lo']).get('verdict')!r}), so no domain wall is established in "
+                   "between. Running a night on this line would only give a set of identical spectra."))
 
         lo, hi = ends["lo"], ends["hi"]
         geom = resolve_line_geometry(
@@ -388,21 +476,28 @@ class LineSTSAcrossWall(CompositeSkillGraph):
         if not mixed:
             return self._refuse(
                 "mixed_frame_not_found",
-                f"搜索 {search_id!r} 下没有判成 {_VERDICT_MIXED!r} 的帧,而 "
-                "bracket_id 也没给。请给 bracket_id(一对 lo/hi)。")
+                tr(f"搜索 {search_id!r} 下没有判成 {_VERDICT_MIXED!r} 的帧,而 "
+                "bracket_id 也没给。请给 bracket_id(一对 lo/hi)。",
+                   f"Search {search_id!r} has no frame judged {_VERDICT_MIXED!r}, and no bracket_id "
+                   "was given. Give a bracket_id (a lo/hi pair)."))
         if len(mixed) > 1:
             where = ", ".join(f"({m.x_m}, {m.y_m})" for m in mixed[:5])
             return self._refuse(
                 "mixed_frame_ambiguous",
-                f"搜索 {search_id!r} 下有 {len(mixed)} 帧判成 {_VERDICT_MIXED!r}"
+                tr(f"搜索 {search_id!r} 下有 {len(mixed)} 帧判成 {_VERDICT_MIXED!r}"
                 f"({where}…) —— 不猜用哪一帧。请给 bracket_id,或用显式几何指定"
-                "线的中心。")
+                "线的中心。",
+                   f"Search {search_id!r} has {len(mixed)} frames judged {_VERDICT_MIXED!r} "
+                   f"({where}...): not guessing which frame to use. Give a bracket_id, or specify the "
+                   "line centre with explicit geometry."))
         frame = mixed[0]
         if looks_like_cross_site(_meta(frame), x_m=getattr(frame, "x_m", None),
                                  y_m=getattr(frame, "y_m", None)):
             return self._refuse(
                 "cross_site_no_metres",
-                f"这一条结果没有米坐标,线谱无从布点。{CROSS_SITE_HINT}。")
+                tr(f"这一条结果没有米坐标,线谱无从布点。{CROSS_SITE_HINT}。",
+                   "This result has no metre coordinates, so a line cannot be laid out. "
+                   f"{CROSS_SITE_HINT}."))
 
         # 轴向:优先用同一次搜索里的 bracket;没有就要求显式给角度。
         # **绝不拿 scan_angle_deg 当轴角** —— 它读不到时是 null 而不是 0,而且
@@ -419,7 +514,7 @@ class LineSTSAcrossWall(CompositeSkillGraph):
             lo_xy=lo_xy, hi_xy=hi_xy,
             axis_deg=params.get("axis_deg"),
             uncertainty_m=params.get("uncertainty_m"),
-            source_note=f"mixed 帧 @ search {search_id}")
+            source_note=tr(f"mixed 帧 @ search {search_id}", f"mixed frame @ search {search_id}"))
         used = [frame] + ([lo[0], hi[0]] if lo_xy else [])
         return geom, self._evidence(search_id, "", used, form="mixed_frame")
 
@@ -455,8 +550,11 @@ class LineSTSAcrossWall(CompositeSkillGraph):
         if len(versions) > 1:
             return self._refuse(
                 "reference_version_conflict",
-                f"这个 bracket 的两端是按不同版本的参照系判的({versions}) —— "
-                "两端不可比,不能当成一道畴界。请用同一版参照系重判。")
+                tr(f"这个 bracket 的两端是按不同版本的参照系判的({versions}) —— "
+                "两端不可比,不能当成一道畴界。请用同一版参照系重判。",
+                   "The two ends of this bracket were judged under different reference-frame "
+                   f"versions ({versions}): they are not comparable and cannot count as one domain "
+                   "wall. Re-judge with the same reference-frame version."))
         if not require:
             evidence["reference_confirmed_by"] = None
             evidence["reference_confirmation_bypassed"] = True
@@ -464,22 +562,32 @@ class LineSTSAcrossWall(CompositeSkillGraph):
         if evidence.get("reference_version_missing") or not versions:
             return self._refuse(
                 "reference_version_unknown",
-                "标记里没有记下是按哪一版参照系判的,因此**无法确认**这道畴界经过"
-                "人工确认。「读不到」不是「确认过」⇒ 不跑一晚上。")
+                tr("标记里没有记下是按哪一版参照系判的,因此**无法确认**这道畴界经过"
+                "人工确认。「读不到」不是「确认过」⇒ 不跑一晚上。",
+                   "The markers do not record which reference-frame version was used, so it **cannot "
+                   "be confirmed** that this wall was confirmed by a person. 'Unreadable' is not "
+                   "'confirmed' => not running for a whole night."))
         from mast.vision.domain_reference import load_reference
 
         ref = load_reference(version=versions[0])
         if ref is None:
             return self._refuse(
                 "reference_not_found",
-                f"找不到版本为 {versions[0]!r} 的畴参照系(判定就是按它做的)。"
-                "参照系文件缺失/损坏时一律当作没有参照系。")
+                tr(f"找不到版本为 {versions[0]!r} 的畴参照系(判定就是按它做的)。"
+                "参照系文件缺失/损坏时一律当作没有参照系。",
+                   f"Domain reference frame version {versions[0]!r} not found (the verdicts were made "
+                   "with it). A missing or corrupted reference-frame file always counts as no "
+                   "reference frame."))
         if not str(getattr(ref, "confirmed_by", "") or "").strip():
             return self._refuse(
                 "reference_not_confirmed",
-                f"参照系 {versions[0]} 还没有人确认过(confirmed_by 是空的)。"
+                tr(f"参照系 {versions[0]} 还没有人确认过(confirmed_by 是空的)。"
                 "一条线谱是一晚上,跑在没人看过的「畴界」上是最贵的浪费 ⇒ 先让人"
-                "看一眼那两簇帧并确认,或显式把 require_confirmed_reference 关掉。")
+                "看一眼那两簇帧并确认,或显式把 require_confirmed_reference 关掉。",
+                   f"Reference frame {versions[0]} has not been confirmed by anyone yet (confirmed_by "
+                   "is empty). A line scan takes a night, and running it on a 'wall' nobody has "
+                   "looked at is the costliest waste => have a person look at the two clusters of "
+                   "frames and confirm, or explicitly turn off require_confirmed_reference."))
         evidence["reference_confirmed_by"] = ref.confirmed_by
         evidence["reference_confirmation_bypassed"] = False
         return None
@@ -515,7 +623,7 @@ class LineSTSAcrossWall(CompositeSkillGraph):
         budget = self._budget_out
         if plan is None:      # 没走到布点就被中止 —— 如实说,不去编一份摘要
             return {"acquired": False, "points": [],
-                    "note": "没有走到布点这一步"}
+                    "note": tr("没有走到布点这一步", "Did not reach the point-layout step")}
         out: dict[str, Any] = dict(plan.summary_dict())
         out.update(self._evidence_out)
         out["estimated_duration_s"] = budget.get("total_s")
@@ -573,9 +681,12 @@ class LineSTSAcrossWall(CompositeSkillGraph):
                 if not str(params.get("domain_search_id") or "").strip():
                     return self._refuse(
                         "no_input",
-                        "既没有 domain_search_id(优先形态:说一个 id,不说四个"
+                        tr("既没有 domain_search_id(优先形态:说一个 id,不说四个"
                         "浮点数),也没有完整的显式几何(origin_x_m + origin_y_m + "
-                        "axis_deg + uncertainty_m)。")
+                        "axis_deg + uncertainty_m)。",
+                           "Neither a domain_search_id (preferred form: give an id, not four floats) "
+                           "nor complete explicit geometry (origin_x_m + origin_y_m + axis_deg + "
+                           "uncertainty_m)."))
                 got = self._geometry_from_map(params)
                 if isinstance(got, SkillResult):
                     return got
@@ -618,10 +729,13 @@ class LineSTSAcrossWall(CompositeSkillGraph):
         # 交给引擎的位置表 **按采集顺序**(D23:|s| 升序),引擎按列表顺序走。
         self._positions_payload = plan.positions()
 
-        head = (f"线谱 {plan.point_count} 点,沿 bracket 轴"
+        head = (tr(f"线谱 {plan.point_count} 点,沿 bracket 轴"
                 f"(方位 {plan.axis_angle_deg:.1f}°,**不是畴界法向**),"
                 f"精细窗 ±{plan.fine_half_width_m * 1e9:.1f} nm"
-                f"(来源: {plan.fine_half_width_source})。")
+                f"(来源: {plan.fine_half_width_source})。",
+                   f"Line scan of {plan.point_count} points along the bracket axis (azimuth "
+                   f"{plan.axis_angle_deg:.1f} deg, **not the wall normal**), fine window "
+                   f"+/-{plan.fine_half_width_m * 1e9:.1f} nm (source: {plan.fine_half_width_source})."))
         note = format_duration_note(budget)
 
         if params.get("dry_run"):
@@ -641,7 +755,7 @@ class LineSTSAcrossWall(CompositeSkillGraph):
             })
             return SkillResult(
                 skill_name=self._skill_name(), success=True, data=data,
-                summary=head + note + "(dry_run:没有采集)")
+                summary=head + note + tr("(dry_run:没有采集)", " (dry_run: nothing acquired)"))
 
         result = self._graph_execute(context, params)
         result.summary = head + note

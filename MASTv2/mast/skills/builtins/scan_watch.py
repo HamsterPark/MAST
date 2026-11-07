@@ -18,6 +18,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ class WatchScanLines(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "在**不停止**正在运行的扫描的前提下看它一眼：进行到哪儿了、"
+                tr("在**不停止**正在运行的扫描的前提下看它一眼：进行到哪儿了、"
                 "自某条游标行以来是否还在推进、以及新扫出来的那些行长什么样"
                 "（粗糙度、量程、倾斜、行间相关性、piezo 饱和）。扫一帧要花几分钟，"
                 "而这个只花一次 TCP 往返 —— 于是「这一帧还值不值得扫完」不再是"
@@ -46,26 +47,26 @@ class WatchScanLines(BaseSkill):
                 "观察 —— 判语归判据类技能（AssessAtomicLines、CheckScanForCrash）。"
                 "把 last_line_index 当作游标传回 since_line 即可；"
                 "新增 0 行意味着扫描停了、卡住了、或者正扫在一行中间 —— "
-                "这是一个必须有人处理的信号。"
+                "这是一个必须有人处理的信号。", "Take a look at a running scan **without stopping it**: how far it has got, whether it is still advancing since a cursor line, and what the newly scanned lines look like (roughness, range, tilt, line-to-line correlation, piezo saturation). A frame takes minutes to scan, while this takes one TCP round trip - so \"is this frame worth finishing\" is no longer a question that takes minutes to answer. It reports **measured values** plus flagged observations - verdicts belong to the assessment skills (AssessAtomicLines, CheckScanForCrash). Pass last_line_index back as since_line to use it as a cursor; 0 new lines means the scan has stopped, is stuck, or is in the middle of a line - a signal that someone must handle.")
             ),
             parameters=[
                 ParameterSpec(
                     name="direction", type="int",
-                    description="1 = 正扫，0 = 反扫（对应 .sxm 的 forward / backward）。",
+                    description=tr("1 = 正扫，0 = 反扫（对应 .sxm 的 forward / backward）。", "1 = forward scan, 0 = backward scan (corresponds to forward / backward in the .sxm)."),
                     required=False, default=1, min_value=0, max_value=1),
                 ParameterSpec(
                     name="since_line", type="int",
-                    description=("游标：只统计行号比它「更新」的那些行。-1 = 全部已扫出的行。"
-                                 "把上一次回包里的 last_line_index 传回来即可。"),
+                    description=(tr("游标：只统计行号比它「更新」的那些行。-1 = 全部已扫出的行。"
+                                 "把上一次回包里的 last_line_index 传回来即可。", "Cursor: only count lines whose index is \"newer\" than it. -1 = all lines scanned so far. Pass back the last_line_index from the previous reply.")),
                     required=False, default=-1, min_value=-1, max_value=100000),
                 ParameterSpec(
                     name="channel_index", type="int",
-                    description=("强行指定**信号索引**（不是缓冲位）。-1 = 自己去 "
-                                 "Scan_BufferGet 找 Z。"),
+                    description=(tr("强行指定**信号索引**（不是缓冲位）。-1 = 自己去 "
+                                 "Scan_BufferGet 找 Z。", "Force a **signal index** (not a buffer slot). -1 = look up Z yourself via Scan_BufferGet.")),
                     required=False, default=-1, min_value=-1, max_value=127),
                 ParameterSpec(
                     name="max_lines", type="int",
-                    description="最多统计这么多条最新的行（省算力）。0 = 不限。",
+                    description=tr("最多统计这么多条最新的行（省算力）。0 = 不限。", "Count at most this many of the newest lines (saves compute). 0 = no limit."),
                     required=False, default=64, min_value=0, max_value=4096),
             ],
             estimated_duration_s=1.5,
@@ -96,15 +97,15 @@ class WatchScanLines(BaseSkill):
         if img is None:
             return SkillResult(
                 skill_name="WatchScanLines", success=False,
-                error=("取不到通道 %d 的帧：%s　（扫描缓冲里的通道是 %s —— "
-                       "这个参数要的是**信号索引**，不是缓冲位）"
+                error=(tr("取不到通道 %d 的帧：%s　（扫描缓冲里的通道是 %s —— "
+                       "这个参数要的是**信号索引**，不是缓冲位）", "Could not get the frame for channel %d: %s  (the channels in the scan buffer are %s - this parameter wants a **signal index**, not a buffer slot)")
                        % (ro.z_index, why, ro.channels)),
                 data=ro.as_dict(), nanonis_calls=calls)
 
         a = np.asarray(img, dtype=float)
         if a.ndim != 2:
             return SkillResult(skill_name="WatchScanLines", success=False,
-                               error="帧不是二维：shape=%s" % (a.shape,),
+                               error=tr("帧不是二维：shape=%s", "Frame is not 2D: shape=%s") % (a.shape,),
                                data=ro.as_dict(), nanonis_calls=calls)
 
         filled = usable_rows(a)
@@ -123,8 +124,8 @@ class WatchScanLines(BaseSkill):
             data["advancing"] = False
             data["n_lines_new"] = 0
             data["observations"] = [
-                "帧缓冲里一行都还没有 —— 扫描可能刚起、或者根本没在扫。"
-                "这不等于「表面是平的」。"]
+                tr("帧缓冲里一行都还没有 —— 扫描可能刚起、或者根本没在扫。"
+                "这不等于「表面是平的」。", "There are no lines in the frame buffer yet - the scan may have just started, or is not scanning at all. This does not mean \"the surface is flat\".")]
             return SkillResult(skill_name="WatchScanLines", success=True, data=data,
                                summary=data["observations"][0], nanonis_calls=calls)
 
@@ -132,8 +133,8 @@ class WatchScanLines(BaseSkill):
         low_unscanned = not bool(filled[0])
         last_line = int(idx.min() if low_unscanned else idx.max())
         data["last_line_index"] = last_line
-        data["scan_direction_hint"] = ("行号从大到小填（未扫区在低号侧）"
-                                       if low_unscanned else "行号从小到大填")
+        data["scan_direction_hint"] = (tr("行号从大到小填（未扫区在低号侧）", "line indices fill from high to low (unscanned region on the low side)")
+                                       if low_unscanned else tr("行号从小到大填", "line indices fill from low to high"))
 
         if since < 0:
             new_idx = idx
@@ -186,17 +187,17 @@ class WatchScanLines(BaseSkill):
         obs: list[str] = []
         if since >= 0 and new_idx.size == 0:
             obs.append(
-                "自上次以来**一行新的都没有** —— 扫描停了、卡了，或者正好在换行。"
-                "这条要有人接：接着对同一张不再更新的图打分，看到的都是旧的。")
+                tr("自上次以来**一行新的都没有** —— 扫描停了、卡了，或者正好在换行。"
+                "这条要有人接：接着对同一张不再更新的图打分，看到的都是旧的。", "**No new lines at all** since last time - the scan has stopped, is stuck, or is exactly at a line change. Someone has to pick this up: scoring the same image that is no longer updating only shows stale data."))
         if corr is not None and corr < _CORR_HINT:
-            obs.append("行间相关只有 %.2f（提醒，不是判定）—— 稳定表面上相邻行"
-                       "通常 0.9 以上；低到这里常见于针尖不稳或成条纹。" % corr)
+            obs.append(tr("行间相关只有 %.2f（提醒，不是判定）—— 稳定表面上相邻行"
+                       "通常 0.9 以上；低到这里常见于针尖不稳或成条纹。", "Line-to-line correlation is only %.2f (a reminder, not a verdict) - adjacent lines on a stable surface are usually above 0.9; this low is common with an unstable tip or streaks.") % corr)
         if sat > 0.02:
-            obs.append("有 %.1f%% 的点贴着自己那一行的极值 —— 可能压电到头了。" % (100 * sat))
+            obs.append(tr("有 %.1f%% 的点贴着自己那一行的极值 —— 可能压电到头了。", "%.1f%% of points sit at the extreme of their own line - the piezo may have run out of range.") % (100 * sat))
         if not obs:
-            obs.append("已扫 %d/%d 行；新行 %s；粗糙度中位 %.3g m、量程 %.3g m。"
+            obs.append(tr("已扫 %d/%d 行；新行 %s；粗糙度中位 %.3g m、量程 %.3g m。", "Scanned %d/%d lines; new lines %s; median roughness %.3g m, range %.3g m.")
                        % (n_done, n_total,
-                          ("%d 条" % new_idx.size) if since >= 0 else "（没给游标）",
+                          (tr("%d 条", "%d") % new_idx.size) if since >= 0 else tr("（没给游标）", "(no cursor given)"),
                           rms, rng))
         data["observations"] = obs
 

@@ -21,6 +21,7 @@ detail, not four decisions.
 
 from __future__ import annotations
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -67,39 +68,40 @@ class StartDataLog(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "把一路或多路信号通道录进一个文件，录固定时长、或一直录到被停止。想**盯着**某个量随时间怎么走时用它，"
+                tr("把一路或多路信号通道录进一个文件，录固定时长、或一直录到被停止。想**盯着**某个量随时间怎么走时用它，"
                 "而不是去轮询：热漂移的稳定过程、针尖的缓慢退化、一次长退火期间的电流。\n"
                 "\n"
                 "通道序号取自信号目录（0=Current，24=Z，…）—— 拿不准就调 ListSignalNames。"
-                "录制不会碰仪器；它只读。"
+                "录制不会碰仪器；它只读。",
+                "Record one or more signal channels to a file, for a fixed duration or until stopped. Use it when you want to **watch** a quantity over time rather than poll it: the settling of thermal drift, slow degradation of the tip, the current during a long anneal.\n\nChannel numbers come from the signal catalogue (0=Current, 24=Z, ...) - if unsure call ListSignalNames. Recording does not touch the instrument; it is read-only.")
             ),
             parameters=[
                 ParameterSpec(
                     name="channels", type="str",
-                    description="要录的信号序号，逗号分隔（例如 '0,24'）",
+                    description=tr("要录的信号序号，逗号分隔（例如 '0,24'）", "Signal indices to record, comma-separated (e.g. '0,24')"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="duration_s", type="float",
                     description=(
-                        "录制时长，单位秒。不传（或传 0）则一直录到 StopDataLog 为止。"
+                        tr("录制时长，单位秒。不传（或传 0）则一直录到 StopDataLog 为止。", "Recording duration in seconds. If omitted (or 0), it records until StopDataLog.")
                     ),
                     unit="s", required=False, default=0.0,
                     min_value=0.0, max_value=86400.0,
                 ),
                 ParameterSpec(
                     name="basename", type="str",
-                    description="Nanonis 机器上的文件基名",
+                    description=tr("Nanonis 机器上的文件基名", "File base name on the Nanonis machine"),
                     required=False, default="mast_log",
                 ),
                 ParameterSpec(
                     name="averaging", type="int",
-                    description="每个记录点平均多少个采样",
+                    description=tr("每个记录点平均多少个采样", "How many samples to average per recorded point"),
                     required=False, default=1, min_value=1, max_value=100000,
                 ),
                 ParameterSpec(
                     name="comment", type="str",
-                    description="存进日志文件头的注释",
+                    description=tr("存进日志文件头的注释", "Comment stored in the log file header"),
                     required=False, default="",
                 ),
             ],
@@ -112,7 +114,7 @@ class StartDataLog(BaseSkill):
         chs = _channels(params["channels"])
         if not chs:
             return _fail("StartDataLog",
-                         f"channels 解析失败：{params['channels']!r}（应为逗号分隔的索引）", [])
+                         tr(f"channels 解析失败：{params['channels']!r}（应为逗号分隔的索引）", f"Failed to parse channels: {params['channels']!r} (expected comma-separated indices)"), [])
         total = float(params.get("duration_s", 0.0) or 0.0)
         avg = int(params.get("averaging", 1) or 1)
         base = str(params.get("basename", "mast_log") or "mast_log")
@@ -162,7 +164,7 @@ class StopDataLog(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
-            description="停掉 Nanonis 数据记录器并关闭文件。",
+            description=tr("停掉 Nanonis 数据记录器并关闭文件。", "Stop the Nanonis data logger and close the file."),
             parameters=[],
             estimated_duration_s=0.5,
             composition_level=0,
@@ -187,8 +189,9 @@ class GetDataLogStatus(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读数据记录器的状态（在跑／已停）、它配置的通道，以及它的各项属性。开一次新记录之前先看这个 —— 在一个正在跑的记录之上再开一个，"
-                "会把前一个丢掉。"
+                tr("读数据记录器的状态（在跑／已停）、它配置的通道，以及它的各项属性。开一次新记录之前先看这个 —— 在一个正在跑的记录之上再开一个，"
+                "会把前一个丢掉。",
+                "Read the data logger state (running / stopped), its configured channels and its properties. Look at this before starting a new recording - starting another on top of a running one drops the earlier one.")
             ),
             parameters=[],
             estimated_duration_s=0.3,
@@ -222,18 +225,19 @@ class StartTcpLog(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "启动 TCP 记录器：把选定的通道通过 TCP 流式送出，而不是录到 Nanonis 机器上的文件里。"
-                "数据应当送到**这边**来的时候用它。只读 —— 不碰任何硬件。"
+                tr("启动 TCP 记录器：把选定的通道通过 TCP 流式送出，而不是录到 Nanonis 机器上的文件里。"
+                "数据应当送到**这边**来的时候用它。只读 —— 不碰任何硬件。",
+                "Start the TCP logger: stream the selected channels out over TCP instead of recording to a file on the Nanonis machine. Use it when the data should come **here**. Read-only - touches no hardware.")
             ),
             parameters=[
                 ParameterSpec(
                     name="channels", type="str",
-                    description="要流式送出的信号序号，逗号分隔",
+                    description=tr("要流式送出的信号序号，逗号分隔", "Signal indices to stream out, comma-separated"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="oversampling", type="int",
-                    description="每个送出点平均多少个采样",
+                    description=tr("每个送出点平均多少个采样", "How many samples to average per streamed point"),
                     required=False, default=10, min_value=1, max_value=100000,
                 ),
             ],
@@ -246,7 +250,7 @@ class StartTcpLog(BaseSkill):
         chs = _channels(params["channels"])
         if not chs:
             return _fail("StartTcpLog",
-                         f"channels 解析失败：{params['channels']!r}", [])
+                         tr(f"channels 解析失败：{params['channels']!r}", f"Failed to parse channels: {params['channels']!r}"), [])
         over = int(params.get("oversampling", 10) or 10)
         calls = []
 
@@ -281,7 +285,7 @@ class StopTcpLog(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
-            description="停掉 Nanonis TCP 记录器的数据流。",
+            description=tr("停掉 Nanonis TCP 记录器的数据流。", "Stop the data stream of the Nanonis TCP logger."),
             parameters=[],
             estimated_duration_s=0.4,
             composition_level=0,
@@ -305,7 +309,7 @@ class GetTcpLogStatus(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读 TCP 记录器的状态（在流式送出／已停／出错）。",
+            description=tr("读 TCP 记录器的状态（在流式送出／已停／出错）。", "Read the TCP logger state (streaming / stopped / error)."),
             parameters=[],
             estimated_duration_s=0.3,
             composition_level=0,

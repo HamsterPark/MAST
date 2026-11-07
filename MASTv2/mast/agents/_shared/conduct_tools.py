@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from langchain_core.tools import tool
 
@@ -103,14 +103,37 @@ def _store():
     return _readonly_store(), False
 
 
-def make_conduct_tools(agent_name: str = "") -> list:
+def make_conduct_tools(agent_name: str = "",
+                       context: "Callable[[], dict] | None" = None) -> list:
     """建这一族工具。
 
     *agent_name* 只用来在审计流里署名（``agent:<name>``）—— **不用来决定
     给不给**。署名会进 ``approved_by`` / op 的 ``by`` 字段，于是「谁点的头」
     永远答得上来。
+
+    *context* 是零参调用，返回 ``{"plan_store": ..., "registry": ...}`` —— 编译器要的两样
+    （``CoreRuntime._conduct_tool_context``）。编译器从不自己按默认路径建 plan 库；若这里裸调
+    ``compile_plan_to_conduct_spec(plan_id)``，``conduct_compile_from_plan``
+    与 ``conduct_create(from_plan_id=…)`` 对每个 agent 都**必然**失败（「需要显式 plan_store」）。
     """
     who = f"agent:{agent_name or 'unknown'}"
+
+    def _compile_plan(plan_id: str):
+        """``(CompileResult | None, 取不到的理由)``，与 ``api/routes/conducts.py`` 的 ``_compile`` 同形：
+        编译**没能发生**（plan 库没接上）和编译发生了、结论是编不动，是两件事。"""
+        try:
+            ctx = dict(context() or {}) if callable(context) else {}
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("conduct 工具：context 取不到（%s）", exc)
+            ctx = {}
+        store = ctx.get("plan_store")
+        if store is None:
+            return None, ("plan 库没接上 —— 编译器不会自己按默认路径建一个库（那是在真实实验库上动手）；"
+                          "这不是「方案有问题」")
+        from mast.conduct.compiler import compile_plan_to_conduct_spec
+
+        return compile_plan_to_conduct_spec(plan_id, plan_store=store,
+                                            registry=ctx.get("registry")), ""
 
     @tool
     def conduct_status(conduct_id: str = "") -> str:
@@ -180,13 +203,11 @@ def make_conduct_tools(agent_name: str = "") -> list:
         这台机器上没有），照着改 plan 再试。**这一步不建任何东西。**
         """
         try:
-            from mast.conduct.compiler import compile_plan_to_conduct_spec
-        except Exception as exc:  # noqa: BLE001
-            return _j({"ok": False, "reason": f"编译器不可用: {exc}"})
-        try:
-            res = compile_plan_to_conduct_spec(plan_id)
+            res, why = _compile_plan(plan_id)
         except Exception as exc:  # noqa: BLE001
             return _j({"ok": False, "reason": f"编译失败: {exc}"})
+        if res is None:
+            return _j({"ok": False, "reason": why})
         return _j({
             "ok": bool(getattr(res, "ok", False)),
             "spec_id": getattr(getattr(res, "spec", None), "spec_id", None),
@@ -224,9 +245,9 @@ def make_conduct_tools(agent_name: str = "") -> list:
         sid, warns = spec_id, []
         if from_plan_id and not params:
             try:
-                from mast.conduct.compiler import compile_plan_to_conduct_spec
-
-                res = compile_plan_to_conduct_spec(from_plan_id)
+                res, why = _compile_plan(from_plan_id)
+                if res is None:
+                    return _j({"ok": False, "reason": f"方案没能编译，没有建：{why}"})
                 if not res.ok:
                     return _j({"ok": False, "reason": "方案编译不通过，没有建",
                                "errors": [{"code": e.code, "slot": e.slot_name,

@@ -33,6 +33,7 @@ INSIDE the handler in try/except (mirrors routes/admin.py + routes/skills.py).
 from __future__ import annotations
 
 import copy
+from mast.i18n import tr
 import logging
 from typing import Any
 
@@ -95,16 +96,19 @@ _ENCYCLOPEDIA_SECTIONS = {
 _READ_ONCE_AT_STARTUP: dict[str, str] = {
     # runtime._init_experiment_folders 在启动时读它决定建不建 ingest sink；
     # 之后 _ingest_submit 不再问。关掉它当场不停，打开它当场也不开。
-    "ingest_enabled": "归档总开关",
+    "ingest_enabled": tr("归档总开关", "Archive master switch"),
     # 下面几个在 _chat_agent_middleware / _chat_call_limits 里读，
     # 而 agent 的图是建好就冻住的。
-    "tool_refine_enabled": "工具返回精炼",
-    "tool_refine_min_chars": "精炼阈值",
-    "compaction_model": "压缩摘要模型",
-    "chat_model_calls_per_run": "单次模型调用上限",
-    "chat_tool_calls_per_run": "单次工具调用上限",
-    "chat_model_calls_per_thread": "累计模型调用上限",
-    "chat_tool_calls_per_thread": "累计工具调用上限",
+    "tool_refine_enabled": tr("工具返回精炼", "Tool-result refinement"),
+    "tool_refine_min_chars": tr("精炼阈值", "Refinement threshold"),
+    "compaction_model": tr("压缩摘要模型", "Compaction summary model"),
+    "chat_model_calls_per_run": tr("单次模型调用上限", "Per-run model call limit"),
+    "chat_tool_calls_per_run": tr("单次工具调用上限", "Per-run tool call limit"),
+    "chat_model_calls_per_thread": tr("累计模型调用上限", "Cumulative model call limit"),
+    "chat_tool_calls_per_thread": tr("累计工具调用上限", "Cumulative tool call limit"),
+    # 站点画像：起不起 Nanonis 连接与线程在 runtime.setup 里一次性决定
+    # （mast.station.restart_pending 据此告诉界面「改了还没重启」）。
+    "station_profile": tr("站点画像", "Station profile settings"),
 }
 
 
@@ -254,15 +258,16 @@ def write_settings(request: Request, body: SettingsWriteRequest) -> SettingsWrit
     if store is None:
         return SettingsWriteResponse(ok=False, degraded=True)
 
-    # ── PIN guard on the two capability keys ─────────────────────────────────
+    # ── PIN guard on the keys in admin_pin.GUARDED_KEYS ──────────────────────
     # `advanced_capabilities` grants powers that step around a protection (loading a
     # script into a slot the allow-list vets, quitting Nanonis, a scan config MAST
     # cannot read). `hardware_modules` grants DANGEROUS skills the moment a module is
     # switched on — a laser, an RF amplifier, probes that can collide.
+    # `station_profile` decides at the next start whether this process dials Nanonis
+    # and runs the tip-crash watchdog (STM) or not (optical).
     #
-    # Both are written from 高级 (the admin page) and both require the PIN. Everything
-    # else in 设置 is unguarded: getting the model or the voice wrong costs quality,
-    # not safety.
+    # All of them require the PIN. Everything else in 设置 is unguarded: getting the
+    # model or the voice wrong costs quality, not safety.
     #
     # This is NOT a defence against the model — the agent has no HTTP tool and no
     # settings tool; its whole surface is Nanonis skills. It is a defence against a
@@ -300,7 +305,7 @@ def write_settings(request: Request, body: SettingsWriteRequest) -> SettingsWrit
             logger.warning("scan_policy 校验异常: %s", exc)
             return SettingsWriteResponse(
                 ok=False, degraded=False,
-                rejected={"scan_policy": f"档位表校验失败: {exc}"},
+                rejected={"scan_policy": tr(f"档位表校验失败: {exc}", f"Tier table validation failed: {exc}")},
             )
 
     # 自定义 Z 参数组:同样「结构非法就一个字节都不写」。这里的理由更硬一层 ——
@@ -323,14 +328,14 @@ def write_settings(request: Request, body: SettingsWriteRequest) -> SettingsWrit
             logger.warning("zctrl_presets 校验异常: %s", exc)
             return SettingsWriteResponse(
                 ok=False, degraded=False,
-                rejected={"zctrl_presets": f"参数组校验失败: {exc}"},
+                rejected={"zctrl_presets": tr(f"参数组校验失败: {exc}", f"Parameter set validation failed: {exc}")},
             )
 
     # Nanonis 端口:同样「非法就一个字节都不写」。这里的失败是**延迟**的 ——
     # 存一个 70000 不会当场报错,``apply_to_config`` 下次开机把它 setattr 进
     # config.nanonis,然后连接失败,而错在哪只有翻设置文件才看得出来。
     bad_ports = {
-        k: f"端口必须是 1..65535 的整数（收到 {getattr(body, k)}）"
+        k: tr(f"端口必须是 1..65535 的整数（收到 {getattr(body, k)}）", f"Port must be an integer in 1..65535 (got {getattr(body, k)})")
         for k in ("nanonis_port_main", "nanonis_port_monitor",
                   "nanonis_port_data", "nanonis_port_emergency")
         if getattr(body, k) is not None and not (1 <= int(getattr(body, k)) <= 65535)
@@ -353,21 +358,33 @@ def write_settings(request: Request, body: SettingsWriteRequest) -> SettingsWrit
         v = getattr(body, k)
         if v is not None and int(v) < 1:
             bad_values[k] = (
-                f"单次调用上限必须 ≥ 1（收到 {v}）。0 和负数不是「不限」——"
+                tr(f"单次调用上限必须 ≥ 1（收到 {v}）。0 和负数不是「不限」——"
                 f"内核会把它换成出厂默认，你会拿到一个自己没选过的上限。"
-                f"要放宽就填一个大数。")
+                f"要放宽就填一个大数。", f"Per-call limit must be >= 1 (got {v}). 0 and negative values do not mean \"unlimited\": the core replaces them with the factory default, and you would get a limit you never chose. To relax it, enter a large number."))
     for k in ("chat_model_calls_per_thread", "chat_tool_calls_per_thread"):
         v = getattr(body, k)
         if v is not None and int(v) < 0:
-            bad_values[k] = f"跨会话累计上限不能是负数（收到 {v}）。0 = 不限。"
+            bad_values[k] = tr(f"跨会话累计上限不能是负数（收到 {v}）。0 = 不限。", f"Cross-session cumulative limit cannot be negative (got {v}). 0 = unlimited.")
     if body.tool_refine_min_chars is not None and int(body.tool_refine_min_chars) < 1:
         bad_values["tool_refine_min_chars"] = (
-            f"精炼阈值必须 ≥ 1（收到 {body.tool_refine_min_chars}）。"
-            f"想整个关掉精炼请用 tool_refine_enabled。")
+            tr(f"精炼阈值必须 ≥ 1（收到 {body.tool_refine_min_chars}）。"
+            f"想整个关掉精炼请用 tool_refine_enabled。", f"Refinement threshold must be >= 1 (got {body.tool_refine_min_chars}). To turn refinement off entirely, use tool_refine_enabled."))
     if body.ingest_copy_mode is not None and body.ingest_copy_mode not in ("copy", "hardlink"):
         bad_values["ingest_copy_mode"] = (
-            f"归档方式只能是 copy 或 hardlink（收到 {body.ingest_copy_mode!r}）。"
-            f"hardlink 省盘，但源和实验文件夹必须在同一个卷上。")
+            tr(f"归档方式只能是 copy 或 hardlink（收到 {body.ingest_copy_mode!r}）。"
+            f"hardlink 省盘，但源和实验文件夹必须在同一个卷上。", f"Archive mode must be copy or hardlink (got {body.ingest_copy_mode!r}). hardlink saves disk, but the source and the experiment folder must be on the same volume."))
+    # 站点画像：只认 stm / optical。一个拼错的值不能被存下来 —— 读的一侧会把它当
+    # stm 处理（mast.station），于是界面绿字「已保存」而光学站其实没切过去。
+    if body.station_profile is not None:
+        from mast import station as _station
+
+        _prof = _station.normalize(body.station_profile)
+        if _prof is None:
+            bad_values["station_profile"] = (
+                tr(f"站点画像只能是 {' 或 '.join(_station.PROFILES)}（收到 {body.station_profile!r}）。",
+                   f"Station profile must be {' or '.join(_station.PROFILES)} (got {body.station_profile!r})."))
+        else:
+            payload["station_profile"] = _prof      # 存规范形式（"Optical " → "optical"）
     if bad_values:
         logger.warning("settings write REFUSED (取值非法): %s", sorted(bad_values))
         return SettingsWriteResponse(ok=False, degraded=False, rejected=bad_values)
@@ -481,7 +498,7 @@ def write_settings(request: Request, body: SettingsWriteRequest) -> SettingsWrit
         except Exception as exc:
             logger.debug("live apply conduct failed: %s", exc)
 
-    # Experiment default-parameter preferences : push into the process-level
+    # Experiment default-parameter preferences: push into the process-level
     # holder so the IC / experiment_design agents see the operator's preferred scan
     # size / speed / setpoint / bias on their NEXT turn (NO graph rebuild — the
     # experiment_prefs middleware live-reads the holder). Like vision_thresholds it
@@ -552,7 +569,7 @@ def write_settings(request: Request, body: SettingsWriteRequest) -> SettingsWrit
     #      unchanged until the next restart. That is exactly the trap that once
     #      let a deleted composite skill stay callable.
     # The rebuild can honestly decline (a task is mid-run — rebuilding under it
-    # would swap the graph beneath a live run), so we return its note verbatim
+    # would swap the graph beneath a live run), so we return its note as-is
     # rather than claiming success.
     rebuild_note = ""
     if body.hardware_modules is not None:
@@ -582,16 +599,16 @@ def write_settings(request: Request, body: SettingsWriteRequest) -> SettingsWrit
                 rebuild_note = req() or ""
             except Exception as exc:  # noqa: BLE001
                 logger.warning("hardware_modules tool-list rebuild failed: %s", exc)
-                rebuild_note = "（agent 工具表重建失败——请重启生效）"
+                rebuild_note = tr("（agent 工具表重建失败——请重启生效）", "(agent tool table rebuild failed; restart to take effect)")
         else:
             # No live orchestrator (headless API, tests). Persisted + holder set;
             # the next graph build picks it up. Say so instead of implying live.
-            rebuild_note = "（未连接运行中的 agent；下次启动生效）"
+            rebuild_note = tr("（未连接运行中的 agent；下次启动生效）", "(no running agent connected; takes effect on next start)")
 
     # 启动时读一次的那几个：写成功了，但这一轮还在用老值。说出来。
     read_once = [v for k, v in _READ_ONCE_AT_STARTUP.items() if k in payload]
     if read_once:
-        rebuild_note += f"（{'、'.join(read_once)}下次启动生效）"
+        rebuild_note += tr(f"（{'、'.join(read_once)}下次启动生效）", f"({', '.join(read_once)} take effect on next start)")
 
     return SettingsWriteResponse(ok=True, persisted=persisted, applied=applied,
                                  degraded=False, rebuild_note=rebuild_note)

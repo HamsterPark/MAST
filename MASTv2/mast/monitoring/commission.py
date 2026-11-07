@@ -36,16 +36,18 @@ import math
 import sys
 from typing import Any, Iterable, Optional
 
+from mast.i18n import tr
+
 #: Features worth a suggested operating point, and the knob each one drives.
 #: Only WARN-level knobs: the three CRITICAL rules are statements about the
 #: instrument (railed, frozen, huge step) and are not calibrated from a healthy
 #: baseline — a rail is a rail whatever the noise floor happens to be.
 _CALIBRATABLE: tuple[tuple[str, str, str], ...] = (
-    ("rms_detrended_a", "cm_rms_warn_a", "去趋势噪声 RMS"),
-    ("spike_max_sigma", "cm_spike_sigma_warn", "尖峰(σ)"),
-    ("line_ratio", "cm_line_ratio_warn", "工频比"),
-    ("jump_rate_hz", "cm_jump_rate_warn_hz", "跳变率"),
-    ("rtn_score", "cm_rtn_score_warn", "RTN 判分"),
+    ("rms_detrended_a", "cm_rms_warn_a", tr("去趋势噪声 RMS", "Detrended noise RMS")),
+    ("spike_max_sigma", "cm_spike_sigma_warn", tr("尖峰(σ)", "Spike (sigma)")),
+    ("line_ratio", "cm_line_ratio_warn", tr("工频比", "Mains ratio")),
+    ("jump_rate_hz", "cm_jump_rate_warn_hz", tr("跳变率", "Jump rate")),
+    ("rtn_score", "cm_rtn_score_warn", tr("RTN 判分", "RTN score")),
 )
 
 #: Which WARN rule each calibratable feature feeds. Only needed to answer one
@@ -76,8 +78,8 @@ _SAT_SHIPPED_DEFAULT = 90e-9
 # Z 与振幅使用各自量纲的阈值，基线只取不扫描、反馈开启且无技能占用的样本。
 _AUX_CALIBRATABLE: tuple[tuple[str, str, str, bool], ...] = (
     # (aux 列名, knob, 标签, 取绝对值)
-    ("z_drift_m_per_s", "cm_z_drift_warn_m_per_s", "Z 漂移率", True),
-    ("z_step_m", "cm_z_step_warn_m", "Z 台阶", False),
+    ("z_drift_m_per_s", "cm_z_drift_warn_m_per_s", tr("Z 漂移率", "Z drift rate"), True),
+    ("z_step_m", "cm_z_step_warn_m", tr("Z 台阶", "Z step"), False),
 )
 
 #: aux 那两个阈值的出厂猜测值。与 ``_SAT_SHIPPED_DEFAULT`` 同一手法：报告要能回答
@@ -96,8 +98,8 @@ _AUX_SHIPPED_DEFAULTS: dict[str, float] = {
 #: 所以这里只把两条分布摆出来，让人自己看 ``cm_amp_zero_frac`` 站得住站不住：
 #: 未接触时振幅是本底的多少倍（应聚在 1.0 附近），以及相对散布有多大。
 _AUX_REPORT_ONLY: tuple[tuple[str, str], ...] = (
-    ("amp_frac_of_baseline", "振幅 / 未接触本底"),
-    ("amp_rel_sd", "振幅相对散布"),
+    ("amp_frac_of_baseline", tr("振幅 / 未接触本底", "Amplitude / non-contact baseline")),
+    ("amp_rel_sd", tr("振幅相对散布", "Amplitude relative spread")),
 )
 
 
@@ -235,7 +237,9 @@ def _rows_from_api(url: str, hours: float, auth: Optional[str],
                  f"&max_points=5000&columns={cols}")
         aux_rows = _aux_rows_from_series(a)
     except Exception as exc:  # noqa: BLE001
-        print(f"(辅助通道数据不可用,报告将跳过那一段:{exc})", file=sys.stderr)
+        print(tr(f"(辅助通道数据不可用,报告将跳过那一段:{exc})",
+                 f"(Auxiliary channel data unavailable, the report skips that section: {exc})"),
+              file=sys.stderr)
     return (body.get("rows") or []), status, aux_rows
 
 
@@ -323,8 +327,11 @@ def analyse(rows: list[dict], thresholds: dict) -> dict:
             suggestions.append({
                 "feature": key, "knob": knob, "label": label,
                 "current": current, "suggested": None, "n": 0,
-                "note": "窗口内没有安静段,而这条判据在扫描期间本就不判 —— "
-                        "拿扫描段标它会标出样品的台阶密度。请另取一段安静窗口。",
+                "note": tr("窗口内没有安静段,而这条判据在扫描期间本就不判 —— "
+                           "拿扫描段标它会标出样品的台阶密度。请另取一段安静窗口。",
+                           "No quiet segment in the window, and this rule is not judged "
+                           "during scanning anyway: calibrating it on scan segments would "
+                           "calibrate the sample's step density. Pick another, quiet window."),
             })
             continue
         vals = [v for v in (_finite(r.get("metrics", {}).get(key)) for r in baseline)
@@ -332,7 +339,9 @@ def analyse(rows: list[dict], thresholds: dict) -> dict:
         if not vals:
             suggestions.append({"feature": key, "knob": knob, "label": label,
                                 "current": current, "suggested": None,
-                                "n": 0, "note": "该窗口内无可用数据"})
+                                "n": 0,
+                                "note": tr("该窗口内无可用数据",
+                                           "No usable data in this window")})
             continue
         anchor = _pct(vals, _ANCHOR_Q) or 0.0
         would_fire = sum(1 for v in vals if current is not None and v > current)
@@ -347,7 +356,8 @@ def analyse(rows: list[dict], thresholds: dict) -> dict:
                 "baseline_p99": anchor, "n": len(vals),
                 "would_fire_now": would_fire,
                 "would_fire_pct": 100.0 * would_fire / len(vals),
-                "note": "基线上从未触发,无从标定 —— 保留当前值",
+                "note": tr("基线上从未触发,无从标定 —— 保留当前值",
+                           "Never fired on the baseline, cannot calibrate: keeping the current value"),
             })
             continue
         suggestions.append({
@@ -421,7 +431,8 @@ def analyse_aux(rows: list[dict], thresholds: dict) -> dict:
             suggestions.append({"feature": key, "knob": knob, "label": label,
                                 "current": current, "suggested": None, "n": 0,
                                 "uncalibrated": uncalibrated,
-                                "note": "该窗口内没有「停在原地」的样本"})
+                                "note": tr("该窗口内没有「停在原地」的样本",
+                                           "No \"parked\" samples in this window")})
             continue
         anchor = _pct(vals, _ANCHOR_Q) or 0.0
         would_fire = sum(1 for v in vals if current is not None and v > current)
@@ -435,7 +446,9 @@ def analyse_aux(rows: list[dict], thresholds: dict) -> dict:
             "would_fire_now": would_fire,
             "would_fire_pct": 100.0 * would_fire / len(vals),
             "uncalibrated": uncalibrated,
-            "note": None if anchor > 0 else "基线上恒为 0,无从标定 —— 保留当前值",
+            "note": None if anchor > 0 else tr(
+                "基线上恒为 0,无从标定 —— 保留当前值",
+                "Always 0 on the baseline, cannot calibrate: keeping the current value"),
         })
 
     for key, _label in _AUX_REPORT_ONLY:
@@ -479,162 +492,252 @@ def render_aux(report: dict, status: dict) -> str:
     是没采到、还是没开、还是守护没跑。
     """
     aux_status = (status or {}).get("aux") or {}
-    L: list[str] = ["═══ 辅助通道 · Z 位置 / qPlus 振幅 ═══\n"]
+    L: list[str] = [tr("═══ 辅助通道 · Z 位置 / qPlus 振幅 ═══\n",
+                       "═══ Auxiliary channels: Z position / qPlus amplitude ═══\n")]
 
     if not report.get("n_rows"):
-        L.append("【本窗口内没有辅助通道数据】")
+        L.append(tr("【本窗口内没有辅助通道数据】",
+                    "[No auxiliary channel data in this window]"))
         if not aux_status:
-            L.append("  采集守护没在跑（或这个版本还没有辅助通道）——"
-                     "这不是「本机没有 Z / qPlus」，是还没有人去看过。")
+            L.append(tr("  采集守护没在跑（或这个版本还没有辅助通道）——"
+                        "这不是「本机没有 Z / qPlus」，是还没有人去看过。",
+                        "  The acquisition daemon is not running (or this version has no "
+                        "auxiliary channels yet): this does not mean \"this machine has no "
+                        "Z / qPlus\", it means nobody has looked yet."))
         elif not aux_status.get("enabled"):
-            L.append("  记录开关 cm_aux_enabled = 0，所以什么都没记。")
+            L.append(tr("  记录开关 cm_aux_enabled = 0，所以什么都没记。",
+                        "  Recording switch cm_aux_enabled = 0, so nothing was recorded."))
         else:
-            L.append(f"  记录开着但这段时间没有行落盘（detail: "
-                     f"{aux_status.get('detail') or '—'}）。"
-                     "让它跑一段「停在原地」的时间再回来看。")
+            L.append(tr(f"  记录开着但这段时间没有行落盘（detail: "
+                        f"{aux_status.get('detail') or '—'}）。"
+                        "让它跑一段「停在原地」的时间再回来看。",
+                        f"  Recording is on but no rows were written in this period "
+                        f"(detail: {aux_status.get('detail') or '—'}). "
+                        "Let it run for a while with the tip parked and come back."))
         L.append("")
     chans = aux_status.get("channels") or []
     if chans:
-        L.append("【通道】")
+        L.append(tr("【通道】", "[Channels]"))
         for c in chans:
-            avail = "✓" if c.get("available") else "✗ 本机没有"
+            avail = "✓" if c.get("available") else tr("✗ 本机没有", "✗ not on this machine")
             val = c.get("value")
             unit = c.get("unit") or ""
             shown = "—"
             if isinstance(val, (int, float)):
                 shown = (f"{val * 1e12:.2f} pm" if unit == "m" else f"{val:.4g} {unit}")
             L.append(f"  {str(c.get('label_zh') or c.get('kind')):12s} {avail:10s}"
-                     f" #{c.get('signal_index', -1):<4} 最新 {shown:>14s}"
-                     f"  判级 {c.get('verdict', '?')}")
+                     f" #{c.get('signal_index', -1):<4} "
+                     f"{tr('最新', 'latest')} {shown:>14s}"
+                     f"  {tr('判级', 'verdict')} {c.get('verdict', '?')}")
             if c.get("note"):
                 L.append(f"      {c['note']}")
         tau = aux_status.get("amp_tau_s")
         interval = aux_status.get("interval_s") or 0.0
         if tau:
-            verdict = "够" if interval <= tau else "**不够,采样比振幅还慢**"
-            L.append(f"  振幅弛豫 τ = Q/(π f₀) = {tau * 1e3:.0f} ms；"
-                     f"采样间隔 {interval:.2f} s —— {verdict}")
+            verdict = tr("够", "enough") if interval <= tau else tr(
+                "**不够,采样比振幅还慢**", "**not enough, sampling is slower than the amplitude**")
+            L.append(tr(f"  振幅弛豫 τ = Q/(π f₀) = {tau * 1e3:.0f} ms；"
+                        f"采样间隔 {interval:.2f} s —— {verdict}",
+                        f"  Amplitude relaxation tau = Q/(pi f0) = {tau * 1e3:.0f} ms; "
+                        f"sampling interval {interval:.2f} s: {verdict}"))
         else:
-            L.append("  振幅弛豫 τ：未知(没扫过 PLL 共振)。"
-                     "跑 AcquirePLLFreqSweep 之后这里会给出 1 Hz 够不够的**算得出来**的答案。")
+            L.append(tr("  振幅弛豫 τ：未知(没扫过 PLL 共振)。"
+                        "跑 AcquirePLLFreqSweep 之后这里会给出 1 Hz 够不够的**算得出来**的答案。",
+                        "  Amplitude relaxation tau: unknown (PLL resonance never swept). "
+                        "After running AcquirePLLFreqSweep this gives a **computed** answer "
+                        "on whether 1 Hz is enough."))
         if aux_status.get("baseline_amp_m") is None:
-            L.append("  ⚠ 没有未接触本底 → 归零判据静默(没有本底就不知道「不为零」"
-                     "长什么样)。针尖确认未接触时调用"
-                     " ReadTipOscillationAmplitude(set_baseline=True)。")
-        L.append(f"  采样 {aux_status.get('sampled', 0)} 次，"
-                 f"因角色忙跳过 {aux_status.get('skipped_busy', 0)} 次")
+            L.append(tr("  ⚠ 没有未接触本底 → 归零判据静默(没有本底就不知道「不为零」"
+                        "长什么样)。针尖确认未接触时调用"
+                        " ReadTipOscillationAmplitude(set_baseline=True)。",
+                        "  ⚠ No non-contact baseline -> the zero-amplitude rule is silent "
+                        "(without a baseline there is no reference for \"not zero\"). "
+                        "Call ReadTipOscillationAmplitude(set_baseline=True) while the tip "
+                        "is confirmed not in contact."))
+        L.append(tr(f"  采样 {aux_status.get('sampled', 0)} 次，"
+                    f"因角色忙跳过 {aux_status.get('skipped_busy', 0)} 次",
+                    f"  Sampled {aux_status.get('sampled', 0)} times, "
+                    f"skipped {aux_status.get('skipped_busy', 0)} because the role was busy"))
         L.append("")
 
     sizes = report.get("group_sizes") or {}
     if sizes:
-        L.append("【分组样本数】(标定只用「停在原地」组:不扫图 + Z 反馈开 + 无技能占用)")
-        for k, label in (("parked", "停在原地 ←用作基线"), ("scanning", "扫描中"),
-                         ("skill", "技能占用"), ("no_junction", "退针/无结")):
+        L.append(tr("【分组样本数】(标定只用「停在原地」组:不扫图 + Z 反馈开 + 无技能占用)",
+                    "[Samples per group] (calibration uses only the \"parked\" group: "
+                    "not scanning + Z feedback on + no skill using the instrument)"))
+        for k, label in (("parked", tr("停在原地 ←用作基线", "parked <- used as baseline")),
+                         ("scanning", tr("扫描中", "scanning")),
+                         ("skill", tr("技能占用", "skill running")),
+                         ("no_junction", tr("退针/无结", "withdrawn / no junction"))):
             L.append(f"  {label:22s} {sizes.get(k, 0):6d}")
-        L.append("  扫描中的 Z 在跟着形貌走 —— 拿它标阈值,标出来的是样品的台阶高度。")
-        L.append("  退针态的 Z 是**冻住的**(漂移恒 0)——混进基线会把 p99 拉低,")
-        L.append("  于是建议出一个过紧的阈值,装上去之后隧穿态每段都响。")
-        L.append("  标定数据的仪器状态应与实际应用状态一致，")
-        L.append("   避免把退针本底直接当作隧穿状态的阈值依据。")
+        L.append(tr("  扫描中的 Z 在跟着形貌走 —— 拿它标阈值,标出来的是样品的台阶高度。",
+                    "  Z while scanning follows the topography: calibrating on it gives "
+                    "the sample's step height."))
+        L.append(tr("  退针态的 Z 是**冻住的**(漂移恒 0)——混进基线会把 p99 拉低,",
+                    "  Z while withdrawn is **frozen** (drift always 0): mixing it into "
+                    "the baseline pulls p99 down,"))
+        L.append(tr("  于是建议出一个过紧的阈值,装上去之后隧穿态每段都响。",
+                    "  so an overly tight threshold is suggested and every tunnelling "
+                    "segment alerts once it is applied."))
+        L.append(tr("  标定数据的仪器状态应与实际应用状态一致，",
+                    "  The instrument state of the calibration data should match the state "
+                    "it will be applied in,"))
+        L.append(tr("   避免把退针本底直接当作隧穿状态的阈值依据。",
+                    "   so do not use the withdrawn floor as the threshold basis for "
+                    "the tunnelling state."))
         if not sizes.get("parked"):
-            L.append("  ⚠ 基线组为空 —— 需要「针在隧穿态、Z 反馈开着、没在扫图」的时段。")
+            L.append(tr("  ⚠ 基线组为空 —— 需要「针在隧穿态、Z 反馈开着、没在扫图」的时段。",
+                        "  ⚠ Baseline group is empty: needs a period with the tip "
+                        "tunnelling, Z feedback on and no scan running."))
         L.append("")
 
-    L.append("【阈值建议】(p99 × 1.5;绝不自动应用)")
+    L.append(tr("【阈值建议】(p99 × 1.5;绝不自动应用)",
+                "[Suggested thresholds] (p99 x 1.5; never applied automatically)"))
     for s in report.get("suggestions") or []:
         key = s["feature"]
         cur = _fmt(s.get("current"), key)
-        mark = " ★出厂猜测" if s.get("uncalibrated") else ""
+        mark = tr(" ★出厂猜测", " * factory guess") if s.get("uncalibrated") else ""
         if not s.get("n") or s.get("suggested") is None:
-            L.append(f"  {s['label']:16s} 当前 {cur:>14s}{mark}"
-                     f"   {s.get('note') or '该窗口内无可用数据'}")
+            L.append(f"  {s['label']:16s} {tr('当前', 'current')} {cur:>14s}{mark}"
+                     f"   {s.get('note') or tr('该窗口内无可用数据', 'No usable data in this window')}")
             continue
         pct = s.get("would_fire_pct", 0.0)
-        flag = "  ⚠ 当前阈值会在基线上误报" if pct > 1.0 else ""
-        L.append(f"  {s['label']:16s} 当前 {cur:>14s}{mark} → 建议 "
+        flag = tr("  ⚠ 当前阈值会在基线上误报",
+                  "  ⚠ current threshold would false-alarm on the baseline") if pct > 1.0 else ""
+        L.append(f"  {s['label']:16s} {tr('当前', 'current')} {cur:>14s}{mark}"
+                 f" → {tr('建议', 'suggested')} "
                  f"{_fmt(s.get('suggested'), key):>14s}"
-                 f"   (基线上会触发 {pct:.1f}%){flag}")
+                 f"   ({tr(f'基线上会触发 {pct:.1f}%', f'would fire on {pct:.1f}% of the baseline')}){flag}")
 
     dists = report.get("distributions") or {}
     if any(dists.get(k, {}).get("n") for k, _ in _AUX_REPORT_ONLY):
         L.append("")
-        L.append("【振幅本底分布】(只报不建议 —— 归零判据是个**下界**,p99 在那个方向上不说话)")
+        L.append(tr("【振幅本底分布】(只报不建议 —— 归零判据是个**下界**,p99 在那个方向上不说话)",
+                    "[Amplitude baseline distribution] (reported only, no suggestion: the "
+                    "zero-amplitude rule is a **lower bound** and p99 says nothing in that "
+                    "direction)"))
         for key, label in _AUX_REPORT_ONLY:
             d = dists.get(key) or {}
             if not d.get("n"):
-                L.append(f"  {label:16s} —  该窗口内没有「停在原地」的样本")
+                L.append(f"  {label:16s} —  " + tr("该窗口内没有「停在原地」的样本",
+                                           "no \"parked\" samples in this window"))
                 continue
             L.append(f"  {label:16s} n={d['n']:<6d} p50 {d['p50']:.3f}"
                      f"  p99 {d['p99']:.3f}  min {d['min']:.3f}  max {d['max']:.3f}")
-        L.append("  「振幅 / 未接触本底」应当聚在 1.0 附近;它的 min 离 cm_amp_zero_frac")
-        L.append("  (出厂 0.30)有多远,就是这条判据在本机还剩多少余量。")
-        L.append("  ⚠ 这些样本是**没在进针**时录的,而判据只在进针期间判 ——")
-        L.append("    它们能说明「不为零长什么样」,说明不了「撞上之后会掉到多少」。")
+        L.append(tr("  「振幅 / 未接触本底」应当聚在 1.0 附近;它的 min 离 cm_amp_zero_frac",
+                    "  \"Amplitude / non-contact baseline\" should cluster near 1.0; how far "
+                    "its min is from cm_amp_zero_frac"))
+        L.append(tr("  (出厂 0.30)有多远,就是这条判据在本机还剩多少余量。",
+                    "  (factory 0.30) is the margin this rule has left on this machine."))
+        L.append(tr("  ⚠ 这些样本是**没在进针**时录的,而判据只在进针期间判 ——",
+                    "  ⚠ These samples were recorded **while not approaching**, and the "
+                    "rule is only judged during approach:"))
+        L.append(tr("    它们能说明「不为零长什么样」,说明不了「撞上之后会掉到多少」。",
+                    "    they show what \"not zero\" looks like, not how far the "
+                    "amplitude drops after a crash."))
 
     if not report.get("alerts_enabled"):
         L.append("")
-        L.append("  ⚠ **辅助通道的告警当前是关的**(cm_aux_alerts_enabled=0)。")
-        L.append("    这是出厂状态,不是故障 —— 这两路的阈值从来没有在任何真机上标定过,")
-        L.append("    而上面这份分布正是用来把它打开的。看过建议值、写进设置之后再开。")
+        L.append(tr("  ⚠ **辅助通道的告警当前是关的**(cm_aux_alerts_enabled=0)。",
+                    "  ⚠ **Auxiliary channel alerts are currently off** "
+                    "(cm_aux_alerts_enabled=0)."))
+        L.append(tr("    这是出厂状态,不是故障 —— 这两路的阈值从来没有在任何真机上标定过,",
+                    "    This is the factory state, not a fault: the thresholds of these "
+                    "two channels have never been calibrated on a real instrument,"))
+        L.append(tr("    而上面这份分布正是用来把它打开的。看过建议值、写进设置之后再开。",
+                    "    and the distribution above is what is used to turn them on. "
+                    "Turn them on after reviewing the suggested values and writing them "
+                    "into settings."))
     return "\n".join(L)
 
 
 def render(report: dict, status: dict) -> str:
     L: list[str] = []
-    L.append("═══ 电流监控 · 真机标定报告 ═══\n")
+    L.append(tr("═══ 电流监控 · 真机标定报告 ═══\n",
+                "═══ Current monitor: real-instrument commissioning report ═══\n"))
 
-    L.append("【只有仪器能回答的事实】")
+    L.append(tr("【只有仪器能回答的事实】", "[Facts only the instrument can answer]"))
     fs = status.get("fs_hz") or 0.0
     rt = status.get("rt_freq_hz") or 0.0
     tbs = status.get("timebases_s") or []
-    L.append(f"  采集状态      : {status.get('state', '?')}"
-             f"  策略 {status.get('strategy') or '—'}")
-    L.append(f"  实际采样率    : {fs:.0f} Hz"
-             f"   (RT 环路 {rt:.0f} Hz)" if fs else "  实际采样率    : —")
-    L.append(f"  通道          : {status.get('channel_name') or '—'}")
-    L.append(f"  缓冲深度 n    : {status.get('n_buffer') or '—'}"
-             "   ← 协议不提供,只能实测")
+    L.append(tr(f"  采集状态      : {status.get('state', '?')}"
+                f"  策略 {status.get('strategy') or '—'}",
+                f"  Acquisition state : {status.get('state', '?')}"
+                f"  strategy {status.get('strategy') or '—'}"))
+    L.append(tr(f"  实际采样率    : {fs:.0f} Hz"
+                f"   (RT 环路 {rt:.0f} Hz)", f"  Actual sample rate: {fs:.0f} Hz"
+                f"   (RT loop {rt:.0f} Hz)") if fs else tr(
+                "  实际采样率    : —", "  Actual sample rate: —"))
+    L.append(tr(f"  通道          : {status.get('channel_name') or '—'}",
+                f"  Channel           : {status.get('channel_name') or '—'}"))
+    L.append(tr(f"  缓冲深度 n    : {status.get('n_buffer') or '—'}"
+                "   ← 协议不提供,只能实测",
+                f"  Buffer depth n    : {status.get('n_buffer') or '—'}"
+                "   <- not given by the protocol, must be measured"))
     if tbs:
         shown = ", ".join(f"{v * 1e6:.0f}µs" for v in tbs[:8])
-        L.append(f"  可用时基({len(tbs)}) : {shown}"
-                 f"{' …' if len(tbs) > 8 else ''}  当前 idx="
-                 f"{status.get('timebase_index', -1)}")
+        L.append(tr(f"  可用时基({len(tbs)}) : {shown}"
+                    f"{' …' if len(tbs) > 8 else ''}  当前 idx="
+                    f"{status.get('timebase_index', -1)}",
+                    f"  Timebases ({len(tbs)}) : {shown}"
+                    f"{' …' if len(tbs) > 8 else ''}  current idx="
+                    f"{status.get('timebase_index', -1)}"))
     else:
-        L.append("  可用时基      : —  (未读到;检查 nanonis_patch 是否生效)")
+        L.append(tr("  可用时基      : —  (未读到;检查 nanonis_patch 是否生效)",
+                    "  Timebases         : —  (not read; check that nanonis_patch is in effect)"))
     # 时基表的自校验。放在表下面一行,因为它说的正是「上面那张表可不可信」。
     # 三态各说各的话:对上了 / 对不上 / 没法对 —— 最后一种既不是通过也不是故障。
     check = str(status.get("timebase_check") or "")
     if check.startswith("mismatch"):
-        L.append(f"  ⚠ 时基表自校验 : {check}")
-        L.append("    ↑ 仪器自报的档数与数组长度对不上。上面的采样率、以及"
-                 "「还有没有更快的档」这两个结论都要先怀疑这一条。")
+        L.append(tr(f"  ⚠ 时基表自校验 : {check}", f"  ⚠ Timebase self-check: {check}"))
+        L.append(tr("    ↑ 仪器自报的档数与数组长度对不上。上面的采样率、以及"
+                    "「还有没有更快的档」这两个结论都要先怀疑这一条。",
+                    "    ^ The step count reported by the instrument does not match the array "
+                    "length. Doubt this first for both conclusions above: the sample rate and "
+                    "whether a faster step exists."))
     elif check.startswith("unverified"):
-        L.append(f"  时基表自校验  : {check}   ← 没法对账,不等于对上了")
+        L.append(tr(f"  时基表自校验  : {check}   ← 没法对账,不等于对上了",
+                    f"  Timebase self-check: {check}   <- cannot be reconciled, "
+                    "which is not the same as matching"))
     elif check:
-        L.append(f"  时基表自校验  : {check}(档数、当前档位、数值范围三项均自洽)")
+        L.append(tr(f"  时基表自校验  : {check}(档数、当前档位、数值范围三项均自洽)",
+                    f"  Timebase self-check: {check} (step count, current step and value "
+                    "range are all consistent)"))
 
     st = status.get("pump_stats") or {}
     if st:
         fresh = st.get("fresh", 0)
         total_polls = fresh + st.get("duplicate", 0)
         dup_pct = (100.0 * st.get("duplicate", 0) / total_polls) if total_polls else 0.0
-        L.append(f"  轮询          : 新帧 {fresh}  重复 {st.get('duplicate', 0)}"
-                 f" ({dup_pct:.0f}%)  缺口 {st.get('gap', 0)}"
-                 f"  忙 {st.get('busy', 0)}  不连续 {st.get('discontinuity', 0)}")
-        L.append("    ↑ 重复占比高 = 轮询快于硬件填充(正常);"
-                 "缺口多 = 没跟上,数据有洞")
+        L.append(tr(f"  轮询          : 新帧 {fresh}  重复 {st.get('duplicate', 0)}"
+                    f" ({dup_pct:.0f}%)  缺口 {st.get('gap', 0)}"
+                    f"  忙 {st.get('busy', 0)}  不连续 {st.get('discontinuity', 0)}",
+                    f"  Polling           : fresh {fresh}  duplicate {st.get('duplicate', 0)}"
+                    f" ({dup_pct:.0f}%)  gap {st.get('gap', 0)}"
+                    f"  busy {st.get('busy', 0)}  discontinuity {st.get('discontinuity', 0)}"))
+        L.append(tr("    ↑ 重复占比高 = 轮询快于硬件填充(正常);"
+                    "缺口多 = 没跟上,数据有洞",
+                    "    ^ High duplicate share = polling faster than the hardware fills "
+                    "(normal); many gaps = not keeping up, data has holes"))
 
         # 重复帧比例只有在仍持续出现新帧时才可解释为正常。
         # 新帧停滞且未形成有效段时必须独立报告，不能用重复率高掩盖采集停顿。
         if total_polls >= 100 and dup_pct >= 90.0:
             segs = status.get("segments_done", 0) or 0
             rate = fresh / total_polls if total_polls else 0.0
-            L.append(f"    ⚠ 重复 {dup_pct:.0f}% 且新帧只占 {rate * 100:.1f}% —— 这不是"
-                     f"「轮询快」，是**判新判不出来**。已落盘 {segs} 段。")
-            L.append("      查:回包 t0 是否恒为同一个值(相对触发下它恒为 0),"
-                     "以及判新是不是只看 t0。")
-    L.append(f"  已采段数      : {status.get('segments_done', 0)}"
-             f"  累计缺口 {status.get('gaps_total_s', 0):.1f} s")
+            L.append(tr(f"    ⚠ 重复 {dup_pct:.0f}% 且新帧只占 {rate * 100:.1f}% —— 这不是"
+                        f"「轮询快」，是**判新判不出来**。已落盘 {segs} 段。",
+                        f"    ⚠ {dup_pct:.0f}% duplicates and only {rate * 100:.1f}% fresh "
+                        "frames: this is not \"polling is fast\", it is **freshness "
+                        f"detection failing**. {segs} segments saved."))
+            L.append(tr("      查:回包 t0 是否恒为同一个值(相对触发下它恒为 0),"
+                        "以及判新是不是只看 t0。",
+                        "      Check: whether the reply t0 is always the same value (always 0 "
+                        "under relative trigger), and whether freshness only looks at t0."))
+    L.append(tr(f"  已采段数      : {status.get('segments_done', 0)}"
+                f"  累计缺口 {status.get('gaps_total_s', 0):.1f} s",
+                f"  Segments done     : {status.get('segments_done', 0)}"
+                f"  total gaps {status.get('gaps_total_s', 0):.1f} s"))
 
     # 墙钟覆盖率为记录的总段时长除以首尾跨度，用于比较采集完整性。
     t = report.get("timing") or {}
@@ -645,26 +748,37 @@ def render(report: dict, status: dict) -> str:
         # 77.3% vs 真值 76.9%），而这个数正是要拿去做 before/after 对比的。
         total_s = t["span_s"] + seg_s
         cov = 100.0 * t["n"] * seg_s / total_s
-        L.append(f"  墙钟覆盖率    : {cov:.1f}%   "
-                 f"({t['n']} 段 × {seg_s:.3g} s / 跨度 {total_s / 60:.1f} min)")
-        L.append(f"  落盘节奏      : p50 {t['cadence_p50_s']:.3f} s"
-                 f"  p99 {t['cadence_p99_s']:.3f} s"
-                 "   ← 段间停顿=特征提取，p99 变大即有东西在抢 data 口")
+        L.append(tr(f"  墙钟覆盖率    : {cov:.1f}%   "
+                    f"({t['n']} 段 × {seg_s:.3g} s / 跨度 {total_s / 60:.1f} min)",
+                    f"  Wall-clock coverage: {cov:.1f}%   "
+                    f"({t['n']} segments x {seg_s:.3g} s / span {total_s / 60:.1f} min)"))
+        L.append(tr(f"  落盘节奏      : p50 {t['cadence_p50_s']:.3f} s"
+                    f"  p99 {t['cadence_p99_s']:.3f} s"
+                    "   ← 段间停顿=特征提取，p99 变大即有东西在抢 data 口",
+                    f"  Write cadence     : p50 {t['cadence_p50_s']:.3f} s"
+                    f"  p99 {t['cadence_p99_s']:.3f} s"
+                    "   <- gap between segments = feature extraction; a larger p99 means "
+                    "something is competing for the data port"))
     L.append("")
 
-    L.append("【分组样本数】(标定只用「安静」组 —— 扫描/修针期间不可比)")
+    L.append(tr("【分组样本数】(标定只用「安静」组 —— 扫描/修针期间不可比)",
+                "[Samples per group] (calibration uses only the \"quiet\" group: segments "
+                "during scanning / tip conditioning are not comparable)"))
     for k, n in (report.get("group_sizes") or {}).items():
-        mark = " ←用作基线" if k == report.get("baseline_group") else ""
+        mark = tr(" ←用作基线", " <- used as baseline") if k == report.get("baseline_group") else ""
         L.append(f"  {k:12s} {n:6d}{mark}")
     if not report.get("baseline_group"):
-        L.append("  ⚠ 没有足够的基线样本(需要 ≥30 段),阈值建议不可用。")
+        L.append(tr("  ⚠ 没有足够的基线样本(需要 ≥30 段),阈值建议不可用。",
+                    "  ⚠ Not enough baseline samples (need >=30 segments), threshold "
+                    "suggestions unavailable."))
     L.append("")
 
     base = report.get("baseline_group")
     dist = (report.get("distributions") or {}).get(base or "", {})
     if dist:
-        L.append(f"【「{base}」组的特征分布】")
-        L.append(f"  {'特征':22s} {'p50':>12s} {'p90':>12s} {'p99':>12s} {'max':>12s}")
+        L.append(tr(f"【「{base}」组的特征分布】",
+                    f"[Feature distribution of group \"{base}\"]"))
+        L.append(f"  {tr('特征', 'Feature'):22s} {'p50':>12s} {'p90':>12s} {'p99':>12s} {'max':>12s}")
         for key, _knob, label in _CALIBRATABLE:
             d = dist.get(key) or {}
             if not d.get("n"):
@@ -675,23 +789,32 @@ def render(report: dict, status: dict) -> str:
                      f" {_fmt(d.get('max'), key):>12s}")
         L.append("")
 
-    L.append("【阈值建议】(p99 × 1.5;绝不自动应用)")
+    L.append(tr("【阈值建议】(p99 × 1.5;绝不自动应用)",
+                "[Suggested thresholds] (p99 x 1.5; never applied automatically)"))
     for s in report.get("suggestions") or []:
         key = s["feature"]
         cur = _fmt(s.get("current"), key)
         sug = _fmt(s.get("suggested"), key)
         if not s.get("n") or s.get("suggested") is None:
-            L.append(f"  {s['label']:22s} 当前 {cur:>12s}"
-                     f"   {s.get('note', '该窗口内无可用数据')}")
+            L.append(f"  {s['label']:22s} {tr('当前', 'current')} {cur:>12s}"
+                     f"   {s.get('note', tr('该窗口内无可用数据', 'No usable data in this window'))}")
             continue
         pct = s.get("would_fire_pct", 0.0)
-        flag = "  ⚠ 当前阈值会在基线上误报" if pct > 1.0 else ""
-        L.append(f"  {s['label']:22s} 当前 {cur:>12s} → 建议 {sug:>12s}"
-                 f"   (基线上会触发 {pct:.1f}%){flag}")
+        flag = tr("  ⚠ 当前阈值会在基线上误报",
+                  "  ⚠ current threshold would false-alarm on the baseline") if pct > 1.0 else ""
+        L.append(f"  {s['label']:22s} {tr('当前', 'current')} {cur:>12s}"
+                 f" → {tr('建议', 'suggested')} {sug:>12s}"
+                 f"   ({tr(f'基线上会触发 {pct:.1f}%', f'would fire on {pct:.1f}% of the baseline')}){flag}")
     L.append("")
-    L.append("说明:CRITICAL 三条(饱和/冻结/巨幅瞬变)不在此标定 —— 它们是关于仪器的")
-    L.append("      陈述(贴轨就是贴轨),与健康基线的噪声水平无关。")
-    L.append("      饱和阈 cm_sat_current_a 应设为前置放大器的真实量程。")
+    L.append(tr("说明:CRITICAL 三条(饱和/冻结/巨幅瞬变)不在此标定 —— 它们是关于仪器的",
+                "Note: the three CRITICAL rules (saturation / frozen / huge transient) are "
+                "not calibrated here: they are statements about the instrument"))
+    L.append(tr("      陈述(贴轨就是贴轨),与健康基线的噪声水平无关。",
+                "      (a rail is a rail), independent of the noise level of a healthy "
+                "baseline."))
+    L.append(tr("      饱和阈 cm_sat_current_a 应设为前置放大器的真实量程。",
+                "      The saturation threshold cm_sat_current_a should be set to the real "
+                "range of the preamplifier."))
     # 饱和是三条 CRITICAL 之一,而它的出厂值是一个**猜测**("just under the usual
     # 100 nA preamp")。判据是 |I| >= cm_sat_current_a —— 阈值定得比真实量程高,
     # 前放贴轨时读数停在真实量程上,永远够不到阈值,**这条 CRITICAL 就被静默关掉了**。
@@ -699,26 +822,45 @@ def render(report: dict, status: dict) -> str:
     _sat = (report.get("thresholds") or {}).get("cm_sat_current_a")
     if _sat is not None and abs(float(_sat) - _SAT_SHIPPED_DEFAULT) < 1e-18:
         L.append("")
-        L.append(f"  ⚠ cm_sat_current_a 仍是**出厂猜测值** {_fmt(_sat, 'cm_sat_current_a')}"
-                 "(注释里写的是 usual 100 nA preamp)。")
-        L.append("    它没有被本机的前放量程校准过。**定得比真实量程高 = 饱和这条")
-        L.append("    CRITICAL 被静默关掉**(贴轨时读数停在真实量程,永远够不到阈值)。")
-        L.append("    问用户前放量程,然后写进设置 —— 这不是标定,是一次登记。")
+        L.append(tr(f"  ⚠ cm_sat_current_a 仍是**出厂猜测值** {_fmt(_sat, 'cm_sat_current_a')}"
+                    "(注释里写的是 usual 100 nA preamp)。",
+                    f"  ⚠ cm_sat_current_a is still the **factory guess** "
+                    f"{_fmt(_sat, 'cm_sat_current_a')} (the comment says usual 100 nA preamp)."))
+        L.append(tr("    它没有被本机的前放量程校准过。**定得比真实量程高 = 饱和这条",
+                    "    It has not been calibrated against this machine's preamp range. "
+                    "**Setting it above the real range = the saturation"))
+        L.append(tr("    CRITICAL 被静默关掉**(贴轨时读数停在真实量程,永远够不到阈值)。",
+                    "    CRITICAL is silently disabled** (when railed the reading stays at the "
+                    "real range and never reaches the threshold)."))
+        L.append(tr("    问用户前放量程,然后写进设置 —— 这不是标定,是一次登记。",
+                    "    Ask the user for the preamp range and write it into settings: this "
+                    "is not calibration, it is a registration."))
     return "\n".join(L)
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="python -m mast.monitoring.commission",
-        description="真机标定报告:观察分布 → 建议阈值(只读,不写设置)")
-    ap.add_argument("--url", help="远程 MAST API,例如 http://<rig-host>:7870;"
-                                  "省略则读本机 store")
-    ap.add_argument("--auth", help="远程 basic auth,格式 user:pass")
-    ap.add_argument("--hours", type=float, default=2.0, help="回看时长(小时)")
-    ap.add_argument("--json", action="store_true", help="输出 JSON 而非报告")
+        description=tr("真机标定报告:观察分布 → 建议阈值(只读,不写设置)",
+                       "Real-instrument commissioning report: observe distributions -> "
+                       "suggest thresholds (read-only, does not write settings)"))
+    ap.add_argument("--url", help=tr("远程 MAST API,例如 http://<rig-host>:7870;"
+                                     "省略则读本机 store",
+                                     "Remote MAST API, e.g. http://<rig-host>:7870; "
+                                     "omit to read the local store"))
+    ap.add_argument("--auth", help=tr("远程 basic auth,格式 user:pass",
+                                      "Remote basic auth, format user:pass"))
+    ap.add_argument("--hours", type=float, default=2.0,
+                    help=tr("回看时长(小时)", "Look-back duration (hours)"))
+    ap.add_argument("--json", action="store_true",
+                    help=tr("输出 JSON 而非报告", "Output JSON instead of the report"))
     ap.add_argument("--insecure", action="store_true",
-                    help="显式关闭 TLS 证书校验，仅用于需要此行为的连接。"
-                         "默认始终校验证书，不自动放行。")
+                    help=tr("不校验 TLS 证书。采用自签名证书的部署不加这个开关连不上"
+                            "（默认仍校验：这是安全开关，不自动放行）",
+                            "Do not verify the TLS certificate. A deployment that uses a "
+                            "self-signed certificate cannot be reached without this switch "
+                            "(verification stays on by default: this is a safety switch, "
+                            "never enabled automatically)"))
     args = ap.parse_args(argv)
 
     try:
@@ -745,17 +887,21 @@ def main(argv: list[str] | None = None) -> int:
                     cfg = json.loads(fh.read().decode("utf-8"))
                 thresholds = {k["key"]: k["value"] for k in (cfg.get("knobs") or [])}
             except Exception as exc:  # noqa: BLE001
-                print(f"(读取远程阈值失败,建议值将缺少对比:{exc})", file=sys.stderr)
+                print(tr(f"(读取远程阈值失败,建议值将缺少对比:{exc})",
+                         f"(Failed to read remote thresholds, suggestions will lack "
+                         f"a comparison: {exc})"), file=sys.stderr)
         else:
             rows, status = _rows_from_store(args.hours)
             aux_rows = _aux_rows_from_store(args.hours)
             from mast.monitoring.thresholds import get_monitor_thresholds
             thresholds = get_monitor_thresholds().to_mapping()
     except Exception as exc:  # noqa: BLE001
-        print(f"取数失败:{exc}", file=sys.stderr)
+        print(tr(f"取数失败:{exc}", f"Failed to fetch data: {exc}"), file=sys.stderr)
         # 证书校验失败时给出明确指引，避免把证书问题误当作网络不可达。
         if "CERTIFICATE_VERIFY_FAILED" in str(exc) and not getattr(args, "insecure", False):
-            print("提示:服务器证书未通过校验；请配置受信任证书，或显式使用 --insecure。", file=sys.stderr)
+            print(tr("提示:若服务器用的是自签名证书 —— 重跑时加 --insecure。",
+                   "Hint: if the server uses a self-signed certificate, rerun with --insecure."),
+                  file=sys.stderr)
         return 1
 
     report = analyse(rows, thresholds)

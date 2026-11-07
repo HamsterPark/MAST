@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+from mast.i18n import tr
 
 VER_INVENTORY = 1
 KIND_BY_EXT = {".sxm": "f", ".dat": "s", ".3ds": "g"}
@@ -98,7 +99,7 @@ def sxm_summary(path: str) -> dict:
 
     h = read_sxm_header(path)
     if not h:
-        raise ValueError("读不到 .sxm 头（没有结束标记）")
+        raise ValueError(tr("读不到 .sxm 头（没有结束标记）", "Cannot read the .sxm header (no end marker)"))
     rng = _floats(h.get("scan_range"))
     off = _floats(h.get("scan_offset"))
     pix = h.get("scan_pixels") or []

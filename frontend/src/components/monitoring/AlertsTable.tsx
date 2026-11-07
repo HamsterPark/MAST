@@ -3,12 +3,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type { components } from "@/api/schema";
 import { Badge, EmptyNote, Spinner } from "@/components/ui";
+import { langTag, tr } from "@/lib/i18n";
 import { verdictView } from "@/lib/monitoring";
 import { SegmentCurveThumb } from "@/components/monitoring/SegmentCurveThumb";
 
 type AlertRow = components["schemas"]["AlertRow"];
 
-// 告警历史。The list endpoint deliberately omits the evidence PNG — a page of
+// Alert history. The list endpoint deliberately omits the evidence PNG — a page of
 // 50 alerts each carrying a base64 plot is a megabyte of payload nobody looked
 // at. Opening a row fetches that one image, and react-query caches it forever
 // because an alert's evidence is written once and never changes.
@@ -27,37 +28,37 @@ function EvidenceImage({ alertId }: { alertId: number }) {
     },
   });
 
-  if (q.isPending) return <Spinner label="载入证据图…" />;
-  if (q.isError) return <p className="text-xs text-mast-danger">证据图载入失败。</p>;
+  if (q.isPending) return <Spinner label={tr("载入证据图…", "Loading evidence plot…")} />;
+  if (q.isError) {
+    return <p className="text-xs text-mast-danger">{tr("证据图载入失败。", "Failed to load the evidence plot.")}</p>;
+  }
   if (!q.data?.ok || !q.data.png_b64) {
-    return <p className="text-xs text-mast-muted">{q.data?.detail || "该告警没有可用的证据图。"}</p>;
+    return (
+      <p className="text-xs text-mast-muted">
+        {q.data?.detail || tr("该告警没有可用的证据图。", "No evidence plot is available for this alert.")}
+      </p>
+    );
   }
   return (
     <img
       src={`data:image/png;base64,${q.data.png_b64}`}
-      alt="告警证据：时域波形与频谱"
+      alt={tr("告警证据：时域波形与频谱", "Alert evidence: time-domain waveform and spectrum")}
       className="max-w-full rounded-lg border border-mast-border bg-mast-bg"
     />
   );
 }
 
 /**
- * What to show when an alert row is opened. THREE outcomes, not two.
+ * What to show when an alert row is opened. Three outcomes, not two.
  *
- * tip_quality_drop 事件详情缺图像时，能不能换成曲线图顶上。
- *
- * `evidence_available` answers a narrower question than the UI was asking: it
- * means "a matplotlib PNG exists on disk", not "there is something to look at".
- * It is false for every WARN (deliberately — WARNs are frequent and rendering
+ * `evidence_available` only means "a rendered PNG exists on disk", not "there is
+ * something to look at". It is false for every WARN (deliberately — rendering
  * each one would put matplotlib on the monitor's hot path), and false for a
- * CRITICAL whose render lost the 60 s rate-limit race. Meanwhile `seg_id` sits
- * in the same row object, and the segment behind it is drawable **forever**:
- * the raw `.npy` is swept at `cm_keep_hours`, but the min/max envelope lives in
- * the row and rows are permanent.
- *
- * So the old two-way branch showed a paragraph of apology while the waveform the
- * judgement was actually made on was one field away. The third case — no PNG
- * AND no segment — keeps the apology, because then there genuinely is nothing.
+ * CRITICAL whose render lost the 60 s rate-limit race. Meanwhile `seg_id` is in
+ * the same row, and the segment behind it stays drawable: the raw `.npy` is
+ * swept at `cm_keep_hours`, but the min/max envelope lives in the row and rows
+ * are permanent. Only when there is neither a PNG nor a segment is there
+ * genuinely nothing to show.
  */
 function AlertEvidence({ alert }: { alert: AlertRow }) {
   if (alert.evidence_available) return <EvidenceImage alertId={alert.id} />;
@@ -67,13 +68,14 @@ function AlertEvidence({ alert }: { alert: AlertRow }) {
       <div className="space-y-1">
         <SegmentCurveThumb
           segId={alert.seg_id}
-          hint={`${alert.rule} 判定所依据的电流段`}
+          hint={tr(`${alert.rule} 判定所依据的电流段`, `Current segment behind the ${alert.rule} verdict`)}
           wide
         />
         <p className="text-xs text-mast-muted">
-          这是判定所依据的那一段电流本身。没有渲染证据图
-          {alert.level === "warn" ? "——WARN 一律不渲染，是刻意的" : ""}，
-          但波形一直在，点开可看完整时域与频谱。
+          {tr(
+            `这是判定所依据的那一段电流本身。没有渲染证据图${alert.level === "warn" ? "——WARN 一律不渲染，是刻意的" : ""}，但波形一直在，点开可看完整时域与频谱。`,
+            `This is the current segment the verdict was based on. No evidence plot was rendered${alert.level === "warn" ? " (WARN alerts are never rendered, by design)" : ""}, but the waveform is kept; open it to see the full time-domain trace and spectrum.`,
+          )}
         </p>
       </div>
     );
@@ -81,33 +83,44 @@ function AlertEvidence({ alert }: { alert: AlertRow }) {
 
   return (
     <p className="text-xs text-mast-muted">
-      该告警既没有证据图，也没有关联的电流段——文字判定仍然有效。
+      {tr(
+        "该告警既没有证据图，也没有关联的电流段——文字判定仍然有效。",
+        "This alert has neither an evidence plot nor a linked current segment; the written verdict still stands.",
+      )}
     </p>
   );
 }
 
 /**
- * 「谁知道了这件事」—— **两个主体,两个格子**。
+ * Who knows about this alert: two subjects, two cells.
  *
- * `delivered_agent` = 这条进过正在操作仪器的 agent 的上下文。
- * `acked`           = 人在这里点掉了。
+ * `delivered_agent` = the alert entered the context of the agent operating the instrument.
+ * `acked`           = a person acknowledged it here.
  *
- * 合成一个「已处理」会让两个问题都问不出来:2026-08-08 那次事故里,监控规则
- * 报得又快又准,而 agent 一无所知又扫了 13 分钟 —— 当时**没有任何字段**能回答
- * 「agent 到底看见没看见」。所以这一列刻意分开显示,而且「没看见」是有颜色的。
+ * They are kept separate on purpose: collapsing them into one "handled" flag
+ * could not answer whether the agent actually saw an alert, and "not seen" is
+ * colour-coded.
  */
 function KnownBy({ alert }: { alert: AlertRow }) {
   return (
     <span className="inline-flex items-center gap-1">
       {alert.delivered_agent ? (
-        <span className="text-mast-accent" title="agent 已在上下文里看到这条">🤖</span>
+        <span className="text-mast-accent" title={tr("agent 已在上下文里看到这条", "The agent has seen this in its context")}>🤖</span>
       ) : alert.level === "critical" ? (
-        <span className="text-mast-danger" title="agent 还没看到这条 CRITICAL">🤖✗</span>
+        <span className="text-mast-danger" title={tr("agent 还没看到这条 CRITICAL", "The agent has not seen this CRITICAL yet")}>🤖✗</span>
       ) : (
-        <span className="text-mast-muted" title="agent 未看到(WARN 可能被折叠或按配置不打扰)">·</span>
+        <span
+          className="text-mast-muted"
+          title={tr(
+            "agent 未看到(WARN 可能被折叠或按配置不打扰)",
+            "The agent has not seen it (WARNs may be folded or suppressed by configuration)",
+          )}
+        >
+          ·
+        </span>
       )}
       {alert.acked ? (
-        <span className="text-mast-muted" title="已由人确认">✓</span>
+        <span className="text-mast-muted" title={tr("已由人确认", "Acknowledged by a person")}>✓</span>
       ) : null}
     </span>
   );
@@ -129,7 +142,7 @@ function AckButton({ alert }: { alert: AlertRow }) {
   });
 
   if (alert.acked) {
-    return <p className="text-xs text-mast-muted">已确认。</p>;
+    return <p className="text-xs text-mast-muted">{tr("已确认。", "Acknowledged.")}</p>;
   }
   return (
     <div className="space-y-1">
@@ -142,13 +155,18 @@ function AckButton({ alert }: { alert: AlertRow }) {
         }}
         className="rounded-md border border-mast-border px-2 py-1 text-xs text-mast-text hover:bg-mast-panel-2 disabled:opacity-50"
       >
-        {m.isPending ? "确认中…" : "我知道了(确认)"}
+        {m.isPending ? tr("确认中…", "Acknowledging…") : tr("我知道了(确认)", "Got it (acknowledge)")}
       </button>
-      {/* 说清楚这个按钮**不**做什么 —— 否则用户会以为点掉就不打扰 agent 了。 */}
+      {/* State what the button does NOT do, so it is not mistaken for suppressing the alert for the agent. */}
       <p className="text-xs text-mast-muted">
-        只是记下「人已知悉」。**不会**让这条不再送给 agent,也不代表 agent 看过。
+        {tr(
+          "只是记下「人已知悉」。**不会**让这条不再送给 agent,也不代表 agent 看过。",
+          "This only records that a person has seen it. It does NOT stop the alert being sent to the agent, and does not mean the agent has seen it.",
+        )}
       </p>
-      {m.isError ? <p className="text-xs text-mast-danger">确认失败,请重试。</p> : null}
+      {m.isError ? (
+        <p className="text-xs text-mast-danger">{tr("确认失败,请重试。", "Acknowledge failed; please retry.")}</p>
+      ) : null}
     </div>
   );
 }
@@ -164,36 +182,41 @@ export function AlertsTable({
 }) {
   const [openId, setOpenId] = useState<number | null>(null);
 
-  // ⚠️ **degraded 时不许说「无告警记录」。** 2026-08-15 起 `alerts_query` 查询
-  // 失败会抛，路由把它翻成 `degraded=true` + `detail` —— 而在此之前它自吞异常
-  // 回 `([], 0)`，这块面板于是把「库读不到」画成了「暂无告警——这是好消息」。
-  // 原文案还替它认了一个死因（「监控模块未装载」），那是两件事里的一件。
+  // When degraded, never claim "no alerts": a failed `alerts_query` is reported by
+  // the route as `degraded=true` + `detail`, and an unreadable store is not the
+  // same as an empty one.
   if (degraded) {
     return (
       <EmptyNote
         label={
           detail
-            ? `读不到告警记录：${detail}`
-            : "读不到告警记录（监控模块未装载，或查询失败）——这不等于没有告警。"
+            ? tr(`读不到告警记录：${detail}`, `Cannot read alert records: ${detail}`)
+            : tr(
+                "读不到告警记录（监控模块未装载，或查询失败）——这不等于没有告警。",
+                "Cannot read alert records (monitoring module not loaded, or the query failed). This does not mean there are no alerts.",
+              )
         }
       />
     );
   }
-  if (!alerts.length) return <EmptyNote label="暂无告警——这是好消息。" />;
+  if (!alerts.length) return <EmptyNote label={tr("暂无告警——这是好消息。", "No alerts. Good news.")} />;
 
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-mast-muted">
-            <th className="py-1 pr-3 font-normal">时间</th>
-            <th className="py-1 pr-3 font-normal">级别</th>
-            <th className="py-1 pr-3 font-normal">规则</th>
-            <th className="py-1 pr-3 font-normal">说明</th>
-            <th className="py-1 pr-3 font-normal" title="🤖=agent 已看到 / ✓=人已确认">
-              谁知道了
+            <th className="py-1 pr-3 font-normal">{tr("时间", "Time")}</th>
+            <th className="py-1 pr-3 font-normal">{tr("级别", "Level")}</th>
+            <th className="py-1 pr-3 font-normal">{tr("规则", "Rule")}</th>
+            <th className="py-1 pr-3 font-normal">{tr("说明", "Description")}</th>
+            <th
+              className="py-1 pr-3 font-normal"
+              title={tr("🤖=agent 已看到 / ✓=人已确认", "🤖 = seen by the agent / ✓ = acknowledged by a person")}
+            >
+              {tr("谁知道了", "Known by")}
             </th>
-            <th className="py-1 font-normal">段</th>
+            <th className="py-1 font-normal">{tr("段", "Segment")}</th>
           </tr>
         </thead>
         <tbody>
@@ -207,14 +230,14 @@ export function AlertsTable({
                 className="cursor-pointer border-t border-mast-border hover:bg-mast-panel-2"
                 title={
                   a.evidence_available
-                    ? "点击展开证据图"
+                    ? tr("点击展开证据图", "Click to expand the evidence plot")
                     : a.seg_id != null
-                      ? "点击展开触发段的电流曲线"
-                      : "点击展开"
+                      ? tr("点击展开触发段的电流曲线", "Click to expand the triggering segment's current trace")
+                      : tr("点击展开", "Click to expand")
                 }
               >
                 <td className="whitespace-nowrap py-1.5 pr-3 text-xs text-mast-muted">
-                  {new Date(a.ts * 1000).toLocaleString("zh-CN", { hour12: false })}
+                  {new Date(a.ts * 1000).toLocaleString(langTag(), { hour12: false })}
                 </td>
                 <td className="py-1.5 pr-3">
                   <Badge tone={v.tone}>{v.label}</Badge>
@@ -226,13 +249,11 @@ export function AlertsTable({
                 </td>
                 <td className="py-1.5 font-mono text-xs text-mast-muted">
                   {a.seg_id ?? "—"}
-                  {/* 两种「有东西可看」要分得开：◧ 是渲染好的证据图，∿ 是
-                      触发段的原始波形。都标成同一个符号，就等于把「这条
-                      CRITICAL 有证据图」和「这条 WARN 只有波形」说成一回事。 */}
+                  {/* Two distinct markers: ◧ = rendered evidence plot, ∿ = raw waveform of the triggering segment. */}
                   {a.evidence_available ? (
-                    <span className="ml-1 text-mast-accent" title="有证据图">◧</span>
+                    <span className="ml-1 text-mast-accent" title={tr("有证据图", "Has evidence plot")}>◧</span>
                   ) : a.seg_id != null ? (
-                    <span className="ml-1 text-mast-muted" title="有触发段波形">∿</span>
+                    <span className="ml-1 text-mast-muted" title={tr("有触发段波形", "Has triggering-segment waveform")}>∿</span>
                   ) : null}
                 </td>
               </tr>,

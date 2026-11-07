@@ -34,10 +34,13 @@ def main() -> None:
         from mast.api.bootstrap import build_live_context
 
         app = create_app(context=build_live_context())
-        uvicorn.run(app, host=host, port=port)
+        # proxy_headers=False: the operator API records the TCP peer of a write; uvicorn's
+        # default would let a loopback client replace it with an X-Forwarded-For value
+        uvicorn.run(app, host=host, port=port, proxy_headers=False)
     else:
         # factory=True → uvicorn calls create_app() itself (and can reload it).
-        uvicorn.run("mast.api.app:create_app", host=host, port=port, reload=reload, factory=True)
+        uvicorn.run("mast.api.app:create_app", host=host, port=port, reload=reload, factory=True,
+                    proxy_headers=False)
 
 
 if __name__ == "__main__":

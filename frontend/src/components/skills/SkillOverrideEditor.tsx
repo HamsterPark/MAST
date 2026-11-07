@@ -17,28 +17,28 @@ import {
   Button,
   useToast,
 } from "@/components/controls";
+import { getLang, tr } from "@/lib/i18n";
 
-// ── 技能详情编辑 — edit skill metadata via the override seam ──────────────────
-// Mirrors the old admin/tabs/skills_tab.py right-detail panel control-by-control:
-//   安全等级 dropdown · 预计时长 number · 回滚技能 dropdown ·
-//   参数表 (read-only) + 逐参数编辑表单 (type/unit/required/default/min/max/
-//   allowed_values) · 前置条件 textarea · 后置条件 textarea ·
-//   保存覆盖 / 恢复默认 buttons + 变更预览(diff-ish).
+// ── Skill editor — edit skill metadata via the override seam ──────────────────
+// Controls: safety level dropdown · estimated duration number · rollback skill dropdown ·
+//   parameter table (read-only) + per-parameter edit form (type/unit/required/default/min/max/
+//   allowed_values) · preconditions textarea · postconditions textarea ·
+//   save override / restore default buttons + change preview (diff-ish).
 // Writes whole-file via POST /api/admin/overrides/skill (category="skill"),
 // a dict keyed by skill name — read current file via GET first so we merge,
 // not clobber.
 
 const SAFETY_OPTIONS: { value: string; label: string }[] = [
-  { value: "AUTO", label: "AUTO 自动" },
-  { value: "INFO", label: "INFO 信息" },
-  { value: "WARN", label: "WARN 警告" },
-  { value: "DANGEROUS", label: "DANGEROUS 危险" },
+  { value: "AUTO", label: tr("AUTO 自动", "AUTO") },
+  { value: "INFO", label: tr("INFO 信息", "INFO") },
+  { value: "WARN", label: tr("WARN 警告", "WARN") },
+  { value: "DANGEROUS", label: tr("DANGEROUS 危险", "DANGEROUS") },
 ];
 
 const REQUIRED_OPTIONS: { value: string; label: string }[] = [
-  { value: "", label: "—（不变）" },
-  { value: "True", label: "True 必填" },
-  { value: "False", label: "False 可选" },
+  { value: "", label: tr("—（不变）", "— (unchanged)") },
+  { value: "True", label: tr("True 必填", "True (required)") },
+  { value: "False", label: tr("False 可选", "False (optional)") },
 ];
 
 const SAFETY_TONE: Record<string, string> = {
@@ -215,12 +215,12 @@ export function SkillOverrideEditor({
           : r,
       ),
     );
-    toast(`已写入参数 ${pSel}（未保存）`, "ok");
+    toast(tr(`已写入参数 ${pSel}（未保存）`, `Parameter ${pSel} updated (not saved)`), "ok");
   }
 
   // ── build override dict (only differences vs code card) ────────────────────
   function buildOverride(): Record<string, unknown> | { __error: string } {
-    if (!cardData?.found) return { __error: "技能未加载" };
+    if (!cardData?.found) return { __error: tr("技能未加载", "Skill not loaded") };
     const ovr: Record<string, unknown> = {};
 
     if (safety && safety !== cardData.safety) ovr.safety_level = safety.toLowerCase();
@@ -263,7 +263,7 @@ export function SkillOverrideEditor({
           try {
             diff.allowed_values = JSON.parse(r.allowed_values);
           } catch {
-            return { __error: `参数 ${r.name} 的 allowed_values 不是合法 JSON 数组` };
+            return { __error: tr(`参数 ${r.name} 的 allowed_values 不是合法 JSON 数组`, `allowed_values of parameter ${r.name} is not a valid JSON array`) };
           }
         }
       }
@@ -287,7 +287,7 @@ export function SkillOverrideEditor({
     mutationFn: async () => {
       const o = buildOverride();
       if ("__error" in o) throw new Error(o.__error as string);
-      if (!Object.keys(o).length) throw new Error("无变更，未保存");
+      if (!Object.keys(o).length) throw new Error(tr("无变更，未保存", "No changes, nothing saved"));
       const existing = { ...((file.data?.data as Record<string, unknown>) ?? {}) };
       existing[selected!] = o;
       const { data, error } = await api.POST("/api/admin/overrides/{category}", {
@@ -295,38 +295,38 @@ export function SkillOverrideEditor({
         body: { data: existing },
       });
       if (error) throw error;
-      if (!data?.ok) throw new Error("保存失败（后端未生效）");
+      if (!data?.ok) throw new Error(tr("保存失败（后端未生效）", "Save failed (backend did not apply it)"));
       return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin", "overrides", "skill"] });
       qc.invalidateQueries({ queryKey: ["skill", selected] });
       qc.invalidateQueries({ queryKey: ["skills", "catalog"] });
-      toast("已保存覆盖，重启主服务后对运行中的 agent 生效", "ok");
+      toast(tr("已保存覆盖，重启主服务后对运行中的 agent 生效", "Override saved; it applies to running agents after the main service restarts"), "ok");
     },
-    onError: (e) => toast(e instanceof Error ? e.message : "保存失败", "err"),
+    onError: (e) => toast(e instanceof Error ? e.message : tr("保存失败", "Save failed"), "err"),
   });
 
   const resetMut = useMutation({
     mutationFn: async () => {
       const existing = { ...((file.data?.data as Record<string, unknown>) ?? {}) };
-      if (!(selected! in existing)) throw new Error(`${selected} 无覆盖配置`);
+      if (!(selected! in existing)) throw new Error(tr(`${selected} 无覆盖配置`, `${selected} has no override`));
       delete existing[selected!];
       const { data, error } = await api.POST("/api/admin/overrides/{category}", {
         params: { path: { category: "skill" } },
         body: { data: existing },
       });
       if (error) throw error;
-      if (!data?.ok) throw new Error("恢复失败（后端未生效）");
+      if (!data?.ok) throw new Error(tr("恢复失败（后端未生效）", "Restore failed (backend did not apply it)"));
       return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin", "overrides", "skill"] });
       qc.invalidateQueries({ queryKey: ["skill", selected] });
       qc.invalidateQueries({ queryKey: ["skills", "catalog"] });
-      toast("已恢复为代码默认值", "ok");
+      toast(tr("已恢复为代码默认值", "Restored to the code defaults"), "ok");
     },
-    onError: (e) => toast(e instanceof Error ? e.message : "恢复失败", "err"),
+    onError: (e) => toast(e instanceof Error ? e.message : tr("恢复失败", "Restore failed"), "err"),
   });
 
   return (
@@ -335,11 +335,11 @@ export function SkillOverrideEditor({
 
       {/* ── LEFT: skill list ── */}
       <Card className="space-y-2 self-start">
-        <h3 className="text-sm font-semibold text-mast-text">技能列表</h3>
+        <h3 className="text-sm font-semibold text-mast-text">{tr("技能列表", "Skills")}</h3>
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="搜索技能名…"
+          placeholder={tr("搜索技能名…", "Search skill name…")}
           className="w-full rounded border border-mast-border bg-mast-bg px-2.5 py-1.5 text-sm text-mast-text placeholder:text-mast-muted"
         />
         {loadingNames ? (
@@ -347,7 +347,7 @@ export function SkillOverrideEditor({
         ) : (
           <div className="max-h-[520px] overflow-auto rounded border border-mast-border">
             {filteredNames.length === 0 ? (
-              <EmptyNote label="无匹配技能" />
+              <EmptyNote label={tr("无匹配技能", "No matching skills")} />
             ) : (
               <ul className="divide-y divide-mast-border text-sm">
                 {filteredNames.map((n) => {
@@ -362,7 +362,7 @@ export function SkillOverrideEditor({
                         }
                       >
                         <span className="truncate">{n}</span>
-                        {ov && <span className="ml-2 h-1.5 w-1.5 shrink-0 rounded-full bg-mast-warn" title="已覆盖" />}
+                        {ov && <span className="ml-2 h-1.5 w-1.5 shrink-0 rounded-full bg-mast-warn" title={tr("已覆盖", "Overridden")} />}
                       </button>
                     </li>
                   );
@@ -371,49 +371,53 @@ export function SkillOverrideEditor({
             )}
           </div>
         )}
-        <p className="text-xs text-mast-muted">共 {filteredNames.length} / {names.length}</p>
+        <p className="text-xs text-mast-muted">{tr("共", "Total")} {filteredNames.length} / {names.length}</p>
       </Card>
 
       {/* ── RIGHT: detail editor ── */}
       <div className="space-y-4">
         {!selected ? (
-          <Card><EmptyNote label="从左侧列表选择一个技能以编辑其覆盖配置" /></Card>
+          <Card><EmptyNote label={tr("从左侧列表选择一个技能以编辑其覆盖配置", "Select a skill from the list on the left to edit its override")} /></Card>
         ) : card.isPending ? (
           <Card><Spinner /></Card>
         ) : card.isError ? (
           <Card><ErrorNote error={card.error} /></Card>
         ) : card.data?.degraded ? (
-          <DegradedNote what="技能详情" />
+          <DegradedNote what={tr("技能详情", "Skill details")} />
         ) : !card.data?.found ? (
-          <Card><EmptyNote label={`未找到技能：${selected}`} /></Card>
+          <Card><EmptyNote label={tr(`未找到技能：${selected}`, `Skill not found: ${selected}`)} /></Card>
         ) : (
           <>
             <Card className="space-y-4">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-base font-semibold text-mast-text">{card.data.name}</h3>
-                {card.data.zh && <span className="text-sm text-mast-muted">{card.data.zh}</span>}
+                {getLang() === "zh" && card.data.zh && <span className="text-sm text-mast-muted">{card.data.zh}</span>}
                 <Badge tone={SAFETY_TONE[card.data.safety] ?? "default"}>{card.data.safety || "—"}</Badge>
                 <Badge tone="INFO">L{card.data.level}</Badge>
-                {hasOverride && <Badge tone="WARN">已覆盖</Badge>}
+                {hasOverride && <Badge tone="WARN">{tr("已覆盖", "Overridden")}</Badge>}
               </div>
               {(card.data.description_zh || card.data.description) && (
-                <p className="text-sm text-mast-text/90">{card.data.description_zh || card.data.description}</p>
+                <p className="text-sm text-mast-text/90">
+                  {getLang() === "zh"
+                    ? card.data.description_zh || card.data.description
+                    : card.data.description || card.data.description_zh}
+                </p>
               )}
 
               {/* safety / duration / rollback */}
               <div className="grid gap-3 sm:grid-cols-3">
-                <Field label="安全等级">
+                <Field label={tr("安全等级", "Safety level")}>
                   <SelectField value={safety} onChange={setSafety} options={SAFETY_OPTIONS} />
                 </Field>
-                <Field label="预计时长 (秒)">
+                <Field label={tr("预计时长 (秒)", "Estimated duration (s)")}>
                   <NumberField value={duration} onChange={setDuration} step="0.1" />
                 </Field>
-                <Field label="回滚技能">
+                <Field label={tr("回滚技能", "Rollback skill")}>
                   <SelectField
                     value={rollback}
                     onChange={setRollback}
                     options={[
-                      { value: "None", label: "None（无）" },
+                      { value: "None", label: tr("None（无）", "None") },
                       ...names.map((n) => ({ value: n, label: n })),
                     ]}
                   />
@@ -423,15 +427,15 @@ export function SkillOverrideEditor({
 
             {/* parameters table + per-param edit form */}
             <Card className="space-y-3">
-              <h4 className="text-sm font-medium text-mast-text">参数</h4>
+              <h4 className="text-sm font-medium text-mast-text">{tr("参数", "Parameters")}</h4>
               {rows.length === 0 ? (
-                <EmptyNote label="该技能无参数" />
+                <EmptyNote label={tr("该技能无参数", "This skill has no parameters")} />
               ) : (
                 <div className="overflow-auto rounded border border-mast-border">
                   <table className="w-full text-xs">
                     <thead className="bg-mast-bg text-mast-muted">
                       <tr>
-                        {["名称", "类型", "单位", "必填", "默认", "min", "max", "允许值"].map((h) => (
+                        {[tr("名称", "Name"), tr("类型", "Type"), tr("单位", "Unit"), tr("必填", "Required"), tr("默认", "Default"), "min", "max", tr("允许值", "Allowed values")].map((h) => (
                           <th key={h} className="px-2 py-1.5 text-left">{h}</th>
                         ))}
                       </tr>
@@ -470,7 +474,7 @@ export function SkillOverrideEditor({
 
               {pSel && (
                 <div className="rounded border border-mast-border bg-mast-bg/40 p-3">
-                  <p className="mb-2 text-xs text-mast-muted">编辑参数：<span className="font-mono text-mast-text">{pSel}</span></p>
+                  <p className="mb-2 text-xs text-mast-muted">{tr("编辑参数：", "Edit parameter: ")}<span className="font-mono text-mast-text">{pSel}</span></p>
                   <div className="grid gap-3 sm:grid-cols-3">
                     <Field label="type"><TextField value={pType} onChange={setPType} mono /></Field>
                     <Field label="unit"><TextField value={pUnit} onChange={setPUnit} mono /></Field>
@@ -482,12 +486,12 @@ export function SkillOverrideEditor({
                     <Field label="max"><NumberField value={pMax} onChange={setPMax} /></Field>
                   </div>
                   <div className="mt-3">
-                    <Field label="allowed_values (JSON 数组，例如 [1,2,3] 或 [&quot;a&quot;,&quot;b&quot;])">
+                    <Field label={tr("allowed_values (JSON 数组，例如 [1,2,3] 或 [\"a\",\"b\"])", "allowed_values (JSON array, e.g. [1,2,3] or [\"a\",\"b\"])")}>
                       <TextField value={pAllowed} onChange={setPAllowed} mono />
                     </Field>
                   </div>
                   <div className="mt-3">
-                    <Button variant="default" onClick={applyParam}>应用到该参数</Button>
+                    <Button variant="default" onClick={applyParam}>{tr("应用到该参数", "Apply to this parameter")}</Button>
                   </div>
                 </div>
               )}
@@ -495,7 +499,7 @@ export function SkillOverrideEditor({
 
             {/* preconditions / postconditions */}
             <Card className="grid gap-4 sm:grid-cols-2">
-              <Field label="前置条件（每行一个）">
+              <Field label={tr("前置条件（每行一个）", "Preconditions (one per line)")}>
                 <textarea
                   value={preconds}
                   onChange={(e) => setPreconds(e.target.value)}
@@ -504,7 +508,7 @@ export function SkillOverrideEditor({
                   className="rounded-md border border-mast-border bg-mast-bg px-2.5 py-1.5 font-mono text-xs text-mast-text"
                 />
               </Field>
-              <Field label="后置条件（每行一个）">
+              <Field label={tr("后置条件（每行一个）", "Postconditions (one per line)")}>
                 <textarea
                   value={postconds}
                   onChange={(e) => setPostconds(e.target.value)}
@@ -517,7 +521,7 @@ export function SkillOverrideEditor({
 
             {/* change preview */}
             <Card className="space-y-2">
-              <h4 className="text-sm font-medium text-mast-text">变更预览</h4>
+              <h4 className="text-sm font-medium text-mast-text">{tr("变更预览", "Change preview")}</h4>
               {preview?.error ? (
                 <p className="text-xs text-mast-danger">{preview.error}</p>
               ) : preview?.ovr && Object.keys(preview.ovr).length ? (
@@ -525,7 +529,7 @@ export function SkillOverrideEditor({
                   {JSON.stringify(preview.ovr, null, 2)}
                 </pre>
               ) : (
-                <p className="text-xs text-mast-muted">无变更</p>
+                <p className="text-xs text-mast-muted">{tr("无变更", "No changes")}</p>
               )}
               <div className="flex gap-2 pt-1">
                 <Button
@@ -533,18 +537,18 @@ export function SkillOverrideEditor({
                   disabled={saveMut.isPending}
                   onClick={() => saveMut.mutate()}
                 >
-                  {saveMut.isPending ? "保存中…" : "保存覆盖"}
+                  {saveMut.isPending ? tr("保存中…", "Saving…") : tr("保存覆盖", "Save override")}
                 </Button>
                 <Button
                   variant="danger"
                   disabled={resetMut.isPending || !hasOverride}
                   onClick={() => resetMut.mutate()}
                 >
-                  {resetMut.isPending ? "恢复中…" : "恢复默认"}
+                  {resetMut.isPending ? tr("恢复中…", "Restoring…") : tr("恢复默认", "Restore default")}
                 </Button>
               </div>
               {file.data?.degraded && (
-                <p className="text-xs text-mast-warn">覆盖存储未接入（degraded）— 保存可能不生效。</p>
+                <p className="text-xs text-mast-warn">{tr("覆盖存储未接入（degraded）— 保存可能不生效。", "Override storage is not connected (degraded); saving may have no effect.")}</p>
               )}
             </Card>
           </>

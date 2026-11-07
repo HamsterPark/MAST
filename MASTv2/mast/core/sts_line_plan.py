@@ -49,6 +49,7 @@ import logging
 import math
 from dataclasses import dataclass, fields, replace
 from typing import Any, Sequence
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -168,8 +169,8 @@ INPUT_FORMS: tuple[str, ...] = ("bracket", "mixed_frame", "explicit")
 #: 上游对「跨站点畴界」的形态名。它**没有米坐标**,本模块一律拒绝。
 CROSS_SITE_FORM = "cross_site"
 
-#: 跨站点拒绝的原话。测试按这个子串断言 —— 拒绝必须说得出下一步。
-CROSS_SITE_HINT = "需要先把它收进单个站点内"
+#: 跨站点拒绝的提示语。测试按这个子串断言 —— 拒绝必须说得出下一步。
+CROSS_SITE_HINT = tr("需要先把它收进单个站点内", "Fold it into a single site first")
 
 #: marker meta 里一旦出现这些键,说明定位结果是**粗动步数**而不是米坐标。
 _STEPS_ONLY_KEYS = ("uncertainty_steps", "gap_steps", "gap_moves", "steps",
@@ -223,10 +224,10 @@ def _pair(xy: Any, what: str, code: str) -> tuple[float, float]:
     try:
         a, b = xy  # type: ignore[misc]
     except Exception:  # noqa: BLE001
-        raise LinePlanRefused(code, f"{what} 不是一对坐标: {xy!r}") from None
+        raise LinePlanRefused(code, tr(f"{what} 不是一对坐标: {xy!r}", f"{what} is not a coordinate pair: {xy!r}")) from None
     fa, fb = _finite(a), _finite(b)
     if fa is None or fb is None:
-        raise LinePlanRefused(code, f"{what} 里有非有限数: {xy!r}")
+        raise LinePlanRefused(code, tr(f"{what} 里有非有限数: {xy!r}", f"{what} contains a non-finite number: {xy!r}"))
     return fa, fb
 
 
@@ -263,27 +264,34 @@ def resolve_line_geometry(
     if f == CROSS_SITE_FORM:
         raise LinePlanRefused(
             "cross_site_no_metres",
-            "这条畴界只定位到粗动步数(站点 k 与 k+1 之间 ±N 步),没有米坐标,"
-            f"线谱无从布点。{CROSS_SITE_HINT}:在两站之间做一次半步长粗动把新站点"
-            "插进去,再在单个站点内重新定位。")
+            tr("这条畴界只定位到粗动步数(站点 k 与 k+1 之间 ±N 步),没有米坐标,"
+               f"线谱无从布点。{CROSS_SITE_HINT}:在两站之间做一次半步长粗动把新站点"
+               "插进去,再在单个站点内重新定位。",
+               "This domain wall was only localised in coarse-motion steps (+/-N steps "
+               "between site k and k+1), with no metre coordinates, so the line "
+               f"spectrum has nowhere to place points. {CROSS_SITE_HINT}: make one "
+               "half-step coarse move between the two sites to insert a new site, then "
+               "re-localise within that single site."))
     if f not in INPUT_FORMS:
         raise LinePlanRefused(
             "unknown_input_form",
-            f"不认识的输入形态 {form!r};只接受 {list(INPUT_FORMS)}"
-            f"(跨站点结果请见 {CROSS_SITE_HINT} 的说明)。")
+            tr(f"不认识的输入形态 {form!r};只接受 {list(INPUT_FORMS)}"
+               f"(跨站点结果请见 {CROSS_SITE_HINT} 的说明)。",
+               f"Unknown input form {form!r}; only {list(INPUT_FORMS)} are accepted "
+               f"(for cross-site results see the note: {CROSS_SITE_HINT})."))
 
     axis: "tuple[float, float] | None" = None
     if axis_xy is not None:
-        axis = _pair(axis_xy, "轴向量", "axis_not_finite")
+        axis = _pair(axis_xy, tr("轴向量", "axis vector"), "axis_not_finite")
     elif axis_deg is not None:
         ang = _finite(axis_deg)
         if ang is None:
-            raise LinePlanRefused("axis_not_finite", f"axis_deg 不是有限数: {axis_deg!r}")
+            raise LinePlanRefused("axis_not_finite", tr(f"axis_deg 不是有限数: {axis_deg!r}", f"axis_deg is not a finite number: {axis_deg!r}"))
         axis = (math.cos(math.radians(ang)), math.sin(math.radians(ang)))
 
     if f == "bracket":
-        lo = _pair(lo_xy, "bracket 的 lo 点", "origin_not_finite")
-        hi = _pair(hi_xy, "bracket 的 hi 点", "origin_not_finite")
+        lo = _pair(lo_xy, tr("bracket 的 lo 点", "bracket lo point"), "origin_not_finite")
+        hi = _pair(hi_xy, tr("bracket 的 hi 点", "bracket hi point"), "origin_not_finite")
         ax = (hi[0] - lo[0], hi[1] - lo[1])
         span = math.hypot(*ax)
         # 不确定度就是 bracket 的跨度本身:二分只保证畴界在这段里。显式给的值
@@ -298,23 +306,30 @@ def resolve_line_geometry(
                             source_note=source_note)
 
     if f == "mixed_frame":
-        ctr = _pair(center_xy, "mixed 帧中心", "origin_not_finite")
+        ctr = _pair(center_xy, tr("mixed 帧中心", "mixed frame centre"), "origin_not_finite")
         if axis is None and lo_xy is not None and hi_xy is not None:
-            lo = _pair(lo_xy, "bracket 的 lo 点", "axis_not_finite")
-            hi = _pair(hi_xy, "bracket 的 hi 点", "axis_not_finite")
+            lo = _pair(lo_xy, tr("bracket 的 lo 点", "bracket lo point"), "axis_not_finite")
+            hi = _pair(hi_xy, tr("bracket 的 hi 点", "bracket hi point"), "axis_not_finite")
             axis = (hi[0] - lo[0], hi[1] - lo[1])
         if axis is None:
             raise LinePlanRefused(
                 "missing_axis",
-                "这一帧被判成 mixed(畴界就在帧内),但没有 bracket 轴、也没有显式"
-                "给出轴向角度。帧角不能拿来当轴向(它读不到时是 null 而不是 0)"
-                "⇒ 请给 axis_deg,或者先跑一次二分拿到 bracket。")
+                tr("这一帧被判成 mixed(畴界就在帧内),但没有 bracket 轴、也没有显式"
+                   "给出轴向角度。帧角不能拿来当轴向(它读不到时是 null 而不是 0)"
+                   "⇒ 请给 axis_deg,或者先跑一次二分拿到 bracket。",
+                   "This frame was classed as mixed (the domain wall is inside the frame), "
+                   "but there is no bracket axis and no explicit axis angle. The frame "
+                   "angle cannot serve as the axis (when unreadable it is null, not 0) "
+                   "=> give axis_deg, or run one bisection first to get a bracket."))
         size = _finite(frame_size_m)
         if size is None or size <= 0:
             raise LinePlanRefused(
                 "missing_uncertainty",
-                "mixed 帧要用帧尺寸当定位不确定度(畴界在帧内,位置未知),"
-                f"但 frame_size_m 读不到: {frame_size_m!r}。")
+                tr("mixed 帧要用帧尺寸当定位不确定度(畴界在帧内,位置未知),"
+                   f"但 frame_size_m 读不到: {frame_size_m!r}。",
+                   "A mixed frame uses the frame size as its localisation uncertainty "
+                   "(the wall is inside the frame, position unknown), "
+                   f"but frame_size_m is unreadable: {frame_size_m!r}."))
         unc = size
         given = _finite(uncertainty_m)
         if given is not None and given > unc:
@@ -324,20 +339,29 @@ def resolve_line_geometry(
                             source_note=source_note)
 
     # explicit
-    org = _pair(origin_xy, "显式原点", "origin_not_finite")
+    org = _pair(origin_xy, tr("显式原点", "explicit origin"), "origin_not_finite")
     if axis is None:
         raise LinePlanRefused(
-            "missing_axis", "显式几何必须给出轴向(axis_xy 或 axis_deg)。")
+            "missing_axis",
+            tr("显式几何必须给出轴向(axis_xy 或 axis_deg)。",
+               "Explicit geometry must give an axis (axis_xy or axis_deg)."))
     unc = _finite(uncertainty_m)
     if unc is None:
         raise LinePlanRefused(
             "missing_uncertainty",
-            "显式几何必须同时给出定位不确定度 uncertainty_m(畴界在轴上位置的已知"
-            "上界)。留空会让精细窗退回流程表的值,而密采点可能整片落在畴界同一侧"
-            "—— 那是一种「跑完了、数据也齐、结论是空的」失败。确知位置就显式写 0。")
+            tr("显式几何必须同时给出定位不确定度 uncertainty_m(畴界在轴上位置的已知"
+               "上界)。留空会让精细窗退回流程表的值,而密采点可能整片落在畴界同一侧"
+               "—— 那是一种「跑完了、数据也齐、结论是空的」失败。确知位置就显式写 0。",
+               "Explicit geometry must also give the localisation uncertainty "
+               "uncertainty_m (a known upper bound on the wall position along the axis). "
+               "Leaving it blank would let the fine window fall back to the workflow-table "
+               "value, and the dense points could all land on one side of the wall "
+               "-- a failure that 'finished, data complete, conclusion empty'. If the "
+               "position is known exactly, write 0 explicitly."))
     if unc < 0:
         raise LinePlanRefused("missing_uncertainty",
-                              f"uncertainty_m 不能为负: {unc!r}")
+                              tr(f"uncertainty_m 不能为负: {unc!r}",
+                                 f"uncertainty_m must not be negative: {unc!r}"))
     return LineGeometry(form="explicit", origin_x_m=org[0], origin_y_m=org[1],
                         axis_x=axis[0], axis_y=axis[1], uncertainty_m=unc,
                         source_note=source_note)
@@ -464,21 +488,25 @@ def _validate_spec(spec: STSLineSpec) -> None:
     fine = float(spec.fine_spacing_nm)
     coarse = float(spec.coarse_spacing_nm)
     if not (fine > 0):
-        raise LinePlanRefused("bad_spec", f"fine_spacing_nm 必须为正: {fine!r}")
+        raise LinePlanRefused("bad_spec", tr(f"fine_spacing_nm 必须为正: {fine!r}", f"fine_spacing_nm must be positive: {fine!r}"))
     if not (coarse > 0):
-        raise LinePlanRefused("bad_spec", f"coarse_spacing_nm 必须为正: {coarse!r}")
+        raise LinePlanRefused("bad_spec", tr(f"coarse_spacing_nm 必须为正: {coarse!r}", f"coarse_spacing_nm must be positive: {coarse!r}"))
     if coarse < fine:
         # 「近墙密、远墙疏」是这条线的全部设计。反过来时不去悄悄纠正 ——
         # 那会让调用方以为自己配的是 X 而实际跑的是 Y。
         raise LinePlanRefused(
             "bad_spec",
-            f"coarse_spacing_nm({coarse:g}) 小于 fine_spacing_nm({fine:g}),"
-            "「近墙密远墙疏」就不成立了。")
+            tr(f"coarse_spacing_nm({coarse:g}) 小于 fine_spacing_nm({fine:g}),"
+               "「近墙密远墙疏」就不成立了。",
+               f"coarse_spacing_nm ({coarse:g}) is smaller than fine_spacing_nm ({fine:g}), "
+               "so 'dense near the wall, sparse far from it' no longer holds."))
     if int(spec.max_points) < 1:
-        raise LinePlanRefused("bad_spec", f"max_points 必须 ≥ 1: {spec.max_points!r}")
+        raise LinePlanRefused("bad_spec", tr(f"max_points 必须 ≥ 1: {spec.max_points!r}", f"max_points must be >= 1: {spec.max_points!r}"))
     if not (float(spec.line_half_length_nm) > 0):
         raise LinePlanRefused(
-            "bad_spec", f"line_half_length_nm 必须为正: {spec.line_half_length_nm!r}")
+            "bad_spec",
+            tr(f"line_half_length_nm 必须为正: {spec.line_half_length_nm!r}",
+               f"line_half_length_nm must be positive: {spec.line_half_length_nm!r}"))
 
 
 #: 去重用的量化尺度(m)。1 pm —— 远小于任何真实点距,远大于浮点误差。
@@ -503,8 +531,8 @@ def plan_line_detail(origin_xy: "Sequence[float]",
     sp = spec or LINE_STS
     _validate_spec(sp)
 
-    ox, oy = _pair(origin_xy, "线的原点", "origin_not_finite")
-    ax, ay = _pair(axis_xy, "bracket 轴", "axis_not_finite")
+    ox, oy = _pair(origin_xy, tr("线的原点", "line origin"), "origin_not_finite")
+    ax, ay = _pair(axis_xy, tr("bracket 轴", "bracket axis"), "axis_not_finite")
 
     axis_len = math.hypot(ax, ay)
     if axis_len <= 0.0:
@@ -512,15 +540,19 @@ def plan_line_detail(origin_xy: "Sequence[float]",
         # 一晚上是更坏的结局。
         raise LinePlanRefused(
             "zero_length_axis",
-            "bracket 轴长度为 0(p_hi 与 p_lo 是同一个点),方向无从定义。"
-            "请先把二分跑到两端确实不同,或者显式给出轴向角度。")
+            tr("bracket 轴长度为 0(p_hi 与 p_lo 是同一个点),方向无从定义。"
+               "请先把二分跑到两端确实不同,或者显式给出轴向角度。",
+               "The bracket axis has zero length (p_hi and p_lo are the same point), so "
+               "the direction is undefined. Run the bisection until the two ends really "
+               "differ, or give an explicit axis angle."))
     ux, uy = ax / axis_len, ay / axis_len
 
     unc = _finite(uncertainty_m)
     if unc is None or unc < 0:
         raise LinePlanRefused(
             "missing_uncertainty",
-            f"uncertainty_m 必须是 ≥ 0 的有限数: {uncertainty_m!r}")
+            tr(f"uncertainty_m 必须是 ≥ 0 的有限数: {uncertainty_m!r}",
+               f"uncertainty_m must be a finite number >= 0: {uncertainty_m!r}"))
 
     fine_half = resolve_fine_half_width_m(sp, unc)
     spec_fine_half = float(sp.fine_half_width_nm) * 1e-9
@@ -547,10 +579,15 @@ def plan_line_detail(origin_xy: "Sequence[float]",
     if n_fine > max_points:
         raise LinePlanRefused(
             "fine_zone_over_budget",
-            f"光是精细区就要 {n_fine} 点,超过上限 {max_points}。精细窗被撑到 "
-            f"{fine_half * 1e9:.1f} nm(定位不确定度 {unc * 1e9:.1f} nm)"
-            f"、点距 {sp.fine_spacing_nm:g} nm。要么放宽 fine_spacing_nm,"
-            "要么提高 max_points —— 但**不要**缩小精细窗,那正是这条线的意义所在。")
+            tr(f"光是精细区就要 {n_fine} 点,超过上限 {max_points}。精细窗被撑到 "
+               f"{fine_half * 1e9:.1f} nm(定位不确定度 {unc * 1e9:.1f} nm)"
+               f"、点距 {sp.fine_spacing_nm:g} nm。要么放宽 fine_spacing_nm,"
+               "要么提高 max_points —— 但**不要**缩小精细窗,那正是这条线的意义所在。",
+               f"The fine zone alone needs {n_fine} points, over the limit of {max_points}. "
+               f"The fine window was widened to {fine_half * 1e9:.1f} nm (localisation "
+               f"uncertainty {unc * 1e9:.1f} nm) with a {sp.fine_spacing_nm:g} nm pitch. "
+               "Either relax fine_spacing_nm or raise max_points -- but do **not** shrink "
+               "the fine window, that is the whole point of this line."))
     fine_s: list[float] = [0.0]
     for k in range(1, k_max + 1):
         fine_s.extend((-k * fine_step, k * fine_step))
@@ -607,7 +644,7 @@ def plan_line_detail(origin_xy: "Sequence[float]",
             x_m=ox + ux * s,
             y_m=oy + uy * s,
             zone=zone_of[q],
-            label=f"线谱 s={s * 1e9:+.2f} nm",
+            label=tr(f"线谱 s={s * 1e9:+.2f} nm", f"Line spectrum s={s * 1e9:+.2f} nm"),
         ))
     points.sort(key=lambda p: p.index)
 
@@ -699,7 +736,7 @@ def estimate_line_duration(points: Sequence[LinePoint],
     travel_spatial = _path_length(pts, key=lambda p: p.index)
     n_moves = max(0, n - 1)
     if start_xy is not None and pts:
-        sx, sy = _pair(start_xy, "起点", "origin_not_finite")
+        sx, sy = _pair(start_xy, tr("起点", "start point"), "origin_not_finite")
         first = min(pts, key=lambda p: p.order)
         travel += math.hypot(first.x_m - sx, first.y_m - sy)
         travel_spatial += math.hypot(first.x_m - sx, first.y_m - sy)
@@ -744,18 +781,25 @@ def format_duration_note(budget: dict) -> str:
     move_min = float(budget.get("move_total_s") or 0.0) / 60.0
     total = budget.get("total_s")
     nominal = budget.get("speed_source") == "nominal_unconfigured"
-    suffix = ("移动速度采用未标定名义值；时长为估算，须按目标仪器核验。"
+    suffix = (tr("移动速度采用未标定名义值；时长为估算，须按目标仪器核验。",
+                 " Travel speed is an uncalibrated nominal value; the duration is an estimate to verify on the target instrument.")
               if nominal else "")
     if total is None:
-        partial_label = "已估算部分约 " if nominal else "已知部分 ≥ "
-        return (f"{n} 点;移动开销约 {move_min:.0f} 分钟(FolMe "
-                f"{float(budget.get('speed_m_s') or 0.0) * 1e9:.1f} nm/s),"
-                f"每点采谱耗时未标定 ⇒ **总时长未知**,{partial_label}"
-                f"{float(budget.get('known_lower_bound_s') or 0.0) / 60.0:.0f} 分钟。"
-                f"{suffix}")
-    return (f"{n} 点;预计约 {float(total) / 60.0:.0f} 分钟"
-            f"(其中移动 {move_min:.0f} 分钟)。{suffix}")
-
+        partial_label = (tr("已估算部分约 ", "estimated part about ") if nominal
+                         else tr("已知部分 ≥ ", "known part >= "))
+        return tr(f"{n} 点;移动开销约 {move_min:.0f} 分钟(FolMe "
+                  f"{float(budget.get('speed_m_s') or 0.0) * 1e9:.1f} nm/s),"
+                  f"每点采谱耗时未标定 ⇒ **总时长未知**,{partial_label}"
+                  f"{float(budget.get('known_lower_bound_s') or 0.0) / 60.0:.0f} 分钟。{suffix}",
+                  f"{n} points; travel overhead about {move_min:.0f} min (FolMe "
+                  f"{float(budget.get('speed_m_s') or 0.0) * 1e9:.1f} nm/s), "
+                  "per-point spectrum time is uncalibrated => **total duration unknown**, "
+                  f"{partial_label}"
+                  f"{float(budget.get('known_lower_bound_s') or 0.0) / 60.0:.0f} min.{suffix}")
+    return tr(f"{n} 点;预计约 {float(total) / 60.0:.0f} 分钟"
+              f"(其中移动 {move_min:.0f} 分钟)。{suffix}",
+              f"{n} points; about {float(total) / 60.0:.0f} min expected "
+              f"({move_min:.0f} min of it travel).{suffix}")
 
 __all__ = [
     "CROSS_SITE_FORM",

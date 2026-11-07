@@ -4,6 +4,7 @@ import { api } from "@/api/client";
 import type { components } from "@/api/schema";
 import { Card, Badge, Spinner, ErrorNote, EmptyNote } from "@/components/ui";
 import { Button, Field, NumberField, SelectField } from "@/components/controls";
+import { tr } from "@/lib/i18n";
 
 type DevicesResp = components["schemas"]["OpticsDevicesResponse"];
 type Device = components["schemas"]["OpticsDevice"];
@@ -17,6 +18,15 @@ type AxisRef = {
 
 const num = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) ? v : null;
+
+/**
+ * A position / delay reply can say "MAST has not opened this device" (data.connected
+ * === false, position null): reads only use devices that are already open and never
+ * open one themselves (opening would take the device away from the vendor software).
+ * Show this text instead of "—".
+ */
+const NOT_OPEN_TEXT = tr("未连接（点移动或连接才会打开）", "Not connected (it opens on Move or Connect)");
+const notOpen = (d: { [key: string]: unknown } | undefined): boolean => d?.connected === false;
 
 function fmt(v: unknown, digits = 3): string {
   const n = num(v);
@@ -54,30 +64,29 @@ export default function OpticsPanel() {
       {/* header row: refresh state + panic stop */}
       <div className="flex items-center justify-between">
         <p className="text-sm text-mast-muted">
-          手动控制 TERS/THz 位移台。所有移动经软限位（驱动层强制），越界会被拒绝而非执行。
+          {tr("手动控制 TERS/THz 位移台。所有移动经软限位（驱动层强制），越界会被拒绝而非执行。", "Manual control of the TERS/THz stages. All moves go through soft limits (enforced in the driver layer); out-of-range moves are rejected, not executed.")}
         </p>
         <Button
           variant="danger"
           onClick={() => stopMut.mutate()}
           loading={stopMut.isPending}
         >
-          ⏹ 全部急停
+          {tr("⏹ 全部急停", "⏹ Stop all")}
         </Button>
       </div>
       {stopMut.data && !stopMut.data.ok && (
-        <ErrorNote error={stopMut.data.error} label="急停失败" />
+        <ErrorNote error={stopMut.data.error} label={tr("急停失败", "Stop failed")} />
       )}
 
-      {devicesQ.isLoading && <Spinner label="读取设备清单…" />}
-      {devicesQ.error && <ErrorNote error={devicesQ.error} label="设备清单读取失败" />}
+      {devicesQ.isLoading && <Spinner label={tr("读取设备清单…", "Reading device list…")} />}
+      {devicesQ.error && <ErrorNote error={devicesQ.error} label={tr("设备清单读取失败", "Failed to read device list")} />}
 
       {devicesQ.data && devices.length === 0 && (
         <Card>
-          <EmptyNote label="尚未配置光学台" />
+          <EmptyNote label={tr("尚未配置光学台", "No optical stage configured")} />
           <p className="mt-2 text-sm text-mast-muted">
-            在 <code className="font-mono text-mast-accent">config/optical_instruments.json</code> 里把设备
-            <code className="font-mono text-mast-accent"> enabled</code> 改为 true 并填好 COM 口 / 序列号，
-            然后刷新。
+            {tr("在 ", "In ")}<code className="font-mono text-mast-accent">config/optical_instruments.json</code>{tr(" 里把设备", ", set the device's")}
+            <code className="font-mono text-mast-accent"> enabled</code>{tr(" 改为 true 并填好 COM 口 / 序列号，然后刷新。", " to true and fill in the COM port / serial number, then refresh.")}
           </p>
         </Card>
       )}
@@ -98,7 +107,7 @@ export default function OpticsPanel() {
 function DevicesOverview({ devices }: { devices: Device[] }) {
   return (
     <div>
-      <h3 className="mb-2 text-sm font-semibold text-mast-text">设备总览</h3>
+      <h3 className="mb-2 text-sm font-semibold text-mast-text">{tr("设备总览", "Device overview")}</h3>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {devices.map((d) => (
           <Card key={d.id}>
@@ -110,11 +119,11 @@ function DevicesOverview({ devices }: { devices: Device[] }) {
                 </div>
               </div>
               {!d.enabled ? (
-                <Badge tone="WARN">未启用</Badge>
+                <Badge tone="WARN">{tr("未启用", "Disabled")}</Badge>
               ) : d.connected ? (
-                <Badge tone="AUTO">已连接</Badge>
+                <Badge tone="AUTO">{tr("已连接", "Connected")}</Badge>
               ) : (
-                <Badge tone="INFO">待连接</Badge>
+                <Badge tone="INFO">{tr("待连接", "Not connected")}</Badge>
               )}
             </div>
             <div className="mt-2.5 flex flex-col gap-1">
@@ -159,7 +168,9 @@ function DelayLineControl({ delayLine }: { delayLine: NonNullable<DevicesResp["d
   });
 
   const cur = delayQ.data?.data;
-  const range = delayLine.delay_range_ps ?? [];
+  // The /delay reply always carries the configured reachable range; older backends
+  // do not, so fall back to the one in the device list.
+  const range = (Array.isArray(cur?.delay_range_ps) ? (cur.delay_range_ps as number[]) : null) ?? delayLine.delay_range_ps ?? [];
   const [rangeLo, rangeHi] = range;
   const targetNum = Number(target);
   const outOfRange =
@@ -169,22 +180,28 @@ function DelayLineControl({ delayLine }: { delayLine: NonNullable<DevicesResp["d
   return (
     <Card>
       <div className="mb-3 flex items-center gap-2">
-        <h3 className="text-sm font-semibold text-mast-text">泵浦-探测延迟线</h3>
+        <h3 className="text-sm font-semibold text-mast-text">{tr("泵浦-探测延迟线", "Pump-probe delay line")}</h3>
         <Badge>{delayLine.device_id} · {delayLine.axis}</Badge>
       </div>
       <div className="flex flex-wrap items-end gap-x-8 gap-y-3">
         <div>
-          <div className="text-xs text-mast-faint">当前延迟</div>
-          <div className="font-mono text-2xl tabular-nums text-mast-accent">
-            {delayQ.isLoading ? "…" : fmt(cur?.delay_ps, 3)}
-            <span className="ml-1 text-sm text-mast-muted">ps</span>
-          </div>
-          <div className="mt-0.5 font-mono text-xs text-mast-faint">
-            台位 {fmt(cur?.stage_position, 2)} {String(cur?.stage_unit ?? "")}
-          </div>
+          <div className="text-xs text-mast-faint">{tr("当前延迟", "Current delay")}</div>
+          {!delayQ.isLoading && notOpen(cur) ? (
+            <div className="text-sm text-mast-warn">{NOT_OPEN_TEXT}</div>
+          ) : (
+            <>
+              <div className="font-mono text-2xl tabular-nums text-mast-accent">
+                {delayQ.isLoading ? "…" : fmt(cur?.delay_ps, 3)}
+                <span className="ml-1 text-sm text-mast-muted">ps</span>
+              </div>
+              <div className="mt-0.5 font-mono text-xs text-mast-faint">
+                {tr("台位", "Stage")} {fmt(cur?.stage_position, 2)} {String(cur?.stage_unit ?? "")}
+              </div>
+            </>
+          )}
         </div>
         <div className="text-xs text-mast-faint">
-          可达范围<br />
+          {tr("可达范围", "Reachable range")}<br />
           <span className="font-mono tabular-nums text-mast-muted">
             {range.length === 2 ? `${fmt(range[0], 1)} … ${fmt(range[1], 1)} ps` : "—"}
           </span>
@@ -193,7 +210,7 @@ function DelayLineControl({ delayLine }: { delayLine: NonNullable<DevicesResp["d
 
       <div className="mt-4 flex flex-wrap items-end gap-3">
         <div className="w-40">
-          <Field label="移到延迟 (ps)" hint={outOfRange ? "超出可达范围" : undefined}>
+          <Field label={tr("移到延迟 (ps)", "Move to delay (ps)")} hint={outOfRange ? tr("超出可达范围", "Out of reachable range") : undefined}>
             <NumberField value={target} onChange={setTarget} step="1" />
           </Field>
         </div>
@@ -203,11 +220,11 @@ function DelayLineControl({ delayLine }: { delayLine: NonNullable<DevicesResp["d
           loading={moveMut.isPending}
           onClick={() => moveMut.mutate(targetNum)}
         >
-          移动
+          {tr("移动", "Move")}
         </Button>
         {moveMut.data && (
           <span className={clsxOk(moveMut.data.ok)}>
-            {moveMut.data.ok ? `已到 ${fmt(moveMut.data.data?.delay_ps, 3)} ps` : moveMut.data.error}
+            {moveMut.data.ok ? tr(`已到 ${fmt(moveMut.data.data?.delay_ps, 3)} ps`, `Reached ${fmt(moveMut.data.data?.delay_ps, 3)} ps`) : moveMut.data.error}
           </span>
         )}
       </div>
@@ -281,10 +298,10 @@ function AxisControl({ devices }: { devices: Device[] }) {
 
   return (
     <Card>
-      <h3 className="mb-3 text-sm font-semibold text-mast-text">单轴控制 · 自检</h3>
+      <h3 className="mb-3 text-sm font-semibold text-mast-text">{tr("单轴控制 · 自检", "Single-axis control · self-test")}</h3>
       <div className="flex flex-wrap items-end gap-3">
         <div className="w-64">
-          <Field label="轴">
+          <Field label={tr("轴", "Axis")}>
             <SelectField
               value={sel}
               onChange={setSel}
@@ -293,24 +310,28 @@ function AxisControl({ devices }: { devices: Device[] }) {
           </Field>
         </div>
         <div>
-          <div className="text-xs text-mast-faint">当前位置</div>
-          <div className="font-mono text-xl tabular-nums text-mast-accent">
-            {posQ.isFetching ? "…" : fmt(pos, 3)}
-            <span className="ml-1 text-xs text-mast-muted">{cur.unit}</span>
-          </div>
+          <div className="text-xs text-mast-faint">{tr("当前位置", "Current position")}</div>
+          {!posQ.isFetching && notOpen(posQ.data?.data) ? (
+            <div className="text-sm text-mast-warn">{NOT_OPEN_TEXT}</div>
+          ) : (
+            <div className="font-mono text-xl tabular-nums text-mast-accent">
+              {posQ.isFetching ? "…" : fmt(pos, 3)}
+              <span className="ml-1 text-xs text-mast-muted">{cur.unit}</span>
+            </div>
+          )}
           {cur.min !== null && cur.max !== null && (
             <div className="mt-0.5 font-mono text-[11px] text-mast-faint">
-              限位 {fmt(cur.min, 0)} … {fmt(cur.max, 0)}
+              {tr("限位", "Limits")} {fmt(cur.min, 0)} … {fmt(cur.max, 0)}
             </div>
           )}
         </div>
-        <Button variant="ghost" onClick={refreshPos} loading={posQ.isFetching}>刷新</Button>
+        <Button variant="ghost" onClick={refreshPos} loading={posQ.isFetching}>{tr("刷新", "Refresh")}</Button>
       </div>
 
       {/* jog */}
       <div className="mt-4 flex flex-wrap items-end gap-2 border-t border-mast-border pt-4">
         <div className="w-28">
-          <Field label={`步长 (${cur.unit})`}>
+          <Field label={tr(`步长 (${cur.unit})`, `Step (${cur.unit})`)}>
             <NumberField value={jog} onChange={setJog} step="1" />
           </Field>
         </div>
@@ -318,15 +339,15 @@ function AxisControl({ devices }: { devices: Device[] }) {
           disabled={!Number.isFinite(jogN)}
           loading={moveMut.isPending}
           onClick={() => moveMut.mutate({ position: -jogN, relative: true })}
-        >− 反向</Button>
+        >{tr("− 反向", "− Reverse")}</Button>
         <Button
           disabled={!Number.isFinite(jogN)}
           loading={moveMut.isPending}
           onClick={() => moveMut.mutate({ position: jogN, relative: true })}
-        >+ 正向</Button>
+        >{tr("+ 正向", "+ Forward")}</Button>
         <div className="mx-2 h-8 w-px bg-mast-border" />
         <div className="w-32">
-          <Field label={`移到 (${cur.unit})`} hint={absOut ? "超出限位" : undefined}>
+          <Field label={tr(`移到 (${cur.unit})`, `Move to (${cur.unit})`)} hint={absOut ? tr("超出限位", "Beyond limits") : undefined}>
             <NumberField value={absTarget} onChange={setAbsTarget} step="1" />
           </Field>
         </div>
@@ -335,7 +356,7 @@ function AxisControl({ devices }: { devices: Device[] }) {
           disabled={absOut || !Number.isFinite(absN)}
           loading={moveMut.isPending}
           onClick={() => moveMut.mutate({ position: absN, relative: false })}
-        >移动</Button>
+        >{tr("移动", "Move")}</Button>
       </div>
       {moveMut.data && !moveMut.data.ok && (
         <p className="mt-2 text-sm text-mast-danger">{moveMut.data.error}</p>
@@ -344,7 +365,7 @@ function AxisControl({ devices }: { devices: Device[] }) {
       {/* wiggle self-test */}
       <div className="mt-4 flex flex-wrap items-end gap-2 border-t border-mast-border pt-4">
         <div className="w-28">
-          <Field label={`自检幅度 (${cur.unit})`}>
+          <Field label={tr(`自检幅度 (${cur.unit})`, `Self-test amplitude (${cur.unit})`)}>
             <NumberField value={wiggleDelta} onChange={setWiggleDelta} step="1" />
           </Field>
         </div>
@@ -353,20 +374,20 @@ function AxisControl({ devices }: { devices: Device[] }) {
           onClick={() => wiggleMut.mutate(Number(wiggleDelta))}
           disabled={!Number.isFinite(Number(wiggleDelta))}
         >
-          🔧 Wiggle 自检
+          {tr("🔧 Wiggle 自检", "🔧 Wiggle self-test")}
         </Button>
         {w && (
           <div className="flex flex-wrap items-center gap-1.5 text-xs">
             <Badge tone={w.moved ? "AUTO" : "DANGEROUS"}>
-              {w.moved ? "动了" : "没动"}
+              {w.moved ? tr("动了", "Moved") : tr("没动", "Did not move")}
             </Badge>
             {w.moved != null && w.direction_ok != null && (
               <Badge tone={w.direction_ok ? "AUTO" : "WARN"}>
-                方向{w.direction_ok ? "✓" : "反了"}
+                {tr("方向", "Direction ")}{w.direction_ok ? "✓" : tr("反了", "reversed")}
               </Badge>
             )}
             <span className="font-mono tabular-nums text-mast-muted">
-              位移 {fmt(w.observed_delta, 3)} · 标度比 {fmt(w.scale_ratio, 3)}
+              {tr("位移", "Displacement")} {fmt(w.observed_delta, 3)} · {tr("标度比", "scale ratio")} {fmt(w.scale_ratio, 3)}
             </span>
           </div>
         )}
@@ -398,32 +419,32 @@ function DryRunControl({ delayLine }: { delayLine: NonNullable<DevicesResp["dela
   return (
     <Card>
       <div className="mb-1 flex items-center gap-2">
-        <h3 className="text-sm font-semibold text-mast-text">泵浦-探测空跑 (dry run)</h3>
-        <Badge tone="INFO">不打激光 · 不读数 · 不存盘</Badge>
+        <h3 className="text-sm font-semibold text-mast-text">{tr("泵浦-探测空跑 (dry run)", "Pump-probe dry run")}</h3>
+        <Badge tone="INFO">{tr("不打激光 · 不读数 · 不存盘", "No laser · no readout · nothing saved")}</Badge>
       </div>
       <p className="mb-3 text-xs text-mast-muted">
-        让延迟线走完整条扫描、每点等稳，只验证行程可达与耗时——真实（带激光）测量走 agent / 技能路径。
+        {tr("让延迟线走完整条扫描、每点等稳，只验证行程可达与耗时——真实（带激光）测量走 agent / 技能路径。", "Runs the delay line through the whole scan, settling at each point, to verify only that the travel is reachable and how long it takes. Real (laser-on) measurements go through the agent / skill path.")}
       </p>
       <div className="flex flex-wrap items-end gap-2">
-        <div className="w-28"><Field label="起 (ps)"><NumberField value={start} onChange={setStart} step="1" /></Field></div>
-        <div className="w-28"><Field label="止 (ps)"><NumberField value={stop} onChange={setStop} step="1" /></Field></div>
-        <div className="w-24"><Field label="点数"><NumberField value={points} onChange={setPoints} step="1" /></Field></div>
-        <Button variant="primary" loading={dryMut.isPending} onClick={() => dryMut.mutate()}>运行空跑</Button>
+        <div className="w-28"><Field label={tr("起 (ps)", "Start (ps)")}><NumberField value={start} onChange={setStart} step="1" /></Field></div>
+        <div className="w-28"><Field label={tr("止 (ps)", "Stop (ps)")}><NumberField value={stop} onChange={setStop} step="1" /></Field></div>
+        <div className="w-24"><Field label={tr("点数", "Points")}><NumberField value={points} onChange={setPoints} step="1" /></Field></div>
+        <Button variant="primary" loading={dryMut.isPending} onClick={() => dryMut.mutate()}>{tr("运行空跑", "Run dry run")}</Button>
         {range.length === 2 && (
           <span className="pb-2 font-mono text-xs text-mast-faint">
-            可达 {fmt(range[0], 0)}…{fmt(range[1], 0)} ps
+            {tr("可达", "Reachable")} {fmt(range[0], 0)}…{fmt(range[1], 0)} ps
           </span>
         )}
       </div>
       {dryMut.isPending && (
-        <p className="mt-2 text-sm text-mast-muted">空跑中——延迟线正在逐点移动…</p>
+        <p className="mt-2 text-sm text-mast-muted">{tr("空跑中——延迟线正在逐点移动…", "Dry run in progress: the delay line is moving point by point…")}</p>
       )}
       {dryMut.data && (
         dryMut.data.ok ? (
           <div className="mt-3 rounded-mast-card border border-mast-auto-border bg-mast-auto-bg p-3 text-sm">
-            <span className="font-semibold text-mast-auto">✓ 空跑完成</span>
+            <span className="font-semibold text-mast-auto">{tr("✓ 空跑完成", "✓ Dry run complete")}</span>
             <span className="ml-2 font-mono tabular-nums text-mast-text">
-              {String(r?.n_points ?? "—")}/{String(r?.requested_points ?? "—")} 点 · {fmt(r?.elapsed_s, 1)} s
+              {String(r?.n_points ?? "—")}/{String(r?.requested_points ?? "—")} {tr("点", "points")} · {fmt(r?.elapsed_s, 1)} s
             </span>
           </div>
         ) : (

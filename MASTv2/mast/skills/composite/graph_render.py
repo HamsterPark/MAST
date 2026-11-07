@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from mast.i18n import tr
 from mast.skills.composite.spec import CompositeSpec
 
 
@@ -68,11 +69,12 @@ class _Builder:
                 self.edge(src, dec)
             then_exits = self.walk(node.get("then") or [], [dec])
             # label the first 'then' edge
-            self._label_first_edge(dec, "是")
+            yes_label = tr("是", "Yes")
+            self._label_first_edge(dec, yes_label)
             else_nodes = node.get("else") or []
             if else_nodes:
                 else_exits = self.walk(else_nodes, [dec])
-                self._label_edge(dec, else_exits and self._first_target(dec, exclude="是"), "否")
+                self._label_edge(dec, else_exits and self._first_target(dec, exclude=yes_label), tr("否", "No"))
             else:
                 else_exits = [dec]  # false path falls through
             return then_exits + else_exits
@@ -85,10 +87,10 @@ class _Builder:
             for src in incoming:
                 self.edge(src, loop)
             body_exits = self.walk(node.get("body") or [], [loop])
-            self._label_first_edge(loop, "每次")
+            self._label_first_edge(loop, tr("每次", "Each"))
             # back-edge body → loop
             for ex in body_exits:
-                self.edge(ex, loop, "循环")
+                self.edge(ex, loop, tr("循环", "Loop"))
             return [loop]  # exit on loop-done
 
         if ntype == "agent":
@@ -98,11 +100,11 @@ class _Builder:
                 self.edge(src, dec)
             err_exits = self.walk(node.get("on_error") or [], [dec])
             if node.get("on_error"):
-                self._label_first_edge(dec, "失败")
+                self._label_first_edge(dec, tr("失败", "Failed"))
             return list(dict.fromkeys([dec, *err_exits]))
 
         if ntype == "human":
-            dec = self.node("if", f"✋ {node.get('message', '人工决策')}"[:60])
+            dec = self.node("if", f"✋ {node.get('message', tr('人工决策', 'Human decision'))}"[:60])
             for src in incoming:
                 self.edge(src, dec)
             routes = node.get("routes") or {}
@@ -117,7 +119,7 @@ class _Builder:
 
         if ntype == "llm":
             mode = node.get("mode", "route")
-            dec = self.node("if", f"🤖 {node.get('responsibility', 'LLM 决策')}"[:60])
+            dec = self.node("if", f"🤖 {node.get('responsibility', tr('LLM 决策', 'LLM decision'))}"[:60])
             for src in incoming:
                 self.edge(src, dec)
             if mode == "route":
@@ -131,7 +133,7 @@ class _Builder:
                 # dedupe，保持顺序
                 return list(dict.fromkeys(exits)) or [dec]
             err_exits = self.walk(node.get("on_error") or [], [dec])
-            self._label_first_edge(dec, "失败")
+            self._label_first_edge(dec, tr("失败", "Failed"))
             return list({*err_exits, dec})
 
         # unknown
@@ -165,9 +167,9 @@ class _Builder:
 def build_graph(spec: CompositeSpec) -> dict:
     """Structured flow graph for *spec*: {start, end, nodes, edges}."""
     b = _Builder()
-    start = b.node("start", "开始")
+    start = b.node("start", tr("开始", "Start"))
     exits = b.walk(spec.nodes, [start])
-    end = b.node("end", "完成")
+    end = b.node("end", tr("完成", "Done"))
     for ex in exits:
         b.edge(ex, end)
     return {"start": start, "end": end, "nodes": b.nodes, "edges": b.edges}
@@ -176,7 +178,7 @@ def build_graph(spec: CompositeSpec) -> dict:
 def steps_to_graph(steps: list) -> dict:
     """Straight-line graph from a static plan() list of CompositeStep."""
     b = _Builder()
-    start = b.node("start", "开始")
+    start = b.node("start", tr("开始", "Start"))
     cur = [start]
     for st in steps:
         label = getattr(st, "skill_name", "?")
@@ -187,7 +189,7 @@ def steps_to_graph(steps: list) -> dict:
         for src in cur:
             b.edge(src, n)
         cur = [n]
-    end = b.node("end", "完成")
+    end = b.node("end", tr("完成", "Done"))
     for src in cur:
         b.edge(src, end)
     return {"start": start, "end": end, "nodes": b.nodes, "edges": b.edges}
@@ -259,7 +261,7 @@ def _render_nodes_html(nodes: list, depth: int = 0) -> str:
         if t == "step":
             border, bg = _PALETTE["step"]
             params = _param_summary(node.get("params") or {})
-            opt = ' · <span style="color:#b45309">可选</span>' if node.get("optional") else ""
+            opt = (' · <span style="color:#b45309">' + tr("可选", "optional") + '</span>') if node.get("optional") else ""
             out.append(
                 f'<div style="margin:4px 0;padding:6px 10px;border-left:3px solid {border};'
                 f'background:{bg};border-radius:4px;">'
@@ -279,13 +281,13 @@ def _render_nodes_html(nodes: list, depth: int = 0) -> str:
             out.append(
                 f'<div style="margin:5px 0;padding:6px 10px;border:1px solid {border};'
                 f'background:{bg};border-radius:6px;">'
-                f'<div style="font-weight:600;color:{border};">◆ 条件: '
+                f'<div style="font-weight:600;color:{border};">◆ {tr("条件", "Condition")}: '
                 f'<span style="font-family:monospace;">{_esc(node.get("cond","?"))}</span></div>'
                 f'<div style="margin-left:14px;border-left:2px dashed #16a34a;padding-left:10px;margin-top:4px;">'
-                f'<div style="color:#16a34a;font-size:0.8em;font-weight:600;">是 ↓</div>'
-                f'{_render_nodes_html(node.get("then") or [], depth+1) or "<i style=color:#94a3b8>（空）</i>"}</div>'
+                f'<div style="color:#16a34a;font-size:0.8em;font-weight:600;">{tr("是", "Yes")} ↓</div>'
+                f'{_render_nodes_html(node.get("then") or [], depth+1) or "<i style=color:#94a3b8>" + tr("（空）", "(empty)") + "</i>"}</div>'
                 + (f'<div style="margin-left:14px;border-left:2px dashed #dc2626;padding-left:10px;margin-top:4px;">'
-                   f'<div style="color:#dc2626;font-size:0.8em;font-weight:600;">否 ↓</div>'
+                   f'<div style="color:#dc2626;font-size:0.8em;font-weight:600;">{tr("否", "No")} ↓</div>'
                    f'{_render_nodes_html(node.get("else") or [], depth+1)}</div>'
                    if node.get("else") else "")
                 + "</div>")
@@ -293,15 +295,16 @@ def _render_nodes_html(nodes: list, depth: int = 0) -> str:
             border, bg = _PALETTE["loop"]
             mode = node.get("mode", "loop")
             bound = (node.get("count") or node.get("iterable") or node.get("cond") or "")
-            label = {"repeat": f"重复 {bound} 次", "foreach": f"遍历 {bound}",
-                     "while": f"当 {bound} 时"}.get(mode, f"{mode} {bound}")
+            label = {"repeat": tr(f"重复 {bound} 次", f"Repeat {bound} times"),
+                     "foreach": tr(f"遍历 {bound}", f"For each {bound}"),
+                     "while": tr(f"当 {bound} 时", f"While {bound}")}.get(mode, f"{mode} {bound}")
             out.append(
                 f'<div style="margin:5px 0;padding:6px 10px;border:1px solid {border};'
                 f'background:{bg};border-radius:6px;">'
-                f'<div style="font-weight:600;color:{border};">↻ 循环: {_esc(label)} '
-                f'<span style="color:#64748b;font-size:0.8em;">(变量 {_esc(node.get("var","i"))})</span></div>'
+                f'<div style="font-weight:600;color:{border};">↻ {tr("循环", "Loop")}: {_esc(label)} '
+                f'<span style="color:#64748b;font-size:0.8em;">({tr("变量", "variable")} {_esc(node.get("var","i"))})</span></div>'
                 f'<div style="margin-left:14px;border-left:2px solid {border};padding-left:10px;margin-top:4px;">'
-                f'{_render_nodes_html(node.get("body") or [], depth+1) or "<i style=color:#94a3b8>（空）</i>"}</div>'
+                f'{_render_nodes_html(node.get("body") or [], depth+1) or "<i style=color:#94a3b8>" + tr("（空）", "(empty)") + "</i>"}</div>'
                 "</div>")
     return "\n".join(out)
 
@@ -312,12 +315,12 @@ def spec_to_html(spec: CompositeSpec) -> str:
     Renders the control-flow tree as nested boxes: steps, ``set`` pills,
     ``if`` branches (是/否), and ``loop`` blocks — so conditionals and loops are
     visible at a glance inside the frozen binary too."""
-    body = _render_nodes_html(spec.nodes) or '<i style="color:#94a3b8">（无步骤）</i>'
+    body = _render_nodes_html(spec.nodes) or ('<i style="color:#94a3b8">' + tr("（无步骤）", "(no steps)") + '</i>')
     return (
         '<div style="font-size:0.92em;line-height:1.4;">'
-        '<div style="text-align:center;color:#64748b;margin-bottom:4px;">▼ 开始 ▼</div>'
+        '<div style="text-align:center;color:#64748b;margin-bottom:4px;">▼ ' + tr("开始", "Start") + ' ▼</div>'
         f'{body}'
-        '<div style="text-align:center;color:#64748b;margin-top:4px;">▼ 完成 ▼</div>'
+        '<div style="text-align:center;color:#64748b;margin-top:4px;">▼ ' + tr("完成", "Done") + ' ▼</div>'
         '</div>')
 
 

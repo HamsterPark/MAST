@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from mast.i18n import tr
 import os
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 def _project_root() -> Path:
     """Lazily resolve the project root on EACH access.
 
-    : ``_PROJECT_ROOT = project_root()`` froze the root at *import*
+    ``_PROJECT_ROOT = project_root()`` froze the root at *import*
     time. Every other call site (``_runtime_paths.project_root()``, the GUI,
     the launcher) resolves it lazily, honouring ``MAST2_PROJECT_ROOT`` /
     ``sys.frozen`` whenever they're consulted. A config instance built after the
@@ -143,19 +144,57 @@ def _port_env(var: str, default: int) -> int:
     return val
 
 
+#: ``MAST_NANONIS_TIMEOUT_S`` 允许的范围(秒)。上限低于
+#: ``connection._MAX_CALL_RECV_TIMEOUT_S``(900 s)和 ``nanonis_patch`` 判定
+#: 「库泄漏的假超时」的 1000 s:到了后者,patch 会把它当成泄漏换回默认值。
+NANONIS_TIMEOUT_RANGE_S = (0.5, 600.0)
+
+
+def _timeout_env(var: str, default: float) -> float:
+    """Nanonis recv 超时的环境变量覆盖 —— 与 ``_port_env`` 同一个态度。
+
+    为什么需要:这个超时从前写死 5 s,而 7.0 要连的 stmsim 模拟器同步渲染一帧
+    要 2–15 s。一次慢渲染就让 recv 超时,迟到的回包落在没人读的 socket 上,
+    流从此错位(``ConnectionPool._raised_recv_timeout`` 记过同一个形状)。
+    真仪器上 5 s 仍然合适,所以默认不变,只开一个外部入口。
+
+    非法值(不是数字、nan/inf、超出 ``NANONIS_TIMEOUT_RANGE_S``)一律**忽略并
+    保留默认**,不夹紧:写 0.05 的人要的不是 0.5,写 6000 的人要的也不是 600 ——
+    换成边界值让人以为生效了,比明说「忽略了」更糟。
+
+    代价:超过约 30 s 时通讯熔断器实际上不会再打开(``comms_health`` 的连击窗口
+    是 30 s,两次超时隔得比它远就不算连击)。只在慢对端上调大。
+    """
+    raw = os.environ.get(var, "").strip()
+    if not raw:
+        return default
+    try:
+        val = float(raw)
+    except ValueError:
+        logger.warning("%s=%r 不是数字,忽略,仍用 %g s", var, raw, default)
+        return default
+    lo, hi = NANONIS_TIMEOUT_RANGE_S
+    # nan 在这里一并被拒:它与任何数比较都为假。
+    if not (lo <= val <= hi):
+        logger.warning("%s=%r 不在 %g–%g s 之内,忽略,仍用 %g s", var, raw, lo, hi, default)
+        return default
+    return val
+
+
 class NanonisConfig(BaseModel):
     """Nanonis TCP connection settings.
 
     四个端口都可用环境变量覆盖(``MAST_NANONIS_PORT_MAIN`` /
     ``_MONITOR`` / ``_DATA`` / ``_EMERGENCY``),**设成 0 即停用该角色**。
     停用的代价见 ``ConnectionPool.connect_all`` 里那段注释。
+    recv 超时可用 ``MAST_NANONIS_TIMEOUT_S`` 覆盖(秒,见 ``_timeout_env``)。
     """
     host: str = "127.0.0.1"
     port_main: int = Field(default_factory=lambda: _port_env("MAST_NANONIS_PORT_MAIN", 6501))
     port_monitor: int = Field(default_factory=lambda: _port_env("MAST_NANONIS_PORT_MONITOR", 6502))
     port_data: int = Field(default_factory=lambda: _port_env("MAST_NANONIS_PORT_DATA", 6503))
     port_emergency: int = Field(default_factory=lambda: _port_env("MAST_NANONIS_PORT_EMERGENCY", 6504))
-    timeout_s: float = 5.0
+    timeout_s: float = Field(default_factory=lambda: _timeout_env("MAST_NANONIS_TIMEOUT_S", 5.0))
     # Separate, much shorter timeout JUST for the socket.connect() call.
     # Windows ConnectionRefused/dropped paths can block up to ~2 s per port
     # under SYN-retry semantics; with 4 ports that was 8 s of GUI main-thread
@@ -206,9 +245,9 @@ MODEL_PRESETS: dict[str, tuple[str, str, str, int]] = {
     # max_tokens ≥ 16k per Kimi K2.6 docs so full reasoning_content + answer
     # aren't truncated (8192 risked cutting off the chain-of-thought).
     "kimi-k2.6":       ("kimi-k2.6",                "moonshot",  "Kimi K2.6 — 256k context, vision + reasoning", 16384),
-    "kimi-k2.7-code":  ("kimi-k2.7-code",           "moonshot",  "Kimi K2.7 Code — 代码/工具推理 (思考模型)",      16384),
+    "kimi-k2.7-code":  ("kimi-k2.7-code",           "moonshot",  tr("Kimi K2.7 Code — 代码/工具推理 (思考模型)", "Kimi K2.7 Code: code/tool reasoning (thinking model)"),      16384),
     # K3 (2026-07-16): 2.8T 开源最强, 1M ctx, 原生视觉, reasoning 常开. 全局默认模型。
-    "kimi-k3":         ("kimi-k3",                   "moonshot",  "Kimi K3 — 2.8T 开源最强, 1M ctx, 视觉+思维 (默认模型)", 16384),
+    "kimi-k3":         ("kimi-k3",                   "moonshot",  tr("Kimi K3 — 2.8T 开源最强, 1M ctx, 视觉+思维 (默认模型)", "Kimi K3: strongest open model at 2.8T, 1M ctx, vision + thinking (default model)"), 16384),
     # moonshot-128k (moonshot-v1-128k, chat-only no-reasoning) removed 2026-06-23
     # per operator request — the thinking-capable Kimi presets above supersede it.
     # ── DeepSeek ──
@@ -227,20 +266,20 @@ MODEL_PRESETS: dict[str, tuple[str, str, str, int]] = {
     # 1 M context, 65 536 max output. Shares dashscope.env with the
     # voice models. ``enable_thinking`` defaults to True per Anthropic-
     # style reasoning gate set by ``ClaudeClient._thinking_body_kwargs``.
-    "qwen3.7-max":         ("qwen3.7-max",                 "qwen", "通义千问 3.7 Max — 1 M ctx, 满血思维链",        65536),
-    "qwen3.7-max-preview": ("qwen3.7-max-2026-05-20",      "qwen", "通义千问 3.7 Max 预览 — 快照版,可复现",         65536),
+    "qwen3.7-max":         ("qwen3.7-max",                 "qwen", tr("通义千问 3.7 Max — 1 M ctx, 满血思维链", "Qwen 3.7 Max: 1M ctx, full chain-of-thought"),        65536),
+    "qwen3.7-max-preview": ("qwen3.7-max-2026-05-20",      "qwen", tr("通义千问 3.7 Max 预览 — 快照版,可复现", "Qwen 3.7 Max Preview: snapshot build, reproducible"),         65536),
     # ── MiniMax (Anthropic-SDK-compatible endpoint) ──
     # Only M3 is exposed now (text+image+video+tools+thinking; see
     # _VISION_MODELS below). Tunable Anthropic-style thinking budget; top_k /
     # stop_sequences are ignored by the endpoint (already absent from our body).
-    "minimax-m3":   ("MiniMax-M3",   "minimax", "MiniMax M3 — Anthropic 兼容, 文本+视觉+工具+思维", 8192),
+    "minimax-m3":   ("MiniMax-M3",   "minimax", tr("MiniMax M3 — Anthropic 兼容, 文本+视觉+工具+思维", "MiniMax M3: Anthropic-compatible, text + vision + tools + thinking"), 8192),
     # ── Zhipu GLM (OpenAI-compatible; reasons by default, returns reasoning_content) ──
     # glm-5.2 access OPENED on this account (probed HTTP 200 on 2026-06-18; it had
     # returned 403「您无权访问」through 2026-06-15). It is now the DEFAULT model
     # (DEFAULT_MODEL_ALIAS) and the offered GLM model. glm-5.1 was RETIRED from the
     # presets/pickers in favour of 5.2 — a stored "glm-5.1" alias still resolves
     # (use()'s else-branch → _provider_for_model → zhipu), so old configs don't break.
-    "glm-5.2":      ("glm-5.2",      "zhipu",   "智谱 GLM-5.2 — 长程任务/推理",                    16384),
+    "glm-5.2":      ("glm-5.2",      "zhipu",   tr("智谱 GLM-5.2 — 长程任务/推理", "Zhipu GLM-5.2: long-horizon tasks / reasoning"),                    16384),
 }
 
 # ── Vision (image input) capability — SINGLE SOURCE OF TRUTH ──────────
@@ -661,7 +700,7 @@ class ModelConfig(BaseModel):
 
 class BufferConfig(BaseModel):
     """BufferService settings (Phase 2, v2 agent layer)."""
-    # default_factory → resolved lazily at construction, not import .
+    # default_factory → resolved lazily at construction, not import.
     wal_path: Path = Field(
         default_factory=lambda: _project_root() / "MASTv2" / "artifacts" / "buffer.wal.sqlite")
     history_size: int = 100
@@ -671,7 +710,7 @@ class BufferConfig(BaseModel):
 
 class Paths(BaseModel):
     """Project-shared paths (v2 agent layer)."""
-    # All derived from the lazily-resolved project root  so a config
+    # All derived from the lazily-resolved project root so a config
     # built after MAST2_PROJECT_ROOT changes uses the current root.
     project_root: Path = Field(default_factory=_project_root)
     artifacts_dir: Path = Field(

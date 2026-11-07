@@ -1,8 +1,9 @@
 """MCP over stdio: JSON-RPC 2.0 framing and the MCP method set.
 
-This is the only module that knows the wire protocol. Tools and resources are
-handed in as plain providers (see ``serve``), so replacing this file with an
-official MCP SDK leaves the rest of the package untouched.
+With ``http_rpc`` (the HTTP transport, which reuses the helpers here) this is
+the only module that knows the wire protocol. Tools and resources are handed in
+as plain providers (see ``serve``), so replacing the two with an official MCP
+SDK leaves the rest of the package untouched.
 
 Framing rules (MCP 2025-06-18, stdio transport):
 
@@ -13,8 +14,14 @@ Framing rules (MCP 2025-06-18, stdio transport):
   ``\\r\\n`` translation can touch the stream.
 
 Threading: the reader thread answers everything inline except ``tools/call``,
-which runs on its own daemon thread. A 50-second job wait therefore never
-delays a ``ping`` or a ``notifications/cancelled``.
+which runs on its own daemon thread. A 50-second act or a 14-minute
+``mast_wait`` therefore never delays a ``ping`` or a ``notifications/cancelled``.
+
+Tool results are a text block followed, per image, by its label (a text block)
+and the image block. They never carry ``structuredContent``: Codex drops the
+images of a result that has it. A call's ``_meta`` (Codex ``itemId``, Claude
+Code ``claudecode/toolUseId`` ...) and the ``clientInfo`` of ``initialize`` are
+handed to the tool provider with every call.
 """
 from __future__ import annotations
 
@@ -112,15 +119,32 @@ def _error(mid, code: int, message: str, data=None) -> dict:
     return {"jsonrpc": "2.0", "id": mid, "error": err}
 
 
-def _tool_result(text: str, is_error: bool) -> dict:
-    return {"content": [{"type": "text", "text": text}], "isError": bool(is_error)}
+def _tool_result(text: str, is_error: bool, images=()) -> dict:
+    content = [{"type": "text", "text": text}]
+    for image in images or ():
+        if image.get("label"):
+            content.append({"type": "text", "text": image["label"]})
+        content.append({"type": "image", "data": image["data_b64"],
+                        "mimeType": image.get("mime") or "image/png"})
+    return {"content": content, "isError": bool(is_error)}
+
+
+def _call_result(output) -> dict:
+    """``(text, is_error)``, or an object with ``text``, ``is_error`` and ``images``."""
+    if isinstance(output, tuple):
+        text, is_error = output
+        return _tool_result(text, is_error)
+    return _tool_result(output.text, output.is_error, getattr(output, "images", ()))
 
 
 class McpServer:
     """Reads requests from ``instream`` and writes responses to ``outstream``.
 
     ``tools`` provides ``list_tools()``, ``has_tool(name)`` and
-    ``call_tool(name, arguments, signal) -> (text, is_error)``.
+    ``call_tool(name, arguments, signal, meta=..., client_info=...)``, which returns
+    ``(text, is_error)`` or an object with ``text``, ``is_error`` and ``images``
+    (``[{label, mime, data_b64}]``). ``meta`` is the call's ``_meta`` (a dict or
+    None); ``client_info`` is the ``clientInfo`` the client sent with ``initialize``.
     ``resources`` provides ``list_resources()``, ``list_templates()`` and
     ``read_resource(uri) -> contents item`` (``KeyError`` when unknown).
     """
@@ -141,6 +165,7 @@ class McpServer:
         self._threads: list[threading.Thread] = []
         self.protocol_version: str | None = None
         self.initialized = False
+        self.client_info: dict | None = None
 
     # ── transport ────────────────────────────────────────────────────────
     def serve(self) -> int:
@@ -262,6 +287,8 @@ class McpServer:
                    else LATEST_PROTOCOL_VERSION)
         self.protocol_version = version
         client = params.get("clientInfo") if isinstance(params.get("clientInfo"), dict) else {}
+        self.client_info = {k: client[k] for k in ("name", "title", "version")
+                            if isinstance(client.get(k), str)} or None
         log.info("initialize: client=%s %s, protocol %s (requested %s)",
                  client.get("name", "?"), client.get("version", ""), version, requested)
         return {
@@ -289,7 +316,7 @@ class McpServer:
             log.debug("ignoring notification %s", method)
 
     # ── tools/call ───────────────────────────────────────────────────────
-    def _parse_call(self, params: dict) -> tuple[str, dict]:
+    def _parse_call(self, params: dict) -> tuple[str, dict, dict | None]:
         name = params.get("name")
         if not isinstance(name, str) or not name:
             raise RpcError(INVALID_PARAMS, "tools/call needs a tool name")
@@ -300,16 +327,17 @@ class McpServer:
             arguments = {}
         if not isinstance(arguments, dict):
             raise RpcError(INVALID_PARAMS, "tools/call arguments must be an object")
-        return name, arguments
+        meta = params.get("_meta")
+        return name, arguments, (meta if isinstance(meta, dict) else None)
 
     def _call_inline(self, params: dict) -> dict:
-        name, arguments = self._parse_call(params)
-        text, is_error = self._tools.call_tool(name, arguments, CallSignal(self._draining))
-        return _tool_result(text, is_error)
+        name, arguments, meta = self._parse_call(params)
+        return _call_result(self._tools.call_tool(name, arguments, CallSignal(self._draining),
+                                                  meta=meta, client_info=self.client_info))
 
     def _start_call(self, mid, params: dict, reply) -> None:
         try:
-            name, arguments = self._parse_call(params)
+            name, arguments, meta = self._parse_call(params)
         except RpcError as exc:
             reply(_error(mid, exc.code, exc.message, exc.data))
             return
@@ -323,17 +351,17 @@ class McpServer:
         with self._inflight_lock:
             self._inflight[key] = signal
         thread = threading.Thread(target=self._run_call,
-                                  args=(mid, key, name, arguments, signal, reply),
+                                  args=(mid, key, name, arguments, meta, signal, reply),
                                   name=f"mcp-{name}", daemon=True)
         self._threads = [t for t in self._threads if t.is_alive()]
         self._threads.append(thread)
         thread.start()
 
-    def _run_call(self, mid, key: str, name: str, arguments: dict,
+    def _run_call(self, mid, key: str, name: str, arguments: dict, meta: dict | None,
                   signal: CallSignal, reply) -> None:
         try:
-            text, is_error = self._tools.call_tool(name, arguments, signal)
-            result = _tool_result(text, is_error)
+            result = _call_result(self._tools.call_tool(name, arguments, signal, meta=meta,
+                                                        client_info=self.client_info))
         except Exception as exc:  # noqa: BLE001 - becomes a tool error, never a crash
             log.exception("tool %s raised", name)
             result = _tool_result(f"Internal error in the MAST MCP server while running "

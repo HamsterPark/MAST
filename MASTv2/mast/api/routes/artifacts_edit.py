@@ -48,6 +48,7 @@ id 解析：先当 ``doc_id`` 精确查，再走 ``resolve_ref``（它认旧的
 
 from __future__ import annotations
 
+from mast.i18n import tr
 import difflib
 import logging
 import re
@@ -99,8 +100,10 @@ def _not_editable(artifact_id: str) -> str | None:
     if art is None or art.editable:
         return None
     return (
-        f"「{art.label}」不是可手工编辑的文本产物（存储于 {art.store}）。"
-        "请通过对应的智能体或界面修改它。"
+        tr(f"「{art.label}」不是可手工编辑的文本产物（存储于 {art.store}）。"
+           "请通过对应的智能体或界面修改它。",
+           f"\"{art.label}\" is not a hand-editable text artifact (stored in {art.store}). "
+           "Change it through the corresponding agent or UI.")
     )
 
 
@@ -126,7 +129,7 @@ def _resolve(s, artifact_id: str):
     return s.resolve_ref(aid)
 
 
-_BAD_ID = "artifact_id 必须是 '<draft|review>:<文件名>' 或一个 doc_id（见 GET /api/artifacts）"
+_BAD_ID = tr("artifact_id 必须是 '<draft|review>:<文件名>' 或一个 doc_id（见 GET /api/artifacts）", "artifact_id must be '<draft|review>:<filename>' or a doc_id (see GET /api/artifacts)")
 
 
 def _read(entry, v: int | None = None) -> str:
@@ -151,7 +154,7 @@ def _filename(entry, v: int) -> str:
     """
     from mast.core.experiment_paths import slug
 
-    return f"{slug(entry.meta.title or '文档', 'document', max_chars=48)}_v{v:03d}.md"
+    return f"{slug(entry.meta.title or tr('文档', 'document'), 'document', max_chars=48)}_v{v:03d}.md"
 
 
 # ── POST /api/artifacts/{artifact_id}/edit ───────────────────────────────────
@@ -177,9 +180,10 @@ def save_artifact_edit(
                 artifact_id=artifact_id, detail=_BAD_ID, degraded=True)
         if not text:
             return ArtifactEditResponse(
-                artifact_id=artifact_id, detail="拒绝保存空文档", degraded=True)
+                artifact_id=artifact_id, detail=tr("拒绝保存空文档", "Refusing to save an empty document"), degraded=True)
         res = s.save(text=text, doc_id=entry.doc_id, created_by="operator",
-                     note="用户编辑（兼容端点 /api/artifacts/…/edit）")
+                     note=tr("用户编辑（兼容端点 /api/artifacts/…/edit）",
+                             "User edit (compatibility endpoint /api/artifacts/.../edit)"))
         if not res.ok:
             return ArtifactEditResponse(
                 artifact_id=artifact_id, detail=res.error, degraded=True)
@@ -193,7 +197,7 @@ def save_artifact_edit(
     return ArtifactEditResponse(
         ok=True, artifact_id=artifact_id, body=text, t=_mtime(entry),
         history_len=max(0, len(entry.versions) - 1),
-        detail=f"已保存为新版本 v{res.version:03d}（智能体下次读取该文档时会看到你的修改）",
+        detail=tr(f"已保存为新版本 v{res.version:03d}（智能体下次读取该文档时会看到你的修改）", f"Saved as new version v{res.version:03d} (the agent will see your changes the next time it reads the document)"),
         degraded=False,
     )
 
@@ -223,17 +227,18 @@ def revert_artifact_edit(artifact_id: str, request: Request) -> ArtifactRevertRe
             return ArtifactRevertResponse(
                 artifact_id=artifact_id, reverted=False,
                 history_len=max(0, len(versions) - 1),
-                detail="只有一个版本，没有可回退的历史。", degraded=False)
+                detail=tr("只有一个版本，没有可回退的历史。", "There is only one version; no history to roll back to."), degraded=False)
         prev_v = versions[-2].v
         prev_text = _read(entry, prev_v)
         if not prev_text.strip():
             return ArtifactRevertResponse(
                 artifact_id=artifact_id, reverted=False,
                 history_len=max(0, len(versions) - 1),
-                detail=f"上一版 v{prev_v:03d} 读不到内容，不做回退（不拿空内容盖掉现版本）。",
+                detail=tr(f"上一版 v{prev_v:03d} 读不到内容，不做回退（不拿空内容盖掉现版本）。", f"The content of the previous version v{prev_v:03d} cannot be read; not rolling back (an empty content must not overwrite the current version)."),
                 degraded=True)
         res = s.save(text=prev_text, doc_id=entry.doc_id, created_by="operator",
-                     note=f"回退到 v{prev_v:03d}（兼容端点）")
+                     note=tr(f"回退到 v{prev_v:03d}（兼容端点）",
+                             f"Reverted to v{prev_v:03d} (compatibility endpoint)"))
         if not res.ok:
             return ArtifactRevertResponse(
                 artifact_id=artifact_id, detail=res.error, degraded=True)
@@ -247,7 +252,7 @@ def revert_artifact_edit(artifact_id: str, request: Request) -> ArtifactRevertRe
     return ArtifactRevertResponse(
         ok=True, artifact_id=artifact_id, reverted=True,
         history_len=max(0, len(entry.versions) - 1),
-        detail=f"已回退 v{prev_v:03d} 的内容，另存为 v{res.version:03d}（历史未被删除）",
+        detail=tr(f"已回退 v{prev_v:03d} 的内容，另存为 v{res.version:03d}（历史未被删除）", f"Restored the content of v{prev_v:03d} and saved it as v{res.version:03d} (history is not deleted)"),
         degraded=False,
     )
 
@@ -310,7 +315,7 @@ def get_artifact_diff(artifact_id: str, request: Request) -> ArtifactDiffRespons
         if not versions:
             return ArtifactDiffResponse(
                 artifact_id=artifact_id, has_original=False, has_edit=False,
-                changed=False, diff="", detail="该文档尚无任何版本", degraded=False)
+                changed=False, diff="", detail=tr("该文档尚无任何版本", "This document has no versions yet"), degraded=False)
         current = _read(entry, versions[-1].v)
         has_original = len(versions) >= 2
         # 只有一版时没有可比的东西 —— 拿空串当 original 会把整篇报成新增，那正是
@@ -365,7 +370,7 @@ def export_artifact(
         if not entry.versions:
             return ArtifactExportResponse(
                 artifact_id=artifact_id, filename=f"{artifact_id}.txt",
-                detail=f"该文档尚无任何版本：{entry.dir}", degraded=True)
+                detail=tr(f"该文档尚无任何版本：{entry.dir}", f"This document has no versions yet: {entry.dir}"), degraded=True)
         v = entry.versions[-1].v
         body = _read(entry, v)
         name = _filename(entry, v)

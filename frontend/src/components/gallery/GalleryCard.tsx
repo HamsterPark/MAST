@@ -1,7 +1,8 @@
-// 一张卡片（旧版兼容格式 app.js 的 cardEl + capHtml + mkHtml）。
+// One gallery card.
 //
-// memo + 按 id 订阅标记与选中：五千张的「全部帧」里打一个 ★，只有这一张重渲。
-// 回调由 CardGrid 传入且是稳定引用，否则 memo 形同虚设。
+// memo + per-id subscriptions to marks and selection: rating one card with a star in a list of
+// five thousand frames re-renders only that card. The callbacks come from CardGrid and must be
+// stable references, otherwise memo is useless.
 
 import { memo } from "react";
 import { Link } from "react-router-dom";
@@ -14,11 +15,12 @@ import { viewSearch } from "@/lib/gallery/route";
 import { useMarksStore } from "./marksStore";
 import { useSelectionStore } from "./selectionStore";
 import { Chip, chipClass, ratingOnClass } from "./bits";
+import { tr } from "@/lib/i18n";
 
 export interface CardProps {
   item: GalleryItem;
   j: number;
-  /** 非目录视图里在说明行后面带 `[MMDD]`。 */
+  /** Outside directory views, append `[MMDD]` after the caption line. */
   showDir: boolean;
   current: boolean;
   lastBatch: string;
@@ -28,9 +30,9 @@ export interface CardProps {
 }
 
 const RATINGS: [number, string, string][] = [
-  [1, "✓", "可用"],
-  [2, "★", "重点"],
-  [-1, "✗", "排除"],
+  [1, "✓", tr("可用", "Usable")],
+  [2, "★", tr("重点", "Key")],
+  [-1, "✗", tr("排除", "Excluded")],
 ];
 
 export const GalleryCard = memo(function GalleryCard({
@@ -70,7 +72,7 @@ export const GalleryCard = memo(function GalleryCard({
         type="button"
         onClick={() => onOpen(j)}
         className={clsx("relative block cursor-zoom-in", spectrumLike ? "bg-white" : "bg-[#181614]")}
-        title="点开大图（键盘翻页、打分）"
+        title={tr("点开大图（键盘翻页、打分）", "Open full size (keyboard paging and rating)")}
       >
         <img loading="lazy" src={item.th} alt="" className="block h-auto w-full" />
         {r !== 0 && (
@@ -93,7 +95,7 @@ export const GalleryCard = memo(function GalleryCard({
       <div className="px-[7px] pb-[3px] pt-[5px] font-mono text-[11.5px] leading-[1.38] text-mast-muted">
         <b className="font-semibold text-mast-text">{cap.num}</b> {cap.when}
         {showDir && (
-          <span title={`所在目录 ${item.d}`}> [{dirShort(item.d)}]</span>
+          <span title={tr(`所在目录 ${item.d}`, `Directory ${item.d}`)}> [{dirShort(item.d)}]</span>
         )}
         {cap.lines.map((line, i) => (
           <div key={i}>{line}</div>
@@ -113,9 +115,9 @@ export const GalleryCard = memo(function GalleryCard({
         <input
           type="checkbox"
           checked={selected}
-          title="选中；按住 Shift 连选一段"
+          title={tr("选中；按住 Shift 连选一段", "Select; hold Shift to select a range")}
           onChange={() => {
-            /* 状态由 onClick 写进 selectionStore（要读 shiftKey） */
+            /* State is written to selectionStore from onClick (needs shiftKey) */
           }}
           onClick={(e) => onPick(j, e.shiftKey, e.currentTarget.checked)}
           className="mr-[3px] h-[15px] w-[15px] cursor-pointer accent-[var(--mast-accent)]"
@@ -144,13 +146,13 @@ export const GalleryCard = memo(function GalleryCard({
             key={sid}
             to={{ search: `?${viewSearch({ v: "series", s: sid })}` }}
             className={chipClass("ser")}
-            title="系列"
+            title={tr("系列", "Series")}
           >
             ▤ {series[sid]?.name || sid}
           </Link>
         ))}
         {m?.anchor && (
-          <Chip kind="anc" title={`位置系于这张帧：${m.anchor.desc || ""}`}>
+          <Chip kind="anc" title={tr(`位置系于这张帧：${m.anchor.desc || ""}`, `Position anchored to this frame: ${m.anchor.desc || ""}`)}>
             ⌖ {shortFn(m.anchor.fn)}
           </Chip>
         )}

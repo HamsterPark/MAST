@@ -25,6 +25,7 @@ from __future__ import annotations
 import threading
 import time
 from typing import Callable
+from mast.i18n import tr
 
 # Two crashes at one spot is the signal to move (team directive "同点连续 crash≥2 次").
 _BLOCK_THRESHOLD = 2
@@ -207,7 +208,7 @@ def crash_escape_message(count: int, x_m=None, y_m=None) -> str:
             where = f"(≈{float(x_m):.3e}, {float(y_m):.3e} m)"
         except (TypeError, ValueError):
             where = ""
-    return (
+    return tr(
         f"repeated_crash_escape_required: 同一区域{where}已连续检测到针尖 crash "
         f"{count} 次。原地扫描/修针/打脉冲无效——停止在此处重试。请用 "
         f"**RelocateCoarseXY** 换到新区域(先用 get_coarse_map 看该往哪走多少步);"
@@ -215,7 +216,18 @@ def crash_escape_message(count: int, x_m=None, y_m=None) -> str:
         f"分块移动时看着电流,最后重新进针。"
         f"**不要直接调 MotorMove 做横向移动** —— 它只检查压电是否收到顶(约 1 µm 余量,"
         f"而且读不到状态时会放行),这正是又一次撞针的来路。"
-        f"切勿在同点继续 ConditionTip/TipPulse。"
+        f"切勿在同点继续 ConditionTip/TipPulse。",
+        f"repeated_crash_escape_required: tip crashes have been detected {count} times "
+        f"in a row in the same region{where}. Scanning, conditioning or pulsing in place "
+        "does not help -- stop retrying here. Use **RelocateCoarseXY** to move to a new "
+        "region (first use get_coarse_map to see how many steps to go and where); it "
+        "retracts the piezo itself, withdraws with the coarse motor to clear the "
+        "obstacle with level-by-level self-checks, verifies vacuum and drive voltage, "
+        "moves in blocks while watching the current, and finally re-approaches. "
+        "**Do not call MotorMove directly for lateral moves** -- it only checks whether "
+        "the piezo is fully retracted (about 1 um margin, and it lets the move through "
+        "when the state cannot be read), which is exactly how the next tip crash happens. "
+        "Do not keep running ConditionTip/TipPulse at the same spot."
     )
 
 
@@ -234,7 +246,9 @@ def crash_guard(context, x_m=None, y_m=None) -> "str | None":
     try:
         from mast.core.diagnostics import record
         record("tip_crash", "repeated_same_region",
-               "同区域连续 crash≥阈值,拒绝原地重试——需退针+粗动换区",
+               tr("同区域连续 crash≥阈值,拒绝原地重试——需退针+粗动换区",
+                  "Consecutive crashes in the same region reached the threshold; in-place "
+                  "retry refused -- withdraw and move to a new region with coarse motion"),
                count=count, x_m=x_m, y_m=y_m)
     except Exception:  # noqa: BLE001 — diagnostics never breaks a skill
         pass

@@ -21,6 +21,8 @@ from __future__ import annotations
 import threading
 from dataclasses import asdict, dataclass, fields, replace
 
+from mast.i18n import tr
+
 #: Keys surfaced in the 设置 UI. The frontend renders these dynamically from
 #: :func:`knob_catalog`, so adding a knob here is the only step needed.
 EDITABLE_KEYS: tuple[str, ...] = (
@@ -124,59 +126,143 @@ FIELD_BOUNDS: dict[str, tuple[float, float]] = {
 
 #: Chinese label + one-line hint per knob, for the settings UI.
 KNOB_LABELS: dict[str, tuple[str, str]] = {
-    "cm_enabled": ("常开采集", "1=连上 Nanonis 就自动开始分段采集,0=完全关闭"),
-    "cm_alerts_enabled": ("启用告警", "0 时仍采集记录,但不发任何告警"),
-    "cm_segment_s": ("段长(秒)", "每段的目标时长;越长特征越稳,延迟越大"),
-    "cm_target_fs_hz": ("目标采样率(Hz)", "0=使用示波器提供的最快时基"),
-    "cm_use_osci2t": ("用双通道示波器(Osci2T)",
-                      "1=优先用 Osci2T 采集；采样率以回包为准。较长缓冲可减少 TCP 往返。"
-                      "模块没加载会自动退回 Osci1T，状态里会说明。0=强制 Osci1T"),
-    "cm_2t_window_s": ("Osci2T 一屏时长(秒)",
-                       "取不超过此值的最长一档。出厂 6.4 s。"
-                       "一屏采满才取得回来，所以窗口越长，告警等待也可能越长；"
-                       "请按目标仪器的档位与所需响应时间设置"),
-    "cm_rms_warn_a": ("噪声 RMS 警告阈(A)",
-                      "去趋势后的交流噪声超过此值提示。**只在没有活跃基线时**"
-                      "生效——有基线时判的是「相对基线的倍数」，"
-                      "见 cm_rms_ratio_warn"),
-    "cm_rms_ratio_warn": ("噪声相对基线倍数阈",
-                          "当前噪声 RMS 是基线在同一电流下预期值的多少倍。"
-                          "有活跃基线且不在扫描时，rms_high 用这一条而不是绝对值——"
-                          "因为噪声会随电流工作点变化，"
-                          "一个固定的 pA 数不可能在整个电流范围上都对"),
-    "cm_spike_sigma_warn": ("尖峰警告(σ)", "最大偏离超过背景噪声的多少倍"),
-    "cm_spike_sigma_crit": ("尖峰严重(σ)", "达到此倍数且步幅够大才可能升级为严重"),
-    "cm_sat_current_a": ("饱和电流(A)", "前置放大器满量程;超过即视为贴轨"),
-    "cm_sat_frac_crit": ("饱和占比阈", "段内贴轨样本占比超过此值算饱和"),
-    "cm_crit_consecutive": ("严重告警确认段数", "连续多少段同类才升级为严重(防误报)"),
-    "cm_afterglow_s": ("技能余波期(秒)",
-                       "进针/退针/脉冲等技能结束后,电流还会抖这么久;这段时间内"
-                       "仍按抑制处理。设 0 = 关闭余波期(回到只看当下令牌)。"
-                       "**默认 5 s 是占位值,不是实测**——用监控历史标定:取每次"
-                       "进针/退针完成后最后一个含尖峰段的 (t_尖峰 − t_完成) 的 95 分位。"),
-    "cm_alert_cooldown_s": ("告警冷却(秒)", "同一规则在此时间内不重复告警"),
-    "cm_rtn_score_warn": ("双稳态跳变阈", "RTN 判分超过此值提示针尖不稳"),
-    "cm_line_ratio_warn": ("工频污染比阈", "50 Hz 峰值相对邻频的倍数"),
-    "cm_jump_rate_warn_hz": ("跳变率阈(Hz)", "每秒突跳次数超过此值提示"),
-    "cm_keep_hours": ("原始波形保留(小时)", "超期的未钉住段只保留包络与特征"),
-    "cm_keep_gb": ("原始波形上限(GB)", "超出后从最旧的未钉住段开始清理"),
-    "cm_pin_preroll_s": ("事件前保留(秒)", "修针/进针/告警发生前多久的段永久保留"),
-    "cm_pin_postroll_s": ("事件后保留(秒)", "事件之后多久的段永久保留"),
-    "cm_evidence_min_interval_s": ("证据图最小间隔(秒)", "限制告警配图的渲染频率"),
+    "cm_enabled": (tr("常开采集",
+               "Always-on acquisition"),
+           tr("1=连上 Nanonis 就自动开始分段采集,0=完全关闭",
+               "1 = start segmented acquisition automatically once Nanonis is connected, 0 = fully off")),
+    "cm_alerts_enabled": (tr("启用告警",
+               "Enable alerts"),
+           tr("0 时仍采集记录,但不发任何告警",
+               "When 0, data is still recorded but no alerts are sent")),
+    "cm_segment_s": (tr("段长(秒)",
+               "Segment length (s)"),
+           tr("每段的目标时长;越长特征越稳,延迟越大",
+               "Target duration of each segment; longer gives steadier features but more latency")),
+    "cm_target_fs_hz": (tr("目标采样率(Hz)",
+               "Target sample rate (Hz)"),
+           tr("0=用示波器最快时基",
+               "0 = use the fastest scope timebase")),
+    "cm_use_osci2t": (tr("用双通道示波器(Osci2T)",
+               "Use the dual-channel scope (Osci2T)"),
+           tr("1=用 Osci2T 采集(出厂)。**采样率完全一样**(2 kHz,由 Signals Period 决定),阈值不用重标;换来的是一次 TCP 往返拿回 50 倍的数据,data 角色的占用直线下降。模块没加载会自动退回 Osci1T,状态里会说。0=强制 Osci1T",
+               "1 = acquire with Osci2T (factory). **The sample rate is exactly the same** (2 kHz, set by Signals Period), so thresholds need no recalibration; what you get is 50x the data per TCP round trip and much lower data-role occupancy. If the module is not loaded it falls back to Osci1T automatically and the status says so. 0 = force Osci1T")),
+    "cm_2t_window_s": (tr("Osci2T 一屏时长(秒)",
+               "Osci2T screen length (s)"),
+           tr("取不超过此值的最长一档。出厂 6.4 s = 12800 点。⚠️ 它同时是**告警延迟**:一屏采满才取得回来,所以 6.4 s 意味着最坏情况下过 6.4 s 才知道刚才发生了什么(从前是 0.128 s)。要延迟回到从前的量级就设 1.28,往返仍然少 10 倍",
+               "Picks the longest step not exceeding this value. Factory 6.4 s = 12800 points. ⚠️ It is also the **alert latency**: a screen can only be fetched once full, so 6.4 s means in the worst case you learn what just happened 6.4 s later (it used to be 0.128 s). Set 1.28 to bring latency back to the old order of magnitude; round trips are still 10x fewer")),
+    "cm_rms_warn_a": (tr("噪声 RMS 警告阈(A)",
+               "Noise RMS warning threshold (A)"),
+           tr("去趋势后的交流噪声超过此值提示。**只在没有活跃基线时**生效——有基线时判的是「相对基线的倍数」，见 cm_rms_ratio_warn",
+               "Warn when the detrended AC noise exceeds this value. **Only in effect when there is no active baseline**; with a baseline the rule judges the \"multiple of the baseline\", see cm_rms_ratio_warn")),
+    "cm_rms_ratio_warn": (tr("噪声相对基线倍数阈",
+               "Noise-to-baseline ratio threshold"),
+           tr("当前噪声 RMS 是基线在同一电流下预期值的多少倍。有活跃基线且不在扫描时，rms_high 用这一条而不是绝对值——因为噪声本来就随电流变（20 pA 到 1 nA 之间可差一个数量级以上），一个固定的 pA 数不可能在整个电流范围上都对",
+               "How many times the baseline's expected value at the same current the present noise RMS is. With an active baseline and no scan running, rms_high uses this instead of the absolute value, because noise varies with current anyway (20 pA to 1 nA can differ by more than an order of magnitude), so no fixed pA number can be right over the whole current range")),
+    "cm_spike_sigma_warn": (tr("尖峰警告(σ)",
+               "Spike warning (sigma)"),
+           tr("最大偏离超过背景噪声的多少倍",
+               "How many times the background noise the largest deviation exceeds")),
+    "cm_spike_sigma_crit": (tr("尖峰严重(σ)",
+               "Spike critical (sigma)"),
+           tr("达到此倍数且步幅够大才可能升级为严重",
+               "Only at this multiple and with a large enough step can it escalate to critical")),
+    "cm_sat_current_a": (tr("饱和电流(A)",
+               "Saturation current (A)"),
+           tr("前置放大器满量程;超过即视为贴轨",
+               "Full scale of the preamplifier; above it the signal counts as railed")),
+    "cm_sat_frac_crit": (tr("饱和占比阈",
+               "Saturation fraction threshold"),
+           tr("段内贴轨样本占比超过此值算饱和",
+               "Saturation if the share of railed samples in a segment exceeds this")),
+    "cm_crit_consecutive": (tr("严重告警确认段数",
+               "Critical confirmation segments"),
+           tr("连续多少段同类才升级为严重(防误报)",
+               "How many consecutive segments of the same kind before escalating to critical (false-alarm guard)")),
+    "cm_afterglow_s": (tr("技能余波期(秒)",
+               "Skill afterglow (s)"),
+           tr("进针/退针/脉冲等技能结束后,电流还会抖这么久;这段时间内仍按抑制处理。设 0 = 关闭余波期(回到只看当下令牌)。**默认 5 s 是占位值,不是实测**——用监控历史标定:取每次进针/退针完成后最后一个含尖峰段的 (t_尖峰 − t_完成) 的 95 分位。",
+               "After approach / withdraw / pulse skills end, the current keeps jittering for this long; it is still treated as suppressed meanwhile. 0 = no afterglow (only the current token counts). **The default 5 s is a placeholder, not a measurement**: calibrate from monitor history by taking the 95th percentile of (t_spike - t_done) of the last spike-containing segment after each approach/withdraw.")),
+    "cm_alert_cooldown_s": (tr("告警冷却(秒)",
+               "Alert cooldown (s)"),
+           tr("同一规则在此时间内不重复告警",
+               "The same rule does not alert again within this time")),
+    "cm_rtn_score_warn": (tr("双稳态跳变阈",
+               "Bistable jump threshold"),
+           tr("RTN 判分超过此值提示针尖不稳",
+               "An RTN score above this indicates an unstable tip")),
+    "cm_line_ratio_warn": (tr("工频污染比阈",
+               "Mains contamination ratio threshold"),
+           tr("50 Hz 峰值相对邻频的倍数",
+               "Ratio of the 50 Hz peak to neighbouring frequencies")),
+    "cm_jump_rate_warn_hz": (tr("跳变率阈(Hz)",
+               "Jump rate threshold (Hz)"),
+           tr("每秒突跳次数超过此值提示",
+               "Warn when jumps per second exceed this")),
+    "cm_keep_hours": (tr("原始波形保留(小时)",
+               "Raw waveform retention (hours)"),
+           tr("超期的未钉住段只保留包络与特征",
+               "Unpinned segments past this keep only the envelope and features")),
+    "cm_keep_gb": (tr("原始波形上限(GB)",
+               "Raw waveform cap (GB)"),
+           tr("超出后从最旧的未钉住段开始清理",
+               "Beyond this, cleanup starts from the oldest unpinned segment")),
+    "cm_pin_preroll_s": (tr("事件前保留(秒)",
+               "Pre-event retention (s)"),
+           tr("修针/进针/告警发生前多久的段永久保留",
+               "How long before a tip-conditioning / approach / alert event segments are kept permanently")),
+    "cm_pin_postroll_s": (tr("事件后保留(秒)",
+               "Post-event retention (s)"),
+           tr("事件之后多久的段永久保留",
+               "How long after an event segments are kept permanently")),
+    "cm_evidence_min_interval_s": (tr("证据图最小间隔(秒)",
+               "Minimum evidence-plot interval (s)"),
+           tr("限制告警配图的渲染频率",
+               "Limits how often alert figures are rendered")),
     # ── 辅助通道 ───────────────────────────────────────────────────────
-    "cm_aux_enabled": ("记录辅助通道", "1=同时记录 Z 位置/qPlus 振幅/频率偏移(不占示波器)"),
-    "cm_aux_alerts_enabled": ("辅助通道告警", "出厂 0:阈值尚未在本机标定,先跑标定报告再打开"),
-    "cm_aux_interval_s": ("辅助采样间隔(秒)",
-                          "多久取一次 Z/振幅;出厂 0.2 s(5 Hz)。"
-                          "每次一个 TCP 往返,搭在电流泵等缓冲的空隙里,不抢锁"),
-    "cm_aux_window_s": ("辅助统计窗口(秒)", "漂移率/台阶/振幅统计量在多长的窗口里算"),
-    "cm_aux_keep_hours": ("辅助读数保留(小时)", "超期的 aux 行滚删(它们很小,可以留很久)"),
-    "cm_z_drift_warn_m_per_s": ("Z 漂移率阈(m/s)", "窗口内 Z 的线性漂移速率超过此值提示"),
-    "cm_z_step_warn_m": ("Z 台阶阈(m)", "相邻样本间的稳健突跳超过此值提示"),
-    "cm_z_headroom_warn_frac": ("Z 量程余量阈", "Z 距离行程边缘的相对余量低于此值提示"),
-    "cm_z_jump_k": ("Z 台阶判据 k", "阈值 = 差分中位数 + k×稳健σ;越大越保守"),
-    "cm_amp_zero_frac": ("振幅归零判据", "低于「未接触本底」的这个比例算归零;**只在进针期间判**"),
-    "cm_amp_blank_s": ("扰动后振幅屏蔽(秒)", "扎针/电脉冲可能使振幅短暂波动；屏蔽时长须按目标仪器验证"),
+    "cm_aux_enabled": (tr("记录辅助通道",
+               "Record auxiliary channels"),
+           tr("1=同时记录 Z 位置/qPlus 振幅/频率偏移(不占示波器)",
+               "1 = also record Z position / qPlus amplitude / frequency shift (does not use the scope)")),
+    "cm_aux_alerts_enabled": (tr("辅助通道告警",
+               "Auxiliary channel alerts"),
+           tr("出厂 0:阈值尚未在本机标定,先跑标定报告再打开",
+               "Factory 0: thresholds are not calibrated on this machine yet, run the commissioning report first and then turn on")),
+    "cm_aux_interval_s": (tr("辅助采样间隔(秒)",
+               "Auxiliary sampling interval (s)"),
+           tr("多久取一次 Z/振幅;出厂 0.2 s(5 Hz)。每次一个 TCP 往返,搭在电流泵等缓冲的空隙里,不抢锁",
+               "How often Z / amplitude are read; factory 0.2 s (5 Hz). One TCP round trip each, slotted into gaps while the current pump waits for its buffer, without contending for the lock")),
+    "cm_aux_window_s": (tr("辅助统计窗口(秒)",
+               "Auxiliary statistics window (s)"),
+           tr("漂移率/台阶/振幅统计量在多长的窗口里算",
+               "Window length over which drift rate / step / amplitude statistics are computed")),
+    "cm_aux_keep_hours": (tr("辅助读数保留(小时)",
+               "Auxiliary reading retention (hours)"),
+           tr("超期的 aux 行滚删(它们很小,可以留很久)",
+               "Aux rows past this are rolled off (they are small and can be kept long)")),
+    "cm_z_drift_warn_m_per_s": (tr("Z 漂移率阈(m/s)",
+               "Z drift rate threshold (m/s)"),
+           tr("窗口内 Z 的线性漂移速率超过此值提示",
+               "Warn when the linear Z drift rate in the window exceeds this")),
+    "cm_z_step_warn_m": (tr("Z 台阶阈(m)",
+               "Z step threshold (m)"),
+           tr("相邻样本间的稳健突跳超过此值提示",
+               "Warn when the robust jump between adjacent samples exceeds this")),
+    "cm_z_headroom_warn_frac": (tr("Z 量程余量阈",
+               "Z range headroom threshold"),
+           tr("Z 距离行程边缘的相对余量低于此值提示",
+               "Warn when the relative headroom of Z to the travel edge falls below this")),
+    "cm_z_jump_k": (tr("Z 台阶判据 k",
+               "Z step criterion k"),
+           tr("阈值 = 差分中位数 + k×稳健σ;越大越保守",
+               "Threshold = difference median + k x robust sigma; larger is more conservative")),
+    "cm_amp_zero_frac": (tr("振幅归零判据",
+               "Amplitude-zero criterion"),
+           tr("低于「未接触本底」的这个比例算归零;**只在进针期间判**",
+               "Below this fraction of the \"non-contact baseline\" counts as zero; **judged only during approach**")),
+    "cm_amp_blank_s": (tr("扰动后振幅屏蔽(秒)",
+               "Post-disturbance amplitude blanking (s)"),
+           tr("扎针/电脉冲会让振幅大起振;恢复时间须按目标仪器验证",
+               "Tip pokes / electrical pulses make the amplitude ring up; verify the recovery time on the target instrument")),
 }
 
 #: Knobs that are really booleans (0/1) — the UI renders these as switches.
@@ -199,7 +285,7 @@ class MonitorThresholds:
     """
 
     cm_enabled: float = 1.0
-    cm_alerts_enabled: float = 1.0
+    cm_alerts_enabled: float = 0.0
     cm_segment_s: float = 1.0
     cm_target_fs_hz: float = 0.0
     # 优先使用 2T 以减少缓冲读取的往返次数；模块不可用时回退到 1T。
@@ -230,7 +316,8 @@ class MonitorThresholds:
     # 辅助通道默认记录但不告警。先在目标仪器上采集本底并运行 commission，验证阈值后再启用。Z 漂移、台阶和振幅屏蔽期都是待验证的配置，不能当作现场标定；稀疏采样无法恢复完整 ring-down，屏蔽期还会延迟持续异常的报告。
     cm_aux_enabled: float = 1.0
     cm_aux_alerts_enabled: float = 0.0
-    # 辅助采样默认 5 Hz；与振幅弛豫及窗口样本数一起在目标仪器上复核。
+    # 5 Hz（原为 1 Hz）。
+    # 保守一档，没有一步到 10 Hz：τ 是几百毫秒，5 Hz 已经把振幅过采到 2-3×。
     cm_aux_interval_s: float = 0.2
     cm_aux_window_s: float = 300.0
     cm_aux_keep_hours: float = 168.0

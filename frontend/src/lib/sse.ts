@@ -1,18 +1,17 @@
 // ════════════════════════════════════════════════════════════════════════════
 // sse.ts — the one SSE reader every streaming view uses.
 //
-// This module fixes a class of bug where a network change on the operator's machine leaves the conversation looking stuck.
-// The operator drives this box over Tailscale; a roam / re-route / sleep drops
-// the TCP connection under a live SSE stream. Four views each hand-rolled the
-// same reader loop, and all four had the same two holes:
+// Operators often drive this machine remotely over Tailscale; a network roam /
+// re-route / sleep drops the TCP connection under a live SSE stream. Four views
+// each hand-rolled the same reader loop, and all four had the same two holes:
 //
 //   1. **EOF was treated as success.** `if (done) break;` cannot tell "the server
 //      finished" from "the socket died", because nothing tracked whether a
 //      terminal frame ever arrived. A dropped connection therefore looked
 //      IDENTICAL to a completed turn: the spinner stopped, no error appeared,
 //      no reconnect banner appeared, and the conversation simply ended
-//      mid-sentence with zero signal. That is the "对话卡住" the operator sees —
-//      not a frozen screen, but a screen that lies about being finished.
+//      mid-sentence with zero signal. The conversation appears stuck — not a
+//      frozen screen, but a screen that lies about being finished.
 //
 //   2. **A half-open socket hung forever.** A TCP connection killed by a NAT
 //      rebind is not closed, it just stops delivering; `reader.read()` then
@@ -23,9 +22,11 @@
 // prolonged silence is real evidence of a dead link rather than a slow model, so
 // an idle watchdog can fire without ever cutting a healthy long-running run.
 //
-// Invariant it serves ("UI 绝不冻结"): a stream can end four different ways and
+// Invariant it serves (the UI must never freeze): a stream can end four different ways and
 // every one of them must leave the UI in a state the operator can act on.
 // ════════════════════════════════════════════════════════════════════════════
+
+import { tr } from "./i18n.ts";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -57,25 +58,31 @@ export function sseBroke(end: SseEnd): boolean {
  *
  * Cause only, deliberately: what happened to the CONNECTION and what is true of
  * the RUN are different facts, and the backend keeps working after the stream
- * drops (see mast/api/sse.py) — so "连接断了" must never be read as "任务没了".
+ * drops (see mast/api/sse.py) — so "connection lost" must never be read as "run lost".
  * Each view appends its own consequence sentence once it has reconciled with the
  * server, which is the only honest way to state it.
  */
 export function sseEndMessage(end: SseEnd): string | null {
   const offline =
     typeof navigator !== "undefined" && navigator.onLine === false
-      ? "（浏览器显示当前离线）"
+      ? tr("（浏览器显示当前离线）", " (the browser reports it is offline)")
       : "";
   switch (end.reason) {
     case "done":
     case "aborted":
       return null;
     case "truncated":
-      return `连接中断${offline}：网络变化（切换 Wi-Fi / Tailscale 重连 / 休眠）会掐断这条流。`;
+      return tr(
+        `连接中断${offline}：网络变化（切换 Wi-Fi / Tailscale 重连 / 休眠）会掐断这条流。`,
+        `Connection interrupted${offline}: a network change (switching Wi-Fi / Tailscale reconnecting / sleep) cuts this stream.`,
+      );
     case "idle":
-      return `连接已静默 ${Math.round(SSE_IDLE_MS / 1000)} 秒${offline}：服务端每 15 秒有一次心跳，收不到说明链路已断。`;
+      return tr(
+        `连接已静默 ${Math.round(SSE_IDLE_MS / 1000)} 秒${offline}：服务端每 15 秒有一次心跳，收不到说明链路已断。`,
+        `Connection silent for ${Math.round(SSE_IDLE_MS / 1000)} s${offline}: the server sends a heartbeat every 15 s, so missing it means the link is down.`,
+      );
     case "error":
-      return `连接出错${offline}：${end.message}`;
+      return tr(`连接出错${offline}：${end.message}`, `Connection error${offline}: ${end.message}`);
   }
 }
 
@@ -114,7 +121,7 @@ export async function readSseStream(
     controller,
   } = opts;
 
-  if (!resp.body) return { reason: "error", message: `HTTP ${resp.status}（无响应体）` };
+  if (!resp.body) return { reason: "error", message: tr(`HTTP ${resp.status}（无响应体）`, `HTTP ${resp.status} (no response body)`) };
 
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();

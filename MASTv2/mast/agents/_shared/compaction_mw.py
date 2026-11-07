@@ -17,8 +17,8 @@ Three MAST-specific changes:
   2. **Optional ``memory_sink``** — each summary is also written to long-term
      memory (``MemoryStore(kind="summary")``) so a compacted-away stretch of the
      conversation stays recallable later, cross-conversation.
-  3. **The compaction is STAMPED onto the summary message** (,
-     2026-07-27「群聊内的压缩功能并未显性体现」). Upstream compacts silently: the
+  3. **The compaction is STAMPED onto the summary message** (it used to be invisible
+     in the group chat). Upstream compacts silently: the
      state update it returns is ``[RemoveMessage(ALL), summary, *preserved]`` and
      nothing in it says how much history was just replaced. The 群聊 SSE bridge
      saw that update, classified the summary as a HumanMessage ("operator echo")

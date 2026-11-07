@@ -28,6 +28,7 @@ from mast.core.types import (
 )
 from mast.skills.composite._base import CompositeSkillGraph
 from mast.skills.composite.graph_executor import CompositeProgress, CompositeStep, GraphExecutor
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -50,56 +51,82 @@ class MoveAtomTo(CompositeSkillGraph):
             category=SkillCategory.COMPOSITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "把一个吸附原子从当前位置横向搬到目标位置:降低结电阻让原子跟着针尖走,"
+                tr("把一个吸附原子从当前位置横向搬到目标位置:降低结电阻让原子跟着针尖走,"
                 "拖到目标后**先升回成像电阻再离开**,然后复扫一小帧确认。"
                 "针尖从原子后方出发扫过它,终点就是目标位置。"
                 "默认参数是文献量级的起点,不是这台机器上标定过的值:原子跟不动就把设定点"
-                "调高(电阻调低)重试,跟得太狠会被针尖捡走。"
+                "调高(电阻调低)重试,跟得太狠会被针尖捡走。",
+                   "Move an adatom laterally from its current position to the target: lower the "
+                   "junction resistance so the atom follows the tip, drag it to the target, "
+                   "**restore the imaging resistance first and only then leave**, then rescan a "
+                   "small frame to confirm. The tip starts behind the atom and sweeps past it; the "
+                   "end point is the target position. The default parameters are literature-order "
+                   "starting values, not calibrated on this machine: if the atom does not follow, "
+                   "raise the setpoint (lower the resistance) and retry; following too aggressively "
+                   "can make the tip pick the atom up.")
             ),
             parameters=[
                 ParameterSpec(name="atom_x_m", type="float", unit="m",
-                              description="原子现在的 x,例如 '12.5n'(SI 前缀必须写)。",
+                              description=tr("原子现在的 x,例如 '12.5n'(SI 前缀必须写)。",
+                                             "Current x of the atom, e.g. '12.5n' (the SI prefix is "
+                                             "required)."),
                               required=True, min_value=-1.5e-6, max_value=1.5e-6),
                 ParameterSpec(name="atom_y_m", type="float", unit="m",
-                              description="原子现在的 y,例如 '-3n'。",
+                              description=tr("原子现在的 y,例如 '-3n'。", "Current y of the atom, e.g. '-3n'."),
                               required=True, min_value=-1.5e-6, max_value=1.5e-6),
                 ParameterSpec(name="target_x_m", type="float", unit="m",
-                              description="目标位置 x,例如 '16.5n'。",
+                              description=tr("目标位置 x,例如 '16.5n'。", "Target x, e.g. '16.5n'."),
                               required=True, min_value=-1.5e-6, max_value=1.5e-6),
                 ParameterSpec(name="target_y_m", type="float", unit="m",
-                              description="目标位置 y,例如 '-3n'。",
+                              description=tr("目标位置 y,例如 '-3n'。", "Target y, e.g. '-3n'."),
                               required=True, min_value=-1.5e-6, max_value=1.5e-6),
                 # MoveToXY 的语义:坐标来自存储过的地图/旧扫描才传,现读的就别传。
                 ParameterSpec(name="coord_epoch", type="int",
-                              description=("坐标的代次。坐标来自地图标记或旧扫描时传;"
-                                           "刚扫出来的坐标不要传。"),
+                              description=(tr("坐标的代次。坐标来自地图标记或旧扫描时传;"
+                                           "刚扫出来的坐标不要传。",
+                                              "Epoch of the coordinates. Pass it when the "
+                                              "coordinates come from a map marker or an old scan; do "
+                                              "not pass it for coordinates just scanned.")),
                               required=False, default=None, min_value=0, max_value=1000000),
                 ParameterSpec(name="manip_bias_v", type="float",
-                              description=("操纵偏压的**大小**,单位伏(普通数字,例如 "
-                                           "0.01)。符号跟随当前成像偏压,不穿零。"),
+                              description=(tr("操纵偏压的**大小**,单位伏(普通数字,例如 "
+                                           "0.01)。符号跟随当前成像偏压,不穿零。",
+                                              "**Magnitude** of the manipulation bias, in volts (a "
+                                              "plain number, e.g. 0.01). The sign follows the "
+                                              "current imaging bias and never crosses zero.")),
                               required=False, default=0.01, min_value=0.001, max_value=0.5),
                 ParameterSpec(name="manip_setpoint_a", type="float", unit="A",
-                              description="操纵设定点,例如 '57n'。",
+                              description=tr("操纵设定点,例如 '57n'。", "Manipulation setpoint, e.g. '57n'."),
                               required=False, default=57e-9,
                               min_value=1e-9, max_value=MAX_SETPOINT_A),
                 ParameterSpec(name="manip_speed_m_s", type="float", unit="m/s",
-                              description="拖拽速度,例如 '500p'(0.5 nm/s)。",
+                              description=tr("拖拽速度,例如 '500p'(0.5 nm/s)。",
+                                             "Drag speed, e.g. '500p' (0.5 nm/s)."),
                               required=False, default=5e-10, min_value=1e-11, max_value=1e-7),
                 ParameterSpec(name="approach_offset_m", type="float", unit="m",
-                              description="出发点落在原子后方多远,例如 '300p'。",
+                              description=tr("出发点落在原子后方多远,例如 '300p'。",
+                                             "How far behind the atom the start point lies, e.g. "
+                                             "'300p'."),
                               required=False, default=3e-10, min_value=0.0, max_value=1e-9),
                 ParameterSpec(name="precision_m", type="float", unit="m",
-                              description=("算「到位」的半径,例如 '150p'。不要小于晶格"
-                                           "间距的一半——原子只能停在格点上。"),
+                              description=(tr("算「到位」的半径,例如 '150p'。不要小于晶格"
+                                           "间距的一半——原子只能停在格点上。",
+                                              "Radius counted as 'in place', e.g. '150p'. Do not go "
+                                              "below half the lattice spacing: an atom can only rest "
+                                              "on lattice sites.")),
                               required=False, default=1.5e-10, min_value=1e-11, max_value=2e-9),
                 ParameterSpec(name="verify", type="bool",
-                              description="搬完复扫一帧确认(默认开)。",
+                              description=tr("搬完复扫一帧确认(默认开)。",
+                                             "Rescan a frame after the move to confirm (default on)."),
                               required=False, default=True),
                 ParameterSpec(name="verify_size_m", type="float", unit="m",
-                              description="确认帧的边长,例如 '6n'。",
+                              description=tr("确认帧的边长,例如 '6n'。",
+                                             "Edge length of the confirmation frame, e.g. '6n'."),
                               required=False, default=6e-9, min_value=1e-9, max_value=5e-8),
                 ParameterSpec(name="max_attempts", type="int",
-                              description="最多尝试几次(失败一次就降电阻重来)。",
+                              description=tr("最多尝试几次(失败一次就降电阻重来)。",
+                                             "Maximum number of attempts (each failure lowers the "
+                                             "resistance and retries)."),
                               required=False, default=2, min_value=1, max_value=3),
             ],
             preconditions=["z_controller_on"],
@@ -339,21 +366,27 @@ class MoveAtomTo(CompositeSkillGraph):
         if not data["instrument_restored"]:
             return SkillResult(
                 skill_name=self._skill_name(), success=False, data=data,
-                error=(f"仪器仍停在操纵条件上(设定点 {params.get('manip_setpoint_a')} A、"
+                error=(tr(f"仪器仍停在操纵条件上(设定点 {params.get('manip_setpoint_a')} A、"
                        f"偏压 {params.get('manip_bias_v')} V):立刻 SetSetpoint / SetBias "
-                       f"还原成像值,否则下一次扫描会把表面拖乱。"),
-                summary="搬运中止,仪器未还原")
+                       f"还原成像值,否则下一次扫描会把表面拖乱。",
+                          "The instrument is still at the manipulation conditions (setpoint "
+                          f"{params.get('manip_setpoint_a')} A, bias {params.get('manip_bias_v')} V): "
+                          "immediately run SetSetpoint / SetBias to restore the imaging values, "
+                          "otherwise the next scan will drag the surface around.")),
+                summary=tr("搬运中止,仪器未还原", "Move aborted, instrument not restored"))
         if data["moved"] is False:
             r = data.get("residual_nm")
             return SkillResult(
                 skill_name=self._skill_name(), success=False, data=data,
-                error=(f"原子没到位({data.get('verify_verdict')}"
-                       + (f",残差 {r:.2f} nm" if r is not None else "")
-                       + f",试了 {data['attempts']} 次)"),
-                summary="搬运未成功,仪器已还原")
-        summary = ("原子已到位" if data["moved"] else "已搬运,未复扫确认")
+                error=(tr(f"原子没到位({data.get('verify_verdict')}",
+                          f"Atom not in place ({data.get('verify_verdict')}")
+                       + (tr(f",残差 {r:.2f} nm", f", residual {r:.2f} nm") if r is not None else "")
+                       + tr(f",试了 {data['attempts']} 次)", f", tried {data['attempts']} times)")),
+                summary=tr("搬运未成功,仪器已还原", "Move unsuccessful, instrument restored"))
+        summary = (tr("原子已到位", "Atom in place") if data["moved"] else tr("已搬运,未复扫确认", "Moved, not confirmed by rescan"))
         if data.get("residual_nm") is not None:
-            summary += f",残差 {data['residual_nm'] * 1000:.0f} pm"
+            summary += tr(f",残差 {data['residual_nm'] * 1000:.0f} pm",
+                          f", residual {data['residual_nm'] * 1000:.0f} pm")
         return SkillResult(skill_name=self._skill_name(), success=True, data=data,
                            summary=summary)
 

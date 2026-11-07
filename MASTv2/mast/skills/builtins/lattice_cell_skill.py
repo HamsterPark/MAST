@@ -43,6 +43,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -61,35 +62,44 @@ class MeasureLatticeCell(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "从一批原子分辨 .sxm 量出表面的实空间原胞 a₁ / a₂ / γ —— "
+                tr("从一批原子分辨 .sxm 量出表面的实空间原胞 a₁ / a₂ / γ —— "
                 "**不需要事先知道晶格常数**（那正是 CalibratePiezoFromLattice 要而"
                 "这里不要的东西）。给上扫与下扫两个方向的帧时，慢轴漂移在 a₂ 上的"
                 "应变会被抵消，并顺带给出漂移速率。同时检验半序位置有没有超结构，"
-                "带空白对照。"
+                "带空白对照。", "Measure the real-space unit cell a1 / a2 / gamma of the surface from a batch of atomically resolved .sxm -- "
+"**no need to know the lattice constant beforehand** (that is exactly what CalibratePiezoFromLattice needs and "
+"this does not). When frames of both the up and down scan directions are given, the slow-axis drift strain on a2 "
+"is cancelled, and the drift rate comes out as a by-product. It also tests whether the half-order positions carry a superstructure, "
+"with a blank control.")
             ),
             parameters=[
                 ParameterSpec(
                     name="scan_paths", type="str",
                     description=(
-                        "一个或多个 .sxm 路径，逗号或换行分隔。"
+                        tr("一个或多个 .sxm 路径，逗号或换行分隔。"
                         "**上扫与下扫都给**才能消掉慢轴漂移（文件头的 SCAN_DIR "
-                        "自动分组，不用手工标）。"),
+                        "自动分组，不用手工标）。", "One or more .sxm paths, comma or newline separated. "
+"Give **both up and down scans** to cancel the slow-axis drift (the SCAN_DIR in the file header "
+"groups them automatically, no manual labelling).")),
                     required=True),
                 ParameterSpec(
                     name="channel", type="str",
-                    description="形貌通道名，默认 Z。",
+                    description=tr("形貌通道名，默认 Z。", "Topography channel name, default Z."),
                     required=False, default="Z"),
                 ParameterSpec(
                     name="min_indexed", type="int",
                     description=(
-                        "一帧要被计入平均，它选出的基矢至少要指标上这么多个观测峰。"
+                        tr("一帧要被计入平均，它选出的基矢至少要指标上这么多个观测峰。"
                         "默认 3 = 「除了它们自己，至少还有一个峰印证」。"
                         "设成 2 会放进「只解释了自己」的帧，那种帧上「a₂ 被报成一半」"
-                        "查不出来。"),
+                        "查不出来。", "For a frame to be counted in the average, the basis vectors it selects must have at least this many observed peaks. "
+"Default 3 = \"besides themselves, at least one more peak corroborates\". "
+"Setting 2 lets in frames that \"only explain themselves\", on which \"a2 reported as half\" "
+"cannot be detected.")),
                     required=False, default=3, min_value=2, max_value=8),
                 ParameterSpec(
                     name="superstructure", type="bool",
-                    description="是否做半序超结构检验（带空白对照）。默认做。",
+                    description=tr("是否做半序超结构检验（带空白对照）。默认做。", "Whether to run the half-order superstructure test (with blank control). On by default."),
                     required=False, default=True),
             ],
             estimated_duration_s=20.0,
@@ -113,7 +123,7 @@ class MeasureLatticeCell(BaseSkill):
         do_super = bool(params.get("superstructure", True))
         if not paths:
             return SkillResult(skill_name=_NAME, success=False,
-                               error="没有给 scan_paths")
+                               error=tr("没有给 scan_paths", "scan_paths was not given"))
 
         ups, downs, per_frame, rejected = [], [], [], []
         heights, times, best = [], [], None
@@ -152,16 +162,17 @@ class MeasureLatticeCell(BaseSkill):
             # 前者是技能失败 —— 混在一起，调用方就分不清该去修路径还是该换帧。
             return SkillResult(
                 skill_name=_NAME, success=False,
-                error=("%d 个路径一个都读不进来：%s"
-                       % (len(paths), "；".join(r["reason"] for r in rejected[:3]))),
+                error=(tr("%d 个路径一个都读不进来：%s", "None of the %d path(s) could be read: %s")
+                       % (len(paths), tr("；", "; ").join(r["reason"] for r in rejected[:3]))),
                 data={"rejected": rejected})
         if not per_frame:
             return SkillResult(
                 skill_name=_NAME, success=True,
                 data={"verdict": "undetermined", "rejected": rejected,
                       "n_frames": 0},
-                summary=("这一批帧上一个原胞都量不出来 —— 逐帧原因见 rejected。"
-                         "最常见的是像素太粗（scale_off）或谱被条纹主导。"))
+                summary=(tr("这一批帧上一个原胞都量不出来 —— 逐帧原因见 rejected。"
+                         "最常见的是像素太粗（scale_off）或谱被条纹主导。", "Not a single unit cell could be measured on this batch of frames -- per-frame reasons are in rejected. "
+"The most common are pixels too coarse (scale_off) or a spectrum dominated by stripes.")))
 
         data: dict = {
             "n_frames": len(per_frame), "n_up": len(ups), "n_down": len(downs),
@@ -193,10 +204,12 @@ class MeasureLatticeCell(BaseSkill):
                 data["gamma_deg"] = round(
                     float(np.median([c.gamma_deg for c in usable])), 2)
                 data["one_direction_caveat"] = (
-                    "这一批只有%s扫。慢轴热漂移会把 a₂ 沿慢轴拉伸或压缩，而这个偏差"
+                    tr("这一批只有%s扫。慢轴热漂移会把 a₂ 沿慢轴拉伸或压缩，而这个偏差"
                     "**只有换慢轴方向才看得见** —— 现在它留在 a₂ 里，量级通常是零点几"
-                    "个百分点。要消掉就补几帧反方向的（Nanonis 扫描方向 up ↔ down）。"
-                    % ("上" if ups else "下"))
+                    "个百分点。要消掉就补几帧反方向的（Nanonis 扫描方向 up ↔ down）。", "This batch was scanned only %s. Slow-axis thermal drift stretches or compresses a2 along the slow axis, and this bias "
+"**is only visible when the slow-axis direction is changed** -- right now it stays in a2, typically a few tenths "
+"of a percent. To cancel it, add a few frames in the opposite direction (Nanonis scan direction up <-> down).")
+                    % (tr("上", "up") if ups else tr("下", "down")))
 
         if do_super and best is not None:
             cell, fr = best
@@ -212,10 +225,13 @@ class MeasureLatticeCell(BaseSkill):
                 for r in res]
 
         data["shear_caveat"] = (
-            "γ 是测量值，但它含着**未校正的扫描器剪切** —— 单帧分不开「表面本来就不是"
+            tr("γ 是测量值，但它含着**未校正的扫描器剪切** —— 单帧分不开「表面本来就不是"
             "直角」与「扫描器把直角扭了」。要分开就用 CalibratePiezoMultiAngle"
             "（换扫描角）或 calibrate_up_down（换慢轴方向），两者分离的是剪切角，"
-            "与本技能用上下扫消掉的慢轴长度应变是同一个漂移矢量的两个分量。")
+            "与本技能用上下扫消掉的慢轴长度应变是同一个漂移矢量的两个分量。", "gamma is a measured value, but it contains **uncorrected scanner shear** -- a single frame cannot separate \"the surface is not "
+"a right angle to begin with\" from \"the scanner twisted a right angle\". To separate them use CalibratePiezoMultiAngle "
+"(change the scan angle) or calibrate_up_down (change the slow-axis direction); what they separate is the shear angle, "
+"which is one component of the same drift vector whose slow-axis length strain this skill cancels with up/down scans."))
         return SkillResult(skill_name=_NAME, success=True, data=data,
                            summary=_summary(data))
 
@@ -223,28 +239,28 @@ class MeasureLatticeCell(BaseSkill):
 def _summary(data: dict) -> str:
     v = data.get("verdict")
     if v == "undetermined":
-        return ("量不出原胞（%d 帧全部无法定基矢）。"
+        return (tr("量不出原胞（%d 帧全部无法定基矢）。", "Cannot measure a unit cell (all %d frames failed to fix basis vectors).")
                 % data.get("n_frames", 0))
-    head = ("原胞 a₁ = %.4f nm、a₂ = %.4f nm、γ = %s°"
+    head = (tr("原胞 a₁ = %.4f nm、a₂ = %.4f nm、γ = %s°", "Unit cell a1 = %.4f nm, a2 = %.4f nm, gamma = %s°")
             % (data.get("a1_nm", float("nan")), data.get("a2_nm", float("nan")),
                data.get("gamma_deg")))
     c = data.get("combined") or {}
     if v == "measured":
-        head += ("（上扫 %d 帧 / 下扫 %d 帧取中位，慢轴漂移已抵消"
+        head += (tr("（上扫 %d 帧 / 下扫 %d 帧取中位，慢轴漂移已抵消", " (median of %d up-scan / %d down-scan frames, slow-axis drift cancelled")
                  % (c.get("n_up", 0), c.get("n_down", 0)))
         if c.get("drift_nm_per_h") is not None:
-            head += "，顺带测得漂移 %.2f nm/h" % c["drift_nm_per_h"]
-        head += "）。"
+            head += tr("，顺带测得漂移 %.2f nm/h", ", drift measured as a by-product %.2f nm/h") % c["drift_nm_per_h"]
+        head += tr("）。", ").")
     else:
-        head += "（只有一个扫描方向，a₂ 里含未抵消的漂移）。"
+        head += tr("（只有一个扫描方向，a₂ 里含未抵消的漂移）。", " (only one scan direction; a2 contains uncancelled drift).")
     sup = data.get("superstructure") or []
     present = [s for s in sup if s.get("verdict") == "present"]
     if sup:
-        head += (" 超结构：%s。"
-                 % ("、".join("%s 处有（对照的 %.1f 倍）"
+        head += (tr(" 超结构：%s。", " Superstructure: %s.")
+                 % (tr("、", ", ").join(tr("%s 处有（对照的 %.1f 倍）", "present at %s (%.1f times the control)")
                               % (s["order"], s["ratio_to_control"] or 0)
                               for s in present)
-                    if present else "半序位置与空白对照不可区分，没有"))
+                    if present else tr("半序位置与空白对照不可区分，没有", "half-order positions are indistinguishable from the blank control, none")))
     return head
 
 

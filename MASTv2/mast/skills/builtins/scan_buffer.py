@@ -27,6 +27,7 @@ from mast.core.types import (
 )
 from mast.io.nanonis_files import decode_reply, parse_buffer_get
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 _log = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ PIXELS_MAX = 4096
 
 def _dim(px, ln) -> str:
     """``512x512``,读不出来时写「未知」而不是印 ``Nonex None``。"""
-    return "未知" if px is None or ln is None else f"{px}x{ln}"
+    return tr("未知", "unknown") if px is None or ln is None else f"{px}x{ln}"
 
 
 class SetScanBuffer(BaseSkill):
@@ -54,19 +55,19 @@ class SetScanBuffer(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "设置扫描分辨率：每行像素数与行数。"
+                tr("设置扫描分辨率：每行像素数与行数。"
                 "会保留当前选中的采集通道（先回读、再原样写回）。"
                 "优先用 ScanAt —— 它会按用户的分尺度策略表，为所请求的扫描"
                 "尺寸挑好分辨率；只有当要求了某个具体分辨率、或你正在"
-                "调试仪器时，才用这个技能。"
+                "调试仪器时，才用这个技能。", "Set the scan resolution: pixels per line and number of lines. Keeps the currently selected acquisition channels (read back first, then written back unchanged). Prefer ScanAt - it picks a resolution for the requested scan size from the user's per-scale policy table; use this skill only when the user names a specific resolution, or when you are debugging the instrument.")
             ),
             parameters=[
                 ParameterSpec(
                     name="pixels",
                     type="int",
                     description=(
-                        "每条扫描线的像素数（如 256、512、1024）。"
-                        f"取值范围 {PIXELS_MIN}..{PIXELS_MAX}。"
+                        tr("每条扫描线的像素数（如 256、512、1024）。"
+                        f"取值范围 {PIXELS_MIN}..{PIXELS_MAX}。", f"Pixels per scan line (e.g. 256, 512, 1024). Range {PIXELS_MIN}..{PIXELS_MAX}.")
                     ),
                     unit="px",
                     required=True,
@@ -77,8 +78,8 @@ class SetScanBuffer(BaseSkill):
                     name="lines",
                     type="int",
                     description=(
-                        "扫描行数。想要方形扫描框就省略它"
-                        "（lines = pixels），这也是常规情形。"
+                        tr("扫描行数。想要方形扫描框就省略它"
+                        "（lines = pixels），这也是常规情形。", "Number of scan lines. Omit it for a square scan frame (lines = pixels), which is the usual case.")
                     ),
                     unit="px",
                     required=False,
@@ -108,8 +109,8 @@ class SetScanBuffer(BaseSkill):
                 skill_name="SetScanBuffer",
                 success=False,
                 error=(
-                    f"读取当前扫描缓冲失败,无法在保留通道的前提下改分辨率: "
-                    f"{rec_get.error}"
+                    tr(f"读取当前扫描缓冲失败,无法在保留通道的前提下改分辨率: "
+                    f"{rec_get.error}", f"Failed to read the current scan buffer, cannot change the resolution while preserving the channels: {rec_get.error}")
                 ),
                 nanonis_calls=calls,
             )
@@ -120,8 +121,8 @@ class SetScanBuffer(BaseSkill):
                 skill_name="SetScanBuffer",
                 success=False,
                 error=(
-                    "Scan_BufferGet 回包格式无法解析,拒绝写入 —— 猜一个通道列表"
-                    "写回去会破坏当前的采集配置。"
+                    tr("Scan_BufferGet 回包格式无法解析,拒绝写入 —— 猜一个通道列表"
+                    "写回去会破坏当前的采集配置。", "The Scan_BufferGet reply format could not be parsed, write refused - guessing a channel list and writing it back would corrupt the current acquisition configuration.")
                 ),
                 nanonis_calls=calls,
                 data={"raw": decode_reply(rec_get.return_value)},
@@ -133,8 +134,8 @@ class SetScanBuffer(BaseSkill):
                 skill_name="SetScanBuffer",
                 success=False,
                 error=(
-                    "当前没有选中任何采集通道。先用 ConfigureScan 选通道,"
-                    "再设分辨率(本技能刻意不替你挑通道)。"
+                    tr("当前没有选中任何采集通道。先用 ConfigureScan 选通道,"
+                    "再设分辨率(本技能刻意不替你挑通道)。", "No acquisition channel is currently selected. Select channels with ConfigureScan first, then set the resolution (this skill deliberately does not pick channels for you).")
                 ),
                 nanonis_calls=calls,
             )
@@ -179,9 +180,9 @@ class SetScanBuffer(BaseSkill):
         }
         if not verified:
             data["warning"] = (
-                "分辨率写入后回读未能确认"
+                tr("分辨率写入后回读未能确认"
                 f"(请求 {pixels}x{lines},回读 {applied_pixels}x{applied_lines})"
-                " —— 硬件可能对该值做了调整"
+                " —— 硬件可能对该值做了调整", f"Readback after the resolution write could not confirm it (requested {pixels}x{lines}, read back {applied_pixels}x{applied_lines}) - the hardware may have adjusted the value")
             )
 
         return SkillResult(
@@ -191,9 +192,9 @@ class SetScanBuffer(BaseSkill):
             summary=(
                 # previous_* 可能是 None(回包里 pixels/lines 读不出来)—— 那不该
                 # 拦下写入(通道保住了、新分辨率照写),但也不能印成 "Nonex None"。
-                f"扫描分辨率 {_dim(current['pixels'], current['lines'])} → "
-                f"{pixels}x{lines}"
-                + ("" if verified else "(回读未确认)")
+                tr(f"扫描分辨率 {_dim(current['pixels'], current['lines'])} → "
+                f"{pixels}x{lines}", f"Scan resolution {_dim(current['pixels'], current['lines'])} -> {pixels}x{lines}")
+                + ("" if verified else tr("(回读未确认)", "(readback not confirmed)"))
             ),
             nanonis_calls=calls,
         )

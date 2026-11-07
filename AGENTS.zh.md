@@ -2,8 +2,8 @@
 
 [English](AGENTS.md)
 
-MAST（Modular Autonomous SPM Toolkit）是面向真实扫描隧道显微镜（STM）实验的全栈多智能体系统。
-系统连接实验规划、仪器技能、确定性的执行校验、视觉观测、数据处理与 React 操作界面，并通过 Nanonis 控制器操作 STM。
+MAST（Modular Autonomous SPM Toolkit）把外置 AI 智能体连接到 Nanonis 控制器上的扫描隧道显微镜（STM）和 TERS 用的光学元件。
+系统提供仪器技能、确定性的执行校验、视觉证据与测量工具、数据处理与 React 操作界面；早期的内置多智能体编排作为历史代码保留在树中。
 **在 MAST 6.4.0 一轮已结束的实机实验中，外部 AI agent 控制真实 STM；
 带时间戳的记录从 2026-09-17 23:10:37 至 2026-09-22 02:08:10（北京时间），跨越约 99 小时。**
 
@@ -38,7 +38,9 @@ MAST（Modular Autonomous SPM Toolkit）是面向真实扫描隧道显微镜（S
 | agent 交接时实际传递了什么？ | `MASTv2/mast/agents/state.py`（`DocRef`、reducer）、`MASTv2/mast/agents/_shared/handoff.py`、`MASTv2/mast/agents/_shared/artifact_channel.py` | `tests/v2/agents/orchestrator/test_artifact_channel.py` |
 | 快速观测怎样进入较慢的推理，模型缺失时又会怎样？ | `MASTv2/mast/buffer/service.py`、`MASTv2/mast/vision/module.py`、`MASTv2/mast/agents/_shared/buffer_tools.py` | `tests/v2/buffer/test_buffer_service.py`、`tests/v2/vision/test_mock_backend.py`、`tests/v2/unit/agents/test_scan_progress_liveness.py` |
 | 操作员怎样区分任务完成与连接中断？ | `MASTv2/mast/api/sse.py`、`MASTv2/mast/api/ws.py`、`frontend/src/lib/sse.ts`、`frontend/src/lib/ws.ts` | `tests/v2/unit/api/test_sse_keepalive.py`、`tests/v2/unit/api/test_sse_client_contract.py`、`frontend/test/ws.reconnect.test.ts` |
-| **6.5.0 新外部接口**怎样处理重试与重启？**软件已测，待真机验证。** | `MASTv2/mast/api/ext/jobs.py`：`JobManager.submit`、`fingerprint`、`_ensure_loaded` | `tests/v2/unit/api_ext/test_ext_jobs.py` |
+| **外部接口**怎样处理重试与重启？**软件已测，待真机验证。** | `MASTv2/mast/api/ext/jobs.py`：`JobManager.submit`、`fingerprint`、`_ensure_loaded` | `tests/v2/unit/api_ext/test_ext_jobs.py` |
+| 视觉脚手架怎样让智能体做到一动一观？**软件已测，待真机验证。** | `MASTv2/mast/vista/service.py`、`MASTv2/mast/vista/gate.py`、`MASTv2/mast/vista/wait.py`、`MASTv2/mast/api/ext/vista.py` | `tests/v2/vista/test_gate.py`、`tests/v2/vista/test_wait.py`、`tests/v2/vista/test_actions.py` |
+| 光学仪器（含出光）怎样设闸？**软件已测，待真机验证。** | `MASTv2/mast/instruments/emission_safety.py`、`MASTv2/mast/instruments/witec/microscope.py`、`MASTv2/mast/station.py`、`MASTv2/mast/satellite/hub.py` | `tests/v2/station/`、`tests/v2/instruments/witec/`、`tests/v2/satellite/` |
 
 agent 工具包装器与手动执行器分别在自己的入口取得仪器占用权，组合技能子步骤经过 `ExecutionContext.run`；
 审阅共享执行约束时，应分别追踪这些路径。观测的时效与推进情况由记录年龄、扫描行号等信息判断，
@@ -61,11 +63,14 @@ WebSocket 客户端负责重连与轮询回退，SSE 客户端区分完成、断
   观测时效与界面连接管理。上面的阅读路线提供每项机制的实现和测试入口。
 - **MAST 6.4.0 真机实践**：外部 AI agent 控制真实 STM；已结束的记录跨越约 99 小时。
   该运行经历由维护者提供。README 展示少量去除样品标识的选图；完整实验数据集与运行日志未纳入本次发布。
-- **公开版 6.5.0 软件验证**：2026-09-21 在 Windows / Python 3.13 环境对源码基线 `9884ff5`
-  完成检查，后端 **14,356 通过、0 失败、46 跳过、2 个预期失败**，前端 **985 项单元测试**
+- **公开版 7.1.6 软件验证**：2026-11-07 在 Windows / Python 3.13 环境对导出树
+  完成检查，后端 **19,755 通过**；1 条时序相关的失败（单独复跑通过）、68 跳过、2 个预期失败，前端 **1,931 项单元测试**
   以及含类型检查的构建通过。环境、命令与范围见[验证记录](docs/OPEN_SOURCE_NOTES.md)。
-- **新增外部接口**：`/api/ext/v1` 与配套 MCP 集成将项目已有的外部控制能力扩展为公开接口。
-  新路径已经过软件测试，真机验证尚待完成；上述约 99 小时记录使用 MAST 6.4.0 的控制路径。
+- **外部接口**：`/api/ext/v1` 与配套 MCP 集成将项目已有的外部控制能力扩展为公开接口。
+  该路径已经过软件测试，真机验证尚待完成；上述约 99 小时记录使用 MAST 6.4.0 的控制路径。
+- **VISTA 与光学控制（7.0–7.1）**：视觉脚手架（`MASTv2/mast/vista/`）、TERS 工作流与卫星程序
+  （`MASTv2/mast/satellite/`、`satellite/`）以及光学站（`MASTv2/mast/instruments/witec/`）
+  已有使用仪器替身的软件测试，真机验证尚待完成。
 - **实验性扩展**：`MASTv2/mast/conduct/`、`MASTv2/mast/agentruntime/`、`MASTv2/mast/goals/`、
   技能工坊与市场及 qPlus 路径继续探索长时间规划、执行与仪器能力，尚待真机验证。
   投稿管线的软件检查与具体投稿技能的真机验证分别记录。

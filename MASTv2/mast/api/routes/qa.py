@@ -7,7 +7,7 @@ LLM / tool-loop / read-only-gating logic lives here. The old handler it mirrors
 is ``gui/app.py:_qa_handle`` (the 查询助手 submit handler that called
 ``self._quickask.one_shot(text, scope=scope)``).
 
-Contract preserved verbatim (the old "单次只读" contract):
+Contract preserved unchanged (the old "单次只读" contract):
   * single-turn, no persisted history;
   * READ-ONLY — never touches the instrument, never writes logs / plan store;
   * independent ``qa_model`` alias (resolved from the persisted ``qa_model``
@@ -24,6 +24,7 @@ never a 500. Heavy backends are LAZY-imported INSIDE the handler in try/except.
 from __future__ import annotations
 
 import logging
+from mast.i18n import tr
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -101,6 +102,8 @@ def ask(request: Request, body: QaRequest) -> QaResponse:
     ``degraded=True`` with an explanatory answer string, never a 500.
 
     Backing fn: ``mast.llm.quickask.QuickAskAgent.one_shot``."""
+    from mast.legacy_gate import require_internal_llm
+    require_internal_llm("query assistant")   # → 403 while legacy features are off
     ctx = request.app.state.ctx
     question = (body.question or "").strip()
     scope = body.scope or "all"
@@ -112,7 +115,7 @@ def ask(request: Request, body: QaRequest) -> QaResponse:
         # Empty input is a benign no-op, not a backend failure — mirror the old
         # handler's "_请输入查询_" early return (not degraded).
         return QaResponse(
-            answer="（请输入查询内容。）", model=model, scope=scope, degraded=False
+            answer=tr("（请输入查询内容。）", "(Please enter a query.)"), model=model, scope=scope, degraded=False
         )
 
     if qa is None:
@@ -120,7 +123,7 @@ def ask(request: Request, body: QaRequest) -> QaResponse:
         # short-circuit message — explanatory, never a 500.
         return QaResponse(
             answer=(
-                "查询助手未初始化（需要 LLM API key，且仅在已连接核心的运行模式下可用）。"
+                tr("查询助手未初始化（需要 LLM API key，且仅在已连接核心的运行模式下可用）。", "Query assistant is not initialised (needs an LLM API key, and is only available when running with the core connected).")
             ),
             model=model,
             scope=scope,
@@ -132,12 +135,12 @@ def ask(request: Request, body: QaRequest) -> QaResponse:
     except Exception as exc:  # noqa: BLE001 — any backend failure degrades, never 500
         logger.warning("QA one_shot failed (scope=%r): %s", scope, exc)
         return QaResponse(
-            answer=f"查询失败：{type(exc).__name__}: {exc}",
+            answer=tr(f"查询失败：{type(exc).__name__}: {exc}", f"Query failed: {type(exc).__name__}: {exc}"),
             model=model,
             scope=scope,
             degraded=True,
         )
 
     return QaResponse(
-        answer=answer or "(没有文本回复)", model=model, scope=scope, degraded=False
+        answer=answer or tr("(没有文本回复)", "(no text reply)"), model=model, scope=scope, degraded=False
     )

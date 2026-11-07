@@ -4,10 +4,13 @@ import { api } from "../../api/client";
 import type { components } from "../../api/schema";
 import { Card, DegradedNote, EmptyNote, ErrorNote, Section, Spinner } from "../ui";
 import { SelectField } from "../controls";
+import { tr } from "../../lib/i18n";
+import { RECORDS_DETAIL_POLL_MS, RECORDS_LIST_POLL_MS } from "../../lib/pollRates";
+import { newestFirst } from "../../lib/recordsOrder";
 import { JsonBlock, fmtTime } from "./shared";
 
-// 日志 sub-tab — reproduces the old experiment_viewer "History viewer":
-//   experiment dropdown + sample dropdown → action timeline with expandable
+// Log sub-tab (history viewer):
+//   experiment dropdown + sample dropdown -> action timeline with expandable
 //   per-action TCP calls and before/after state diff.
 //   GET /api/experiments  (dropdown choices)
 //   GET /api/experiments/{id}/timeline  (entries + tcp_calls + state_diff)
@@ -23,6 +26,7 @@ function useExperiments() {
       if (error) throw error;
       return data;
     },
+    refetchInterval: RECORDS_LIST_POLL_MS,
   });
 }
 
@@ -37,6 +41,7 @@ function useTimeline(experimentId: string | null) {
       if (error) throw error;
       return data;
     },
+    refetchInterval: RECORDS_DETAIL_POLL_MS,
   });
 }
 
@@ -44,16 +49,17 @@ export function TimelinePane() {
   const expQ = useExperiments();
   const [expId, setExpId] = useState<string>("");
   const [sampleId, setSampleId] = useState<string>("");
+  const [oldestFirst, setOldestFirst] = useState(false);
 
   const experiments: ExperimentSummary[] = expQ.data?.experiments ?? [];
   const effectiveExpId = expId || experiments[0]?.id || "";
   const tlQ = useTimeline(effectiveExpId || null);
 
   const expOptions = [
-    { value: "", label: experiments.length ? "（选择实验）" : "（无实验）" },
+    { value: "", label: experiments.length ? tr("（选择实验）", "(select experiment)") : tr("（无实验）", "(no experiments)") },
     ...experiments.map((e) => ({
       value: e.id,
-      label: `${e.name || "未命名"} · ${fmtTime(e.start_time)} [${e.status || "—"}]`,
+      label: `${e.name || tr("未命名", "unnamed")} · ${fmtTime(e.start_time)} [${e.status || "—"}]`,
     })),
   ];
 
@@ -63,17 +69,20 @@ export function TimelinePane() {
     new Set(entries.map((e) => e.sample_id).filter((s): s is string => !!s)),
   );
   const sampleOptions = [
-    { value: "", label: "全部样品" },
+    { value: "", label: tr("全部样品", "All samples") },
     ...sampleIds.map((s) => ({ value: s, label: s.slice(0, 8) + "…" })),
   ];
-  const shown = sampleId ? entries.filter((e) => e.sample_id === sampleId) : entries;
+  const filtered = sampleId ? entries.filter((e) => e.sample_id === sampleId) : entries;
+  // Step numbers count in execution order (1 = first action) in either display order.
+  const latestFirst = newestFirst(filtered);
+  const shown = latestFirst.map((entry, i) => ({ entry, step: latestFirst.length - i }));
+  if (oldestFirst) shown.reverse();
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-4">
-        {/* OLD experiment_viewer dropdown labels (verbatim English). */}
         <div className="min-w-64">
-          <div className="mb-1 text-xs text-mast-muted">Experiment</div>
+          <div className="mb-1 text-xs text-mast-muted">{tr("Experiment", "Experiment")}</div>
           <SelectField
             value={effectiveExpId}
             onChange={(v) => {
@@ -84,41 +93,39 @@ export function TimelinePane() {
           />
         </div>
         <div className="min-w-48">
-          <div className="mb-1 text-xs text-mast-muted">Sample</div>
+          <div className="mb-1 text-xs text-mast-muted">{tr("Sample", "Sample")}</div>
           <SelectField value={sampleId} onChange={setSampleId} options={sampleOptions} />
         </div>
-        {/* OLD hist_refresh_btn ("Refresh"). */}
         <button
           type="button"
-          disabled={tlQ.isFetching}
-          onClick={() => {
-            expQ.refetch();
-            tlQ.refetch();
-          }}
-          className="rounded border border-mast-border px-3 py-1 text-sm text-mast-muted hover:text-mast-text disabled:opacity-50"
+          onClick={() => setOldestFirst((v) => !v)}
+          className="rounded border border-mast-border px-3 py-1 text-sm text-mast-muted hover:text-mast-text"
         >
-          {tlQ.isFetching ? "Refreshing…" : "Refresh"}
+          {oldestFirst ? tr("当前：最早在前", "Showing: oldest first") : tr("当前：最新在前", "Showing: newest first")}
         </button>
+        <span className="pb-1 text-xs text-mast-faint">
+          {tr("自动更新", "Updates automatically")}
+        </span>
       </div>
 
       {expQ.isError && <ErrorNote error={expQ.error} />}
       {tlQ.isPending && effectiveExpId && <Spinner />}
       {tlQ.isError && <ErrorNote error={tlQ.error} />}
-      {tlQ.data?.degraded && <DegradedNote what="实验时间线" />}
+      {tlQ.data?.degraded && <DegradedNote what={tr("实验时间线", "experiment timeline")} />}
 
       {tlQ.data && !tlQ.data.degraded && (
         <>
           <Section
-            title={`时间线 — ${tlQ.data.name || effectiveExpId.slice(0, 8) + "…"}`}
+            title={`${tr("时间线", "Timeline")} — ${tlQ.data.name || effectiveExpId.slice(0, 8) + "…"}`}
           >
             <Card>
               <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-mast-muted">
-                <span>状态：{tlQ.data.status || "—"}</span>
-                <span className="tabular-nums">动作：{tlQ.data.action_count}</span>
-                <span className="tabular-nums text-mast-auto">成功：{tlQ.data.succeeded}</span>
-                <span className="tabular-nums text-mast-danger">失败：{tlQ.data.failed}</span>
+                <span>{tr("状态：", "Status: ")}{tlQ.data.status || "—"}</span>
+                <span className="tabular-nums">{tr("动作：", "Actions: ")}{tlQ.data.action_count}</span>
+                <span className="tabular-nums text-mast-auto">{tr("成功：", "Succeeded: ")}{tlQ.data.succeeded}</span>
+                <span className="tabular-nums text-mast-danger">{tr("失败：", "Failed: ")}{tlQ.data.failed}</span>
                 <span className="tabular-nums">
-                  总耗时：{tlQ.data.total_duration_s.toFixed(1)}s
+                  {tr("总耗时：", "Total time: ")}{tlQ.data.total_duration_s.toFixed(1)}s
                 </span>
               </div>
               {tlQ.data.goal_text && (
@@ -128,11 +135,11 @@ export function TimelinePane() {
           </Section>
 
           {shown.length === 0 ? (
-            <EmptyNote label="暂无动作" />
+            <EmptyNote label={tr("暂无动作", "No actions")} />
           ) : (
             <ol className="relative ml-1 space-y-2.5 border-l border-mast-border pl-0">
-              {shown.map((e, i) => (
-                <TimelineRow key={e.id} entry={e} step={i + 1} />
+              {shown.map(({ entry, step }) => (
+                <TimelineRow key={entry.id} entry={entry} step={step} />
               ))}
             </ol>
           )}
@@ -240,10 +247,10 @@ function TimelineRow({ entry, step }: { entry: TimelineEntry; step: number }) {
             }
           >
             {ok ? <IconCheck /> : <IconX />}
-            {ok ? "成功" : "失败"}
+            {ok ? tr("成功", "Success") : tr("失败", "Failed")}
           </span>
           <code className="truncate font-mono text-mast-text">
-            <span className="text-mast-ag-ic">{entry.skill_name || "(未知)"}</span>
+            <span className="text-mast-ag-ic">{entry.skill_name || tr("(未知)", "(unknown)")}</span>
             <span className="text-mast-faint">({fmtParams(entry.parameters)})</span>
           </code>
           {entry.error && (
@@ -262,7 +269,7 @@ function TimelineRow({ entry, step }: { entry: TimelineEntry; step: number }) {
             {tcp.length > 0 && (
               <div>
                 <div className="mb-1 font-medium text-mast-faint">
-                  TCP 调用 <span className="font-mono tabular-nums">({tcp.length})</span>
+                  {tr("TCP 调用", "TCP calls")} <span className="font-mono tabular-nums">({tcp.length})</span>
                 </div>
                 <div className="overflow-hidden rounded-mast-ctl border border-mast-border bg-mast-code-bg">
                   {tcp.map((c, i) => (

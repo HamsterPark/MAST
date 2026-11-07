@@ -305,19 +305,26 @@ def test_upstream_header_override_is_actually_used(tmp_path, monkeypatch):
     看不见它被调错了。所以这里测的是**行为**：设了覆写，注出来的文本要变。
     """
     monkeypatch.setenv("MAST2_PROJECT_ROOT", str(tmp_path))
+    from mast.admin.override_store import ConfigOverrideRegistry
     from mast.prompts import overrides
 
+    # 覆写库是进程级单例：同一进程里先跑的测试若已建好它（指向检出里真实的
+    # config/overrides），只改环境变量没用 —— 这条测试就会把「自定义抬头 XYZ」写进
+    # 检出、还改掉受版本管理的 .reload。前后都重置。
+    ConfigOverrideRegistry.reset()
     overrides.reset_cache() if hasattr(overrides, "reset_cache") else None
     from mast.agents._shared.upstream_mw import _resolve_header
 
     default = _resolve_header()
     assert default, "抬头默认值是空的？那这条测试什么也没测"
+    assert ConfigOverrideRegistry.get()._dir == tmp_path / "config" / "overrides"
 
     overrides.set_override("mw.upstream_artifacts.header", "自定义抬头 XYZ")
     try:
         assert _resolve_header() == "自定义抬头 XYZ"
     finally:
         overrides.set_override("mw.upstream_artifacts.header", "")
+        ConfigOverrideRegistry.reset()
 
 
 def test_resolve_requires_a_default_everywhere_it_is_called():

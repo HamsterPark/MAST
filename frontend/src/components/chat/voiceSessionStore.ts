@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { MicCapture } from "@/lib/audio/mic";
 import { PcmPlayer } from "@/lib/audio/player";
 import { EnergyVad } from "@/lib/voice/vad";
+import { tr } from "@/lib/i18n";
 
 // ════════════════════════════════════════════════════════════════════════════
 // voiceSessionStore — the full-duplex voice session, hoisted OUT of React into a
@@ -62,7 +63,7 @@ interface VoiceState {
   caption: string; // live ASR (partial → final)
   captionFinal: boolean;
   reply: string; // accumulating assistant reply text
-  narrations: string[]; // execution narration ("扫描完成" …)
+  narrations: string[]; // execution narration ("scan finished" …)
   armed: boolean; // wake mode: heard the wake word, awaiting the command
   narrate: boolean; // speak agent tool executions (seeded from settings)
   error: string | null;
@@ -92,7 +93,7 @@ export const useVoiceSession = create<VoiceState>((set, get) => {
       await _mic.start();
       return true;
     } catch (e) {
-      set({ error: `无法访问麦克风：${String((e as Error)?.message ?? e)}` });
+      set({ error: tr(`无法访问麦克风：${String((e as Error)?.message ?? e)}`, `Cannot access the microphone: ${String((e as Error)?.message ?? e)}`) });
       _mic = null;
       return false;
     }
@@ -152,7 +153,7 @@ export const useVoiceSession = create<VoiceState>((set, get) => {
         break;
       case "interrupt":
         set((s) => ({
-          narrations: [...s.narrations, `⚠ ${String(f.spoken ?? "需要人工确认")}`].slice(-8),
+          narrations: [...s.narrations, `⚠ ${String(f.spoken ?? tr("需要人工确认", "Operator confirmation required"))}`].slice(-8),
         }));
         break;
       case "tts_begin":
@@ -167,7 +168,7 @@ export const useVoiceSession = create<VoiceState>((set, get) => {
         set({ degraded: true, degradedReason: String(f.reason ?? ""), status: "degraded" });
         break;
       case "error":
-        set({ error: String(f.message ?? "语音出错") });
+        set({ error: String(f.message ?? tr("语音出错", "Voice error")) });
         break;
       default:
         break;
@@ -229,7 +230,7 @@ export const useVoiceSession = create<VoiceState>((set, get) => {
         _ws = null;
       };
       ws.onerror = () => {
-        set({ error: "语音连接出错" });
+        set({ error: tr("语音连接出错", "Voice connection error") });
       };
     },
 

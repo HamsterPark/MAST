@@ -1,13 +1,16 @@
-// 出图页的全尺寸查看：暗底遮罩，←/→ 在同一类别内翻，Esc 关，顶上是下载链接。
+// Full-size viewer for the Figures page: dark overlay, ←/→ page within the same kind, Esc closes,
+// download links on top.
 //
-// 与大图（Lightbox）一样挂到 document.body：MAST 的滚动容器是 AppLayout 的 <main>，
-// fixed 遮罩留在里面的话，滚轮会把底下的页面一起滚走。键盘监听只注册一次，「现在第几张」
-// 从 latest ref 读——连按 → 时闭包里的旧序号会让翻页原地打转。
+// Like the Lightbox it is mounted on document.body: MAST's scroll container is AppLayout's
+// <main>, and a fixed overlay left inside it would let the wheel scroll the page underneath.
+// The keyboard listener is registered once and reads the current index from the `latest` ref;
+// with a stale index in a closure, repeated → presses would keep paging in place.
 
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { fileLinks, fullImageUrl, KIND_LABEL, type FigureEntry } from "@/lib/gallery/figures";
 import { DARK_BTN } from "../bits";
+import { tr } from "@/lib/i18n";
 
 export function FigureViewer({
   entries,
@@ -44,7 +47,7 @@ export function FigureViewer({
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  // 列表刷新后这一类空了：自己关掉，不留一个黑屏。
+  // The kind became empty after a list refresh: close, rather than leave a black screen.
   useEffect(() => {
     if (!entries.length) latest.current.onClose();
   }, [entries.length]);
@@ -69,12 +72,12 @@ export function FigureViewer({
             </a>
           ))}
           <button type="button" className={DARK_BTN} disabled={j === 0} onClick={() => onIndex(j - 1)}>
-            ← 上一张
+            {tr("← 上一张", "← Previous")}
           </button>
           <button type="button" className={DARK_BTN} disabled={j >= entries.length - 1} onClick={() => onIndex(j + 1)}>
-            下一张 →
+            {tr("下一张 →", "Next →")}
           </button>
-          <button type="button" className={DARK_BTN} title="关闭（Esc）" onClick={onClose}>
+          <button type="button" className={DARK_BTN} title={tr("关闭（Esc）", "Close (Esc)")} onClick={onClose}>
             ✕
           </button>
         </span>
@@ -88,7 +91,9 @@ export function FigureViewer({
         {url ? (
           <img src={url} alt={e.base} className="max-h-full max-w-full bg-white object-contain" />
         ) : (
-          <div className="text-[#9aa4af]">这一项没有 PNG/JPG（只有数据文件），用上面的链接下载。</div>
+          <div className="text-[#9aa4af]">
+            {tr("这一项没有 PNG/JPG（只有数据文件），用上面的链接下载。", "This entry has no PNG/JPG (data files only); download them with the links above.")}
+          </div>
         )}
       </div>
     </div>

@@ -194,7 +194,7 @@ def build(
         # execution" and nothing else.
         UpstreamArtifactMiddleware("instrument_control"),
         # ExperimentPrefsMiddleware — inject the operator's default-parameter
-        # preferences (设置 → 实验默认参数, #147). Placed BEFORE live-state so the
+        # preferences (设置 → 实验默认参数). Placed BEFORE live-state so the
         # magnitude/live-state block stays the freshest (last) context; a no-op
         # when nothing is set, live-read (no rebuild on a settings change).
         ExperimentPrefsMiddleware(),
@@ -249,7 +249,7 @@ def build(
         from mast.agents._shared.buffer_hitl import make_buffer_hitl_middleware
         # get_mode so the interrupt's `suggested_action` matches what MAST will
         # actually do: SAFE mode refuses tip conditioning, so it must not tell
-        # the operator to run one ().
+        # the operator to run one.
         middleware.append(make_buffer_hitl_middleware(buffer=buf,
                                                       get_mode=get_mode))
     if enable_hitl:
@@ -257,7 +257,7 @@ def build(
         # ``HumanInTheLoopMiddleware(interrupt_on=_derive_hitl_map(registry))``
         # (每个 DANGEROUS 技能一次审批框)和 ``ModeGatedPulseHITLMiddleware``
         # (SEMI 模式下每一发电脉冲一次)。两天实机里它们的成绩是**零真阳性**,
-        # 把自动运行打成了值守运行,定案整条打断链割掉。
+        # 把自动运行打成了值守运行,因此整条打断链被割掉。
         #
         # 判据没删也没放宽 —— 它搬进了 ``mast.core.auto_approval.would_have_asked``,
         # 由这条通知中间件、``skill_adapter``(写 approvals 审计行)和

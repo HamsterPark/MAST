@@ -1,20 +1,28 @@
 // ════════════════════════════════════════════════════════════════════════════
-// marksStore —— 数据图库的标记（设计 D12；旧版兼容格式 app.js 的 Store 逐项移植）。
+// marksStore: marks of the data gallery.
 //
-// 服务端 marks.json 是唯一真源；这里是它在浏览器里的镜像 + 存盘驱动：
-//   * 每次改动先落到本地文档（界面立刻变），同时进 pending 队列；
-//   * 350 ms 去抖后发一批；**一次只发一个请求**，服务端就按顺序收到；
-//   * 失败的一批放回队列（不盖掉路上又改的新版本），5 s 后补发；
-//   * pending 同时写 localStorage["mast.gallery.pending"]——关掉页面、服务重启、
-//     网线掉了，下次打开先把它应用上再补发；
-//   * 回到页面（visibilitychange）且没有待存改动时，按 rev 看服务端变没变过。
+// The server-side marks.json is the single source of truth; this is its browser mirror plus the
+// save driver:
+//   * every change is applied to the local document first (the UI updates at once) and also
+//     enters the pending queue;
+//   * a batch is sent after a 350 ms debounce, with **one request in flight at a time**, so the
+//     server receives them in order;
+//   * a failed batch is put back in the queue (without overwriting newer edits made meanwhile)
+//     and retried after 5 s;
+//   * pending is also written to localStorage["mast.gallery.pending"], so after closing the
+//     page, a server restart or a network drop, the next visit applies it and resends;
+//   * when the page becomes visible again with nothing pending, `rev` tells whether the server
+//     copy changed.
 //
-// 卡片按 id 订阅（`useMarksStore(s => s.doc.items[id])`）：文档每次改动都换新对象，
-// 但没被改的那一条仍是同一个对象引用，所以改一条只重渲一张卡。
+// Cards subscribe by id (`useMarksStore(s => s.doc.items[id])`): every change yields a new
+// document object, but an unchanged entry keeps its object reference, so editing one entry
+// re-renders one card.
 //
-// `epoch` 只在**整份文档被服务端版本替换**时加一（加载、别的标签页改过、导入之后）。
-// 列表视图据此重算筛选；本页自己的逐条改动不动它——原版在翻页、打分的过程中不重排
-// 列表（否则按 ✗ 之后那一张立刻从「隐藏 ✗」的列表里消失，下一张跳到手底下）。
+// `epoch` is incremented only when the **whole document is replaced by the server version**
+// (load, changed by another tab, after an import). List views recompute their filters from it;
+// per-item edits made on this page do not touch it, so the list is not re-sorted while paging
+// and rating (otherwise pressing ✗ under "Hide ✗" would remove the card at once and the next
+// one would jump under the pointer).
 // ════════════════════════════════════════════════════════════════════════════
 
 import { create } from "zustand";
@@ -38,10 +46,12 @@ import {
   withSeries,
 } from "@/lib/gallery/marks";
 import { nowStr } from "@/lib/gallery/format";
+import { tr } from "@/lib/i18n";
 
 /**
- * loading：还没拿到服务端文档 · idle：连上了、还没存过 · pending：保存中 ·
- * ok：已存盘 · bad：没存上（改动在浏览器里，会补存）· offline：标记服务不可用
+ * loading: server document not yet received · idle: connected, nothing saved yet · pending: saving ·
+ * ok: saved · bad: save failed (changes are kept in the browser and will be resent) ·
+ * offline: marks service unavailable
  */
 export type SaveState = "loading" | "idle" | "pending" | "ok" | "bad" | "offline";
 
@@ -70,7 +80,7 @@ interface MarksState {
 const nextTs = tsClock();
 let timer: ReturnType<typeof setTimeout> | null = null;
 let initPromise: Promise<void> | null = null;
-/** 服务没起来时的重试定时器；只留一个，别随组件重复挂载叠出一串。 */
+/** Retry timer for when the service is not up; keep only one so repeated component mounts do not stack several. */
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
 function lsGet(k: string): string | null {
@@ -84,18 +94,18 @@ function lsSet(k: string, v: string): void {
   try {
     localStorage.setItem(k, v);
   } catch {
-    /* 存不了就算了：隐私模式里仍要能用 */
+    /* Ignore failures to store: the page must still work in private mode */
   }
 }
 function lsDel(k: string): void {
   try {
     localStorage.removeItem(k);
   } catch {
-    /* 同上 */
+    /* Same as above */
   }
 }
 
-/** 把一批改动并进 localStorage 里「没存上的改动」。 */
+/** Merge a batch of changes into the unsaved changes kept in localStorage. */
 function persistPending(p: Patch): void {
   if (patchEmpty(p)) return;
   lsSet(PENDING_KEY, JSON.stringify(mergePatch(parsePending(lsGet(PENDING_KEY)) ?? emptyPatch(), p)));
@@ -111,12 +121,13 @@ async function fetchDoc(): Promise<MarksDoc | null> {
   }
 }
 
-/** 发出去的请求体：tags 为 null 时不带这个键（它的意思是「标签表没改」）。 */
+/** The request body: when tags is null the key is omitted (meaning "tag table unchanged"). */
 function requestBody(p: Patch): components["schemas"]["GalleryMarksPatch"] {
   const body: Record<string, unknown> = { items: p.items, series: p.series, days: p.days };
   if (p.tags) body.tags = p.tags;
-  // 生成的 GalleryMark 把带默认值的字段标成必填；删除条目 {del, ts} 与只含部分键的标记
-  // 在线上都是合法的（服务端 exclude_unset）。见 lib/gallery/types.ts 顶部。
+  // The generated GalleryMark marks fields with defaults as required; delete entries {del, ts}
+  // and marks with only some keys are both valid on the wire (the server uses exclude_unset).
+  // See the top of lib/gallery/types.ts.
   return body as unknown as components["schemas"]["GalleryMarksPatch"];
 }
 
@@ -147,7 +158,7 @@ export const useMarksStore = create<MarksState>()((set, get) => {
         if (!fetched) {
           set({ loaded: true, online: false, saveState: "offline" });
           initPromise = null;
-          // 服务没起来：5 s 后再试。期间的改动照样进队列、写 localStorage。
+          // Service not up: retry in 5 s. Changes made meanwhile still enter the queue and localStorage.
           if (!retryTimer) {
             retryTimer = setTimeout(() => {
               retryTimer = null;
@@ -160,7 +171,7 @@ export const useMarksStore = create<MarksState>()((set, get) => {
         let pending = get().pending;
         const stored = parsePending(lsGet(PENDING_KEY));
         if (stored) {
-          // 上次没存上的改动：先应用到界面上，再并进队列补发。
+          // Changes that were not saved last time: apply to the UI first, then merge into the queue and resend.
           doc = applyPatchLocal(doc, stored);
           pending = mergePatch(stored, pending);
         }
@@ -263,7 +274,7 @@ export const useMarksStore = create<MarksState>()((set, get) => {
       if (!st.online || st.busy || !patchEmpty(st.pending)) return false;
       const d = await fetchDoc();
       if (!d || d.rev === get().doc.rev) return false;
-      if (!patchEmpty(get().pending) || get().busy) return false; // 取的路上又改了：别覆盖
+      if (!patchEmpty(get().pending) || get().busy) return false; // Edited while fetching: do not overwrite
       set((s) => ({ doc: d, savedAt: d.updated ?? s.savedAt, epoch: s.epoch + 1 }));
       return true;
     },
@@ -281,20 +292,20 @@ export const useMarksStore = create<MarksState>()((set, get) => {
   };
 });
 
-/** 顶栏的保存状态文字（原版 setSave）。 */
+/** Save-state text for the header. */
 export function saveText(state: SaveState, savedAt: string): string {
   switch (state) {
     case "ok":
-      return `已存盘 ${(savedAt || "").slice(11)} → marks.json`;
+      return tr(`已存盘 ${(savedAt || "").slice(11)} → marks.json`, `Saved ${(savedAt || "").slice(11)} → marks.json`);
     case "pending":
-      return "保存中…";
+      return tr("保存中…", "Saving…");
     case "bad":
-      return "⚠ 没存上，改动先记在浏览器，服务恢复后自动补存";
+      return tr("⚠ 没存上，改动先记在浏览器，服务恢复后自动补存", "⚠ Not saved; changes are kept in the browser and saved automatically once the service recovers");
     case "offline":
-      return "⚠ 标记服务不可用：改动先记在浏览器，连上后自动补存";
+      return tr("⚠ 标记服务不可用：改动先记在浏览器，连上后自动补存", "⚠ Marks service unavailable; changes are kept in the browser and saved automatically once connected");
     case "idle":
-      return "已连上存盘服务 → marks.json";
+      return tr("已连上存盘服务 → marks.json", "Connected to the save service → marks.json");
     default:
-      return "读取标记…";
+      return tr("读取标记…", "Reading marks…");
   }
 }

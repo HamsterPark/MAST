@@ -32,6 +32,7 @@ from :mod:`mast.core.instrument_profile` (per-rig, operator-set). CONFIRM-gated
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from mast.core import instrument_profile as ip
@@ -47,6 +48,9 @@ from mast.core.types import (
 from mast.skills.composite._base import CompositeSkillGraph
 from mast.skills.composite._z_settle import ZSettle, settle_and_read_z
 from mast.skills.composite.graph_executor import CompositeStep, GraphExecutor
+from mast.i18n import tr
+
+logger = logging.getLogger(__name__)
 
 # Synthetic phase identifiers — intercepted by _RetractPhaseCtx.
 _P_STOP = "_phase_stop_powered"
@@ -113,18 +117,27 @@ class RetractForSampleChange(CompositeSkillGraph):
             # the operator should knowingly trigger, hence CONFIRM not AUTO.
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "换样品/关机前的大退针：先收压电，再用粗动马达沿配置的退针方向"
+                tr("换样品/关机前的大退针：先收压电，再用粗动马达沿配置的退针方向"
                 "分级(1→10→100→剩余)后退约数千步；每级退完开反馈回读 Z 压电走向"
                 "自检(只有确认在远离才继续，检测到逼近立即停+撤针)。方向/步数/阈值"
-                "来自 instrument_profile。"
+                "来自 instrument_profile。",
+                   "Large retract before a sample change / shutdown: first retract the piezo, then "
+                   "back off about several thousand steps with the coarse motor along the configured "
+                   "retract direction, in stages (1 -> 10 -> 100 -> remainder). After each stage, "
+                   "turn feedback on and read back the Z piezo trend as a self-check (continue only "
+                   "if it is confirmed to be moving away; if approach is detected, stop at once and "
+                   "withdraw). Direction / steps / thresholds come from instrument_profile.")
             ),
             parameters=[
                 ParameterSpec(
                     name="total_steps",
                     type="int",
                     description=(
-                        "退针总步数(覆盖 instrument_profile 的默认)。分级 1→10→100→"
-                        "剩余(按单次上限分批)后退这么多步。"),
+                        tr("退针总步数(覆盖 instrument_profile 的默认)。分级 1→10→100→"
+                        "剩余(按单次上限分批)后退这么多步。",
+                           "Total retract steps (overrides the default of instrument_profile). Backs "
+                           "off this many steps in stages 1 -> 10 -> 100 -> remainder (batched by "
+                           "the per-move limit).")),
                     required=False,
                     default=None,
                     min_value=1,
@@ -252,11 +265,20 @@ class RetractForSampleChange(CompositeSkillGraph):
         if not settle.usable:
             return SkillResult(
                 skill_name=_P_BASELINE, success=False,
-                error=("退针方向自检无法建立基线 Z:" + settle.why() + "。"
+                error=(tr("退针方向自检无法建立基线 Z:", "Retract-direction self-check cannot establish a baseline Z: ") + settle.why() + tr("。"
                        "每一级退针都是拿「反馈稳定后的 Z」跟这个基线比,"
                        "基线读不到就没有方向自检 —— 不会盲退几千步。"
                        "若本机反馈确实比这个预算慢,到设置页把「退针 Z 稳定预算」"
-                       "(z_settle_timeout_s)调大。"),
+                       "(z_settle_timeout_s)调大。",
+                                                             ". Every retract stage compares the 'Z "
+                                                             "after feedback settles' with this "
+                                                             "baseline; without a baseline there is "
+                                                             "no direction self-check, so it will not "
+                                                             "blindly retract thousands of steps. If "
+                                                             "feedback on this machine really is "
+                                                             "slower than this budget, raise 'retract "
+                                                             "Z settle budget' (z_settle_timeout_s) "
+                                                             "on the settings page.")),
                 data={"baseline_settle": settle.as_dict()})
         return SkillResult(skill_name=_P_BASELINE, success=True,
                            data={"baseline_z_m": self._baseline_z,
@@ -295,9 +317,44 @@ class RetractForSampleChange(CompositeSkillGraph):
         approach / current spike."""
         dir_code = ip.get_retract_dir_code()
 
+        # 0. Which Nanonis motor group is the STM coarse drive (was a literal 0
+        #    in an earlier version; 0 is still the answer when nanonis_motor_groups.json
+        #    is absent), and is the drive known to be the STM one — see
+        #    optics_motor_groups.check_drive_latch. This ladder only ever steps
+        #    AWAY from the sample, so the latch does not stop it (contract §10.3:
+        #    the safe direction always passes) — it is logged and reported, and
+        #    the per-rung Z check below judges what each rung really did.
+        from mast.instruments.motor_groups import MotorGroupConfigError, stm_coarse_group
+        from mast.skills.builtins.optics_motor_groups import drive_latch_status
+
+        try:
+            group = stm_coarse_group()
+        except MotorGroupConfigError as exc:
+            return SkillResult(skill_name=_P_RETRACT, success=False, error=str(exc))
+        latch_why, latch_info = drive_latch_status(real_ctx, self._call_log)
+        if latch_why and ip.retract_dir_code_or_none() is None:
+            # "Away" under the latch is the DECLARED retract direction only: the
+            # factory z+ this ladder would step on an undeclared rig is
+            # the approach on a rig whose retract is Z−. Refuse before any step.
+            from mast.skills.builtins.motor import RETRACT_DIR_UNDECLARED
+
+            self._drive_latch = {**(latch_info or {}), "message": latch_why,
+                                 "retract_exemption": RETRACT_DIR_UNDECLARED}
+            return SkillResult(
+                skill_name=_P_RETRACT, success=False,
+                error=tr(f"{latch_why}（这一步也不按退针放行：{RETRACT_DIR_UNDECLARED}）",
+                         f"{latch_why} (this step is not released as a retract either: "
+                         f"{RETRACT_DIR_UNDECLARED})"),
+                data={"drive_latch": self._drive_latch})
+        if latch_why:
+            logger.warning("RetractForSampleChange: coarse drive latched — retracting anyway "
+                           "(away from the sample); drive now %s: %s",
+                           (latch_info or {}).get("drive_now"), latch_why)
+            self._drive_latch = {**(latch_info or {}), "message": latch_why}
+
         # 1. Coarse retract (direction from config; away-only). Motor_StartMove(
         #    direction, steps, group, wait) — same shape as MotorMove uses.
-        rec_move = real_ctx.safe_call("Motor_StartMove", dir_code, steps, 0, 1)
+        rec_move = real_ctx.safe_call("Motor_StartMove", dir_code, steps, group, 1)
         self._call_log.append(rec_move)
         if rec_move.error:
             return SkillResult(skill_name=_P_RETRACT, success=False,
@@ -336,11 +393,18 @@ class RetractForSampleChange(CompositeSkillGraph):
             self._safe_stop_and_withdraw(real_ctx)
             return SkillResult(
                 skill_name=_P_RETRACT, success=False,
-                error=("退针方向自检**没有得出结论**(不是判定为逼近):" + reason
-                       + "。已停止粗动并撤针。读不到稳定的 Z 就无法判断针尖是远离"
+                error=(tr("退针方向自检**没有得出结论**(不是判定为逼近):",
+                          "Retract-direction self-check **reached no conclusion** (not judged as "
+                          "approaching): ") + reason
+                       + tr("。已停止粗动并撤针。读不到稳定的 Z 就无法判断针尖是远离"
                          "还是靠近,而下一级步数是这一级的 10 倍。"
                          "若本机反馈确实较慢,到设置页把「退针 Z 稳定预算」"
-                         "(z_settle_timeout_s)调大。"),
+                         "(z_settle_timeout_s)调大。",
+                            ". Coarse motion stopped and tip withdrawn. Without a stable Z it is "
+                            "impossible to tell whether the tip is moving away or closing in, and "
+                            "the next stage is 10 times the steps of this one. If feedback on this "
+                            "machine really is slow, raise 'retract Z settle budget' "
+                            "(z_settle_timeout_s) on the settings page.")),
                 data={"rung": rung, "rungs": list(self._rungs)})
 
         if verdict == "no_sign":
@@ -351,10 +415,25 @@ class RetractForSampleChange(CompositeSkillGraph):
             self._safe_stop_and_withdraw(real_ctx)
             return SkillResult(
                 skill_name=_P_RETRACT, success=False,
-                error=("退针方向自检无法进行:" + reason + "。已停止粗动并撤针。"
-                       "z_extend_sign 必须经目标仪器的方向检查明确配置，不能猜测。"
-                       "请依据退针与反馈寻面时的原始 Z 读数确认伸长方向，"
-                       "再在设置页的退针配置中填写 z_extend_sign。"),
+                error=(tr("退针方向自检**无法进行**:", "Retract-direction self-check **cannot be performed**: ") + reason + tr("。已停止粗动并撤针,"
+                       "只赔了这一级的步数。这一项没有可用的默认值,且因机型而异 —— "
+                       "「猜一个」和「猜对了」长得一模一样。"
+                       ""
+                       "判法:开反馈让压电去找表面,看 Z 读数往哪边走 —— 那一边就是"
+                       "**伸长**;再到设置页 → 退针 → `z_extend_sign` 如实填。",
+                                                       ". Coarse motion stopped and tip withdrawn, "
+                                                       "costing only the steps of this stage. This "
+                                                       "item has no usable default: the sign depends "
+                                                       "on the instrument model and differs between "
+                                                       "setups, "
+                                                       "so "
+                                                       "'guessing one' and 'guessing right' look "
+                                                       "exactly the same. How to determine it: turn "
+                                                       "feedback on so the piezo looks for the "
+                                                       "surface and see which way the Z reading "
+                                                       "goes: that direction is **extend**; then "
+                                                       "fill in `z_extend_sign` honestly under "
+                                                       "Settings -> Retract.")),
                 data={"rung": rung, "rungs": list(self._rungs)})
 
         if verdict == "approaching":
@@ -363,10 +442,17 @@ class RetractForSampleChange(CompositeSkillGraph):
             self._safe_stop_and_withdraw(real_ctx)
             return SkillResult(
                 skill_name=_P_RETRACT, success=False,
-                error=("退针方向自检失败：粗动 " + str(steps) + " 步后开反馈检测到针尖在"
-                       "**逼近**样品（" + reason + "）——退针方向很可能配置反了。已停止粗动"
+                error=(tr("退针方向自检失败：粗动 ", "Retract-direction self-check failed: after coarse motion of ") + str(steps) + tr(" 步后开反馈检测到针尖在"
+                       "**逼近**样品（",
+                                                        " steps, feedback detected the tip "
+                                                        "**approaching** the sample (") + reason + tr("）——退针方向很可能配置反了。已停止粗动"
                        "并撤针，只赔了这一级的步数。请核对 instrument_profile 的退针方向/"
-                       "z_extend_sign 后再试。"),
+                       "z_extend_sign 后再试。",
+                                                 "): the retract direction is probably configured "
+                                                 "backwards. Coarse motion stopped and tip "
+                                                 "withdrawn, costing only the steps of this stage. "
+                                                 "Check the retract direction / z_extend_sign in "
+                                                 "instrument_profile and try again.")),
                 data={"rung": rung, "rungs": list(self._rungs)})
 
         # 4. Receding (or ambiguous-but-safe on a tiny early rung): withdraw the
@@ -399,14 +485,15 @@ class RetractForSampleChange(CompositeSkillGraph):
                             and abs(current) > _DANGER_CURRENT_MULT * abs(sp))
             if danger_by_sp or abs(current) > _DANGER_CURRENT_ABS_A:
                 return ("approaching",
-                        f"|I|={abs(current):.2e} A 远高于退针时应有的~0")
+                        tr(f"|I|={abs(current):.2e} A 远高于退针时应有的~0",
+                           f"|I|={abs(current):.2e} A, far above the ~0 expected during a retract"))
 
         base = self._baseline
         if not after.usable:
             return ("unsettled", after.why())
         if base is None or not base.usable:
-            return ("unsettled", "基线 Z 不可用:"
-                    + (base.why() if base is not None else "没有基线读数"))
+            return ("unsettled", tr("基线 Z 不可用:", "Baseline Z unavailable: ")
+                    + (base.why() if base is not None else tr("没有基线读数", "no baseline reading")))
 
         z_min_m = float(ip.get_config("z_recede_min_nm", 1.0)) * 1e-9
         # **没声明就不判**(2026-08-11):出厂 ``+1`` 不是保守值,是两个互斥答案里的
@@ -414,9 +501,12 @@ class RetractForSampleChange(CompositeSkillGraph):
         sign = ip.z_extend_sign_or_none()
         if sign is None:
             return ("no_sign",
-                    "本机没有声明「压电伸长(趋向样品)对应 Z 读数符号」"
+                    tr("本机没有声明「压电伸长(趋向样品)对应 Z 读数符号」"
                     "(设置 → 退针 → `z_extend_sign`),"
-                    "Z 读数变化无法翻译成「在远离还是在靠近」")
+                    "Z 读数变化无法翻译成「在远离还是在靠近」",
+                       "This machine has not declared 'the Z reading sign for piezo extension "
+                       "(toward the sample)' (Settings -> Retract -> `z_extend_sign`), so a change "
+                       "in the Z reading cannot be translated into 'moving away or closing in'"))
         dz_extend = (after.z_m - base.z_m) * sign
 
         if after.at_rail and base.at_rail:
@@ -425,24 +515,38 @@ class RetractForSampleChange(CompositeSkillGraph):
             # proves nothing. The approaching half of the check stays live —
             # a tip that closed in would pull the piezo off the rail.
             return ("ambiguous",
-                    "退针前后压电都到极限、量程内都没有表面 —— "
-                    "与远离一致,但证明不了距离(也无逼近迹象)")
+                    tr("退针前后压电都到极限、量程内都没有表面 —— "
+                    "与远离一致,但证明不了距离(也无逼近迹象)",
+                       "The piezo was at its limit both before and after the retract, with no "
+                       "surface within range: consistent with moving away, but it cannot prove the "
+                       "distance (and there is no sign of approach)"))
         if dz_extend > z_min_m:
             if after.at_rail:
                 return ("receding",
-                        f"压电走到极限仍未找到表面,较基线至少远离 "
-                        f"{dz_extend * 1e9:.2f} nm(极限值,实际更远)")
+                        tr(f"压电走到极限仍未找到表面,较基线至少远离 "
+                        f"{dz_extend * 1e9:.2f} nm(极限值,实际更远)",
+                           "The piezo reached its limit without finding the surface, so the tip is "
+                           f"at least {dz_extend * 1e9:.2f} nm farther than at baseline (a limit "
+                           "value, the real distance is larger)"))
             return ("receding",
-                    f"开反馈后 Z 朝伸长方向移动 {dz_extend * 1e9:.2f} nm（在追更远的样品）")
+                    tr(f"开反馈后 Z 朝伸长方向移动 {dz_extend * 1e9:.2f} nm（在追更远的样品）",
+                       f"After feedback on, Z moved {dz_extend * 1e9:.2f} nm in the extend direction "
+                       "(chasing a more distant sample)"))
         if dz_extend < -z_min_m:
             if base.at_rail:
                 return ("approaching",
-                        f"基线时量程内还没有表面,退针后反而找到了"
-                        f"(Z 缩回 {abs(dz_extend) * 1e9:.2f} nm)—— 针尖是靠近了")
+                        tr(f"基线时量程内还没有表面,退针后反而找到了"
+                        f"(Z 缩回 {abs(dz_extend) * 1e9:.2f} nm)—— 针尖是靠近了",
+                           "No surface was within range at baseline, but one was found after the "
+                           f"retract (Z retracted {abs(dz_extend) * 1e9:.2f} nm): the tip moved closer"))
             return ("approaching",
-                    f"开反馈后 Z 朝缩回方向移动 {abs(dz_extend) * 1e9:.2f} nm（样品变近了）")
+                    tr(f"开反馈后 Z 朝缩回方向移动 {abs(dz_extend) * 1e9:.2f} nm（样品变近了）",
+                       f"After feedback on, Z moved {abs(dz_extend) * 1e9:.2f} nm in the retract "
+                       "direction (the sample came closer)"))
         # Within the noise band → not conclusive.
-        return ("ambiguous", "Z 走向不明显，未确认但也无逼近迹象")
+        return ("ambiguous", tr("Z 走向不明显，未确认但也无逼近迹象",
+                                "Z trend is not distinct: not confirmed, but no sign of approach "
+                                "either"))
 
     def _safe_stop_and_withdraw(self, real_ctx) -> None:
         """Best-effort emergency cleanup: stop the motor + withdraw. Never raises."""
@@ -466,6 +570,7 @@ class RetractForSampleChange(CompositeSkillGraph):
         self._baseline_z: "float | None" = None
         self._baseline: "ZSettle | None" = None
         self._setpoint_a: "float | None" = None
+        self._drive_latch: "dict | None" = None
 
         wrapped = _RetractPhaseCtx(context, self)
         executor = GraphExecutor(
@@ -490,6 +595,8 @@ class RetractForSampleChange(CompositeSkillGraph):
             "recede_confirmed_rungs": len(confirmed),
             "_progress": executor.progress.to_dict(),
         }
+        if self._drive_latch:
+            data["drive_latch"] = self._drive_latch     # reason, expected and current drive
 
         if not executor.progress.aborted:
             executor.clear_sidecar()
@@ -511,7 +618,9 @@ class RetractForSampleChange(CompositeSkillGraph):
             from mast.skills.builtins._tip_evidence import capture_qplus_baseline
 
             data.update(capture_qplus_baseline(
-                context, note="退针自检全部通过后记录的自由振荡基线"))
+                context, note=tr("退针自检全部通过后记录的自由振荡基线",
+                                 "Free-oscillation baseline recorded after all retract self-checks "
+                                 "passed")))
         except Exception:  # noqa: BLE001 — a bonus must not fail a good retract
             pass
 

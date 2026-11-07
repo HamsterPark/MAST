@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Iterator
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -54,45 +55,64 @@ class AcquireAngleSeriesForCalibration(CompositeSkillGraph):
             version="1.0.0",
             category=SkillCategory.COMPOSITE,
             safety_level=SafetyLevel.CONFIRM,
-            description=(
+            description=tr(
                 "多扫描角采原子分辨图并解出压电 x/y 尺度、非正交与热漂移。"
-                "换角度是把压电与漂移分开的唯一手段 —— 单帧原理上做不到。"
+                "换角度是把压电与漂移分开的唯一手段 —— 单帧原理上做不到。",
+                "Acquire atomically resolved images at several scan angles and solve "
+                "for the piezo x/y scales, non-orthogonality and thermal drift. "
+                "Changing the angle is the only way to separate piezo from drift - a "
+                "single frame cannot do it in principle."
             ),
             parameters=[
                 ParameterSpec(
                     name="angles_deg", type="str", required=False,
                     default="0,45,90",
-                    description=("扫描角列表，逗号分隔。至少两个、张开 ≥15°；"
-                                 "0/45/90 已经够用（cond≈3），六个角度只是更稳"),
+                    description=tr("扫描角列表，逗号分隔。至少两个、张开 ≥15°；"
+                                   "0/45/90 已经够用（cond≈3），六个角度只是更稳",
+                                   "Scan angle list, comma-separated. At least two, "
+                                   "spread by >=15 deg; 0/45/90 is enough (cond~3), "
+                                   "six angles are just more robust"),
                 ),
                 ParameterSpec(
                     name="center_x_m", type="float", unit="m", required=False,
-                    default=None, description="扫描中心 X；不填用当前扫描框",
+                    default=None,
+                    description=tr("扫描中心 X；不填用当前扫描框",
+                                   "Scan centre X; if empty, the current scan frame is used"),
                 ),
                 ParameterSpec(
                     name="center_y_m", type="float", unit="m", required=False,
-                    default=None, description="扫描中心 Y；不填用当前扫描框",
+                    default=None,
+                    description=tr("扫描中心 Y；不填用当前扫描框",
+                                   "Scan centre Y; if empty, the current scan frame is used"),
                 ),
                 ParameterSpec(
                     name="scan_size_m", type="float", unit="m", required=False,
                     default=None, min_value=1e-10, max_value=1e-7,
-                    description="视场边长；不填用当前扫描框",
+                    description=tr("视场边长；不填用当前扫描框",
+                                   "Field-of-view side length; if empty, the current scan frame is used"),
                 ),
                 ParameterSpec(
                     name="line_time_s", type="float", unit="s", required=False,
                     default=None, min_value=1e-3, max_value=60.0,
-                    description=("每线时间；不填走出厂档位表（8 nm → atomic 档 "
-                                 "1.2 s/线 ≈ 6.7 nm/s）。原子分辨要慢扫"),
+                    description=tr("每线时间；不填走出厂档位表（8 nm → atomic 档 "
+                                   "1.2 s/线 ≈ 6.7 nm/s）。原子分辨要慢扫",
+                                   "Time per line; if empty, the factory tier table is "
+                                   "used (8 nm -> atomic tier, 1.2 s/line ~ 6.7 nm/s). "
+                                   "Atomic resolution needs slow scanning"),
                 ),
                 ParameterSpec(
                     name="surface", type="str", required=False, default="Au(111)",
-                    description="表面（决定理论晶格常数）",
+                    description=tr("表面（决定理论晶格常数）",
+                                   "Surface (determines the theoretical lattice constant)"),
                 ),
                 ParameterSpec(
                     name="retries_per_angle", type="int", required=False,
                     default=1, min_value=1, max_value=5,
-                    description=("每个角度最多扫几帧。原子分辨有随机性 ——"
-                                 "「多扫一会儿有时候就出来了」"),
+                    description=tr("每个角度最多扫几帧。原子分辨有随机性 ——"
+                                   "「多扫一会儿有时候就出来了」",
+                                   "Maximum frames per angle. Atomic resolution is "
+                                   "random - 'scan a bit longer and it sometimes "
+                                   "appears'"),
                 ),
             ],
             preconditions=["z_controller_on"],
@@ -205,13 +225,16 @@ class AcquireAngleSeriesForCalibration(CompositeSkillGraph):
                         fr = getattr(ctx.run("GetScanFrame", {}), "data", None) or {}
                         sp = getattr(ctx.run("GetScanSpeed", {}), "data", None) or {}
                         if abs(float(fr.get("angle_deg", -999)) - a) > 0.5:
-                            bad = "角度没跟上：要 %.1f，读回 %s" % (a, fr.get("angle_deg"))
+                            bad = tr("角度没跟上：要 %.1f，读回 %s",
+                                     "Angle did not follow: wanted %.1f, read back %s"
+                                     ) % (a, fr.get("angle_deg"))
                         elif abs(float(sp.get("fwd_time_s", 0)) - line_time) \
                                 > 0.05 * line_time:
-                            bad = ("线时间没跟上：要 %.4f s，读回 %s"
+                            bad = (tr("线时间没跟上：要 %.4f s，读回 %s",
+                                      "Line time did not follow: wanted %.4f s, read back %s")
                                    % (line_time, sp.get("fwd_time_s")))
                 except Exception as exc:  # noqa: BLE001
-                    bad = "读回失败: %s" % exc
+                    bad = tr("读回失败: %s", "Read-back failed: %s") % exc
                 if bad:
                     logger.error("AcquireAngleSeriesForCalibration %s: %s", tag, bad)
                     frames.append({"angle_deg": a, "attempt": k + 1,
@@ -250,7 +273,8 @@ class AcquireAngleSeriesForCalibration(CompositeSkillGraph):
                     path = (getattr(lr, "data", None) or {}).get("path")
                 if not path:
                     frames.append({"angle_deg": a, "attempt": k + 1,
-                                   "ok": False, "error": "没拿到文件路径"})
+                                   "ok": False,
+                                   "error": tr("没拿到文件路径", "No file path obtained")})
                     executor.set_partial("frames", list(frames))
                     continue
 
@@ -289,17 +313,28 @@ class AcquireAngleSeriesForCalibration(CompositeSkillGraph):
         }
         if pd.get("refused") == "angles_too_close":
             out["advice"] = (
-                "扫描角只张开 %.1f°，压电与漂移分不开 —— 一帧都没扫。"
-                "把角度拉开到 ≥15°（0/45/90 就很好）。"
+                tr("扫描角只张开 %.1f°，压电与漂移分不开 —— 一帧都没扫。"
+                   "把角度拉开到 ≥15°（0/45/90 就很好）。",
+                   "The scan angles are spread by only %.1f deg, so piezo and drift "
+                   "cannot be separated - no frame was scanned. Widen the angles to "
+                   ">=15 deg (0/45/90 is fine).")
                 % (pd.get("angle_spread_deg") or 0.0))
         elif out["n_frames_ok"] < 2:
             out["advice"] = (
-                "只成功了 %d 帧，解不了。先用 ScanUntilAtomicResolution 确认"
-                "这个位置能出原子分辨，再回来做定标。" % out["n_frames_ok"])
+                tr("只成功了 %d 帧，解不了。先用 ScanUntilAtomicResolution 确认"
+                   "这个位置能出原子分辨，再回来做定标。",
+                   "Only %d frame(s) succeeded, cannot solve. First use "
+                   "ScanUntilAtomicResolution to confirm atomic resolution can be "
+                   "obtained at this location, then come back to calibrate.")
+                % out["n_frames_ok"])
         elif cd.get("ok"):
             out["advice"] = (
-                "把 X / Y 压电灵敏度分别乘以 %.4f / %.4f。**本技能不写仪器** —— "
-                "改灵敏度要人来决定。剪切 %+.2f° 已与热漂移分离（漂移另报）。"
+                tr("把 X / Y 压电灵敏度分别乘以 %.4f / %.4f。**本技能不写仪器** —— "
+                   "改灵敏度要人来决定。剪切 %+.2f° 已与热漂移分离（漂移另报）。",
+                   "Multiply the X / Y piezo sensitivities by %.4f / %.4f. **This "
+                   "skill does not write to the instrument** - changing the "
+                   "sensitivity is a human decision. Shear %+.2f deg has been "
+                   "separated from thermal drift (drift is reported separately).")
                 % (cd.get("x_scale") or 1.0, cd.get("y_scale") or 1.0,
                    cd.get("piezo_shear_deg") or 0.0))
         return out

@@ -38,6 +38,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.io.nanonis_files import decode_reply
+from mast.i18n import tr
 from mast.skills.base import BaseSkill
 from mast.skills.verify import values_match
 
@@ -89,14 +90,22 @@ class SetZCtrlGain(BaseSkill):
             version="1.1.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description=(
+            description=tr(
                 "设置 Z 控制器的 P/I 增益与时间常数。\n\n"
                 "**优先使用 ApplyZCtrlPreset**(按参数组名应用,数值由代码从用户"
-                "维护的存储里取)。只有当用户在本次对话里逐字念出了具体数值时,"
+                "维护的存储里取)。只有当用户在本次对话里明确给出了具体数值时,"
                 "才直接调用本技能传裸数值。\n\n"
                 "三个参数都是有量纲的物理量,且都是极小的数 —— **写成带 SI 前缀的"
                 "字符串**(如 '3p'、'16.667u'、'180n')。⚠️ 前缀不可省略:"
-                "**指数写法与裸数字都会被拒绝**。I = P / T。"
+                "**指数写法与裸数字都会被拒绝**。I = P / T。",
+                "Set the Z controller P/I gains and time constant.\n\n"
+                "**Prefer ApplyZCtrlPreset** (apply by preset name; the values are taken by code "
+                "from the user-maintained store). Call this skill with bare values only when the "
+                "user has explicitly given concrete numbers in this conversation.\n\n"
+                "All three parameters are dimensional physical quantities and very small numbers -- "
+                "**write them as strings with an SI prefix** (e.g. '3p', '16.667u', '180n'). "
+                "WARNING: the prefix must not be omitted: **exponent notation and bare numbers are "
+                "both rejected**. I = P / T.",
             ),
             parameters=[
                 # Gains MUST be non-negative: a negative Z-controller gain inverts
@@ -120,10 +129,13 @@ class SetZCtrlGain(BaseSkill):
                 ParameterSpec(
                     name="p_gain",
                     type="float",
-                    description=(
+                    description=tr(
                         "比例增益 —— 它是一个**长度**，单位米 "
                         "(Nanonis 面板上的 'Proportional (m)')。"
-                        "典型值 1p ~ 10p m(即 1–10 pm)。必须 >= 0。"
+                        "典型值 1p ~ 10p m(即 1–10 pm)。必须 >= 0。",
+                        "Proportional gain -- a **length**, in metres "
+                        "(the 'Proportional (m)' on the Nanonis panel). "
+                        "Typical 1p ~ 10p m (i.e. 1-10 pm). Must be >= 0.",
                     ),
                     unit="m",
                     required=True,
@@ -133,9 +145,11 @@ class SetZCtrlGain(BaseSkill):
                 ParameterSpec(
                     name="time_constant_s",
                     type="float",
-                    description=(
+                    description=tr(
                         "时间常数，单位秒。典型值 10u ~ 100u s "
-                        "(即 10–100 µs)。T = P / I。"
+                        "(即 10–100 µs)。T = P / I。",
+                        "Time constant, in seconds. Typical 10u ~ 100u s "
+                        "(i.e. 10-100 µs). T = P / I.",
                     ),
                     unit="s",
                     required=True,
@@ -145,11 +159,15 @@ class SetZCtrlGain(BaseSkill):
                 ParameterSpec(
                     name="i_gain",
                     type="float",
-                    description=(
+                    description=tr(
                         "积分增益 —— 它是一个**速度**，单位米每秒 "
                         "(Nanonis 面板上的 'Integral (m/s)')。"
                         "典型值 10n ~ 1u m/s(即 10 nm/s – 1 µm/s)。"
-                        "I = P / T,必须 >= 0。"
+                        "I = P / T,必须 >= 0。",
+                        "Integral gain -- a **speed**, in metres per second "
+                        "(the 'Integral (m/s)' on the Nanonis panel). "
+                        "Typical 10n ~ 1u m/s (i.e. 10 nm/s - 1 µm/s). "
+                        "I = P / T, must be >= 0.",
                     ),
                     unit="m/s",
                     required=True,
@@ -173,8 +191,7 @@ class SetZCtrlGain(BaseSkill):
         # （进针前置、扫描前置、粗动闸门）都会拿到一个误导性的「是」，然后放行。
         # 带着死环进针的意思是：针在下降，而没有任何东西会在建立隧道时停住它。
         #
-        # 三个参数的 min_value 都是 0.0，所以 0/0/0 一路合法通过到硬件（用户
-        # 2026-08-04 拍板堵掉）。**下限不改**：把 min_value 抬成某个非零数是在
+        # 三个参数的 min_value 都是 0.0，所以 0/0/0 一路合法通过到硬件（2026-08-04 起拒绝该输入）。**下限不改**：把 min_value 抬成某个非零数是在
         # 编造一个物理上并不存在的界，而且会让 schema 拒绝的理由变得无法解释。
         #
         # 只禁「两个都零」这一种。单独 p_gain=0 不禁 —— 纯积分控制是真实存在的
@@ -204,7 +221,7 @@ class SetZCtrlGain(BaseSkill):
             return SkillResult(
                 skill_name="SetZCtrlGain",
                 success=False,
-                error=(
+                error=tr(
                     "拒绝：比例增益与积分增益同时为零。"
                     "这样写出去，控制器不产生任何输出——反馈环实际上是死的，"
                     "但 Z 控制器状态**仍然报 On**，所有「控制器开着吗」的前置检查"
@@ -212,9 +229,20 @@ class SetZCtrlGain(BaseSkill):
                     "如果你要关掉反馈，用 `ZControllerOnOff(on=false)` —— "
                     "那条路会把状态如实报成 Off，下游判据才拿得到真相。\n\n"
                     "如果你是想设一组很小的增益，请检查是不是量级写丢了："
-                    "本机典型值 p_gain='3p'、time_constant_s='16.667u'、"
+                    "示例值 p_gain='3p'、time_constant_s='16.667u'、"
                     "i_gain='180n'。这三个参数必须写成**带 SI 前缀的字符串**，"
-                    "'3e-12' 与裸数字都会被拒。"
+                    "'3e-12' 与裸数字都会被拒。",
+                    "Refused: proportional and integral gain are both zero. "
+                    "Written like this, the controller produces no output -- the feedback loop is "
+                    "effectively dead, yet the Z controller status **still reports On**, and every "
+                    "\"is the controller on?\" precondition check would be let through by that false "
+                    "\"yes\".\n\n"
+                    "If you want to turn the feedback off, use `ZControllerOnOff(on=false)` -- "
+                    "that route reports the state truthfully as Off, so downstream criteria get the truth.\n\n"
+                    "If you meant to set a very small gain, check whether the magnitude got lost: "
+                    "example values are p_gain='3p', time_constant_s='16.667u', "
+                    "i_gain='180n'. These three parameters must be written as **strings with an SI "
+                    "prefix**; '3e-12' and bare numbers are both rejected.",
                 ),
                 data={"p_gain": p, "time_constant_s": tc, "i_gain": i,
                       "rejected_by": "zero_pi_guard"},
@@ -256,9 +284,12 @@ class SetZCtrlGain(BaseSkill):
                     **requested,
                     "readback_ok": None,
                     "readback_unavailable": True,
-                    "note": (
+                    "note": tr(
                         "增益已写入,但回读失败,无法确认硬件真的接受了这组值。"
-                        "进针或扫图前请在 Nanonis 面板上人工核对 Z-Controller 增益。"
+                        "进针或扫图前请在 Nanonis 面板上人工核对 Z-Controller 增益。",
+                        "The gains were written, but the readback failed, so it cannot be confirmed "
+                        "that the hardware really accepted these values. Before approaching or "
+                        "scanning, verify the Z-Controller gains manually on the Nanonis panel.",
                     ),
                 },
                 nanonis_calls=calls,
@@ -287,23 +318,30 @@ class SetZCtrlGain(BaseSkill):
                 restored = not r.error
                 restore_error = r.error
             tail = (
-                "已还原为写入前的值。"
+                tr("已还原为写入前的值。", "Restored to the pre-write values.")
                 if restored
                 else (
-                    "无法还原(写入前的值也读不到)。"
+                    tr("无法还原(写入前的值也读不到)。",
+                       "Cannot restore (the pre-write values could not be read either).")
                     if prior is None
-                    else f"还原也失败了({restore_error})。"
+                    else tr(f"还原也失败了({restore_error})。",
+                            f"The restore also failed ({restore_error}).")
                 )
             )
             return SkillResult(
                 skill_name="SetZCtrlGain",
                 success=False,
                 error=(
-                    "写后回读不一致 —— 硬件里的增益不是刚才请求的值: "
+                    tr("写后回读不一致 —— 硬件里的增益不是刚才请求的值: ",
+                       "Readback after write does not match -- the gains in the hardware are not the "
+                       "values just requested: ")
                     + "; ".join(mismatches)
-                    + f"。{tail}"
-                    "**不要进针、不要扫图**,先在 Nanonis 面板上人工核对 "
-                    "Z-Controller → Controller Adjustment。"
+                    + tr(f"。{tail}"
+                         "**不要进针、不要扫图**,先在 Nanonis 面板上人工核对 "
+                         "Z-Controller → Controller Adjustment。",
+                         f". {tail} "
+                         "**Do not approach or scan**; first verify manually on the Nanonis panel: "
+                         "Z-Controller -> Controller Adjustment.")
                 ),
                 data={
                     "requested": requested,
@@ -339,9 +377,11 @@ class GetZCtrlGain(BaseSkill):
             version="1.1.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description=(
+            description=tr(
                 "读回 Z 控制器当前的 P/I 增益与时间常数。"
-                "P 的单位是米(m),I 的单位是米每秒(m/s),T 是秒。"
+                "P 的单位是米(m),I 的单位是米每秒(m/s),T 是秒。",
+                "Read back the current Z controller P/I gains and time constant. "
+                "P is in metres (m), I in metres per second (m/s), T in seconds.",
             ),
             estimated_duration_s=0.5,
             composition_level=0,

@@ -1,11 +1,9 @@
-// 图表尺寸 — how wide and how tall a plot should be drawn, given the space it
+// Chart sizing: how wide and how tall a plot should be drawn, given the space it
 // actually got.
 //
-// Every chart and canvas in this app used to be a hardcoded pixel pair (860×300,
-// 620×460, …) with no caller ever overriding it, so a 2560-wide monitor showed
-// the same postage stamp as a laptop and the rest of the row was dead space
-// (「扫描地图这个占网页的面积太小」, 「图的大小没有充分利用屏幕空间，
-// 考虑到是浏览器，应该增加根据比例的自适应」).
+// Charts and canvases used to be fixed pixel pairs (860×300, 620×460, …) that no
+// caller overrode, so a 2560-wide monitor showed the same small plot as a laptop
+// and the rest of the row was unused. Sizes now follow the container width.
 //
 // The measuring itself is a DOM concern and lives in hooks/useElementWidth.ts.
 // What is here is only the arithmetic — which is the part that can be wrong in a

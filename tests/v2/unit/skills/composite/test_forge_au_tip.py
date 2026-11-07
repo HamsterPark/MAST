@@ -703,8 +703,14 @@ def test_the_selfcheck_never_creates_the_monitoring_db(monkeypatch):
 # stopped_early —— 用户按了停止是事实,不是判断
 # ══════════════════════════════════════════════════════════════════════
 
-def test_the_stop_marker_matches_what_the_scan_composites_actually_write():
-    """跨模块的停止标记应完整传递。"""
+@pytest.mark.parametrize("lang", ["zh", "en"])
+def test_the_stop_marker_matches_what_the_scan_composites_actually_write(lang):
+    """跨模块的钉子:直接**调产出方**生成真句子,不抄它的字面量。
+
+    ForgeAuTip 判「是不是被停下的」用的是对 ScanAt / PreScanCheck 所写句子的子串
+    匹配。上游改措辞会在这里炸,而不是在真机上悄悄退化成一句泛泛的失败。
+    The sentence is written in the active language (mast/i18n.py), so both must match."""
+    from mast.i18n import use_lang
     from mast.skills.composite.graph_executor import CompositeProgress
     from mast.skills.composite.scan_at import ScanAt
 
@@ -712,7 +718,8 @@ def test_the_stop_marker_matches_what_the_scan_composites_actually_write():
     progress.partial_data["wait_stopped_early"] = True
     progress.partial_data["scan_lines_done"] = 9
     progress.partial_data["scan_lines_total"] = 256
-    ok, reason = ScanAt()._decide_outcome(True, progress, {})
+    with use_lang(lang):
+        ok, reason = ScanAt()._decide_outcome(True, progress, {})
     assert ok is False
     assert _looks_like_operator_stop(reason), (
         f"ScanAt 的中途停止文案已经变了,ForgeAuTip 认不出来了:{reason!r}")
@@ -720,6 +727,7 @@ def test_the_stop_marker_matches_what_the_scan_composites_actually_write():
 
 def test_an_ordinary_failure_is_not_called_an_operator_stop():
     assert not _looks_like_operator_stop("扫描在超时时间内没有完成")
+    assert not _looks_like_operator_stop("The scan did not finish within the timeout")
     assert not _looks_like_operator_stop("")
 
 

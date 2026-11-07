@@ -48,15 +48,31 @@ from mast.skills.composite.verify_atomic_resolution import VerifyAtomicResolutio
 # 技能就是这么消失的。
 from mast.skills.composite.cross_point_tip_check import CrossPointTipCheck
 from mast.skills.composite.spectroscopy_at_positions import SpectroscopyAtPositions
+# 位点标注 D：在标注页位点上逐点测谱（冻结包只认这里 import 过的模块）。
+from mast.skills.composite.measure_spectra_at_sites import MeasureSpectraAtSites
 from mast.skills.composite.line_sts_across_wall import LineSTSAcrossWall
 from mast.skills.composite.search_domain_boundary import SearchDomainBoundary
 from mast.skills.composite.atomic_bias_series import AtomicBiasSeries
 from mast.skills.composite.sts_condition_series import STSConditionSeries
 # 论文复现:横向操纵 (2026-09)
 from mast.skills.composite.move_atom_to import MoveAtomTo
+# TERS 光学–STM 联动模式 (2026-10-20, 规格 docs/v2/design/ters_modes_spec.md;
+# 契约 docs/v2/design/ters_satellite_integration.md §8.3)。冻结包只认这里 import 过的模块。
+from mast.skills.composite.ters_point import TERSPointSpectrum
+from mast.skills.composite.ters_nearfar import TERSNearFarPair
+from mast.skills.composite.ters_pump_probe import PumpProbeSpectral
+from mast.skills.composite.ters_map import TERSGridMap, TERSLineProfile, TERSTriggeredMap
+from mast.skills.composite.ters_series import (
+    TERSBiasSeries,
+    TERSPolarizationSeries,
+    TERSSetpointSeries,
+    TERSTimeSeries,
+)
+from mast.skills.composite.ters_align import LaserFocusMap
 
 __all__ = [
     "AchieveAtomicResolution",
+    "MeasureSpectraAtSites",
     "MoveAtomTo",
     "AcquireBiasImagingSeries",
     "AcquireAngleSeriesForCalibration",
@@ -103,4 +119,16 @@ __all__ = [
     "TiltCalibrate",
     "BiasSettleChange",
     "ExecuteScanPlan",
+    # TERS 联动模式
+    "TERSPointSpectrum",
+    "TERSNearFarPair",
+    "PumpProbeSpectral",
+    "TERSLineProfile",
+    "TERSGridMap",
+    "TERSTriggeredMap",
+    "TERSTimeSeries",
+    "TERSPolarizationSeries",
+    "TERSBiasSeries",
+    "TERSSetpointSeries",
+    "LaserFocusMap",
 ]

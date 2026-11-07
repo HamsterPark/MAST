@@ -105,7 +105,7 @@ def build(
         # 上游产物：文献报告 / 既往方案 / 分析结果 / 它自己上一轮的纲领。
         # 没有这一层，交接过来的只有一句自由文本。
         UpstreamArtifactMiddleware("research_director"),
-        # 同一个工具、同一个错误反复重试时收尾（）。任何 agent 都会
+        # 同一个工具、同一个错误反复重试时收尾。任何 agent 都会
         # 打转，不只是仪器那一个。
         StallGuardMiddleware(agent_name="research_director"),
         *make_call_limit_middleware(
@@ -134,7 +134,7 @@ def build(
     from mast.agents._shared.tool_pair_guard_mw import ToolPairGuardMiddleware
     # ToolPairGuard 装在 prefill 外层（让 prefill 保留 ends-on-user 的最终发言权）：
     # 群聊编排器会在 parent 通道里留下配不上对的 handoff tool message，不清掉的话
-    # provider 会 400 "tool_call_id is not found"（）。
+    # provider 会 400 "tool_call_id is not found"。
     middleware.append(ToolPairGuardMiddleware())
     # 没有 SkillImageMiddleware：这个 agent 不跑技能，也就不会有技能挂图像路径。
     middleware.append(ClaudePrefillGuardMiddleware())

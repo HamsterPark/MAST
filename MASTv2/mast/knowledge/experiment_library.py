@@ -3,8 +3,8 @@
 设计文档：``docs/v2/design/document_and_library_management.md`` §4
 上位设计：``docs/v2/design/experiment_folder_persistence.md``（INCREMENTAL-ONLY）
 
-既定的三条前提
-------------------
+设计前提（三条）
+----------------
 
 1. **一实验一专属文献库。** 库不跨实验共享；真需要就 :func:`copy_library` 复制过去，
    库数量膨胀不是问题。
@@ -795,7 +795,7 @@ def copy_library(
 ) -> dict[str, Any]:
     """把 *src* 库的成员复制进某实验的专属库（``to_experiment_id`` 空 = 当前实验）。
 
-    定案用**复制**代替共享：库不跨实验共享，膨胀不是问题。
+    用**复制**代替共享：库不跨实验共享，膨胀不是问题。
 
     * 每条记 ``copied_from=<src_id>``（**不动 ``source``** —— 见
       :func:`add_members` 的说明），``reason`` 原样保留。

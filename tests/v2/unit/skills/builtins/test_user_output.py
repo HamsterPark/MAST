@@ -343,3 +343,110 @@ def test_the_gap_is_actually_closed():
             "GetUserOutputMonitorChannel", "PulseDigitalLine",
             "SetDigitalLineStatus", "GetDigitalLineTTL",
             "ConfigureDigitalLine"} <= names
+
+
+# ── reserved digital ports (machine config) ─────────────────────
+#
+# On a PMD4 rig Port A is the coarse-motor controller's control link (Nanonis
+# help: "The PMD4 DIO port A connector must be connected to … DIO port A").
+# ``reserved_digital_ports`` in nanonis_motor_groups.json lists such ports; no
+# skill may write their direction, level or pulse. No config ⇒ nothing reserved.
+
+import json  # noqa: E402
+
+from mast.instruments import motor_groups as mg  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _machine_config(tmp_path, monkeypatch):
+    """Every test in this file reads a tmp machine config (absent unless written),
+    never the checkout's config/nanonis_motor_groups.json."""
+    p = tmp_path / mg.CONFIG_FILENAME
+    monkeypatch.setattr(mg, "config_path", lambda: p)
+    mg.reset_for_tests()
+
+    def write(body):
+        p.write_text(body if isinstance(body, str) else json.dumps(body), encoding="utf-8")
+        mg.reset_for_tests()
+
+    yield write
+    mg.reset_for_tests()
+
+
+_PMD4 = {"reserved_digital_ports": [{"port": 0, "reason": "PMD4 粗动控制器的控制口"}]}
+
+_WRITES = [
+    (ConfigureDigitalLine, {"line": 1, "direction": 1, "polarity": 1}, "DigLines_PropsSet"),
+    (ConfigureDigitalLine, {"line": 1, "direction": 0, "polarity": 1}, "DigLines_PropsSet"),
+    (SetDigitalLineStatus, {"line": 3, "status": True}, "DigLines_OutStatusSet"),
+    (PulseDigitalLine, {"lines": "1", "pulse_width_s": 0.01}, "DigLines_Pulse"),
+]
+
+
+class TestReservedDigitalPorts:
+    @pytest.mark.parametrize("cls,params,verb", _WRITES)
+    def test_a_reserved_port_is_refused_before_anything_is_sent(self, _machine_config,
+                                                                cls, params, verb):
+        _machine_config(_PMD4)
+        ctx = Ctx()
+        res = cls().execute(ctx, {**params, "port": 0})
+        assert not res.success
+        assert "Port A" in res.error and "PMD4 粗动控制器的控制口" in res.error
+        assert "误动作" in res.error and "不会截断" in res.error and "别的口" in res.error
+        assert ctx.calls == []                       # nothing sent, no other port tried
+
+    @pytest.mark.parametrize("cls,params,verb", _WRITES)
+    def test_other_ports_go_through_on_the_port_asked_for(self, _machine_config,
+                                                          cls, params, verb):
+        _machine_config(_PMD4)
+        ctx = Ctx()
+        assert cls().execute(ctx, {**params, "port": 1}).success
+        (method, args), = ctx.calls
+        port_arg = args[1] if verb == "DigLines_PropsSet" else args[0]
+        assert method == verb and port_arg == 1
+
+    @pytest.mark.parametrize("cls,params,verb", _WRITES)
+    def test_without_a_reservation_port_a_behaves_as_before(self, _machine_config,
+                                                            cls, params, verb):
+        for body in (None, {"stm_coarse_group": 0}, {"reserved_digital_ports": []}):
+            if body is not None:
+                _machine_config(body)
+            ctx = Ctx()
+            assert cls().execute(ctx, {**params, "port": 0}).success, body
+            assert [m for m, _ in ctx.calls] == [verb]
+
+    def test_reads_are_never_gated(self, _machine_config):
+        _machine_config(_PMD4)
+        ctx = Ctx()
+        assert GetDigitalLineTTL().execute(ctx, {"port": 0}).success
+        assert ctx.methods() == ["DigLines_TTLValGet"]
+
+    @pytest.mark.parametrize("body,why", [
+        ({"reserved_digital_ports": [{"port": "A"}]}, "读不懂"),
+        ({"reserved_digital_ports": [{"port": 99}]}, "读不懂"),
+        ({"reserved_digital_ports": {"port": 0}}, "读不懂"),
+        ("{not json", "读不出来"),
+    ])
+    def test_an_unreadable_reservation_refuses_every_write(self, _machine_config, body, why):
+        """Not knowing which port is reserved is not knowing that this one is free."""
+        _machine_config(body)
+        ctx = Ctx()
+        res = ConfigureDigitalLine().execute(ctx, {"line": 1, "port": 1, "direction": 1,
+                                                   "polarity": 1})
+        assert not res.success and why in res.error and ctx.calls == []
+        assert GetDigitalLineTTL().execute(Ctx(), {"port": 1}).success   # reads still pass
+
+    def test_the_optics_trigger_honours_the_reservation_too(self, _machine_config):
+        from mast.skills.builtins.optics_acquire import trigger_port_refusal
+
+        _machine_config({"reserved_digital_ports": [{"port": 2, "reason": "接着快门控制器"}]})
+        assert "接着快门控制器" in trigger_port_refusal(2)
+        assert trigger_port_refusal(1) == ""
+        assert "Port A" in trigger_port_refusal(0)            # refused on every rig
+
+    def test_the_reservations_are_listed_with_the_motor_groups(self, _machine_config):
+        _machine_config(_PMD4)
+        cfg = mg.load_motor_groups().as_dict()
+        assert cfg["reserved_digital_ports"] == [{"port": 0, "reason": "PMD4 粗动控制器的控制口"}]
+        assert cfg["digital_ports_error"] == ""
+

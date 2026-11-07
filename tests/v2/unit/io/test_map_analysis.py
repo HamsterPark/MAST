@@ -331,6 +331,27 @@ def test_sts_coverage_reports_the_true_total_when_truncated():
     assert total == 5           # never mistake a display cap for the real count
 
 
+def test_manual_spectrum_markers_count_in_either_language():
+    """The manual-spectrum label is stored in whatever language MAST ran in
+    (io/exp_map.py). Coverage must count both wordings, or an English user's
+    manual spectra silently drop out of the STS map."""
+    from mast.i18n import use_lang
+    from mast.io.exp_map import MapMarker
+
+    labels = []
+    for lang in ("zh", "en"):
+        with use_lang(lang):
+            labels.append(MA.tr("手动跑网格谱", "Manual grid spectroscopy"))
+            labels.append(MA.tr("手动跑点谱 (STS)", "Manual point spectroscopy (STS)"))
+    assert any("Manual" in x for x in labels) and any("手动" in x for x in labels)
+    markers = [MapMarker(kind="manual", x_m=i * 1e-8, y_m=0.0, label=lab,
+                         source="manual") for i, lab in enumerate(labels)]
+    markers.append(MapMarker(kind="manual", x_m=9e-8, y_m=0.0, label="tip change",
+                             source="manual"))
+    _, total = sts_coverage(markers, cfg())
+    assert total == len(labels)
+
+
 def test_markers_near_sorts_by_distance_and_flags_dead_coordinates():
     rows = [row("tip_shape", 0, 0, epoch=0), row("pulse", 50, 0, epoch=1),
             row("crash", 5, 0, epoch=1)]

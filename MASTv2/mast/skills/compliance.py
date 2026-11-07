@@ -59,6 +59,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from mast.i18n import tr
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -86,27 +87,39 @@ _FP_RANK = {"pure-analysis": 0, "hardware-read-only": 1, "hardware-write": 2}
 
 #: 判据代号表。代号是对外契约（CLI 输出、CI 日志、网关回执都带它），只增不改。
 CODES: dict[str, str] = {
-    "S01": "safety_level 显式声明",
-    "S02": "恰好一个 BaseSkill 子类，有 metadata() 与 execute()，metadata() 直接构造 SkillMetadata",
-    "S03": "AST 拒绝名单（与自定义技能加载器同一个检查器）",
-    "S04": "名字合法，且 安装文件名 = 类名 = metadata.name",
-    "S05": "不与注册表里的技能或内置模板种子撞名",
-    "P01": "带量纲参数：unit + min/max，报命中的全局包络行",
-    "P02": "强制 SI 前缀的参数，描述里不出现指数写法",
-    "P03": "前置条件在词表里",
-    "P04": "发脉冲 / 修针的技能声明了对应能力标签",
-    "V01": "safe_call 的动词是字符串字面量",
-    "V02": "动词在 nanonis_spm（或补丁）里存在",
-    "V03": "足迹可三分类，且与 category / manifest 一致",
-    "V04": "写后回读（启发式，只提醒）",
-    "R01": "SkillResult 的关键字都是真字段",
-    "R02": "不把 Nanonis 的整个回包信封当数据交出去",
-    "X01": "冒烟执行（拒绝名单通过之后才跑）",
-    "C01": "spec 设计期全量校验，且子步只引用官方来源的技能",
-    "M01": "manifest.json 结构",
-    "M02": "manifest 与代码 / 目录一致",
-    "M03": "政策声明：原创、无机器参数默认值、接受入站许可；不收论文移植",
-    "E01": "判据的运行环境（注册表 / 依赖是否齐全）",
+    "S01": tr("safety_level 显式声明", "safety_level is declared explicitly"),
+    "S02": tr("恰好一个 BaseSkill 子类，有 metadata() 与 execute()，metadata() 直接构造 SkillMetadata",
+              "Exactly one BaseSkill subclass, with metadata() and execute(); metadata() constructs SkillMetadata directly"),
+    "S03": tr("AST 拒绝名单（与自定义技能加载器同一个检查器）",
+              "AST deny list (the same checker as the custom-skill loader)"),
+    "S04": tr("名字合法，且 安装文件名 = 类名 = metadata.name",
+              "Name is valid, and install file name = class name = metadata.name"),
+    "S05": tr("不与注册表里的技能或内置模板种子撞名",
+              "Does not collide with a skill in the registry or a built-in template seed"),
+    "P01": tr("带量纲参数：unit + min/max，报命中的全局包络行",
+              "Dimensional parameters: unit + min/max, reporting the global envelope row hit"),
+    "P02": tr("强制 SI 前缀的参数，描述里不出现指数写法",
+              "Parameters that force an SI prefix must not show exponent notation in their description"),
+    "P03": tr("前置条件在词表里", "Preconditions are in the vocabulary"),
+    "P04": tr("发脉冲 / 修针的技能声明了对应能力标签",
+              "Skills that pulse / condition the tip declare the matching capability tag"),
+    "V01": tr("safe_call 的动词是字符串字面量", "The safe_call verb is a string literal"),
+    "V02": tr("动词在 nanonis_spm（或补丁）里存在", "The verb exists in nanonis_spm (or its patch)"),
+    "V03": tr("足迹可三分类，且与 category / manifest 一致",
+              "Footprint falls into one of three classes and agrees with category / manifest"),
+    "V04": tr("写后回读（启发式，只提醒）", "Readback after write (heuristic, advisory only)"),
+    "R01": tr("SkillResult 的关键字都是真字段", "All SkillResult keywords are real fields"),
+    "R02": tr("不把 Nanonis 的整个回包信封当数据交出去",
+              "Does not hand out Nanonis's whole reply envelope as data"),
+    "X01": tr("冒烟执行（拒绝名单通过之后才跑）", "Smoke execution (runs only after the deny list passes)"),
+    "C01": tr("spec 设计期全量校验，且子步只引用官方来源的技能",
+              "Full design-time validation of the spec, and sub-steps only reference skills of official origin"),
+    "M01": tr("manifest.json 结构", "manifest.json structure"),
+    "M02": tr("manifest 与代码 / 目录一致", "manifest agrees with the code / directory"),
+    "M03": tr("政策声明：原创、无机器参数默认值、接受入站许可；不收论文移植",
+              "Policy declaration: original work, no machine-specific defaults, accepts the inbound license; paper ports are not accepted"),
+    "E01": tr("判据的运行环境（注册表 / 依赖是否齐全）",
+              "Runtime environment of the checks (whether the registry / dependencies are complete)"),
 }
 
 #: manifest.json 的键：{键: 是否必填}。
@@ -376,8 +389,10 @@ def default_registry() -> tuple[Any, tuple[Finding, ...]]:
         try:
             from mast.core.registry import _DEFAULT_DISCOVER_PACKAGES, SkillRegistry
         except Exception as exc:  # noqa: BLE001
-            findings.append(Finding("E01", FAIL, f"注册表模块导入失败（{type(exc).__name__}: {exc}）"
-                                                 "——撞名与官方子步两项无从判断"))
+            findings.append(Finding("E01", FAIL, tr(f"注册表模块导入失败（{type(exc).__name__}: {exc}）"
+                                                    "——撞名与官方子步两项无从判断",
+                                                    f"Failed to import the registry module ({type(exc).__name__}: {exc}) "
+                                                    "-- name collisions and official sub-steps cannot be judged")))
             _REG_CACHE = (None, tuple(findings))
             return _REG_CACHE
         for pkg in _DEFAULT_DISCOVER_PACKAGES:
@@ -385,14 +400,19 @@ def default_registry() -> tuple[Any, tuple[Finding, ...]]:
                 importlib.import_module(pkg)
             except ModuleNotFoundError as exc:
                 if exc.name == pkg:
-                    findings.append(Finding("E01", INFO, f"技能包 {pkg} 不在这份代码里（未随仓），跳过"))
+                    findings.append(Finding("E01", INFO, tr(f"技能包 {pkg} 不在这份代码里（未随仓），跳过",
+                                                        f"Skill package {pkg} is not in this code (not shipped with the repo); skipped")))
                 else:
                     findings.append(Finding(
                         "E01", FAIL,
-                        f"技能包 {pkg} 整包导入失败（缺 {exc.name}）——这个包里的技能全都不在注册表里，"
-                        "撞名与官方子步检查会漏掉它们。装齐依赖再跑。"))
+                        tr(f"技能包 {pkg} 整包导入失败（缺 {exc.name}）——这个包里的技能全都不在注册表里，"
+                           "撞名与官方子步检查会漏掉它们。装齐依赖再跑。",
+                           f"Skill package {pkg} failed to import as a whole (missing {exc.name}) -- none of "
+                           "this package's skills are in the registry, so the collision and official "
+                           "sub-step checks will miss them. Install the dependencies and rerun.")))
             except Exception as exc:  # noqa: BLE001
-                findings.append(Finding("E01", FAIL, f"技能包 {pkg} 整包导入失败（{type(exc).__name__}: {exc}）"))
+                findings.append(Finding("E01", FAIL, tr(f"技能包 {pkg} 整包导入失败（{type(exc).__name__}: {exc}）",
+                                                        f"Skill package {pkg} failed to import as a whole ({type(exc).__name__}: {exc})")))
         cap = _Capture()
         reg_logger = logging.getLogger("mast.core.registry")
         reg_logger.addHandler(cap)
@@ -400,7 +420,8 @@ def default_registry() -> tuple[Any, tuple[Finding, ...]]:
             reg = SkillRegistry()
             n = reg.discover()
         except Exception as exc:  # noqa: BLE001
-            findings.append(Finding("E01", FAIL, f"注册表发现过程抛异常（{type(exc).__name__}: {exc}）"))
+            findings.append(Finding("E01", FAIL, tr(f"注册表发现过程抛异常（{type(exc).__name__}: {exc}）",
+                                                    f"Registry discovery raised an exception ({type(exc).__name__}: {exc})")))
             _REG_CACHE = (None, tuple(findings))
             return _REG_CACHE
         finally:
@@ -409,12 +430,15 @@ def default_registry() -> tuple[Any, tuple[Finding, ...]]:
         if bad:
             findings.append(Finding(
                 "E01", WARN,
-                f"{len(bad)} 个技能模块没能加载，它们的名字不在撞名检查的视野里："
-                + "；".join(b[:120] for b in bad[:6]) + ("…" if len(bad) > 6 else "")))
+                tr(f"{len(bad)} 个技能模块没能加载，它们的名字不在撞名检查的视野里：",
+                   f"{len(bad)} skill modules failed to load; their names are outside the collision check: ")
+                + tr("；", "; ").join(b[:120] for b in bad[:6]) + ("…" if len(bad) > 6 else "")))
         if n == 0:
-            findings.append(Finding("E01", FAIL, "注册表是空的（一个技能都没发现）——检查依赖是否装齐"))
+            findings.append(Finding("E01", FAIL, tr("注册表是空的（一个技能都没发现）——检查依赖是否装齐",
+                                                    "The registry is empty (no skill discovered) -- check that the dependencies are installed")))
         else:
-            findings.append(Finding("E01", INFO, f"注册表：{n} 个随代码发出的技能（fresh discover）"))
+            findings.append(Finding("E01", INFO, tr(f"注册表：{n} 个随代码发出的技能（fresh discover）",
+                                                    f"Registry: {n} skills shipped with the code (fresh discover)")))
         _REG_CACHE = (reg, tuple(findings))
         return _REG_CACHE
 
@@ -429,10 +453,12 @@ def _resolve_registry(registry, rep: ComplianceReport):
     try:
         n = len(list(registry.list_skills()))
     except Exception as exc:  # noqa: BLE001
-        rep.add("E01", FAIL, f"传入的注册表读不了（{type(exc).__name__}: {exc}）")
+        rep.add("E01", FAIL, tr(f"传入的注册表读不了（{type(exc).__name__}: {exc}）",
+                                f"The registry passed in cannot be read ({type(exc).__name__}: {exc})"))
         return None
     if n == 0:
-        rep.add("E01", FAIL, "传入的注册表是空的——撞名与官方子步两项无从判断")
+        rep.add("E01", FAIL, tr("传入的注册表是空的——撞名与官方子步两项无从判断",
+                                "The registry passed in is empty -- name collisions and official sub-steps cannot be judged"))
         return None
     return registry
 
@@ -532,11 +558,11 @@ def _callee_repr(func: ast.AST) -> str:
 
 def _unparse(node: ast.AST | None) -> str:
     if node is None:
-        return "<缺>"
+        return tr("<缺>", "<missing>")
     try:
         return ast.unparse(node)
     except Exception:  # noqa: BLE001
-        return "<表达式>"
+        return tr("<表达式>", "<expression>")
 
 
 def _field_names(cls_path: str) -> tuple[str, ...]:
@@ -653,22 +679,26 @@ def _collect_facts(units: list[ast.AST], ctx_names: set[str], local_callables: s
                         if isinstance(a, ast.Starred):
                             a = a.value
                         if isinstance(a, ast.Name) and a.id in ctx_names:
-                            f.escapes.append((node.lineno, f"执行上下文被交给了 {_callee_repr(node.func)}(…)"))
+                            f.escapes.append((node.lineno, tr(f"执行上下文被交给了 {_callee_repr(node.func)}(…)",
+                                                         f"the execution context was handed to {_callee_repr(node.func)}(…)")))
             elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id in ctx_names:
                 if node.attr == "state":
                     f.state_lines.append(node.lineno)
                 elif node.attr not in _CTX_ATTRS_OK:
-                    f.escapes.append((node.lineno, f"直接访问了执行上下文的 .{node.attr}"))
+                    f.escapes.append((node.lineno, tr(f"直接访问了执行上下文的 .{node.attr}",
+                                                     f"directly accessed .{node.attr} of the execution context")))
             elif isinstance(node, (ast.Assign, ast.AnnAssign)):
                 value = node.value
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
                 if isinstance(value, ast.Name) and value.id in ctx_names:
                     for t in targets:
                         if not isinstance(t, ast.Name):
-                            f.escapes.append((node.lineno, f"执行上下文被存进了 {_unparse(t)}"))
+                            f.escapes.append((node.lineno, tr(f"执行上下文被存进了 {_unparse(t)}",
+                                                         f"the execution context was stored into {_unparse(t)}")))
             elif isinstance(node, (ast.Return, ast.Yield)) and isinstance(getattr(node, "value", None), ast.Name) \
                     and node.value.id in ctx_names:
-                f.escapes.append((node.lineno, "执行上下文被返回 / 交出去了"))
+                f.escapes.append((node.lineno, tr("执行上下文被返回 / 交出去了",
+                                          "the execution context was returned / handed out")))
     return f
 
 
@@ -749,13 +779,15 @@ def skill_footprint(registry, name: str, *, _seen: frozenset[str] = frozenset())
     来自别的模块的框架类）给 ``unknown`` 并写明原因，``declared`` 另按 category 给出。
     """
     if name in _seen or len(_seen) > 8:
-        return SkillFootprint(UNKNOWN, reasons=(f"{name}：子技能循环引用或嵌套太深",))
+        return SkillFootprint(UNKNOWN, reasons=(tr(f"{name}：子技能循环引用或嵌套太深",
+                                                   f"{name}: sub-skills reference each other in a cycle or are nested too deep"),))
     seen = _seen | {name}
     try:
         cls = registry.get(name)
         meta = registry._get_metadata(cls)
     except Exception:  # noqa: BLE001
-        return SkillFootprint(UNKNOWN, reasons=(f"注册表里没有 {name}",))
+        return SkillFootprint(UNKNOWN, reasons=(tr(f"注册表里没有 {name}",
+                                                   f"{name} is not in the registry"),))
     declared = _declared_footprint(getattr(meta, "category", None))
     try:
         from mast.skills.composite.interpreter import SpecComposite
@@ -773,17 +805,22 @@ def skill_footprint(registry, name: str, *, _seen: frozenset[str] = frozenset())
                               reasons, eff)
     tree = _module_tree(cls)
     if tree is None:
-        return SkillFootprint(UNKNOWN, reasons=(f"{name}：源码读不到（动态生成的类？）",), declared=declared)
+        return SkillFootprint(UNKNOWN, reasons=(tr(f"{name}：源码读不到（动态生成的类？）",
+                                                   f"{name}: source cannot be read (dynamically generated class?)"),),
+                              declared=declared)
     classes = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}
     funcs = {n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
     node = classes.get(getattr(cls, "__name__", ""))
     if node is None:
-        return SkillFootprint(UNKNOWN, reasons=(f"{name}：类不在模块顶层",), declared=declared)
+        return SkillFootprint(UNKNOWN, reasons=(tr(f"{name}：类不在模块顶层",
+                                                   f"{name}: the class is not at module top level"),),
+                              declared=declared)
     owner = next((k for k in getattr(cls, "__mro__", ()) if "execute" in vars(k)), None)
     if owner is None or getattr(owner, "__module__", "") != getattr(cls, "__module__", "") \
             or getattr(owner, "__name__", "") not in classes:
         where = f"{getattr(owner, '__module__', '?')}.{getattr(owner, '__name__', '?')}"
-        return SkillFootprint(UNKNOWN, reasons=(f"{name}：execute 由 {where} 提供，静态看不透",),
+        return SkillFootprint(UNKNOWN, reasons=(tr(f"{name}：execute 由 {where} 提供，静态看不透",
+                                                   f"{name}: execute is provided by {where}, which static analysis cannot see through"),),
                               declared=declared)
     # 同模块的基类（execute 可能在那里）
     units: list[ast.AST] = [node]
@@ -821,9 +858,11 @@ def skill_footprint(registry, name: str, *, _seen: frozenset[str] = frozenset())
 def _footprint_from_facts(registry, name: str, facts: _Facts, declared: str,
                           seen: frozenset[str]) -> SkillFootprint:
     reasons: list[str] = []
-    reasons += [f"{name} L{ln}：动词是变量 {txt}" for ln, txt in facts.dynamic_verbs]
-    reasons += [f"{name} L{ln}：子技能名是变量 {txt}" for ln, txt in facts.dynamic_runs]
-    reasons += [f"{name} L{ln}：{txt}" for ln, txt in facts.escapes]
+    reasons += [tr(f"{name} L{ln}：动词是变量 {txt}", f"{name} L{ln}: the verb is a variable {txt}")
+                for ln, txt in facts.dynamic_verbs]
+    reasons += [tr(f"{name} L{ln}：子技能名是变量 {txt}", f"{name} L{ln}: the sub-skill name is a variable {txt}")
+                for ln, txt in facts.dynamic_runs]
+    reasons += [tr(f"{name} L{ln}：{txt}", f"{name} L{ln}: {txt}") for ln, txt in facts.escapes]
     subs = {s: skill_footprint(registry, s, _seen=seen) for s in sorted(facts.runs)}
     own = _own_footprint(facts.verbs, bool(facts.state_lines))
     verbs = set(facts.verbs)
@@ -957,12 +996,14 @@ class _PySource:
         if node is None:
             return [], ""
         if not isinstance(node, (ast.List, ast.Tuple)):
-            return [], "parameters 不是字面量列表（写成 [ParameterSpec(...), ...]，好让审阅与判据都读得到）"
+            return [], tr("parameters 不是字面量列表（写成 [ParameterSpec(...), ...]，好让审阅与判据都读得到）",
+                          "parameters is not a literal list (write it as [ParameterSpec(...), ...] so that review and the checks can read it)")
         names = _field_names("ParameterSpec")
         out: list[dict[str, Any]] = []
         for el in node.elts:
             if not (isinstance(el, ast.Call) and _callee_name(el.func) == "ParameterSpec"):
-                return [], f"parameters 里有一项不是 ParameterSpec(...)：{_unparse(el)[:60]}"
+                return [], tr(f"parameters 里有一项不是 ParameterSpec(...)：{_unparse(el)[:60]}",
+                              f"one item in parameters is not ParameterSpec(...): {_unparse(el)[:60]}")
             args = _call_args(el, names)
             row: dict[str, Any] = {k: _ev(v, self.names) for k, v in args.items() if k in names}
             for k, spec_default in (("description", ""), ("unit", ""), ("required", True), ("default", None),
@@ -994,11 +1035,14 @@ def check_python_source(code: str, *, filename: str = "skill.py", registry=None,
     try:
         violations = _deny_list(code)
     except Exception as exc:  # noqa: BLE001 — 检查器不可用时保守拒绝（与加载器同一策略）
-        violations = [f"拒绝名单检查器不可用（{type(exc).__name__}: {exc}）"]
-        rep.add("E01", FAIL, f"拒绝名单检查器不可用（{type(exc).__name__}: {exc}）")
+        violations = [tr(f"拒绝名单检查器不可用（{type(exc).__name__}: {exc}）",
+                         f"The deny-list checker is unavailable ({type(exc).__name__}: {exc})")]
+        rep.add("E01", FAIL, tr(f"拒绝名单检查器不可用（{type(exc).__name__}: {exc}）",
+                                f"The deny-list checker is unavailable ({type(exc).__name__}: {exc})"))
     for v in violations:
         m = re.search(r"\(line (\d+)\)", v)
-        rep.add("S03", FAIL, f"拒绝名单：{v}（加载器加载前会重跑同一个检查，不过就不加载，只留一行日志）",
+        rep.add("S03", FAIL, tr(f"拒绝名单：{v}（加载器加载前会重跑同一个检查，不过就不加载，只留一行日志）",
+                                f"Deny list: {v} (the loader reruns the same check before loading; if it fails the skill is not loaded and only a log line remains)"),
                 int(m.group(1)) if m else None)
     s03_ok = not violations
 
@@ -1007,17 +1051,19 @@ def check_python_source(code: str, *, filename: str = "skill.py", registry=None,
     try:
         shape = _forge()._baseskill_shape_problems(code)
     except Exception as exc:  # noqa: BLE001
-        shape = [f"形状判据不可用（{type(exc).__name__}: {exc}）"]
+        shape = [tr(f"形状判据不可用（{type(exc).__name__}: {exc}）",
+                    f"The shape check is unavailable ({type(exc).__name__}: {exc})")]
     for p in shape:
         rep.add("S02", FAIL, p)
     try:
         src = _PySource(code)
     except SyntaxError as exc:
         if not shape:
-            rep.add("S02", FAIL, f"代码语法错误：{exc}", exc.lineno)
+            rep.add("S02", FAIL, tr(f"代码语法错误：{exc}", f"Syntax error in the code: {exc}"), exc.lineno)
         return rep
     if src.skill_cls is not None and src.meta_call is None:
-        rep.add("S02", FAIL, "metadata() 里没有直接构造 SkillMetadata(...)——判据与审阅都要能静态读到它",
+        rep.add("S02", FAIL, tr("metadata() 里没有直接构造 SkillMetadata(...)——判据与审阅都要能静态读到它",
+                                "metadata() does not construct SkillMetadata(...) directly -- both the checks and review need to read it statically"),
                 src.skill_cls.lineno)
     if shape or src.skill_cls is None or src.meta_call is None:
         return rep
@@ -1035,10 +1081,12 @@ def check_python_source(code: str, *, filename: str = "skill.py", registry=None,
         if s03_ok:
             _smoke(code, filename, src, facts, rep)
         else:
-            rep.skipped.append("X01：拒绝名单没过，不执行这段代码")
+            rep.skipped.append(tr("X01：拒绝名单没过，不执行这段代码",
+                                  "X01: the deny list did not pass, so this code is not executed"))
     else:
         # 只记一条说明，不算「跑过」：checks_run 里没有 X01
-        rep.findings.append(Finding("X01", INFO, "未做冒烟执行（run_smoke=False）"))
+        rep.findings.append(Finding("X01", INFO, tr("未做冒烟执行（run_smoke=False）",
+                                                    "Smoke execution not performed (run_smoke=False)")))
     return rep
 
 
@@ -1049,15 +1097,20 @@ def _check_identity(src: _PySource, stem: str, reg, rep: ComplianceReport) -> No
     rep.ran("S01")
     sl_node = src.meta.get("safety_level")
     if sl_node is None:
-        rep.add("S01", FAIL, "SkillMetadata 没有显式写 safety_level —— 缺省值是 CONFIRM，漏写不报错，"
-                             "只会悄悄落在确认档", src.meta_call.lineno if src.meta_call else None)
+        rep.add("S01", FAIL, tr("SkillMetadata 没有显式写 safety_level —— 缺省值是 CONFIRM，漏写不报错，"
+                                "只会悄悄落在确认档",
+                                "SkillMetadata does not write safety_level explicitly -- the default is CONFIRM, "
+                                "and omitting it raises no error; it just quietly lands in the confirm tier"),
+                src.meta_call.lineno if src.meta_call else None)
     else:
         v = _ev(sl_node, src.names)
         if isinstance(v, _EnumRef) and v.owner == "SafetyLevel" and v.member in ("AUTO", "CONFIRM", "DANGEROUS"):
             rep.extra["safety_level"] = v.member.lower()
         else:
-            rep.add("S01", FAIL, f"safety_level 必须写成 SafetyLevel.AUTO / CONFIRM / DANGEROUS，"
-                                 f"现在是 {_unparse(sl_node)}", sl_node.lineno)
+            rep.add("S01", FAIL, tr(f"safety_level 必须写成 SafetyLevel.AUTO / CONFIRM / DANGEROUS，"
+                                    f"现在是 {_unparse(sl_node)}",
+                                    f"safety_level must be written as SafetyLevel.AUTO / CONFIRM / DANGEROUS, "
+                                    f"currently {_unparse(sl_node)}"), sl_node.lineno)
     ver = src.value("version")
     if isinstance(ver, str):
         rep.extra["version"] = ver
@@ -1065,33 +1118,45 @@ def _check_identity(src: _PySource, stem: str, reg, rep: ComplianceReport) -> No
     rep.ran("S04")
     name = src.value("name")
     if not isinstance(name, str) or not name:
-        rep.add("S04", FAIL, "metadata 的 name 必须是字符串字面量（或模块级字符串常量）", src.line_of("name"))
+        rep.add("S04", FAIL, tr("metadata 的 name 必须是字符串字面量（或模块级字符串常量）",
+                                "metadata's name must be a string literal (or a module-level string constant)"),
+                src.line_of("name"))
         return
     rep.skill_name = name
     err = _name_error(name)
     if err:
-        rep.add("S04", FAIL, f"名字不合法：{err}", src.line_of("name"))
+        rep.add("S04", FAIL, tr(f"名字不合法：{err}", f"Invalid name: {err}"), src.line_of("name"))
     if cls.name != name:
-        rep.add("S04", FAIL, f"类名 {cls.name} 与 metadata.name {name} 不一致", cls.lineno)
+        rep.add("S04", FAIL, tr(f"类名 {cls.name} 与 metadata.name {name} 不一致",
+                                f"Class name {cls.name} does not match metadata.name {name}"), cls.lineno)
     if stem == "skill":
-        rep.add("S04", INFO, "没给安装名（filename 取缺省值）：安装时文件必须命名为 "
-                             f"{name}.py —— enabled.json 按文件名启用，注册按 metadata.name")
+        rep.add("S04", INFO, tr("没给安装名（filename 取缺省值）：安装时文件必须命名为 "
+                                f"{name}.py —— enabled.json 按文件名启用，注册按 metadata.name",
+                                "No install name given (filename took its default): when installed the file must be named "
+                                f"{name}.py -- enabled.json enables by file name, registration is by metadata.name"))
     elif stem != name:
-        rep.add("S04", FAIL, f"安装文件名 {stem}.py 与 metadata.name {name} 不一致 —— "
-                             "enabled.json 按文件名启用、注册表按 metadata.name 注册，两者不同时"
-                             "启用的是一个名字、出现的是另一个")
+        rep.add("S04", FAIL, tr(f"安装文件名 {stem}.py 与 metadata.name {name} 不一致 —— "
+                                "enabled.json 按文件名启用、注册表按 metadata.name 注册，两者不同时"
+                                "启用的是一个名字、出现的是另一个",
+                                f"Install file name {stem}.py does not match metadata.name {name} -- "
+                                "enabled.json enables by file name and the registry registers by metadata.name; "
+                                "when they differ, one name is enabled and another appears"))
     # S05
     rep.ran("S05")
     if reg is None:
-        rep.skipped.append("S05：没有可用的注册表，撞名未核对")
+        rep.skipped.append(tr("S05：没有可用的注册表，撞名未核对",
+                              "S05: no usable registry, name collisions not checked"))
         return
     try:
         if reg.has(name):
             origin = _forge()._origin_of(reg, name)
-            rep.add("S05", FAIL, f"名字 {name} 已被一个已注册技能占用（来源：{origin}）——自定义技能最后加载，"
-                                 "同名同版本会顶掉原来那个，注册表只打一行警告")
+            rep.add("S05", FAIL, tr(f"名字 {name} 已被一个已注册技能占用（来源：{origin}）——自定义技能最后加载，"
+                                    "同名同版本会顶掉原来那个，注册表只打一行警告",
+                                    f"The name {name} is already taken by a registered skill (origin: {origin}) -- custom skills load last, "
+                                    "and the same name and version would replace the original, with the registry only logging one warning"))
     except Exception as exc:  # noqa: BLE001
-        rep.add("S05", WARN, f"撞名检查读注册表失败（{exc}）")
+        rep.add("S05", WARN, tr(f"撞名检查读注册表失败（{exc}）",
+                                f"The collision check failed to read the registry ({exc})"))
     for p in _forge()._name_collision_problems(name, _NoSkills()):
         rep.add("S05", FAIL, p)
 
@@ -1116,60 +1181,83 @@ def _check_params(src: _PySource, params: list[dict[str, Any]], why: str, rep: C
         name, line = str(p.get("name") or "?"), p.get("_line")
         unit, typ = p.get("unit"), p.get("type")
         if unit is _UNRES or not isinstance(unit if unit is not None else "", str):
-            rep.add("P01", FAIL, f"参数 {name}：unit 不能静态求值", line)
+            rep.add("P01", FAIL, tr(f"参数 {name}：unit 不能静态求值",
+                                    f"Parameter {name}: unit cannot be evaluated statically"), line)
             continue
         unit = (unit or "").strip()
         lo, hi, default = p.get("min_value"), p.get("max_value"), p.get("default")
         numeric = typ in ("float", "int")
         if unit:
             if lo is None or hi is None:
-                rep.add("P01", FAIL, f"带量纲参数 {name} [{unit}] 缺 min_value / max_value —— "
-                                     "参数包络只对写了边界的参数生效", line)
+                rep.add("P01", FAIL, tr(f"带量纲参数 {name} [{unit}] 缺 min_value / max_value —— "
+                                        "参数包络只对写了边界的参数生效",
+                                        f"Dimensional parameter {name} [{unit}] lacks min_value / max_value -- "
+                                        "the parameter envelope only applies to parameters that declare bounds"), line)
                 lo = hi = None
             elif lo is _UNRES or hi is _UNRES or not all(
                     isinstance(x, (int, float)) and not isinstance(x, bool) for x in (lo, hi)):
-                rep.add("P01", FAIL, f"带量纲参数 {name} [{unit}] 的 min / max 不能静态求值"
-                                     "（写成数字字面量或模块级数字常量）", line)
+                rep.add("P01", FAIL, tr(f"带量纲参数 {name} [{unit}] 的 min / max 不能静态求值"
+                                        "（写成数字字面量或模块级数字常量）",
+                                        f"min / max of dimensional parameter {name} [{unit}] cannot be evaluated statically "
+                                        "(write them as numeric literals or module-level numeric constants)"), line)
                 lo = hi = None
             elif lo > hi:
-                rep.add("P01", FAIL, f"参数 {name}：min_value {lo} > max_value {hi}", line)
+                rep.add("P01", FAIL, tr(f"参数 {name}：min_value {lo} > max_value {hi}",
+                                        f"Parameter {name}: min_value {lo} > max_value {hi}"), line)
             if lo is not None and hi is not None and isinstance(default, (int, float)) \
                     and not isinstance(default, bool) and not (lo <= default <= hi):
-                rep.add("P01", FAIL, f"参数 {name}：默认值 {default} 不在 [{lo}, {hi}] 内", line)
+                rep.add("P01", FAIL, tr(f"参数 {name}：默认值 {default} 不在 [{lo}, {hi}] 内",
+                                        f"Parameter {name}: default {default} is not within [{lo}, {hi}]"), line)
             row = _global_row(name, unit)
             if row:
-                rep.add("P01", INFO, f"参数 {name} [{unit}] 命中全局包络 _GLOBAL_CHECKS 行 {row!r}："
-                                     f"运行时还要落在 SafetyLimits.{row[2]} … {row[3]} 之内", line)
+                rep.add("P01", INFO, tr(f"参数 {name} [{unit}] 命中全局包络 _GLOBAL_CHECKS 行 {row!r}："
+                                        f"运行时还要落在 SafetyLimits.{row[2]} … {row[3]} 之内",
+                                        f"Parameter {name} [{unit}] hits the global envelope _GLOBAL_CHECKS row {row!r}: "
+                                        f"at run time it must also lie within SafetyLimits.{row[2]} … {row[3]}"), line)
             else:
-                rep.add("P01", INFO, f"参数 {name} [{unit}] 不命中任何全局包络行，只受自身 [min, max] 约束", line)
+                rep.add("P01", INFO, tr(f"参数 {name} [{unit}] 不命中任何全局包络行，只受自身 [min, max] 约束",
+                                        f"Parameter {name} [{unit}] hits no global envelope row and is only constrained by its own [min, max]"),
+                        line)
             # P02
             if isinstance(lo, (int, float)) and isinstance(hi, (int, float)) and needs_strict_prefix(lo, hi):
                 desc = p.get("description")
                 text = desc if isinstance(desc, str) else ""
                 hits = _EXPONENT.findall(text)
                 if hits:
-                    rep.add("P02", FAIL, f"参数 {name} 的量程整段远离 1，解析器强制要求 SI 前缀、会拒绝指数写法，"
-                                         f"而描述里在教指数写法 {hits} —— 改成 '50n' 这类写法", line)
+                    rep.add("P02", FAIL, tr(f"参数 {name} 的量程整段远离 1，解析器强制要求 SI 前缀、会拒绝指数写法，"
+                                            f"而描述里在教指数写法 {hits} —— 改成 '50n' 这类写法",
+                                            f"The range of parameter {name} lies entirely far from 1, so the parser forces an SI prefix "
+                                            f"and rejects exponent notation, yet the description teaches exponent notation {hits} -- "
+                                            "change it to a form like '50n'"), line)
         elif numeric:
             pats = [r for r in _GLOBAL_CHECKS if r[0] in name.lower()]
             if pats:
-                rep.add("P01", WARN, f"参数 {name} 的名字命中全局包络行 {pats[0]!r}，但没写 unit —— "
-                                     "全局包络要「名字 + 单位」同时命中才生效，它现在绕过了这一层", line)
+                rep.add("P01", WARN, tr(f"参数 {name} 的名字命中全局包络行 {pats[0]!r}，但没写 unit —— "
+                                        "全局包络要「名字 + 单位」同时命中才生效，它现在绕过了这一层",
+                                        f"The name of parameter {name} hits the global envelope row {pats[0]!r}, but no unit is given -- "
+                                        "the global envelope only takes effect when both name and unit match, and it is currently bypassed"),
+                        line)
             elif typ == "float" and _UNIT_SUFFIX.search(name.lower()):
-                rep.add("P01", WARN, f"参数 {name} 的名字像带量纲（单位后缀），却没写 unit", line)
+                rep.add("P01", WARN, tr(f"参数 {name} 的名字像带量纲（单位后缀），却没写 unit",
+                                        f"The name of parameter {name} looks dimensional (unit suffix), but no unit is given"), line)
     # P03
     pcs = src.value("preconditions")
     if pcs is _UNRES or (pcs is not None and not isinstance(pcs, list)):
-        rep.add("P03", FAIL, "preconditions 要写成字符串字面量列表", src.line_of("preconditions"))
+        rep.add("P03", FAIL, tr("preconditions 要写成字符串字面量列表",
+                                "preconditions must be written as a list of string literals"), src.line_of("preconditions"))
     elif pcs:
         from mast.core.preconditions import precondition_recognized
         for pc in pcs:
             if not isinstance(pc, str) or not precondition_recognized(pc):
-                rep.add("P03", FAIL, f"前置条件 {pc!r} 不在词表里 —— BaseSkill.check_preconditions 会报"
-                                     "「Cannot verify」，这个技能每次都会被拒", src.line_of("preconditions"))
+                rep.add("P03", FAIL, tr(f"前置条件 {pc!r} 不在词表里 —— BaseSkill.check_preconditions 会报"
+                                        "「Cannot verify」，这个技能每次都会被拒",
+                                        f"Precondition {pc!r} is not in the vocabulary -- BaseSkill.check_preconditions will report "
+                                        "\"Cannot verify\", and this skill would be refused every time"),
+                        src.line_of("preconditions"))
     caps = src.value("capabilities")
     if caps is _UNRES:
-        rep.add("P04", FAIL, "capabilities 不能静态求值（写成 frozenset({\"bias_pulse\"}) 这样的字面量）",
+        rep.add("P04", FAIL, tr("capabilities 不能静态求值（写成 frozenset({\"bias_pulse\"}) 这样的字面量）",
+                                "capabilities cannot be evaluated statically (write a literal such as frozenset({\"bias_pulse\"}))"),
                 src.line_of("capabilities"))
         rep.extra["capabilities"] = _UNRES
     else:
@@ -1205,85 +1293,110 @@ def _file_facts(src: _PySource) -> _Facts:
 def _check_verbs(src: _PySource, facts: _Facts, reg, rep: ComplianceReport) -> None:
     rep.ran("V01", "V02", "V03", "V04")
     for ln, txt in facts.dynamic_verbs:
-        rep.add("V01", FAIL, f"动词藏在变量里：{txt} —— 本仓每一个安全工具（中止策略、安全审计、命令名"
-                             "核对）都靠字面量找 Nanonis 调用。改成两个字面量分支，或持有字面量的 thunk", ln)
+        rep.add("V01", FAIL, tr(f"动词藏在变量里：{txt} —— 本仓每一个安全工具（中止策略、安全审计、命令名"
+                                "核对）都靠字面量找 Nanonis 调用。改成两个字面量分支，或持有字面量的 thunk",
+                                f"The verb is hidden in a variable: {txt} -- every safety tool in this repo (abort policy, safety audit, "
+                                "command-name check) finds Nanonis calls by literals. Change it to two literal branches, or a thunk holding the literal"),
+                ln)
     # V02
     verbs = sorted(facts.verbs)
     rep.verbs = verbs
     if verbs:
         lib = _nanonis_methods()
         if lib is None:
-            rep.add("V02", WARN, "nanonis_spm 没装：命令名存在性**没有核对**（这一项不算通过）")
-            rep.skipped.append("V02：nanonis_spm 未安装，命令名未核对")
+            rep.add("V02", WARN, tr("nanonis_spm 没装：命令名存在性**没有核对**（这一项不算通过）",
+                                    "nanonis_spm is not installed: command-name existence was **not checked** (this item does not count as passed)"))
+            rep.skipped.append(tr("V02：nanonis_spm 未安装，命令名未核对",
+                                  "V02: nanonis_spm is not installed, command names not checked"))
         else:
             for v in verbs:
                 if v not in lib:
-                    rep.add("V02", FAIL, f"Nanonis 命令 {v!r} 在 nanonis_spm 里不存在，也没被 nanonis_patch 补上 "
-                                         "—— 真机上会以 Method not found 失败", facts.verbs[v][0])
+                    rep.add("V02", FAIL, tr(f"Nanonis 命令 {v!r} 在 nanonis_spm 里不存在，也没被 nanonis_patch 补上 "
+                                            "—— 真机上会以 Method not found 失败",
+                                            f"Nanonis command {v!r} does not exist in nanonis_spm and is not added by nanonis_patch "
+                                            "-- on the real instrument it would fail with Method not found"), facts.verbs[v][0])
     # 子技能
     subs: dict[str, SkillFootprint] = {}
     for s in sorted(facts.runs):
         if reg is None:
-            rep.skipped.append(f"V03：没有注册表，子技能 {s} 的足迹未核对")
+            rep.skipped.append(tr(f"V03：没有注册表，子技能 {s} 的足迹未核对",
+                                  f"V03: no registry, footprint of sub-skill {s} not checked"))
             continue
         if not reg.has(s):
-            rep.add("V03", FAIL, f"context.run 调用的子技能 {s!r} 不在注册表里", facts.runs[s][0])
+            rep.add("V03", FAIL, tr(f"context.run 调用的子技能 {s!r} 不在注册表里",
+                                    f"The sub-skill {s!r} called by context.run is not in the registry"), facts.runs[s][0])
             continue
         sf = skill_footprint(reg, s)
         subs[s] = sf
         if sf.basis == "declared":
-            rep.add("V03", INFO, f"子技能 {s} 的足迹按其 category 推断为 {sf.effective}（静态看不透：{sf.reasons[:1]}）")
+            rep.add("V03", INFO, tr(f"子技能 {s} 的足迹按其 category 推断为 {sf.effective}（静态看不透：{sf.reasons[:1]}）",
+                                    f"The footprint of sub-skill {s} is inferred from its category as {sf.effective} (static analysis cannot see through: {sf.reasons[:1]})"))
     rep.sub_skills = sorted(facts.runs)
     # V03
-    reasons = [f"L{ln} 动词是变量 {txt}" for ln, txt in facts.dynamic_verbs]
-    reasons += [f"L{ln} 子技能名是变量 {txt}" for ln, txt in facts.dynamic_runs]
+    reasons = [tr(f"L{ln} 动词是变量 {txt}", f"L{ln} the verb is a variable {txt}") for ln, txt in facts.dynamic_verbs]
+    reasons += [tr(f"L{ln} 子技能名是变量 {txt}", f"L{ln} the sub-skill name is a variable {txt}") for ln, txt in facts.dynamic_runs]
     reasons += [f"L{ln} {txt}" for ln, txt in facts.escapes]
-    reasons += [f"L{ln} import 了 {mod} —— 它能绕开执行上下文碰到仪器或网络" for ln, mod in _bypass_imports(src.tree)]
+    reasons += [tr(f"L{ln} import 了 {mod} —— 它能绕开执行上下文碰到仪器或网络",
+                   f"L{ln} imports {mod} -- it can bypass the execution context to reach the instrument or the network")
+                for ln, mod in _bypass_imports(src.tree)]
     own = _own_footprint(facts.verbs, bool(facts.state_lines))
     fp = UNKNOWN if reasons else _combine([own] + [sf.effective for sf in subs.values()])
     rep.footprint = fp
     if fp == UNKNOWN:
         if not reasons:
-            reasons = [f"子技能 {s} 的足迹无法判断" for s, sf in subs.items() if sf.effective == UNKNOWN] \
-                or ["子技能的足迹无法判断"]
-        rep.add("V03", FAIL, "足迹无法静态分类（硬件只经执行上下文可达，而这里看不透它去了哪）："
-                             + "；".join(reasons[:4]))
+            reasons = [tr(f"子技能 {s} 的足迹无法判断", f"The footprint of sub-skill {s} cannot be determined")
+                       for s, sf in subs.items() if sf.effective == UNKNOWN] \
+                or [tr("子技能的足迹无法判断", "The footprint of the sub-skill cannot be determined")]
+        rep.add("V03", FAIL, tr("足迹无法静态分类（硬件只经执行上下文可达，而这里看不透它去了哪）：",
+                                "The footprint cannot be classified statically (hardware is reachable only through the execution context, and here it cannot be seen where the context goes): ")
+                             + tr("；", "; ").join(reasons[:4]))
     cat = src.value("category")
     cat_name = cat.member if isinstance(cat, _EnumRef) and cat.owner == "SkillCategory" else ""
     if not cat_name:
         if "category" not in src.meta:
-            rep.add("V03", WARN, "没写 category —— 缺省是 READ", src.meta_call.lineno if src.meta_call else None)
+            rep.add("V03", WARN, tr("没写 category —— 缺省是 READ", "category is not written -- the default is READ"),
+                    src.meta_call.lineno if src.meta_call else None)
             cat_name = "READ"
         else:
-            rep.add("V03", FAIL, f"category 必须写成 SkillCategory.X 字面量，现在是 {_unparse(src.meta.get('category'))}",
+            rep.add("V03", FAIL, tr(f"category 必须写成 SkillCategory.X 字面量，现在是 {_unparse(src.meta.get('category'))}",
+                                    f"category must be written as a SkillCategory.X literal, currently {_unparse(src.meta.get('category'))}"),
                     src.line_of("category"))
     rep.extra["category"] = cat_name.lower()
     if fp in _FP_RANK and cat_name:
         if cat_name == "ANALYSIS" and fp != "pure-analysis":
-            rep.add("V03", FAIL, f"category=ANALYSIS 的定义是「不碰硬件」，而这段代码的足迹是 {fp}"
-                                 f"（动词 {verbs or '—'}，子技能 {sorted(subs) or '—'}）", src.line_of("category"))
+            rep.add("V03", FAIL, tr(f"category=ANALYSIS 的定义是「不碰硬件」，而这段代码的足迹是 {fp}"
+                                    f"（动词 {verbs or '—'}，子技能 {sorted(subs) or '—'}）",
+                                    f"category=ANALYSIS is defined as \"touches no hardware\", but this code's footprint is {fp} "
+                                    f"(verbs {verbs or '—'}, sub-skills {sorted(subs) or '—'})"), src.line_of("category"))
         elif cat_name == "READ" and fp == "hardware-write":
             writes = [v for v in verbs if not _is_read_verb(v)]
-            rep.add("V03", FAIL, f"category=READ，但这段代码会写硬件（{writes or sorted(subs)}）",
+            rep.add("V03", FAIL, tr(f"category=READ，但这段代码会写硬件（{writes or sorted(subs)}）",
+                                    f"category=READ, but this code writes to hardware ({writes or sorted(subs)})"),
                     src.line_of("category"))
         elif cat_name == "READ" and fp == "pure-analysis":
-            rep.add("V03", WARN, "category=READ，但没有任何硬件读取 —— 纯计算请用 ANALYSIS", src.line_of("category"))
+            rep.add("V03", WARN, tr("category=READ，但没有任何硬件读取 —— 纯计算请用 ANALYSIS",
+                                    "category=READ, but there is no hardware read -- use ANALYSIS for pure computation"),
+                    src.line_of("category"))
         elif cat_name == "WRITE" and fp != "hardware-write":
-            rep.add("V03", INFO, f"category=WRITE，而静态足迹是 {fp}（声明偏保守，不拦）", src.line_of("category"))
+            rep.add("V03", INFO, tr(f"category=WRITE，而静态足迹是 {fp}（声明偏保守，不拦）",
+                                    f"category=WRITE, while the static footprint is {fp} (the declaration is conservative; not blocked)"),
+                    src.line_of("category"))
         elif cat_name == "COMPOSITE" and not facts.runs:
-            rep.add("V03", INFO, "category=COMPOSITE，但没有 context.run 子技能调用", src.line_of("category"))
+            rep.add("V03", INFO, tr("category=COMPOSITE，但没有 context.run 子技能调用",
+                                    "category=COMPOSITE, but there is no context.run sub-skill call"), src.line_of("category"))
     # V04（启发式）
     reads = {v for v in verbs if _is_read_verb(v)}
     for w in (v for v in verbs if not _is_read_verb(v)):
         prefix = w.split("_", 1)[0] + "_"
         if not any(r.startswith(prefix) for r in reads):
-            rep.add("V04", WARN, f"写了 {w} 却没有同模块的回读（{prefix}…Get）—— 写进去的值没被读回来确认",
+            rep.add("V04", WARN, tr(f"写了 {w} 却没有同模块的回读（{prefix}…Get）—— 写进去的值没被读回来确认",
+                                    f"{w} is written but there is no readback in the same module ({prefix}…Get) -- the written value is not read back to confirm"),
                     facts.verbs[w][0])
     # P04
     need: dict[str, str] = {}
     for v, cap in _CAPABILITY_VERBS.items():
         if v in facts.verbs:
-            need.setdefault(cap, f"Nanonis 命令 {v}")
+            need.setdefault(cap, tr(f"Nanonis 命令 {v}", f"Nanonis command {v}"))
     if reg is not None:
         for s in subs:
             try:
@@ -1291,14 +1404,17 @@ def _check_verbs(src: _PySource, facts: _Facts, reg, rep: ComplianceReport) -> N
             except Exception:  # noqa: BLE001
                 caps = set()
             for cap in caps & set(_CAPABILITY_VERBS.values()):
-                need.setdefault(cap, f"子技能 {s}")
+                need.setdefault(cap, tr(f"子技能 {s}", f"sub-skill {s}"))
     declared = rep.extra.get("capabilities")
     if need and declared is not _UNRES:
         missing = sorted(set(need) - set(declared or ()))
         for cap in missing:
-            rep.add("P04", FAIL, f"这个技能会{'发脉冲' if cap == 'bias_pulse' else '修针'}（来自 {need[cap]}），"
-                                 f"却没声明能力标签 {cap!r} —— SAFE / SEMI 模式闸只认能力标签，没有它，"
-                                 "SAFE 模式拦不住这个技能", src.line_of("capabilities"))
+            rep.add("P04", FAIL, tr(f"这个技能会{'发脉冲' if cap == 'bias_pulse' else '修针'}（来自 {need[cap]}），"
+                                    f"却没声明能力标签 {cap!r} —— SAFE / SEMI 模式闸只认能力标签，没有它，"
+                                    "SAFE 模式拦不住这个技能",
+                                    f"This skill will {'send pulses' if cap == 'bias_pulse' else 'condition the tip'} (from {need[cap]}), "
+                                    f"but does not declare the capability tag {cap!r} -- the SAFE / SEMI mode gates only recognise capability tags, "
+                                    "and without it SAFE mode cannot stop this skill"), src.line_of("capabilities"))
 
 
 def _check_results(src: _PySource, rep: ComplianceReport) -> None:
@@ -1308,8 +1424,11 @@ def _check_results(src: _PySource, rep: ComplianceReport) -> None:
         if isinstance(node, ast.Call) and _callee_name(node.func) == "SkillResult":
             for kw in node.keywords:
                 if kw.arg is not None and kw.arg not in valid:
-                    rep.add("R01", FAIL, f"SkillResult 没有字段 {kw.arg!r}（合法字段：{sorted(valid)}）"
-                                         "—— 调用那一刻抛 TypeError，而注册时发现不了", node.lineno)
+                    rep.add("R01", FAIL, tr(f"SkillResult 没有字段 {kw.arg!r}（合法字段：{sorted(valid)}）"
+                                            "—— 调用那一刻抛 TypeError，而注册时发现不了",
+                                            f"SkillResult has no field {kw.arg!r} (valid fields: {sorted(valid)}) "
+                                            "-- it raises TypeError at the moment of the call, and cannot be found at registration"),
+                            node.lineno)
             _raw_envelope_in(node, rep)
     # 形状一：一句话的 return getattr(x, "return_value", …)
     for node in ast.walk(src.tree):
@@ -1320,15 +1439,19 @@ def _check_results(src: _PySource, rep: ComplianceReport) -> None:
                 if isinstance(v, ast.Call) and isinstance(v.func, ast.Name) and v.func.id == "getattr" \
                         and len(v.args) >= 2 and isinstance(v.args[1], ast.Constant) \
                         and v.args[1].value == "return_value":
-                    rep.add("R02", FAIL, f"{node.name}() 把整个回包信封当读数交出去了 —— 用 "
-                                         "mast.io.nanonis_files.decode_reply 剥开", node.lineno)
+                    rep.add("R02", FAIL, tr(f"{node.name}() 把整个回包信封当读数交出去了 —— 用 "
+                                            "mast.io.nanonis_files.decode_reply 剥开",
+                                            f"{node.name}() hands out the whole reply envelope as the reading -- unwrap it with "
+                                            "mast.io.nanonis_files.decode_reply"), node.lineno)
         # 形状二："raw": str(…)
         if isinstance(node, ast.Dict):
             for k, v in zip(node.keys, node.values):
                 if isinstance(k, ast.Constant) and k.value == "raw" and isinstance(v, ast.Call) \
                         and isinstance(v.func, ast.Name) and v.func.id == "str":
-                    rep.add("R02", FAIL, "把整个回包字符串化塞进 data（\"raw\": str(…)）—— 要原始回包看 "
-                                         "nanonis_calls", node.lineno)
+                    rep.add("R02", FAIL, tr("把整个回包字符串化塞进 data（\"raw\": str(…)）—— 要原始回包看 "
+                                            "nanonis_calls",
+                                            "The whole reply is stringified into data (\"raw\": str(…)) -- look at "
+                                            "nanonis_calls for the raw reply"), node.lineno)
 
 
 def _raw_envelope_in(call: ast.Call, rep: ComplianceReport) -> None:
@@ -1352,27 +1475,32 @@ def _raw_envelope_in(call: ast.Call, rep: ComplianceReport) -> None:
                 break
             cur = parents.get(id(cur))
         if not processed:
-            rep.add("R02", FAIL, "SkillResult 里原样放了 .return_value（Nanonis 的三段信封）—— 用 "
-                                 "mast.io.nanonis_files.decode_reply 剥开再交", n.lineno)
+            rep.add("R02", FAIL, tr("SkillResult 里原样放了 .return_value（Nanonis 的三段信封）—— 用 "
+                                    "mast.io.nanonis_files.decode_reply 剥开再交",
+                                    "SkillResult contains .return_value as-is (Nanonis's three-part envelope) -- unwrap it with "
+                                    "mast.io.nanonis_files.decode_reply before handing it out"), n.lineno)
 
 
-def _check_policy_source(code: str, src: _PySource | None, rep: ComplianceReport, *, label: str = "源码") -> None:
+def _check_policy_source(code: str, src: _PySource | None, rep: ComplianceReport, *, label: str = tr("源码", "source")) -> None:
     rep.ran("M03")
     if src is not None:
         cit = src.meta.get("citations")
         if cit is not None:
             v = _ev(cit, src.names)
             if v is _UNRES or v:
-                rep.add("M03", FAIL, "metadata 带 citations —— contrib 不收论文移植（方法来自已发表工作的技能）",
+                rep.add("M03", FAIL, tr("metadata 带 citations —— contrib 不收论文移植（方法来自已发表工作的技能）",
+                                        "metadata carries citations -- contrib does not accept paper ports (skills whose method comes from published work)"),
                         getattr(cit, "lineno", None))
     for i, line in enumerate(code.splitlines(), 1):
         m = _DOI.search(line) or _ARXIV.search(line)
         if m:
-            rep.add("M03", FAIL, f"{label}里出现文献标识 {m.group()[:40]!r} —— contrib 不收论文移植", i)
+            rep.add("M03", FAIL, tr(f"{label}里出现文献标识 {m.group()[:40]!r} —— contrib 不收论文移植",
+                                    f"{label.strip()} contains a literature identifier {m.group()[:40]!r} -- contrib does not accept paper ports"), i)
             continue
         s = _SOFT_PORT.search(line)
         if s:
-            rep.add("M03", WARN, f"{label}里出现 {s.group()!r} —— 若这是论文 / 他人代码的复现，contrib 不收", i)
+            rep.add("M03", WARN, tr(f"{label}里出现 {s.group()!r} —— 若这是论文 / 他人代码的复现，contrib 不收",
+                                    f"{label.strip()} contains {s.group()!r} -- if this is a reproduction of a paper / someone else's code, contrib does not accept it"), i)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -1463,12 +1591,12 @@ def _smoke(code: str, filename: str, src: _PySource, facts: _Facts, rep: Complia
         mod = types.ModuleType(mod_name)
         mod.__file__ = filename
         sys.modules[mod_name] = mod
-        stage = "导入模块"
+        stage = tr("导入模块", "importing the module")
         try:
             exec(compile(code, filename, "exec"), mod.__dict__)  # noqa: S102 — 拒绝名单通过后、调用方明确要求时才到这里
-            stage = "找技能类"
+            stage = tr("找技能类", "locating the skill class")
             cls = mod.__dict__[src.skill_cls.name]  # type: ignore[union-attr]
-            stage = "实例化"
+            stage = tr("实例化", "instantiating")
             inst = cls()
             stage = "metadata()"
             meta = inst.metadata()
@@ -1487,27 +1615,36 @@ def _smoke(code: str, filename: str, src: _PySource, facts: _Facts, rep: Complia
     t.start()
     t.join(_SMOKE_TIMEOUT_S)
     if t.is_alive():
-        rep.add("X01", FAIL, f"冒烟执行 {_SMOKE_TIMEOUT_S:.0f} s 没有返回 —— 会等待的技能必须响应 check_abort()")
+        rep.add("X01", FAIL, tr(f"冒烟执行 {_SMOKE_TIMEOUT_S:.0f} s 没有返回 —— 会等待的技能必须响应 check_abort()",
+                                f"Smoke execution did not return within {_SMOKE_TIMEOUT_S:.0f} s -- a skill that waits must respond to check_abort()"))
         return
     if not out.get("ok"):
-        rep.add("X01", FAIL, f"冒烟执行在「{out.get('stage')}」抛异常：{out.get('tb')}")
+        rep.add("X01", FAIL, tr(f"冒烟执行在「{out.get('stage')}」抛异常：{out.get('tb')}",
+                                f"Smoke execution raised an exception while {out.get('stage')}: {out.get('tb')}"))
         return
     res, meta, ctx = out["res"], out["meta"], out["ctx"]
     if getattr(meta, "name", None) != rep.skill_name and rep.skill_name:
-        rep.add("X01", FAIL, f"运行时 metadata().name = {getattr(meta, 'name', None)!r}，与静态读到的 "
-                             f"{rep.skill_name!r} 不一致")
+        rep.add("X01", FAIL, tr(f"运行时 metadata().name = {getattr(meta, 'name', None)!r}，与静态读到的 "
+                                f"{rep.skill_name!r} 不一致",
+                                f"At run time metadata().name = {getattr(meta, 'name', None)!r}, which does not match the statically read "
+                                f"{rep.skill_name!r}"))
     if not isinstance(res, SkillResult):
-        rep.add("X01", FAIL, f"execute() 返回了 {type(res).__name__}，不是 SkillResult")
+        rep.add("X01", FAIL, tr(f"execute() 返回了 {type(res).__name__}，不是 SkillResult",
+                                f"execute() returned {type(res).__name__}, not a SkillResult"))
         return
     if not res.skill_name:
-        rep.add("X01", FAIL, "返回的 SkillResult 没有 skill_name")
-    rep.add("X01", INFO, f"冒烟执行：success={res.success}，safe_call {len(ctx.calls)} 次，"
-                         f"子技能 {len(ctx.runs)} 次（参数 {out['params']}）")
+        rep.add("X01", FAIL, tr("返回的 SkillResult 没有 skill_name", "The returned SkillResult has no skill_name"))
+    rep.add("X01", INFO, tr(f"冒烟执行：success={res.success}，safe_call {len(ctx.calls)} 次，"
+                            f"子技能 {len(ctx.runs)} 次（参数 {out['params']}）",
+                            f"Smoke execution: success={res.success}, safe_call {len(ctx.calls)} times, "
+                            f"sub-skills {len(ctx.runs)} times (params {out['params']})"))
     extra_verbs = sorted(set(ctx.calls) - set(facts.verbs))
     extra_runs = sorted(set(ctx.runs) - set(facts.runs))
     if extra_verbs or extra_runs:
-        rep.add("V03", FAIL, f"运行时出现了静态分析没看到的调用（动词 {extra_verbs or '—'}，子技能 "
-                             f"{extra_runs or '—'}）—— 足迹结论不可信")
+        rep.add("V03", FAIL, tr(f"运行时出现了静态分析没看到的调用（动词 {extra_verbs or '—'}，子技能 "
+                                f"{extra_runs or '—'}）—— 足迹结论不可信",
+                                f"Calls appeared at run time that static analysis did not see (verbs {extra_verbs or '—'}, sub-skills "
+                                f"{extra_runs or '—'}) -- the footprint conclusion cannot be trusted"))
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -1525,24 +1662,26 @@ def check_spec(spec: dict, *, registry=None) -> ComplianceReport:
     rep = ComplianceReport(target=f"spec:{name or '?'}", kind="spec", skill_name=name)
     rep.ran("C01")
     if not isinstance(spec, dict):
-        rep.add("C01", FAIL, "spec 要是一个 JSON 对象")
+        rep.add("C01", FAIL, tr("spec 要是一个 JSON 对象", "spec must be a JSON object"))
         return rep
     reg = _resolve_registry(registry, rep)
     # S01
     rep.ran("S01")
     sl = spec.get("safety_level")
     if sl is None:
-        rep.add("S01", FAIL, "spec 没有显式写 safety_level —— 缺省会落成 confirm；要写出来，审阅才看得见")
+        rep.add("S01", FAIL, tr("spec 没有显式写 safety_level —— 缺省会落成 confirm；要写出来，审阅才看得见",
+                                "The spec does not write safety_level explicitly -- the default would land on confirm; write it out so review can see it"))
     elif str(sl).lower() not in _SAFETY_NAMES:
-        rep.add("S01", FAIL, f"safety_level 必须是 auto / confirm / dangerous，现在是 {sl!r}")
+        rep.add("S01", FAIL, tr(f"safety_level 必须是 auto / confirm / dangerous，现在是 {sl!r}",
+                                f"safety_level must be auto / confirm / dangerous, currently {sl!r}"))
     # S04
     rep.ran("S04")
     if not name:
-        rep.add("S04", FAIL, "spec 没有 name")
+        rep.add("S04", FAIL, tr("spec 没有 name", "The spec has no name"))
     else:
         err = _name_error(name)
         if err:
-            rep.add("S04", FAIL, f"名字不合法：{err}")
+            rep.add("S04", FAIL, tr(f"名字不合法：{err}", f"Invalid name: {err}"))
     # S05
     rep.ran("S05")
     collision: set[str] = set()
@@ -1550,34 +1689,40 @@ def check_spec(spec: dict, *, registry=None) -> ComplianceReport:
         try:
             if reg.has(name):
                 origin = _forge()._origin_of(reg, name)
-                rep.add("S05", FAIL, f"名字 {name} 已被一个已注册技能占用（来源：{origin}）")
+                rep.add("S05", FAIL, tr(f"名字 {name} 已被一个已注册技能占用（来源：{origin}）",
+                                        f"The name {name} is already taken by a registered skill (origin: {origin})"))
             collision = set(_forge()._name_collision_problems(name, reg))
         except Exception as exc:  # noqa: BLE001
-            rep.add("S05", WARN, f"撞名检查读注册表失败（{exc}）")
+            rep.add("S05", WARN, tr(f"撞名检查读注册表失败（{exc}）",
+                                f"The collision check failed to read the registry ({exc})"))
         for p in _forge()._name_collision_problems(name, _NoSkills()):
             rep.add("S05", FAIL, p)
     elif reg is None:
-        rep.skipped.append("S05：没有可用的注册表，撞名未核对")
+        rep.skipped.append(tr("S05：没有可用的注册表，撞名未核对",
+                              "S05: no usable registry, name collisions not checked"))
     if reg is None:
-        rep.add("C01", FAIL, "没有可用的注册表 —— spec 的子步无从校验")
+        rep.add("C01", FAIL, tr("没有可用的注册表 —— spec 的子步无从校验",
+                                "No usable registry -- the spec's sub-steps cannot be validated"))
         return rep
     # C01 —— 设计期全量校验（与 agent 轨 draft_composite / save_composite 同一个函数）
     try:
         result = _forge()._validate(spec, reg)
     except Exception as exc:  # noqa: BLE001
-        rep.add("C01", FAIL, f"spec 校验内核不可用（{type(exc).__name__}: {exc}）")
+        rep.add("C01", FAIL, tr(f"spec 校验内核不可用（{type(exc).__name__}: {exc}）",
+                                f"The spec validation kernel is unavailable ({type(exc).__name__}: {exc})"))
         return rep
     for p in result.get("problems") or []:
         p = str(p)
         if p in collision:
             continue                    # 撞名已在 S05 报过
-        if p.startswith("警告："):
+        from mast.webui.builder_api import is_advisory
+        if is_advisory(p):
             rep.add("C01", WARN, p)
         else:
             rep.add("C01", FAIL, p)
     for st in result.get("steps") or []:
         for w in st.get("warnings") or []:
-            rep.add("C01", WARN, f"步骤 {st.get('id')!r}：{w}")
+            rep.add("C01", WARN, tr(f"步骤 {st.get('id')!r}：{w}", f"Step {st.get('id')!r}: {w}"))
     steps = sorted(_forge()._step_skills(spec.get("nodes")))
     rep.sub_skills = steps
     official = _forge()._OFFICIAL_ORIGINS
@@ -1586,21 +1731,26 @@ def check_spec(spec: dict, *, registry=None) -> ComplianceReport:
             continue                    # 「不存在」已由校验内核报过
         origin = _forge()._origin_of(reg, s)
         if origin not in official:
-            rep.add("C01", FAIL, f"子步 {s} 的来源是 {origin}，不是官方技能 —— 启动时 spec 先于它加载，"
-                                 "这份 spec 会在每次启动时被拒绝注册")
+            rep.add("C01", FAIL, tr(f"子步 {s} 的来源是 {origin}，不是官方技能 —— 启动时 spec 先于它加载，"
+                                    "这份 spec 会在每次启动时被拒绝注册",
+                                    f"The origin of sub-step {s} is {origin}, not an official skill -- at startup the spec loads before it, "
+                                    "so this spec would be refused registration on every startup"))
     # V03
     rep.ran("V03")
     subs = {s: skill_footprint(reg, s) for s in steps if reg.has(s)}
     for s, sf in subs.items():
         if sf.basis == "declared":
-            rep.add("V03", INFO, f"子步 {s} 的足迹按其 category 推断为 {sf.effective}")
+            rep.add("V03", INFO, tr(f"子步 {s} 的足迹按其 category 推断为 {sf.effective}",
+                                    f"The footprint of sub-step {s} is inferred from its category as {sf.effective}"))
         elif sf.basis == "none":
-            rep.add("V03", FAIL, f"子步 {s} 的足迹无法判断：{'；'.join(sf.reasons[:2])}")
+            rep.add("V03", FAIL, tr(f"子步 {s} 的足迹无法判断：{'；'.join(sf.reasons[:2])}",
+                                    f"The footprint of sub-step {s} cannot be determined: {'; '.join(sf.reasons[:2])}"))
     fp = _combine(sf.effective for sf in subs.values()) if subs else UNKNOWN
     rep.footprint = fp
     rep.verbs = sorted({v for sf in subs.values() for v in sf.verbs})
     if fp == UNKNOWN:
-        rep.add("V03", FAIL, "足迹无法分类（没有可判断的子步）")
+        rep.add("V03", FAIL, tr("足迹无法分类（没有可判断的子步）",
+                                "The footprint cannot be classified (no sub-step to judge)"))
     # 生效安全级（声明只能收紧，继承自子步最高级）
     try:
         from mast.skills.composite.interpreter import _inherited_safety_level
@@ -1609,7 +1759,7 @@ def check_spec(spec: dict, *, registry=None) -> ComplianceReport:
         rep.extra["safety_level"] = str(spec.get("safety_level") or "").lower()
         rep.extra["effective_safety_level"] = str(getattr(eff, "value", eff)).lower()
     except Exception as exc:  # noqa: BLE001
-        rep.add("C01", WARN, f"生效安全级推不出来（{exc}）")
+        rep.add("C01", WARN, tr(f"生效安全级推不出来（{exc}）", f"The effective safety level cannot be derived ({exc})"))
     return rep
 
 
@@ -1631,7 +1781,7 @@ def check_contrib_dir(path, *, registry=None, run_smoke: bool = True) -> Complia
     rep = ComplianceReport(target=d.as_posix(), kind="contrib")
     rep.ran("M01", "M02", "M03")
     if not d.is_dir():
-        rep.add("M01", FAIL, f"{d} 不是目录")
+        rep.add("M01", FAIL, tr(f"{d} 不是目录", f"{d} is not a directory"))
         return rep
     entries = sorted(p for p in d.iterdir() if p.name not in _IGNORED_ENTRIES)
     manifest = _check_manifest(d, rep)
@@ -1641,29 +1791,37 @@ def check_contrib_dir(path, *, registry=None, run_smoke: bool = True) -> Complia
         kind = "python" if py.is_file() else ("spec" if js.is_file() else "")
     # 目录内容
     if kind == "python" and not py.is_file():
-        rep.add("M02", FAIL, "manifest 说 kind=python，但目录里没有 skill.py")
+        rep.add("M02", FAIL, tr("manifest 说 kind=python，但目录里没有 skill.py",
+                                "manifest says kind=python, but there is no skill.py in the directory"))
     if kind == "spec" and not js.is_file():
-        rep.add("M02", FAIL, "manifest 说 kind=spec，但目录里没有 spec.json")
+        rep.add("M02", FAIL, tr("manifest 说 kind=spec，但目录里没有 spec.json",
+                                "manifest says kind=spec, but there is no spec.json in the directory"))
     if py.is_file() and js.is_file():
-        rep.add("M02", FAIL, "skill.py 与 spec.json 只能二选一")
+        rep.add("M02", FAIL, tr("skill.py 与 spec.json 只能二选一", "Only one of skill.py and spec.json is allowed"))
     tests = [p.name for p in entries if p.is_file() and p.name.startswith("test_") and p.suffix == ".py"]
     for p in entries:
         if p.is_dir():
-            rep.add("M02", FAIL, f"目录里有子目录 {p.name}/ —— 安装只拷 skill.py / spec.json，子目录不会跟过去")
+            rep.add("M02", FAIL, tr(f"目录里有子目录 {p.name}/ —— 安装只拷 skill.py / spec.json，子目录不会跟过去",
+                                    f"The directory contains a subdirectory {p.name}/ -- installation only copies skill.py / spec.json, subdirectories do not follow"))
         elif p.suffix == ".py" and p.name not in ("skill.py", "conftest.py") and p.name not in tests:
-            rep.add("M02", FAIL, f"多余的模块 {p.name} —— 安装时只拷 skill.py，它 import 不到这个文件")
+            rep.add("M02", FAIL, tr(f"多余的模块 {p.name} —— 安装时只拷 skill.py，它 import 不到这个文件",
+                                    f"Extra module {p.name} -- installation only copies skill.py, which cannot import this file"))
         elif p.name == "conftest.py":
-            rep.add("M02", FAIL, "技能目录里不放 conftest.py（contrib/conftest.py 已经管路径与 nanonis_spm 替身）")
+            rep.add("M02", FAIL, tr("技能目录里不放 conftest.py（contrib/conftest.py 已经管路径与 nanonis_spm 替身）",
+                                    "Do not put conftest.py in a skill directory (contrib/conftest.py already handles paths and the nanonis_spm stand-in)"))
     if not tests:
-        rep.add("M02", FAIL, "没有测试文件（test_*.py）—— 最低验证级别是 unit-tested")
+        rep.add("M02", FAIL, tr("没有测试文件（test_*.py）—— 最低验证级别是 unit-tested",
+                                "No test file (test_*.py) -- the minimum verification level is unit-tested"))
     listed = manifest.get("tests")
     if isinstance(listed, list):
         for t in listed:
             if not isinstance(t, str) or not (d / t).is_file():
-                rep.add("M02", FAIL, f"manifest.tests 里的 {t!r} 在目录里不存在")
+                rep.add("M02", FAIL, tr(f"manifest.tests 里的 {t!r} 在目录里不存在",
+                                        f"{t!r} in manifest.tests does not exist in the directory"))
     m_name = manifest.get("name")
     if isinstance(m_name, str) and m_name != d.name:
-        rep.add("M02", FAIL, f"manifest.name {m_name!r} 与目录名 {d.name!r} 不一致")
+        rep.add("M02", FAIL, tr(f"manifest.name {m_name!r} 与目录名 {d.name!r} 不一致",
+                                f"manifest.name {m_name!r} does not match the directory name {d.name!r}"))
     # 代码 / spec 本体
     sub: ComplianceReport | None = None
     text = ""
@@ -1672,13 +1830,14 @@ def check_contrib_dir(path, *, registry=None, run_smoke: bool = True) -> Complia
         sub = check_python_source(text, filename=f"{d.name}.py", registry=registry,
                                   run_smoke=run_smoke, contribution=True)
         if re.search(r"^\s*(?:from|import)\s+contrib\b", text, re.M):
-            rep.add("M02", FAIL, "skill.py import 了 contrib 下的东西 —— 装到 config/custom_skills/ 之后找不到它")
+            rep.add("M02", FAIL, tr("skill.py import 了 contrib 下的东西 —— 装到 config/custom_skills/ 之后找不到它",
+                                    "skill.py imports something under contrib -- it cannot be found once installed in config/custom_skills/"))
     elif kind == "spec" and js.is_file():
         text = js.read_text(encoding="utf-8")
         try:
             data = json.loads(text)
         except json.JSONDecodeError as exc:
-            rep.add("C01", FAIL, f"spec.json 不是合法 JSON：{exc}", exc.lineno)
+            rep.add("C01", FAIL, tr(f"spec.json 不是合法 JSON：{exc}", f"spec.json is not valid JSON: {exc}"), exc.lineno)
             data = None
         if data is not None:
             sub = check_spec(data, registry=registry)
@@ -1695,94 +1854,108 @@ def check_contrib_dir(path, *, registry=None, run_smoke: bool = True) -> Complia
     if sub is not None:
         real_name = sub.skill_name
         if isinstance(m_name, str) and real_name and m_name != real_name:
-            rep.add("M02", FAIL, f"manifest.name {m_name!r} 与技能自己的名字 {real_name!r} 不一致")
+            rep.add("M02", FAIL, tr(f"manifest.name {m_name!r} 与技能自己的名字 {real_name!r} 不一致",
+                                    f"manifest.name {m_name!r} does not match the skill's own name {real_name!r}"))
         m_sl = manifest.get("safety_level")
         real_sl = sub.extra.get("effective_safety_level") or sub.extra.get("safety_level")
         if isinstance(m_sl, str) and real_sl and m_sl != real_sl:
-            what = "生效安全级（继承自子步）" if kind == "spec" else "代码里的 safety_level"
-            rep.add("M02", FAIL, f"manifest.safety_level={m_sl!r}，而{what}是 {real_sl!r}")
+            what = (tr("生效安全级（继承自子步）", "the effective safety level (inherited from sub-steps)")
+                    if kind == "spec" else tr("代码里的 safety_level", "the safety_level in the code"))
+            rep.add("M02", FAIL, tr(f"manifest.safety_level={m_sl!r}，而{what}是 {real_sl!r}",
+                                    f"manifest.safety_level={m_sl!r}, but {what} is {real_sl!r}"))
         m_ver = manifest.get("version")
         if kind == "python" and isinstance(m_ver, str) and sub.extra.get("version") \
                 and m_ver != sub.extra["version"]:
-            rep.add("M02", FAIL, f"manifest.version {m_ver!r} 与 metadata.version {sub.extra['version']!r} 不一致")
+            rep.add("M02", FAIL, tr(f"manifest.version {m_ver!r} 与 metadata.version {sub.extra['version']!r} 不一致",
+                                    f"manifest.version {m_ver!r} does not match metadata.version {sub.extra['version']!r}"))
         m_fp = manifest.get("footprint")
         rep.ran("V03")
         if isinstance(m_fp, str) and m_fp in FOOTPRINTS:
             if sub.footprint == UNKNOWN:
-                rep.add("V03", FAIL, f"manifest 声明足迹 {m_fp}，但代码的足迹无法静态核实")
+                rep.add("V03", FAIL, tr(f"manifest 声明足迹 {m_fp}，但代码的足迹无法静态核实",
+                                        f"manifest declares footprint {m_fp}, but the code's footprint cannot be verified statically"))
             elif sub.footprint != m_fp:
-                rep.add("V03", FAIL, f"manifest 声明足迹 {m_fp}，而代码的足迹是 {sub.footprint}")
+                rep.add("V03", FAIL, tr(f"manifest 声明足迹 {m_fp}，而代码的足迹是 {sub.footprint}",
+                                        f"manifest declares footprint {m_fp}, but the code's footprint is {sub.footprint}"))
     return rep
 
 
 def _check_manifest(d: Path, rep: ComplianceReport) -> dict:
     p = d / "manifest.json"
     if not p.is_file():
-        rep.add("M01", FAIL, "缺 manifest.json")
+        rep.add("M01", FAIL, tr("缺 manifest.json", "manifest.json is missing"))
         return {}
     try:
         m = json.loads(p.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        rep.add("M01", FAIL, f"manifest.json 不是合法 JSON：{exc}", exc.lineno)
+        rep.add("M01", FAIL, tr(f"manifest.json 不是合法 JSON：{exc}", f"manifest.json is not valid JSON: {exc}"), exc.lineno)
         return {}
     if not isinstance(m, dict):
-        rep.add("M01", FAIL, "manifest.json 要是一个 JSON 对象")
+        rep.add("M01", FAIL, tr("manifest.json 要是一个 JSON 对象", "manifest.json must be a JSON object"))
         return {}
     for k, required in MANIFEST_KEYS.items():
         if required and k not in m:
-            rep.add("M01", FAIL, f"manifest 缺必填键 {k!r}")
+            rep.add("M01", FAIL, tr(f"manifest 缺必填键 {k!r}", f"manifest lacks the required key {k!r}"))
     for k in m:
         if k not in MANIFEST_KEYS:
-            rep.add("M01", WARN, f"manifest 里有未知键 {k!r}（拼错了？）")
+            rep.add("M01", WARN, tr(f"manifest 里有未知键 {k!r}（拼错了？）", f"manifest has an unknown key {k!r} (misspelled?)"))
 
     def bad(key: str, why: str) -> None:
-        rep.add("M01", FAIL, f"manifest.{key}：{why}")
+        rep.add("M01", FAIL, tr(f"manifest.{key}：{why}", f"manifest.{key}: {why}"))
 
     if "schema" in m and m["schema"] != 1:
-        bad("schema", "只认 1")
+        bad("schema", tr("只认 1", "only 1 is accepted"))
     for k in ("name", "summary"):
         if k in m and (not isinstance(m[k], str) or not m[k].strip()):
-            bad(k, "要是非空字符串")
+            bad(k, tr("要是非空字符串", "must be a non-empty string"))
     if "summary_zh" in m and not isinstance(m["summary_zh"], str):
-        bad("summary_zh", "要是字符串")
+        bad("summary_zh", tr("要是字符串", "must be a string"))
     if "kind" in m and m["kind"] not in _MANIFEST_KINDS:
-        bad("kind", f"只能是 {_MANIFEST_KINDS}")
+        bad("kind", tr(f"只能是 {_MANIFEST_KINDS}", f"can only be {_MANIFEST_KINDS}"))
     if "version" in m and not (isinstance(m["version"], str) and _SEMVER.match(m["version"])):
-        bad("version", "要是 X.Y.Z 形式的字符串")
+        bad("version", tr("要是 X.Y.Z 形式的字符串", "must be a string of the form X.Y.Z"))
     if "safety_level" in m and m["safety_level"] not in _SAFETY_NAMES:
-        bad("safety_level", f"只能是 {_SAFETY_NAMES}")
+        bad("safety_level", tr(f"只能是 {_SAFETY_NAMES}", f"can only be {_SAFETY_NAMES}"))
     if "footprint" in m and m["footprint"] not in FOOTPRINTS:
-        bad("footprint", f"只能是 {FOOTPRINTS}")
+        bad("footprint", tr(f"只能是 {FOOTPRINTS}", f"can only be {FOOTPRINTS}"))
     if "authors" in m:
         a = m["authors"]
         if not isinstance(a, list) or not a or not all(
                 isinstance(x, dict) and isinstance(x.get("name"), str) and x["name"].strip() for x in a):
-            bad("authors", "要是非空列表，每项是带非空 name 的对象")
+            bad("authors", tr("要是非空列表，每项是带非空 name 的对象",
+                              "must be a non-empty list whose items are objects with a non-empty name"))
     if "license" in m and m["license"] != "MIT":
-        bad("license", "只收 MIT（入站许可 = 出站许可）")
+        bad("license", tr("只收 MIT（入站许可 = 出站许可）", "only MIT is accepted (inbound license = outbound license)"))
     if "verification" in m and m["verification"] not in _MANIFEST_VERIFICATION:
-        bad("verification", f"只能是 {_MANIFEST_VERIFICATION}（维护者上机验证 = 毕业，不在 contrib 里）")
+        bad("verification", tr(f"只能是 {_MANIFEST_VERIFICATION}（维护者上机验证 = 毕业，不在 contrib 里）",
+                               f"can only be {_MANIFEST_VERIFICATION} (verification on the instrument by a maintainer = graduation, not in contrib)"))
     if m.get("verification") == "contributor-hardware":
         hn = m.get("hardware_notes")
         if not isinstance(hn, str) or not hn.strip():
-            bad("hardware_notes", "verification=contributor-hardware 时必填：在什么仪器 / 控制器版本上、怎么验的")
+            bad("hardware_notes", tr("verification=contributor-hardware 时必填：在什么仪器 / 控制器版本上、怎么验的",
+                                     "required when verification=contributor-hardware: on what instrument / controller version and how it was verified"))
     if "tests" in m and not (isinstance(m["tests"], list) and m["tests"]
                              and all(isinstance(t, str) for t in m["tests"])):
-        bad("tests", "要是非空的文件名列表")
+        bad("tests", tr("要是非空的文件名列表", "must be a non-empty list of file names"))
     if "policy" in m:
         pol = m["policy"]
         if not isinstance(pol, dict):
-            bad("policy", "要是对象")
+            bad("policy", tr("要是对象", "must be an object"))
         else:
             for k in _MANIFEST_POLICY_KEYS:
                 if k not in pol:
-                    bad("policy", f"缺 {k!r}")
+                    bad("policy", tr(f"缺 {k!r}", f"lacks {k!r}"))
                 elif pol[k] is not True:
                     rep.add("M03", FAIL, {
-                        "original_work": "policy.original_work 不是 true —— contrib 不收论文移植或他人代码的移植",
-                        "no_machine_specific_defaults": "policy.no_machine_specific_defaults 不是 true —— "
-                                                        "默认值里不能有某台仪器的标定值 / 增益 / 量程",
-                        "accepts_inbound_license": "policy.accepts_inbound_license 不是 true —— 投稿按 MIT 入站，"
-                                                   "且可能被收进闭源 / 商业发行版",
+                        "original_work": tr("policy.original_work 不是 true —— contrib 不收论文移植或他人代码的移植",
+                                            "policy.original_work is not true -- contrib does not accept ports of papers or of other people's code"),
+                        "no_machine_specific_defaults": tr("policy.no_machine_specific_defaults 不是 true —— "
+                                                           "默认值里不能有某台仪器的标定值 / 增益 / 量程",
+                                                           "policy.no_machine_specific_defaults is not true -- "
+                                                           "defaults must not contain one instrument's calibration values / gains / ranges"),
+                        "accepts_inbound_license": tr("policy.accepts_inbound_license 不是 true —— 投稿按 MIT 入站，"
+                                                      "且可能被收进闭源 / 商业发行版",
+                                                      "policy.accepts_inbound_license is not true -- contributions come in under MIT "
+                                                      "and may be taken into closed-source / commercial distributions"),
                     }[k])
     return m

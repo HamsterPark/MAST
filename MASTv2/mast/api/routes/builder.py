@@ -40,6 +40,7 @@ NOTE — deliberately NOT ported here (need a subsystem unreachable standalone):
 
 from __future__ import annotations
 
+from mast.i18n import tr
 import logging
 
 from fastapi import APIRouter, Query, Request
@@ -108,7 +109,7 @@ def _save_spec(
     if name and spec_dict.get("name") != name:
         return CompositeSaveResult(
             ok=False, name=name, error="name_mismatch",
-            message="URL 中的名字与 spec.name 不一致", degraded=False)
+            message=tr("URL 中的名字与 spec.name 不一致", "The name in the URL does not match spec.name"), degraded=False)
     name = spec_dict["name"]
 
     # Lazy-import the kept core; absence ⇒ degrade (never 500).
@@ -135,7 +136,7 @@ def _save_spec(
         if require_new and store.exists(name):
             return CompositeSaveResult(
                 ok=False, name=name, error="already_exists",
-                message=f"组合技能 {name!r} 已存在——改用更新或换名",
+                message=tr(f"组合技能 {name!r} 已存在——改用更新或换名", f"Composite skill {name!r} already exists - update it or choose another name"),
                 degraded=False)
 
         # Design-time lint (fail-closed; an invalid spec is NOT degradation).
@@ -184,7 +185,7 @@ def _save_spec(
             pass
         return CompositeSaveResult(
             ok=True, name=saved.name, version=saved.version,
-            hot_registered="已热注册" in msg, message=msg.strip(),
+            hot_registered=tr("已热注册", "Hot-registered.") in msg, message=msg.strip(),
             problems=list(report.get("problems") or []),
             steps=_report_steps(report), degraded=False)
     except Exception as exc:
@@ -296,7 +297,7 @@ async def validate_builder_spec(
     except Exception as exc:
         logger.warning("builder validate failed: %s", exc)
         return BuilderValidateResponse(
-            ok=False, problems=[f"校验后端不可用：{exc}"], degraded=True)
+            ok=False, problems=[tr(f"校验后端不可用：{exc}", f"Validation backend unavailable: {exc}")], degraded=True)
 
 
 # ── GET /api/builder/catalog — paginated palette catalog ──────────────────────

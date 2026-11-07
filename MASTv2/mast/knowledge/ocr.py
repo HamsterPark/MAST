@@ -179,8 +179,12 @@ def ocr_available() -> bool:
     """Best-effort readiness probe: fitz (render) + httpx (transport) + a key.
 
     Used by the ingest-status endpoint so the panel can tell the operator whether
-    a scanned PDF can be OCR-recovered. Never raises.
+    a scanned PDF can be OCR-recovered. Never raises. False while legacy features
+    are off: the OCR backend is a vision LLM (the internal LLM is disabled).
     """
+    from mast.legacy_gate import internal_llm_enabled
+    if not internal_llm_enabled():
+        return False
     try:
         import fitz  # noqa: F401  (PyMuPDF)
         import httpx  # noqa: F401
@@ -359,6 +363,14 @@ def ocr_pdf_pages(
         page_ocr: injectable ``data_uri -> text`` (tests / custom transport).
                   ``None`` → the default DashScope qwen-vl-ocr call.
     """
+    # The default transport is a vision LLM: while legacy features are off
+    # (internal LLM disabled, mast/legacy_gate.py) nothing is rendered or sent.
+    if page_ocr is None:
+        from mast.legacy_gate import internal_llm_enabled
+        if not internal_llm_enabled():
+            logger.warning("OCR: legacy features are off (internal LLM disabled) — "
+                           "skipping OCR for %s", Path(pdf_path).name)
+            return []
     pages_png = _render_pages(pdf_path, dpi=dpi, max_pages=max_pages)
     if not pages_png:
         return []

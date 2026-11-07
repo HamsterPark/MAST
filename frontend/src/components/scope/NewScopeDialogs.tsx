@@ -1,12 +1,17 @@
-// 新建实验 / 新建样品的严谨确认弹窗。
+// Confirmation dialogs for creating an experiment or a sample.
 //
-// 提交前展示操作后果及已有同名对象，避免重复创建。
+// The point is not an extra click but showing the consequences, and any existing
+// item with the same name, before the user commits. Creating always without a
+// check used to produce duplicate experiments minutes apart; the preflight block
+// prevents that at the source.
 //
-// 范式参照 admin/DeviceScanner：标题即行动指令、明说会发生什么、主按钮自述后果。
+// Pattern follows admin/DeviceScanner: the title is the action, the body says what
+// will happen, and the primary button describes the outcome.
 
 import { useState } from "react";
 import { Field, SelectField, TextField } from "../controls";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { tr } from "@/lib/i18n";
 import {
   useCreateExperiment,
   useCreateSample,
@@ -61,8 +66,9 @@ export function NewExperimentDialog({
       await create.mutateAsync({ name: name.trim(), goal: goal.trim() });
       reset();
     } catch (e) {
-      // 失败时弹窗保持打开 + 就地显示原因。静默失败是这里最贵的失败模式。
-      setErr(errText(e) || "新建失败——请重试或检查服务状态");
+      // Keep the dialog open and show the reason inline; a silent failure is the
+      // costliest failure mode here.
+      setErr(errText(e) || tr("新建失败——请重试或检查服务状态", "Creation failed. Retry or check the service status."));
     }
   }
 
@@ -73,7 +79,7 @@ export function NewExperimentDialog({
       await switchTo.mutateAsync({ experimentId: existing.id });
       reset();
     } catch (e) {
-      setErr(errText(e) || "切换失败");
+      setErr(errText(e) || tr("切换失败", "Switch failed"));
     }
   }
 
@@ -81,43 +87,50 @@ export function NewExperimentDialog({
     <ConfirmDialog
       open={open}
       onClose={reset}
-      title="新建实验 — 请确认这是一个新项目"
-      confirmLabel="创建实验并切换过去"
+      title={tr("新建实验 — 请确认这是一个新项目", "New experiment: confirm this is a new project")}
+      confirmLabel={tr("创建实验并切换过去", "Create experiment and switch to it")}
       busy={create.isPending}
-      busyLabel="创建中…"
+      busyLabel={tr("创建中…", "Creating…")}
       disabled={name.trim().length === 0}
       error={err}
       onConfirm={doCreate}
     >
-      <Field label="实验名称">
-        <TextField value={name} onChange={setName} placeholder="例如：NiI2 质量表征" />
+      <Field label={tr("实验名称", "Experiment name")}>
+        <TextField value={name} onChange={setName} placeholder={tr("例如：NiI2 质量表征", "e.g. NiI2 quality characterization")} />
       </Field>
-      <Field label="目标（可选）">
-        <TextField value={goal} onChange={setGoal} placeholder="想验证什么" />
+      <Field label={tr("目标（可选）", "Goal (optional)")}>
+        <TextField value={goal} onChange={setGoal} placeholder={tr("想验证什么", "What do you want to verify")} />
       </Field>
 
       {existing && (
         <div className="rounded border border-mast-warn/40 bg-mast-warn/10 px-3 py-2 text-sm">
           <p className="text-mast-text">
-            已存在实验「{existing.name}」—— {existing.sample_count} 个样品 ·{" "}
-            {existing.action_count} 条动作
+            {tr(
+              `已存在实验「${existing.name}」—— ${existing.sample_count} 个样品 · ${existing.action_count} 条动作`,
+              `Experiment "${existing.name}" already exists: ${existing.sample_count} samples · ${existing.action_count} actions`,
+            )}
           </p>
           <p className="mt-1 text-xs text-mast-muted">
-            要继续做这个实验，还是确实要另开一个新项目？
+            {tr("要继续做这个实验，还是确实要另开一个新项目？", "Continue this experiment, or really start a separate new project?")}
           </p>
           <button
             className="mt-2 rounded-mast-ctl bg-mast-accent px-3 py-1.5 text-sm font-semibold text-mast-accent-ink hover:opacity-90"
             onClick={doReuse}
             disabled={switchTo.isPending}
           >
-            {switchTo.isPending ? "切换中…" : "继续该实验"}
+            {switchTo.isPending ? tr("切换中…", "Switching…") : tr("继续该实验", "Continue this experiment")}
           </button>
         </div>
       )}
 
       <p className="text-xs text-mast-faint">
-        {currentName ? `当前实验「${currentName}」不会被关闭，你随时可以切回去——实验永远可以继续。` : "新建后，之后的扫描/谱学都会记到这个实验下。"}
-        {" 不会结束任何实验，也不会影响已有的对话。"}
+        {currentName
+          ? tr(
+              `当前实验「${currentName}」不会被关闭，你随时可以切回去——实验永远可以继续。`,
+              `The current experiment "${currentName}" is not closed; you can switch back at any time.`,
+            )
+          : tr("新建后，之后的扫描/谱学都会记到这个实验下。", "After creation, later scans and spectroscopy are recorded under this experiment.")}
+        {tr(" 不会结束任何实验，也不会影响已有的对话。", " No experiment is ended and existing conversations are unaffected.")}
       </p>
     </ConfirmDialog>
   );
@@ -152,7 +165,7 @@ export function NewSampleDialog({
 
   async function doCreate() {
     if (!experimentId) {
-      setErr("没有当前实验——请先新建或选择一个实验");
+      setErr(tr("没有当前实验——请先新建或选择一个实验", "No current experiment. Create or select one first."));
       return;
     }
     setErr(null);
@@ -165,7 +178,7 @@ export function NewSampleDialog({
       });
       reset();
     } catch (e) {
-      setErr(errText(e) || "新建样品失败——请重试");
+      setErr(errText(e) || tr("新建样品失败——请重试", "Sample creation failed. Please retry."));
     }
   }
 
@@ -173,32 +186,32 @@ export function NewSampleDialog({
     <ConfirmDialog
       open={open}
       onClose={reset}
-      title={`在实验「${experimentName || "—"}」下新建样品 — 请确认`}
-      confirmLabel="创建样品并切换过去"
+      title={tr(`在实验「${experimentName || "—"}」下新建样品 — 请确认`, `New sample in experiment "${experimentName || "—"}": confirm`)}
+      confirmLabel={tr("创建样品并切换过去", "Create sample and switch to it")}
       busy={create.isPending}
-      busyLabel="创建中…"
+      busyLabel={tr("创建中…", "Creating…")}
       disabled={name.trim().length === 0 || !experimentId}
       error={err}
       onConfirm={doCreate}
     >
-      <Field label="样品名称">
-        <TextField value={name} onChange={setName} placeholder="例如：film-A" />
+      <Field label={tr("样品名称", "Sample name")}>
+        <TextField value={name} onChange={setName} placeholder={tr("例如：film-A", "e.g. film-A")} />
       </Field>
-      <Field label="类型">
+      <Field label={tr("类型", "Type")}>
         <SelectField
           value={type}
           onChange={setType}
-          options={SAMPLE_TYPES.map((t) => ({ value: t, label: t || "（未分类）" }))}
+          options={SAMPLE_TYPES.map((t) => ({ value: t, label: t || tr("（未分类）", "(uncategorized)") }))}
         />
       </Field>
-      <Field label="描述（可选）">
-        <TextField value={desc} onChange={setDesc} placeholder="制备方法 / 来源" />
+      <Field label={tr("描述（可选）", "Description (optional)")}>
+        <TextField value={desc} onChange={setDesc} placeholder={tr("制备方法 / 来源", "Preparation / source")} />
       </Field>
       <p className="text-xs text-mast-faint">
         {currentSampleName
-          ? `当前样品「${currentSampleName}」不会被结束，可随时切回。`
-          : "创建后它将成为当前样品。"}
-        {" 新样品的数据会存进实验文件夹下它自己的目录，扫描文件名也会随之改变。"}
+          ? tr(`当前样品「${currentSampleName}」不会被结束，可随时切回。`, `The current sample "${currentSampleName}" is not ended; you can switch back at any time.`)
+          : tr("创建后它将成为当前样品。", "It becomes the current sample once created.")}
+        {tr(" 新样品的数据会存进实验文件夹下它自己的目录，扫描文件名也会随之改变。", " Data for the new sample is stored in its own directory under the experiment folder, and scan file names change accordingly.")}
       </p>
     </ConfirmDialog>
   );

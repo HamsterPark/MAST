@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -74,29 +75,42 @@ class MapBarrierHeight(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "在多个位置测量 I–Z 势垒，并在其中一个位置重复测量作为噪声对照。只有比较空间变化与重复测量散布，才能解释差异是否超过测量波动。\n\n重复对照是必需项。surface_side 和 tip_side 分别提示优先检查表面或针尖，证据不足时返回 inconclusive。\n\n每个位置调用 MeasureBarrierHeight，由它确认退开方向、筛除触底点并在可用点不足时拒答；本技能如实计入这些拒答。"
+                tr("在若干个位置各测一条 I–Z 势垒，**并在其中一个位置重复测几次作为噪声标尺**，"
+                "据此回答：压低势垒的那层东西在**针尖**上还是在**表面**上。"
+                "\n\n**重复对照是这个技能的核心，不是可选项。** 例如：多个位置上的 "
+                "φ 的散布很大——单看这个数读不出任何东西；同一位置重复多次"
+                "散布小得多，两者差距足够大，才立得住「空间结构是真的」。"
+                "\n\n**结论直接决定下一步：** `surface_side` ⇒ 换样品能解决、修针不能"
+                "（反复修针没有用）；`tip_side` ⇒ 该处理针尖。"
+                "两者驱动的动作相反，所以中间地带**不硬判**，返回 `inconclusive`。"
+                "\n\n每个位置调用一次 `MeasureBarrierHeight`；它自己会确认退开方向、"
+                "只用未触底的点拟合、可用点不足时拒答。本技能把这些拒答如实计入，"
+                "**不拿「判不了」凑数**。",
+                "Measure one I-Z barrier at each of several positions, **and repeat a few times at one of them as a noise ruler**, to answer: is the layer lowering the barrier on the **tip** or on the **surface**.\n\n**The repeat control is the core of this skill, not optional.** For example: the scatter of φ across positions alone reads as nothing; repeats at one position give a much smaller scatter, and only a clear gap between the two justifies 'the spatial structure is real'.\n\n**The conclusion directly decides the next step:** `surface_side` => changing the sample can fix it, tip conditioning cannot; `tip_side` => deal with the tip. The two drive opposite actions, so the middle ground is **not forced**; it returns `inconclusive`.\n\n`MeasureBarrierHeight` is called once per position; it confirms the withdrawal direction itself, fits only points that have not bottomed out, and refuses to answer when there are too few usable points. This skill counts those refusals honestly and **does not pad with 'cannot judge'**.")
             ),
             parameters=[
                 ParameterSpec(
                     name="sites_nm", type="str",
                     description=(
-                        "位置列表，形如 'x1,y1; x2,y2; …'（nm）。至少 %d 个。"
-                        "建议横跨几百 nm —— 挨得太近量到的是同一块。" % _MIN_SITES),
+                        tr("位置列表，形如 'x1,y1; x2,y2; …'（nm）。至少 %d 个。"
+                        "建议横跨几百 nm —— 挨得太近量到的是同一块。",
+                        "List of positions, of the form 'x1,y1; x2,y2; ...' (nm). At least %d. Suggest spanning a few hundred nm - positions too close together measure the same patch.") % _MIN_SITES),
                     required=True),
                 ParameterSpec(
                     name="repeats", type="int",
                     description=(
-                        "在**第一个位置**重复测的次数，用作噪声标尺。至少 %d 次。"
-                        "**这是判读的分母，省掉它整个结论就没有意义。**" % _MIN_REPEATS),
+                        tr("在**第一个位置**重复测的次数，用作噪声标尺。至少 %d 次。"
+                        "**这是判读的分母，省掉它整个结论就没有意义。**",
+                        "Number of repeats at the **first position**, used as the noise ruler. At least %d. **This is the denominator of the reading; without it the whole conclusion is meaningless.**") % _MIN_REPEATS),
                     required=False, default=6,
                     min_value=_MIN_REPEATS, max_value=20),
                 ParameterSpec(
                     name="bias_v", type="float", unit="V",
-                    description="测量偏压。留空 = 用当前偏压。", required=False,
+                    description=tr("测量偏压。留空 = 用当前偏压。", "Measurement bias. Empty = use the current bias."), required=False,
                     min_value=-10.0, max_value=10.0),
                 ParameterSpec(
                     name="hop_size_m", type="float", unit="m",
-                    description="位置之间用来挪针尖的小扫描视野。",
+                    description=tr("位置之间用来挪针尖的小扫描视野。", "Small scan field of view used to move the tip between positions."),
                     required=False, default=3e-9,
                     min_value=1e-9, max_value=1e-7),
             ],
@@ -126,10 +140,10 @@ class MapBarrierHeight(BaseSkill):
         errors = list(super().validate_params(params) or [])
         sites, bad = self._parse_sites(params.get("sites_nm"))
         if bad:
-            errors.append("sites_nm 里有解析不了的项：%s（每项写成 `x,y`，分号分隔）"
+            errors.append(tr("sites_nm 里有解析不了的项：%s（每项写成 `x,y`，分号分隔）", "sites_nm has items that cannot be parsed: %s (write each as `x,y`, separated by semicolons)")
                           % "; ".join(bad[:4]))
         elif len(sites) < _MIN_SITES:
-            errors.append("至少要 %d 个位置才算得出可信的空间散布（给了 %d）"
+            errors.append(tr("至少要 %d 个位置才算得出可信的空间散布（给了 %d）", "At least %d positions are needed to compute a trustworthy spatial spread (%d given)")
                           % (_MIN_SITES, len(sites)))
         return errors
 
@@ -158,16 +172,18 @@ class MapBarrierHeight(BaseSkill):
         if bad or len(sites) < _MIN_SITES:
             return SkillResult(
                 skill_name="MapBarrierHeight", success=False,
-                error=("sites_nm 至少要 %d 个位置，每项写成 `x,y`（nm），分号分隔。"
-                       "收到 %d 个可用位置%s" % (
+                error=(tr("sites_nm 至少要 %d 个位置，每项写成 `x,y`（nm），分号分隔。"
+                       "收到 %d 个可用位置%s",
+                       "sites_nm needs at least %d positions, each written as `x,y` (nm), separated by semicolons. Received %d usable positions%s") % (
                            _MIN_SITES, len(sites),
-                           "，解析不了的：%s" % "; ".join(bad[:4]) if bad else "")))
+                           tr("，解析不了的：%s", ", could not be parsed: %s") % "; ".join(bad[:4]) if bad else "")))
         repeats = int(params.get("repeats") or 6)
         if repeats < _MIN_REPEATS:
             return SkillResult(
                 skill_name="MapBarrierHeight", success=False,
-                error=("repeats 至少 %d —— 它是判读的**分母**（位置间散布 ÷ 重复散布），"
-                       "次数太少这个分母本身就不可信，整个结论跟着不可信。" % _MIN_REPEATS))
+                error=(tr("repeats 至少 %d —— 它是判读的**分母**（位置间散布 ÷ 重复散布），"
+                       "次数太少这个分母本身就不可信，整个结论跟着不可信。",
+                       "repeats must be at least %d - it is the **denominator** of the reading (spread between positions / repeat spread); with too few repeats the denominator itself is untrustworthy, and so is the whole conclusion.") % _MIN_REPEATS))
         bias_v = params.get("bias_v")
         hop_m = float(params.get("hop_size_m") or 3e-9)
 
@@ -187,25 +203,28 @@ class MapBarrierHeight(BaseSkill):
 
         msg = {
             "surface_side": (
-                "位置间散布是同点重复的 %.1f 倍，提示存在空间变化。应优先检查表面与局部测量条件，不能假定改变针尖形状即可消除差异。"
-                ),
+                tr("位置间散布是同点重复的 %.1f 倍 ⇒ **势垒有真实的空间结构，那层东西在表面上**。"
+                "换样品能解决；修针改的是针尖形状，改不了它。",
+                "Spread between positions is %.1f times that of same-point repeats => **the barrier has real spatial structure; the layer is on the surface**. Changing the sample can fix it; tip conditioning changes the tip shape and cannot.")),
             "tip_side": (
-                "位置间散布只有同点重复的 %.1f 倍 ⇒ **各处一样，跟着针尖走**。"
-                "该处理的是针尖，换地方没用。"),
+                tr("位置间散布只有同点重复的 %.1f 倍 ⇒ **各处一样，跟着针尖走**。"
+                "该处理的是针尖，换地方没用。",
+                "Spread between positions is only %.1f times that of same-point repeats => **the same everywhere, it follows the tip**. The tip is what to deal with; changing place does not help.")),
             "inconclusive": (
-                "位置间散布是同点重复的 %.1f 倍，落在 %.0f–%.0f 之间的灰带里 —— **不硬判**。"
+                tr("位置间散布是同点重复的 %.1f 倍，落在 %.0f–%.0f 之间的灰带里 —— **不硬判**。"
                 "「针尖侧」和「表面侧」驱动的下一步相反（换针尖 vs 换样品），"
-                "猜错要赔一整轮。加位置、加重复次数再来。"),
+                "猜错要赔一整轮。加位置、加重复次数再来。",
+                "Spread between positions is %.1f times that of same-point repeats, in the grey band between %.0f-%.0f - **not forced**. 'Tip side' and 'surface side' drive opposite next steps (change the tip vs change the sample), and a wrong guess costs a whole round. Add positions and repeats and come back.")),
         }.get(verdict)
         if msg and verdict == "inconclusive":
             message = msg % (ratio, _TIP_SIDE_MAX, _SURFACE_SIDE_MIN)
         elif msg:
             message = msg % ratio
         else:
-            message = ("判不了：%s。" % (
-                "重复测没得出可用的 φ" if repeat_spread is None
-                else "各位置没得出足够的 φ" if site_spread is None else "散布算不出来")
-                + "**这不是「没有差别」** —— 没有噪声标尺，位置间的散布读不出任何意义。")
+            message = (tr("判不了：%s。", "Cannot judge: %s.") % (
+                tr("重复测没得出可用的 φ", "the repeats gave no usable φ") if repeat_spread is None
+                else tr("各位置没得出足够的 φ", "the positions did not give enough φ") if site_spread is None else tr("散布算不出来", "the spread cannot be computed"))
+                + tr("**这不是「没有差别」** —— 没有噪声标尺，位置间的散布读不出任何意义。", "**This is not 'no difference'** - without a noise ruler, the spread between positions means nothing."))
 
         import statistics
         return SkillResult(

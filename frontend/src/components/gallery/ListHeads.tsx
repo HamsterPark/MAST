@@ -1,5 +1,4 @@
-// 列表视图的头部：某目录（带「已过完」与目录备注）/ 全部X / 最新一批
-// （旧版兼容格式 app.js renderList 开头那三段）。
+// List-view headers: a directory (with the "reviewed" flag and directory note), all items of a kind, or the latest batch.
 
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -7,6 +6,9 @@ import type { GalleryItem, Kind } from "@/lib/gallery/types";
 import { KLAB, dirLabel, dirnameOf, isDateSeg, lastSeg } from "@/lib/gallery/format";
 import { viewSearch } from "@/lib/gallery/route";
 import { useMarksStore } from "./marksStore";
+import { tr } from "@/lib/i18n";
+
+const EN_KIND: Record<Kind, string> = { f: "frames", s: "spectra", g: "grid spectra" };
 
 export function H1({ children }: { children: React.ReactNode }) {
   return <h1 className="mb-0.5 mt-1 text-[1.35rem] font-semibold text-mast-text">{children}</h1>;
@@ -19,12 +21,12 @@ export function Sub({ children }: { children: React.ReactNode }) {
 export function BackToDirs() {
   return (
     <Link to={{ search: `?${viewSearch({ v: "dirs" })}` }} className="text-sm text-mast-accent hover:underline">
-      ← 目录
+      {tr("← 目录", "← Directories")}
     </Link>
   );
 }
 
-/** 某目录的头：计数、原始目录、「已过完」、目录备注（700 ms 去抖，离开时补存）。 */
+/** Directory header: counts, source directory, "reviewed" flag and directory note (debounced 700 ms, saved on leave). */
 export function DirHead({ d, base }: { d: string; base: GalleryItem[] }) {
   const dv = useMarksStore((s) => s.doc.days[d]);
   const setDay = useMarksStore((s) => s.setDay);
@@ -33,7 +35,7 @@ export function DirHead({ d, base }: { d: string; base: GalleryItem[] }) {
   const noteRef = useRef(note);
   noteRef.current = note;
 
-  // 服务端文档换了（别的标签页改过）且没在输入时，把备注同步过来。
+  // When the server document changed (edited in another tab) and the user is not typing, sync the note.
   const focused = useRef(false);
   useEffect(() => {
     if (!focused.current && !timer.current) setNote(dv?.note ?? "");
@@ -60,15 +62,18 @@ export function DirHead({ d, base }: { d: string; base: GalleryItem[] }) {
     if (it.dup) nd++;
   }
   const sample = base[0];
-  const dayWord = isDateSeg(lastSeg(d)) ? "本日" : "本目录";
+  const isDay = isDateSeg(lastSeg(d));
 
   return (
     <div>
       <BackToDirs />
       <H1>{dirLabel(d)}</H1>
       <Sub>
-        {c.f} 帧{nd ? `（其中重复保存 ${nd}）` : ""} · {c.s} 条谱 · {c.g} 个网格谱 · 原始目录{" "}
-        <span className="font-mono">{sample ? dirnameOf(sample.p) : d}</span> · 点图放大后可用键盘连续标记
+        {tr(`${c.f} 帧`, `${c.f} frames`)}
+        {nd ? tr(`（其中重复保存 ${nd}）`, ` (${nd} duplicate saves)`) : ""} · {tr(`${c.s} 条谱`, `${c.s} spectra`)} ·{" "}
+        {tr(`${c.g} 个网格谱`, `${c.g} grid spectra`)} · {tr("原始目录", "source directory")}{" "}
+        <span className="font-mono">{sample ? dirnameOf(sample.p) : d}</span> ·{" "}
+        {tr("点图放大后可用键盘连续标记", "open an image to mark continuously with the keyboard")}
       </Sub>
       <div className="my-1.5 flex items-start gap-2.5">
         <label className="flex shrink-0 items-center gap-1 whitespace-nowrap text-[13px] text-mast-text">
@@ -77,11 +82,15 @@ export function DirHead({ d, base }: { d: string; base: GalleryItem[] }) {
             checked={!!dv?.done}
             onChange={(e) => setDay(d, { done: e.target.checked, note: noteRef.current })}
           />
-          {dayWord}已过完
+          {isDay ? tr("本日已过完", "Day reviewed") : tr("本目录已过完", "Directory reviewed")}
         </label>
         <textarea
           value={note}
-          placeholder={`${dayWord === "本日" ? "这一天" : "这个目录"}的备注：针尖状态、做了什么、看到了什么…`}
+          placeholder={
+            isDay
+              ? tr("这一天的备注：针尖状态、做了什么、看到了什么…", "Notes for this day: tip state, what was done, what was seen…")
+              : tr("这个目录的备注：针尖状态、做了什么、看到了什么…", "Notes for this directory: tip state, what was done, what was seen…")
+          }
           onFocus={() => (focused.current = true)}
           onBlur={() => {
             focused.current = false;
@@ -102,8 +111,8 @@ export function DirHead({ d, base }: { d: string; base: GalleryItem[] }) {
 export function AllHead({ k }: { k: Kind }) {
   return (
     <div>
-      <H1>全部{KLAB[k]}</H1>
-      <Sub>跨目录，按目录与时间排；方括号里是所在目录。</Sub>
+      <H1>{tr(`全部${KLAB[k]}`, `All ${EN_KIND[k]}`)}</H1>
+      <Sub>{tr("跨目录，按目录与时间排；方括号里是所在目录。", "Across directories, ordered by directory and time; the directory is shown in square brackets.")}</Sub>
     </div>
   );
 }
@@ -112,8 +121,8 @@ export function NewHead({ lastBatch }: { lastBatch: string }) {
   return (
     <div>
       <BackToDirs />
-      <H1>最新一批（{lastBatch} 加入）</H1>
-      <Sub>这次更新新到的全部文件。</Sub>
+      <H1>{tr(`最新一批（${lastBatch} 加入）`, `Latest batch (added ${lastBatch})`)}</H1>
+      <Sub>{tr("这次更新新到的全部文件。", "All files that arrived in this update.")}</Sub>
     </div>
   );
 }

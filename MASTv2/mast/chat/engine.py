@@ -205,8 +205,8 @@ class ConversationEngine:
         """回合结束就摘掉 —— **必须在 finally 里调**。
 
         留着的话,下一个回合在事件被 ``_abort_event()`` clear 之前的那一小段里,
-        会读到上一回合的事件;更糟的是一个已经 set 过的陈旧事件会让新回合的第一个
-        技能**立刻自我中止**,而症状是「它什么都没干就说被停了」。
+        会读到上一回合的事件;另外,一个已经 set 过的陈旧事件会让新回合的第一个
+        技能**立刻自我中止**(表现为没执行任何动作就报告已停止)。
         """
         if not conversation_id:
             return
@@ -726,7 +726,7 @@ class ConversationEngine:
             # 既不 touch（会话列表的 updated_at 不动）也不广播 private_turn ——
             # 两个信号源同时缺席，别的窗口再也看不到用户刚说的那句话（它已经在
             # checkpointer 里了）。``stream_turn`` 的同一条路径一直是调 _finish 的
-            # （见上文 except 分支），两边不对称纯属遗漏。/#36 的同族。
+            # （见上文 except 分支），两边应保持一致。
             try:
                 final_render = render_history(self._state_messages(graph, cfg))
             except Exception:  # noqa: BLE001
@@ -783,7 +783,7 @@ class ConversationEngine:
         self._mirror_turn(conversation_id, conv, thread_id)
         # 私聊的正文落在 checkpointer 里，不经过 ConversationStore.append_message，
         # 所以那条转录推送对它一次都不会发 —— 别的窗口（另一台机器、同一台的
-        # 另一个标签页）因此永远看不到这一轮。。
+        # 另一个标签页）因此永远看不到这一轮。
         # 放在 touch 之后：先落库再广播，收到通知的人读到的一定是新状态。
         try:
             from mast.chat.store import publish_private_turn_finished

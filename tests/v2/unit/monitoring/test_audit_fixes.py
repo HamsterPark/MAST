@@ -406,7 +406,7 @@ def test_a_segment_that_is_mostly_gap_is_not_judged(tmp_path):
     st = CurrentMonitorStore(tmp_path / "m.sqlite", tmp_path)
     ST.set_store_for_test(st)
     try:
-        th = MonitorThresholds.from_mapping({"cm_crit_consecutive": 1.0})
+        th = MonitorThresholds.from_mapping({"cm_crit_consecutive": 1.0, "cm_alerts_enabled": 1.0})
         svc = S.CurrentMonitorService(
             pool_getter=lambda: None, state_getter=lambda: None,
             store_getter=lambda: st, thresholds_getter=lambda: th)
@@ -435,7 +435,7 @@ def test_suppressed_segments_still_break_the_critical_streak(tmp_path):
     st = CurrentMonitorStore(tmp_path / "m.sqlite", tmp_path)
     ST.set_store_for_test(st)
     try:
-        th = MonitorThresholds.from_mapping({"cm_crit_consecutive": 2.0})
+        th = MonitorThresholds.from_mapping({"cm_crit_consecutive": 2.0, "cm_alerts_enabled": 1.0})
         svc = S.CurrentMonitorService(
             pool_getter=lambda: None, state_getter=lambda: None,
             store_getter=lambda: st, thresholds_getter=lambda: th)

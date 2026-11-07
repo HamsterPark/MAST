@@ -18,6 +18,7 @@ any absence/raise returns a valid degraded response (``degraded=True``), never a
 from __future__ import annotations
 
 import logging
+from mast.i18n import tr
 import threading
 from typing import Any
 
@@ -176,11 +177,11 @@ def _relay_wish_async(board: Any, rec: dict, payload: WishCreate) -> None:
 def submit_wish(payload: WishCreate, request: Request) -> WishCreateResponse:
     text = (payload.text or "").strip()
     if not text:
-        return WishCreateResponse(ok=False, message="请先填写内容")
+        return WishCreateResponse(ok=False, message=tr("请先填写内容", "Please enter some content first"))
 
     board = _get_board(request.app.state.ctx)
     if board is None:
-        return WishCreateResponse(ok=False, message="心愿单暂不可用", degraded=True)
+        return WishCreateResponse(ok=False, message=tr("心愿单暂不可用", "Wishlist temporarily unavailable"), degraded=True)
 
     try:
         rec = board.add_wish(
@@ -190,11 +191,11 @@ def submit_wish(payload: WishCreate, request: Request) -> WishCreateResponse:
         )
     except Exception as exc:
         logger.warning("add_wish failed: %s", exc)
-        return WishCreateResponse(ok=False, message="提交失败", degraded=True)
+        return WishCreateResponse(ok=False, message=tr("提交失败", "Submit failed"), degraded=True)
 
     if not isinstance(rec, dict) or rec.get("error"):
-        msg = rec.get("error") if isinstance(rec, dict) else "提交失败"
-        return WishCreateResponse(ok=False, message=str(msg or "提交失败"))
+        msg = rec.get("error") if isinstance(rec, dict) else tr("提交失败", "Submit failed")
+        return WishCreateResponse(ok=False, message=str(msg or tr("提交失败", "Submit failed")))
 
     # Recorded locally (queued). Relay to the update server runs OFF the request
     # path so a slow/offline network never pins the handler.
@@ -206,7 +207,7 @@ def submit_wish(payload: WishCreate, request: Request) -> WishCreateResponse:
     return WishCreateResponse(
         ok=True,
         wish=_to_wish(rec),
-        message="已提交，正在上报到更新服务器…",
+        message=tr("已提交，正在上报到更新服务器…", "Submitted; reporting to the update server..."),
         degraded=False,
     )
 
@@ -221,7 +222,7 @@ def resolve_request(
 ) -> RequestResolveResponse:
     board = _get_board(request.app.state.ctx)
     if board is None:
-        return RequestResolveResponse(ok=False, message="心愿单暂不可用", degraded=True)
+        return RequestResolveResponse(ok=False, message=tr("心愿单暂不可用", "Wishlist temporarily unavailable"), degraded=True)
 
     try:
         rec = board.resolve_agent_request(
@@ -230,15 +231,15 @@ def resolve_request(
         )
     except Exception as exc:
         logger.warning("resolve_agent_request failed: %s", exc)
-        return RequestResolveResponse(ok=False, message="处理失败", degraded=True)
+        return RequestResolveResponse(ok=False, message=tr("处理失败", "Action failed"), degraded=True)
 
     if not isinstance(rec, dict) or rec.get("error"):
-        msg = rec.get("error") if isinstance(rec, dict) else "处理失败"
-        return RequestResolveResponse(ok=False, message=str(msg or "处理失败"))
+        msg = rec.get("error") if isinstance(rec, dict) else tr("处理失败", "Action failed")
+        return RequestResolveResponse(ok=False, message=str(msg or tr("处理失败", "Action failed")))
 
     # Deliver the operator's answer BACK to the asking agent.
     #
-    # TWO paths now, because the live one is not enough : the interjection
+    # TWO paths now, because the live one is not enough: the interjection
     # relay below only fires if a run happens to be STREAMING at the moment the
     # operator clicks resolve. Resolve it after the run ends — the normal case,
     # since the agent asked precisely because it was blocked and stopped — and the
@@ -275,13 +276,13 @@ def resolve_request(
                         delivered = True
         except Exception as exc:  # noqa: BLE001 — delivery is best-effort
             logger.debug("wishlist note delivery failed: %s", exc)
-        delivery = ("；答复已实时转发给运行中的智能体" if delivered else
-                    "；当前无运行中的任务——答复已保存，智能体下次运行时会通过"
-                    "check_my_requests 读到（不必再手动复述）")
+        delivery = (tr("；答复已实时转发给运行中的智能体", "; the reply was forwarded to the running agent in real time") if delivered else
+                    tr("；当前无运行中的任务——答复已保存，智能体下次运行时会通过"
+                    "check_my_requests 读到（不必再手动复述）", "; no task is running right now, so the reply is saved and the agent will read it via check_my_requests on its next run (no need to repeat it by hand)"))
 
     return RequestResolveResponse(
         ok=True,
         request=_to_request(rec),
-        message=f"已将 {request_id} 标记为 {payload.action}{delivery}。",
+        message=tr(f"已将 {request_id} 标记为 {payload.action}{delivery}。", f"Marked {request_id} as {payload.action}{delivery}."),
         degraded=False,
     )

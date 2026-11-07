@@ -22,6 +22,7 @@ here (the same shape ``/api/hardware/live-readings`` has for the top bar).
 from __future__ import annotations
 
 import base64
+from mast.i18n import tr
 import logging
 from typing import Callable, Optional, TypeVar
 
@@ -124,7 +125,7 @@ def _metrics(row: dict) -> dict[str, float]:
 
 #: Longest live-current window the chart may ask for.
 #:
-#: Was 600 s, but a longer real-time current window was needed, and the data was never the
+#: Was 600 s, but the data was never the
 #: constraint: ``segments.envelope`` rows are permanent (only the raw ``.npy``
 #: is swept at ``cm_keep_hours``), so an hours-long window has always been
 #: readable. The 600 was a guard against the cost of expanding every envelope
@@ -149,7 +150,7 @@ _MAX_TRACE_WINDOW_S: float = 21600.0
 #: with modulation off the demodulator puts out crosstalk and noise, same unit
 #: and same order of magnitude as a real dI/dV. A caller that gets the values
 #: without the flag cannot tell the two apart, and the cheap reading is always
-#: "it is dI/dV" — dI/dV must indicate, in some form, whether lock-in is on.
+#: "it is dI/dV".
 _AUX_SERIES_COLUMNS: tuple[str, ...] = (
     "z_m", "amp_m", "df_hz", "lockin_a", "lockin_mod_on",
 )
@@ -217,8 +218,8 @@ def _aux_snapshot(raw) -> Optional[AuxSnapshot]:
         # （``AuxSampler.observed_interval_s()``，最近 21 个间隔的中位数），
         # 而这里漏掉它,响应模型的默认值 None 就把「还没测够」和「这一层忘了传」
         # 变成了同一个样子 —— 而 ``observed_interval_s`` 存在的**全部理由**正是
-        # 「别拿设置值当真实节奏」——配置值与实测值并不总是相等；这个字段若
-        # 恒为 None，验证真实节奏就只能靠外部去量数据点的间距。
+        # 「别拿设置值当真实节奏」（设置值与实测值并不总是相等，
+        # 而这个字段恒 None 时，提速验收只能靠外部量序列的点距去做）。
         observed_interval_s=raw.get("observed_interval_s"),
         window_s=float(raw.get("window_s") or 0.0),
         sampled=int(raw.get("sampled") or 0),
@@ -275,7 +276,7 @@ def monitoring_status() -> MonitoringStatus:
             # No daemon (standalone API, or the core never came up). History is
             # still readable — a stopped monitor must not blank the page.
             st = {"running": False, "state": "no_pool",
-                  "detail": "监控服务未运行(独立 API 模式或内核未启动)",
+                  "detail": tr("监控服务未运行(独立 API 模式或内核未启动)", "Monitoring service is not running (standalone API mode or core not started)"),
                   "enabled_in_settings": bool(th.enabled),
                   "alerts_enabled": bool(th.alerts_enabled),
                   "segment_seconds": float(th.cm_segment_s),
@@ -305,7 +306,7 @@ def monitoring_status() -> MonitoringStatus:
             retry_in_s=float(st.get("retry_in_s") or 0.0),
             strategy=st.get("strategy"),
             # 三态,不要 `bool(...)`:True/False 是探测结论,None 是「还没探过」。
-            # 这一行是 ⑲ 的另一半 —— 光给 schema 加字段不够,逐字段构造的映射层
+            # 光给 schema 加字段不够,逐字段构造的映射层
             # 不写它就照样丢。
             hr_available=_opt_bool(st.get("hr_available")),
             fs_hz=float(st.get("fs_hz") or 0.0),
@@ -338,7 +339,7 @@ def monitoring_status() -> MonitoringStatus:
 
     return _guarded(body, lambda e: MonitoringStatus(
         degraded=True, state="unknown",
-        detail="监控模块未装载", detail_error=e))
+        detail=tr("监控模块未装载", "Monitoring module not loaded"), detail_error=e))
 
 
 @router.post("/monitoring/start", response_model=MonitoringControlResult)
@@ -349,13 +350,13 @@ def monitoring_start() -> MonitoringControlResult:
         if svc is None:
             return MonitoringControlResult(
                 ok=False, running=False, degraded=True,
-                note="监控服务未装载(独立 API 模式下无法启动)")
+                note=tr("监控服务未装载(独立 API 模式下无法启动)", "Monitoring service not loaded (cannot start in standalone API mode)"))
         svc.start()
         return MonitoringControlResult(ok=True, running=svc.status()["running"],
-                                       note="已启动")
+                                       note=tr("已启动", "Started"))
 
     return _guarded(body, lambda e: MonitoringControlResult(
-        ok=False, degraded=True, note=f"启动失败:{e}"))
+        ok=False, degraded=True, note=tr(f"启动失败:{e}", f"Start failed: {e}")))
 
 
 @router.post("/monitoring/stop", response_model=MonitoringControlResult)
@@ -365,12 +366,12 @@ def monitoring_stop() -> MonitoringControlResult:
         svc = get_service()
         if svc is None:
             return MonitoringControlResult(ok=True, running=False,
-                                           note="监控服务本就未运行")
+                                           note=tr("监控服务本就未运行", "Monitoring service was not running"))
         svc.stop()
-        return MonitoringControlResult(ok=True, running=False, note="已停止")
+        return MonitoringControlResult(ok=True, running=False, note=tr("已停止", "Stopped"))
 
     return _guarded(body, lambda e: MonitoringControlResult(
-        ok=False, degraded=True, note=f"停止失败:{e}"))
+        ok=False, degraded=True, note=tr(f"停止失败:{e}", f"Stop failed: {e}")))
 
 
 @router.get("/monitoring/config", response_model=MonitoringConfigResponse)
@@ -545,7 +546,7 @@ def monitoring_alert_evidence(alert_id: int) -> AlertEvidenceResponse:
         raw = _store().alert_evidence_png(alert_id)
         if not raw:
             return AlertEvidenceResponse(ok=False, alert_id=alert_id,
-                                         detail="该告警没有可用的证据图")
+                                         detail=tr("该告警没有可用的证据图", "No evidence image available for this alert"))
         return AlertEvidenceResponse(ok=True, alert_id=alert_id,
                                      png_b64=base64.b64encode(raw).decode("ascii"))
 
@@ -557,8 +558,10 @@ def monitoring_alert_evidence(alert_id: int) -> AlertEvidenceResponse:
 def monitoring_alert_ack(alert_id: int) -> AlertAckResponse:
     """人把这条告警点掉:「我知道了,别再提醒我」。
 
-    ``store.ack_alert()`` 曾经存在却**全树零调用方** —— 没有路由、没有前端,
-    写进去的 ``acked`` 永远是 ``false``,那不是「没人点」,是**点不了**:
+    ## 为什么需要这条路由
+
+    ``store.ack_alert()`` 从写下那天起就存在,而且**全树零调用方** —— 没有路由、
+    没有前端。``acked`` 全是 ``false``,那不是「没人点」,是**点不了**。
     一个零可达调用方的原语,从测试外面看和一个能用的逃生门一模一样。
 
     ## 它**不**做什么
@@ -622,7 +625,7 @@ def monitoring_segment_data(seg_id: int, max_points: int = 4000,
         out = store.read_segment_decimated(seg_id, max_points=mp)
         if not out:
             return SegmentDataResponse(ok=False, seg_id=seg_id,
-                                       detail="该段不存在,或原始数据与包络都已不可用")
+                                       detail=tr("该段不存在,或原始数据与包络都已不可用", "This segment does not exist, or both its raw data and envelope are gone"))
         psd = None
         if include_psd:
             raw = store.segment_psd(seg_id)
@@ -718,7 +721,7 @@ def monitoring_baseline(baseline_id: int) -> BaselineDetailResponse:
     def body() -> BaselineDetailResponse:
         d = _store().baseline(baseline_id, with_points=True)
         if not d:
-            return BaselineDetailResponse(ok=False, detail="没有这份基线")
+            return BaselineDetailResponse(ok=False, detail=tr("没有这份基线", "No such baseline"))
         pts = [BaselinePoint(**{k: v for k, v in p.items()
                                 if k in BaselinePoint.model_fields})
                for p in (d.get("points") or [])]
@@ -741,7 +744,7 @@ def monitoring_baseline_curve(point_id: int, kind: str = "psd") -> BaselineCurve
         c = _store().baseline_point_curve(point_id, kind=k)
         if not c:
             return BaselineCurveResponse(ok=False, kind=k,
-                                         detail="这个点的曲线文件不在了")
+                                         detail=tr("这个点的曲线文件不在了", "The curve file for this point is gone"))
         return BaselineCurveResponse(ok=True, kind=k, x=c["x"], y=c["y"])
 
     return _guarded(body, lambda e: BaselineCurveResponse(kind=k, degraded=True,
@@ -759,8 +762,8 @@ def monitoring_activate_baseline(body_in: BaselineActivateRequest) -> BaselineAc
         ok = _store().activate_baseline(body_in.baseline_id)
         if not ok:
             return BaselineActivateResult(
-                ok=False, detail=("激活失败 —— 只有跑完整（status=complete）的"
-                                  "基线才能启用；没跑完的那份没有 sigma 曲线。"))
+                ok=False, detail=(tr("激活失败 —— 只有跑完整（status=complete）的"
+                                  "基线才能启用；没跑完的那份没有 sigma 曲线。", "Activation failed: only a baseline that ran to completion (status=complete) can be enabled; an unfinished one has no sigma curve.")))
         return BaselineActivateResult(ok=True, active_id=body_in.baseline_id)
 
     return _guarded(body, lambda e: BaselineActivateResult(detail=e))
@@ -775,7 +778,7 @@ def monitoring_delete_baseline(baseline_id: int) -> BaselineActivateResult:
     def body() -> BaselineActivateResult:
         ok = _store().delete_baseline(baseline_id)
         return BaselineActivateResult(
-            ok=ok, detail=None if ok else "删不掉：它不存在，或正在被判据使用（先停用）")
+            ok=ok, detail=None if ok else tr("删不掉：它不存在，或正在被判据使用（先停用）", "Cannot delete: it does not exist, or the criterion is using it (deactivate it first)"))
 
     return _guarded(body, lambda e: BaselineActivateResult(detail=e))
 
@@ -793,7 +796,7 @@ def monitoring_baseline_check() -> BaselineCheckResponse:
         svc = get_service()
         if svc is None or not hasattr(svc, "baseline_check"):
             return BaselineCheckResponse(judged=False,
-                                         reason="电流监控服务没在跑")
+                                         reason=tr("电流监控服务没在跑", "The current monitoring service is not running"))
         d = svc.baseline_check() or {}
         return BaselineCheckResponse(**{k: v for k, v in d.items()
                                         if k in BaselineCheckResponse.model_fields})

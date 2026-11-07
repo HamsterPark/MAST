@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
+from mast.i18n import tr
 from typing import Any
 
 
 def parse_float(text: str | float | None, field_name: str) -> float:
     """Parse a user-entered float, raising ``ValueError`` with a readable message."""
     if text is None or (isinstance(text, str) and text.strip() == ""):
-        raise ValueError(f"'{field_name}' 不能为空")
+        raise ValueError(tr(tr(f"'{field_name}' 不能为空", f"'{field_name}' must not be empty"), f"'{field_name}' must not be empty"))
     try:
         return float(text)
     except (TypeError, ValueError):
-        raise ValueError(f"'{field_name}' 不是有效数字: {text}")
+        raise ValueError(tr(tr(f"'{field_name}' 不是有效数字: {text}", f"'{field_name}' is not a valid number: {text}"), f"'{field_name}' is not a valid number: {text}"))
 
 
 def parse_optional_float(s: str) -> float | None:

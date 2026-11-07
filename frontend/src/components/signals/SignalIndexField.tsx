@@ -6,16 +6,25 @@ import {
   channelOptions,
   type SignalChannelOption,
 } from "@/lib/signalChannels";
+import { tr } from "@/lib/i18n";
 
-// 信号通道选择器：并列显示索引与名称，避免把不同解调分量混为一谈。
+// Signal channel picker: users choose a channel from a dropdown instead of typing
+// a bare index such as 86.
 //
-// ── 退化时给输入框，绝不给一个空下拉 ───────────────────────────────────
-// 名单读不到（没连仪器 / 端点降级）时回落成自由文本输入。硬规则：任何点击最
-// 坏只能「无反应/提示」。一个空的下拉框会让已经填好的值**看起来是空的**，
-// 而用户的下一步就是重填一遍——用一个他此刻查不到的数字。
+// Why a bare number is a real problem, not just an inconvenience: index 86 on a real
+// instrument is `LI Demod 1 X (A)`. Whoever types it must first look up whether 86
+// is X or Y, and an instrument's `LI Demod` may have only X/Y, no R. A wrong index does
+// not raise an error; dI/dV silently reads another component, and every plot and
+// spectrum comes out wrong. The dropdown shows "index · channel name" together, so
+// the mapping explains itself.
 //
-// 判断逻辑（选项拼装 / 三种退化理由）在 lib/signalChannels.ts，那里能单测：
-// node --test 剥不掉 .tsx 里的 JSX，所以能出错的那部分不放在这个文件里。
+// When the list is unavailable, fall back to a free-text input, never an empty
+// dropdown. An empty dropdown would make an already-entered value look blank, and
+// the user's next step would be to retype it with a number they cannot look up.
+//
+// The decision logic (option assembly, the three degradation reasons) lives in
+// lib/signalChannels.ts so it can be unit-tested: node --test cannot strip JSX from
+// .tsx files, so the part that can go wrong is kept out of this file.
 
 export function useSignalChannels() {
   return useQuery({
@@ -38,7 +47,7 @@ export function useSignalChannels() {
 export function SignalIndexField({
   value,
   onCommit,
-  /** Offer 「自动（按通道名查找）」 mapped to this value. qPlus uses -1. */
+  /** Offer an "Auto (look up by channel name)" option mapped to this value. qPlus uses -1. */
   autoValue,
   placeholder,
 }: {
@@ -77,7 +86,7 @@ export function SignalIndexField({
         options={channelOptions(channels, value, autoValue)}
       />
       <p className="text-xs text-mast-faint">
-        共 {channels.length} 路。存下来的是索引，名字只用来认。
+        {tr(`共 ${channels.length} 路。存下来的是索引，名字只用来认。`, `${channels.length} channels. The stored value is the index; the name is only for identification.`)}
       </p>
     </div>
   );

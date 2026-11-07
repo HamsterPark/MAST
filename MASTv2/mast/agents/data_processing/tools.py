@@ -113,7 +113,7 @@ def _resolve_missing(p: Path) -> "Path | None":
 
 def _not_found_message(p: Path) -> str:
     """Say where we looked. "file not found" alone sent the agent round in
-    circles guessing new paths ."""
+    circles guessing new paths."""
     try:
         from mast.core.scan_registry import known_scan_dirs, recent_scan_paths
 
@@ -129,8 +129,8 @@ def _not_found_message(p: Path) -> str:
     if recent:
         msg += f"；本次运行已保存的扫描文件：{', '.join(recent)}"
     # ALWAYS point at the tool that knows. Without this the agent's next move is
-    # to guess another path — which is exactly the loop the operator watched it
-    # spin in on 2026-07-10 (#92: "load_scan then failed on a dozen guessed paths").
+    # to guess another path — which is a loop seen in practice (load_scan
+    # failing repeatedly on many guessed paths).
     msg += "。不要自行拼接路径——调用 get_latest_scan_file 取真实路径。"
     return msg
 
@@ -682,7 +682,7 @@ def fit_sts_peaks(path: str, n_peaks: int = 3) -> str:
 # 6. run_numpy_snippet (RestrictedPython sandbox — ALLOW-LIST model)
 # ─────────────────────────────────────────────────────────────────────
 #
-# SECURITY MODEL
+# SECURITY MODEL (converted deny-list → allow-list)
 # ----------------------------------------------------------------------
 # This snippet runner executes LLM-authored Python in-process. The previous
 # implementation used a *deny-list* (`_NP_IO_DENY`) over the full `np` module,

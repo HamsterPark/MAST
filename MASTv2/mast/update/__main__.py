@@ -6,6 +6,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from mast.i18n import tr
+
 
 def _data_root_from_argv(default_arg: str | None) -> Path:
     if default_arg:
@@ -96,13 +98,18 @@ def _sign_published_manifest(m, args: argparse.Namespace, data_root: Path, pdir:
     sig_file = pdir / "manifest.sig"
     if key_path is None:
         sig_file.unlink(missing_ok=True)  # never ship a stale sig for a new manifest
-        print("\n⚠️  未签名发布：无签名私钥（--sign-key 或 <data>/api key/"
-              "release_signing_key.pem 缺失）。已内嵌公钥的客户端会拒绝此版本。"
-              "先运行 `python -m mast.update keygen`。", file=sys.stderr)
+        print(tr("\n⚠️  未签名发布：无签名私钥（--sign-key 或 <data>/api key/"
+                 "release_signing_key.pem 缺失）。已内嵌公钥的客户端会拒绝此版本。"
+                 "先运行 `python -m mast.update keygen`。",
+                 "\n⚠️  Unsigned release: no signing private key (--sign-key missing, or "
+                 "<data>/api key/release_signing_key.pem not found). Clients with an embedded "
+                 "public key will reject this version. Run `python -m mast.update keygen` first."),
+              file=sys.stderr)
         return False
     if not HAVE_CRYPTO:
         sig_file.unlink(missing_ok=True)
-        print("\n⚠️  未签名：cryptography 不可用（pip install cryptography>=43）。",
+        print(tr("\n⚠️  未签名：cryptography 不可用（pip install cryptography>=43）。",
+                 "\n⚠️  Unsigned: cryptography is not available (pip install cryptography>=43)."),
               file=sys.stderr)
         return False
     try:
@@ -112,7 +119,8 @@ def _sign_published_manifest(m, args: argparse.Namespace, data_root: Path, pdir:
         return True
     except Exception as exc:  # noqa: BLE001
         sig_file.unlink(missing_ok=True)
-        print(f"\n⚠️  签名失败（未写 manifest.sig）：{exc}", file=sys.stderr)
+        print(tr(f"\n⚠️  签名失败（未写 manifest.sig）：{exc}",
+                 f"\n⚠️  Signing failed (manifest.sig not written): {exc}"), file=sys.stderr)
         return False
 
 
@@ -123,13 +131,16 @@ def cmd_keygen(args: argparse.Namespace) -> int:
     from mast.update.signing import HAVE_CRYPTO, generate_keypair
 
     if not HAVE_CRYPTO:
-        print("ERROR: 需要 cryptography（pip install cryptography>=43）", file=sys.stderr)
+        print(tr("ERROR: 需要 cryptography（pip install cryptography>=43）",
+                 "ERROR: cryptography is required (pip install cryptography>=43)"), file=sys.stderr)
         return 2
     data_root = _data_root_from_argv(args.data_root)
     key_path = (Path(args.out).resolve() if args.out
                 else data_root / "api key" / "release_signing_key.pem")
     if key_path.exists() and not args.force:
-        print(f"ERROR: 私钥已存在：{key_path}（--force 覆盖）", file=sys.stderr)
+        print(tr(f"ERROR: 私钥已存在：{key_path}（--force 覆盖）",
+                 f"ERROR: private key already exists: {key_path} (--force to overwrite)"),
+              file=sys.stderr)
         return 2
     pem, pub_hex = generate_keypair()
     key_path.parent.mkdir(parents=True, exist_ok=True)
@@ -139,10 +150,13 @@ def cmd_keygen(args: argparse.Namespace) -> int:
         os.chmod(key_path, 0o600)  # best-effort (POSIX); harmless on Windows
     except Exception:  # noqa: BLE001
         pass
-    print("✅ 已生成 Ed25519 发布签名密钥对")
-    print(f"  私钥（离线保存，切勿提交/放到推送服务器）：{key_path}")
-    print("\n  公钥 HEX —— 填进 installer/push_defaults_mast2.json 的 "
-          "\"signing_pubkey\"，随构建烧进客户端：")
+    print(tr("✅ 已生成 Ed25519 发布签名密钥对", "✅ Generated the Ed25519 release signing key pair"))
+    print(tr(f"  私钥（离线保存，切勿提交/放到推送服务器）：{key_path}",
+             f"  Private key (keep offline; never commit it or put it on the push server): {key_path}"))
+    print(tr("\n  公钥 HEX —— 填进 installer/push_defaults_mast2.json 的 "
+             "\"signing_pubkey\"，随构建烧进客户端：",
+             "\n  Public key HEX - put it in \"signing_pubkey\" of "
+             "installer/push_defaults_mast2.json; it is baked into clients at build time:"))
     print(f"  {pub_hex}\n")
     return 0
 
@@ -162,19 +176,25 @@ def cmd_publish_token(args: argparse.Namespace) -> int:
     data_root = _data_root_from_argv(args.data_root)
     existing = _read_publish_token(data_root)
     if existing and not args.force:
-        print(f"ERROR: 发布凭据已存在：{data_root / 'api key' / PUBLISH_TOKEN_FILE}"
-              "（--force 覆盖；覆盖后所有发布方都要换成新值）", file=sys.stderr)
+        _pf = data_root / 'api key' / PUBLISH_TOKEN_FILE
+        print(tr(f"ERROR: 发布凭据已存在：{_pf}"
+                 "（--force 覆盖；覆盖后所有发布方都要换成新值）",
+                 f"ERROR: publish credential already exists: {_pf} "
+                 "(--force to overwrite; all publishers must then switch to the new value)"),
+              file=sys.stderr)
         return 2
     tok = generate_token()
     p = write_publish_token(data_root, tok)
-    print("✅ 已生成发布凭据")
-    print(f"  文件（只留在发布机上）：{p}")
-    print(f"  值：{tok}")
-    print("\n  发布时带上它：")
+    print(tr("✅ 已生成发布凭据", "✅ Generated the publish credential"))
+    print(tr(f"  文件（只留在发布机上）：{p}", f"  File (stays on the publishing machine only): {p}"))
+    print(tr(f"  值：{tok}", f"  Value: {tok}"))
+    print(tr("\n  发布时带上它：", "\n  Send it when publishing:"))
     print(f'    curl -H "Authorization: Bearer {tok}" \\')
     print('         --data-binary @pack.zip <server>/skills/pack/publish')
-    print("\n  ⚠️ 不要把它写进 push_defaults*.json 或任何随包分发的文件 ——")
-    print("     那样它就和客户端 token 一样公开了，这次分离也就白做了。\n")
+    print(tr("\n  ⚠️ 不要把它写进 push_defaults*.json 或任何随包分发的文件 ——",
+             "\n  ⚠️ Do not write it into push_defaults*.json or any file shipped with the package -"))
+    print(tr("     那样它就和客户端 token 一样公开了，这次分离也就白做了。\n",
+             "     it would then be as public as the client token, and the separation would be pointless.\n"))
     return 0
 
 
@@ -208,40 +228,57 @@ def cmd_status(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m mast.update",
-        description="MAST 内网推送升级 — 服务器端发布工具",
+        description=tr("MAST 内网推送升级 — 服务器端发布工具",
+                       "MAST intranet push update - server-side publishing tool"),
     )
-    parser.add_argument("--data-root", help="MAST 数据目录（默认从环境/当前目录推断）")
+    parser.add_argument("--data-root", help=tr("MAST 数据目录（默认从环境/当前目录推断）",
+                                               "MAST data directory (default: inferred from the environment / current directory)"))
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_pub = sub.add_parser("publish", help="发布一个新版本到推送服务器目录")
-    p_pub.add_argument("setup_exe", help="MAST 安装包 .exe 路径")
-    p_pub.add_argument("--version", required=True, help="版本号 (e.g. 2.0.0)")
-    p_pub.add_argument("--release-notes-url", default="", help="release 链接 (可选)")
-    p_pub.add_argument("--min-force-install", default="0.0.0", help="强制升级下界")
+    p_pub = sub.add_parser("publish", help=tr("发布一个新版本到推送服务器目录",
+                                                   "Publish a new version to the push server directory"))
+    p_pub.add_argument("setup_exe", help=tr("MAST 安装包 .exe 路径", "Path to the MAST installer .exe"))
+    p_pub.add_argument("--version", required=True, help=tr("版本号 (e.g. 2.0.0)", "Version number (e.g. 2.0.0)"))
+    p_pub.add_argument("--release-notes-url", default="",
+                       help=tr("release 链接 (可选)", "Release link (optional)"))
+    p_pub.add_argument("--min-force-install", default="0.0.0",
+                       help=tr("强制升级下界", "Lower bound for forced upgrades"))
     p_pub.add_argument("--delta", action="append", metavar="PATH:FROM_VERSION",
-                       help="增量包及其升级起始版本,可多次 (e.g. delta.zip:2.1.13)")
-    p_pub.add_argument("--sign-key", help="Ed25519 私钥 PEM 路径 "
-                       "(默认 <data>/api key/release_signing_key.pem)")
+                       help=tr("增量包及其升级起始版本,可多次 (e.g. delta.zip:2.1.13)",
+                               "Delta package and the version it upgrades from; repeatable (e.g. delta.zip:2.1.13)"))
+    p_pub.add_argument("--sign-key", help=tr("Ed25519 私钥 PEM 路径 "
+                                             "(默认 <data>/api key/release_signing_key.pem)",
+                                             "Path to the Ed25519 private key PEM "
+                                             "(default <data>/api key/release_signing_key.pem)"))
     p_pub.set_defaults(func=cmd_publish)
 
-    p_kg = sub.add_parser("keygen", help="生成 Ed25519 发布签名密钥对(一次性)")
-    p_kg.add_argument("--out", help="私钥输出路径(默认 <data>/api key/release_signing_key.pem)")
-    p_kg.add_argument("--force", action="store_true", help="覆盖已存在的私钥")
+    p_kg = sub.add_parser("keygen", help=tr("生成 Ed25519 发布签名密钥对(一次性)",
+                                                 "Generate the Ed25519 release signing key pair (one-time)"))
+    p_kg.add_argument("--out", help=tr("私钥输出路径(默认 <data>/api key/release_signing_key.pem)",
+                                       "Private key output path (default <data>/api key/release_signing_key.pem)"))
+    p_kg.add_argument("--force", action="store_true",
+                      help=tr("覆盖已存在的私钥", "Overwrite an existing private key"))
     p_kg.set_defaults(func=cmd_keygen)
 
     p_pt = sub.add_parser("publish-token",
-                          help="生成**发布**凭据（只有它能发布技能包；不随包分发）")
+                          help=tr("生成**发布**凭据（只有它能发布技能包；不随包分发）",
+                                  "Generate the **publish** credential (only it can publish "
+                                  "skill packs; not shipped with the package)"))
     p_pt.add_argument("--data-root", default="")
-    p_pt.add_argument("--force", action="store_true", help="已存在时覆盖")
+    p_pt.add_argument("--force", action="store_true",
+                      help=tr("已存在时覆盖", "Overwrite if it already exists"))
     p_pt.set_defaults(func=cmd_publish_token)
 
-    p_st = sub.add_parser("status", help="显示当前发布的 manifest")
+    p_st = sub.add_parser("status", help=tr("显示当前发布的 manifest", "Show the currently published manifest"))
     p_st.set_defaults(func=cmd_status)
 
-    p_d = sub.add_parser("delta", help="构建增量包 old_root → new_root（onedir 根目录）")
-    p_d.add_argument("old", help="旧版 onedir 根目录（含 MAST.exe + _internal/）")
-    p_d.add_argument("new", help="新版 onedir 根目录（含 MAST.exe + _internal/）")
-    p_d.add_argument("out", help="输出 delta zip 路径")
+    p_d = sub.add_parser("delta", help=tr("构建增量包 old_root → new_root（onedir 根目录）",
+                                               "Build a delta package old_root -> new_root (onedir roots)"))
+    p_d.add_argument("old", help=tr("旧版 onedir 根目录（含 MAST.exe + _internal/）",
+                                    "Old onedir root (contains MAST.exe + _internal/)"))
+    p_d.add_argument("new", help=tr("新版 onedir 根目录（含 MAST.exe + _internal/）",
+                                    "New onedir root (contains MAST.exe + _internal/)"))
+    p_d.add_argument("out", help=tr("输出 delta zip 路径", "Output delta zip path"))
     p_d.add_argument("--from-version", required=True, dest="from_version")
     p_d.add_argument("--to-version", required=True, dest="to_version")
     p_d.set_defaults(func=cmd_delta)

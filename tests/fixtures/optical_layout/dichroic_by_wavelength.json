@@ -1,0 +1,358 @@
+{
+  "name": "dichroic_by_wavelength",
+  "description": "One laser with three lines (532, 700, 1064 nm). DM1 (edge 700, reflects short) reflects 532 and transmits 700 (equal to the edge transmits) and 1064; DM2 (edge 900, reflects long) reflects 1064 and transmits 700. One tree per wavelength, in the order listed.",
+  "layout": {
+    "schema": 1,
+    "id": "dichroic",
+    "title": "Dichroic split",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 50.0,
+        "y_mm": 62.5,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelengths_nm": [
+            532.0,
+            700.0,
+            1064.0
+          ]
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "dm1",
+        "type": "dichroic",
+        "label": "DM1",
+        "x_mm": 150.0,
+        "y_mm": 62.5,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "edge_nm": 700.0,
+          "reflects": "short"
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "dm2",
+        "type": "dichroic",
+        "label": "DM2",
+        "x_mm": 225.0,
+        "y_mm": 62.5,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "edge_nm": 900.0,
+          "reflects": "long"
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det_532",
+        "type": "detector",
+        "label": "D_532",
+        "x_mm": 150.0,
+        "y_mm": 250.0,
+        "angle_deg": 270.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det_1064",
+        "type": "detector",
+        "label": "D_1064",
+        "x_mm": 225.0,
+        "y_mm": 250.0,
+        "angle_deg": 270.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det_700",
+        "type": "detector",
+        "label": "D_700",
+        "x_mm": 350.0,
+        "y_mm": 62.5,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 62.5,
+              "x1": 150.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 150.0,
+              "y0": 62.5,
+              "x1": 150.0,
+              "y1": 250.0
+            }
+          ],
+          "events": [
+            {
+              "component": "dm1",
+              "action": "reflect",
+              "x": 150.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 100.0
+            },
+            {
+              "component": "det_532",
+              "action": "stop",
+              "x": 150.0,
+              "y": 250.0,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 287.5
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "las1",
+      "wavelength_nm": 700.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 62.5,
+              "x1": 150.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 150.0,
+              "y0": 62.5,
+              "x1": 225.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 225.0,
+              "y0": 62.5,
+              "x1": 350.0,
+              "y1": 62.5
+            }
+          ],
+          "events": [
+            {
+              "component": "dm1",
+              "action": "transmit",
+              "x": 150.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 100.0
+            },
+            {
+              "component": "dm2",
+              "action": "transmit",
+              "x": 225.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 175.0
+            },
+            {
+              "component": "det_700",
+              "action": "stop",
+              "x": 350.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 300.0
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "las1",
+      "wavelength_nm": 1064.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 62.5,
+              "x1": 150.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 150.0,
+              "y0": 62.5,
+              "x1": 225.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 225.0,
+              "y0": 62.5,
+              "x1": 225.0,
+              "y1": 250.0
+            }
+          ],
+          "events": [
+            {
+              "component": "dm1",
+              "action": "transmit",
+              "x": 150.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 100.0
+            },
+            {
+              "component": "dm2",
+              "action": "reflect",
+              "x": 225.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 175.0
+            },
+            {
+              "component": "det_1064",
+              "action": "stop",
+              "x": 225.0,
+              "y": 250.0,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 362.5
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ]
+}

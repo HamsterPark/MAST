@@ -38,6 +38,7 @@ import logging
 import time
 from typing import Any, Callable, Sequence
 
+from mast.i18n import tr
 logger = logging.getLogger(__name__)
 
 #: 与电流监控同一个角色。6502(monitor) 已经满了,6501(main) 上的阻塞读会抽干
@@ -103,12 +104,12 @@ def run_z_burst(pool_getter: Callable[[], Any], *, stop=None,
     try:
         pool = pool_getter() if callable(pool_getter) else pool_getter
         if pool is None:
-            raise _Skip("未连接 Nanonis")
+            raise _Skip(tr("未连接 Nanonis", "Nanonis not connected"))
 
         _call(pool, "Osci2T_Run")
         z_idx, z_name, i_idx = _resolve_channels(pool)
         if z_idx < 0:
-            raise _Skip("128 路信号里没有找到 Z")
+            raise _Skip(tr("128 路信号里没有找到 Z", "Z not found among the 128 signals"))
 
         want_a, want_b, restore = _ensure_channels(pool, z_idx, i_idx)
         _set_immediate_trigger(pool)
@@ -116,17 +117,17 @@ def run_z_burst(pool_getter: Callable[[], Any], *, stop=None,
 
         runs, _runs_i, fs_hz, n_fresh = _pump(pool, stop, burst_s, dt)
         if not runs:
-            raise _Skip("burst 期间没有取到新数据")
+            raise _Skip(tr("burst 期间没有取到新数据", "no new data during the burst"))
 
         # 采完再校验一次：中途被别的技能改走通道的话，前面那些样本是别人的信号。
         if not _channels_still_ours(pool, want_a, want_b):
-            raise _Skip("采集期间 Osci2T 通道被改动，本轮丢弃")
+            raise _Skip(tr("采集期间 Osci2T 通道被改动，本轮丢弃", "Osci2T channels were changed during acquisition; this round discarded"))
 
         from mast.monitoring.features import psd_of_runs
         freqs, psd = psd_of_runs(runs, fs_hz)
         f, p = log_bin(freqs, psd, int(bins))
         if len(f) < 2:
-            raise _Skip("谱点太少")
+            raise _Skip(tr("谱点太少", "too few spectrum points"))
         now = time.time()
         logger.info("Z 噪声谱：%d 段 @ %.0f Hz，%d 个频点（%s）",
                     n_fresh, fs_hz, len(f), z_name or f"#{z_idx}")
@@ -166,21 +167,21 @@ def run_dual_burst(pool_getter: Callable[[], Any], *, stop=None,
     try:
         pool = pool_getter() if callable(pool_getter) else pool_getter
         if pool is None:
-            raise _Skip("未连接 Nanonis")
+            raise _Skip(tr("未连接 Nanonis", "Nanonis not connected"))
 
         _call(pool, "Osci2T_Run")
         key = str(channel or "z").strip().lower()
         hints = _CHANNEL_HINTS.get(key)
         if hints is None:
-            raise _Skip("不认识的通道 %r（可选：%s）"
+            raise _Skip(tr("不认识的通道 %r（可选：%s）", "Unknown channel %r (options: %s)")
                         % (channel, ", ".join(sorted(_CHANNEL_HINTS))))
         z_idx, z_name, i_idx = _resolve_channels(pool, hints)
         if z_idx < 0:
             # 名字对不上就停手。**不退回到别的通道** —— 采到别的东西而不声张，
             # 比什么都没采到糟得多：数据会一路走到分析、图、结论。
-            raise _Skip("128 路信号里没有找到 %s（线索 %s）" % (key, hints))
+            raise _Skip(tr("128 路信号里没有找到 %s（线索 %s）", "%s not found among the 128 signals (hints %s)") % (key, hints))
         if i_idx < 0:
-            raise _Skip("128 路信号里没有找到电流 —— 双通道 burst 需要两路都在")
+            raise _Skip(tr("128 路信号里没有找到电流 —— 双通道 burst 需要两路都在", "Current not found among the 128 signals -- a dual-channel burst needs both"))
 
         want_a, want_b, restore = _ensure_channels(pool, z_idx, i_idx)
         _set_immediate_trigger(pool)
@@ -190,13 +191,13 @@ def run_dual_burst(pool_getter: Callable[[], Any], *, stop=None,
 
         runs_z, runs_i, fs_hz, n_fresh = _pump(pool, stop, burst_s, dt)
         if not runs_z:
-            raise _Skip("burst 期间没有取到新数据")
+            raise _Skip(tr("burst 期间没有取到新数据", "no new data during the burst"))
         if not _channels_still_ours(pool, want_a, want_b):
-            raise _Skip("采集期间 Osci2T 通道被改动，本轮丢弃")
+            raise _Skip(tr("采集期间 Osci2T 通道被改动，本轮丢弃", "Osci2T channels were changed during acquisition; this round discarded"))
 
         pairs = [(z, i) for z, i in zip(runs_z, runs_i) if i is not None]
         if not pairs:
-            raise _Skip("没有一帧的两路是等长的")
+            raise _Skip(tr("没有一帧的两路是等长的", "no frame has both channels of equal length"))
         logger.info("双通道 burst：%d/%d 帧同步 @ %.0f Hz（Z=%s #%d，I #%d）",
                     len(pairs), n_fresh, fs_hz, z_name or "?", z_idx, i_idx)
         return {"z": [z for z, _ in pairs], "i": [i for _, i in pairs],
@@ -248,7 +249,7 @@ def _call(pool, verb: str, *args):
     elif verb == "Osci2T_DataGet":
         rec = pool.safe_call("Osci2T_DataGet", 0, role=DATA_ROLE, count_health=False)
     else:  # pragma: no cover — 防止有人加了动词却忘了分支
-        raise _Skip(f"未知动词 {verb}")
+        raise _Skip(tr(f"未知动词 {verb}", f"unknown verb {verb}"))
     return _guard(rec)
 
 
@@ -259,9 +260,9 @@ def _guard(rec):
         if is_lock_busy(rec):
             raise _Busy(err)
         if "comms_circuit_open" in err:
-            raise _Skip("TCP 已熔断")
+            raise _Skip(tr("TCP 已熔断", "TCP circuit breaker open"))
         if "NeedModule" in err:
-            raise _Skip("Osci2T 模块未加载（仿真器上属正常）")
+            raise _Skip(tr("Osci2T 模块未加载（仿真器上属正常）", "Osci2T module not loaded (normal on the simulator)"))
     return rec
 
 
@@ -437,20 +438,20 @@ def _pump(pool, stop, burst_s: float, dt_hint: float):
             if busy > _MAX_BUSY:
                 # from None：RoleBusy 不是错误，是"扫描正拿着 data 口"这个正常
                 # 事件。把它挂成 _Skip 的 __cause__ 会让日志读起来像故障。
-                raise _Skip("data 角色持续被占") from None
+                raise _Skip(tr("data 角色持续被占", "data role stays occupied")) from None
             _sleep(stop, min(_SLEEP_MAX_S, 0.05 * busy))
             continue
         if getattr(rec, "error", ""):
             bad += 1
             if bad > _MAX_BAD:
-                raise _Skip("连续坏回包")
+                raise _Skip(tr("连续坏回包", "consecutive bad replies"))
             _sleep(stop, 0.05)
             continue
         d = _decoded(rec.return_value)
         if len(d) < 6:
             bad += 1
             if bad > _MAX_BAD:
-                raise _Skip("回包结构不符（缺第二通道）")
+                raise _Skip(tr("回包结构不符（缺第二通道）", "reply structure mismatch (second channel missing)"))
             _sleep(stop, 0.05)
             continue
         try:

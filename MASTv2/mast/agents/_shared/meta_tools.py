@@ -52,12 +52,12 @@ def _j(obj) -> str:
         return str(obj)
 
 
-# ── plan-coordinate magnitude check () ───────
+# ── plan-coordinate magnitude check ───────
 #
-# `show_plan_on_map` took 17 calls carrying 18 impossible `[xywh]_m` values
-# (x_m=6.0 → a scan box six METRES away) and answered success every time, so the
-# agent kept re-publishing the same nonsense — five show/clear rounds in two
-# minutes — because nothing ever told it the values were wrong.
+# `show_plan_on_map` used to accept impossible `[xywh]_m` values
+# (x_m=6.0 → a scan box six METRES away) and answer success every time, so an
+# agent could keep re-publishing the same nonsense because nothing ever told
+# it the values were wrong.
 #
 # The units are NOT the problem and the message must not say they are: every
 # skill parameter in this repo is SI, the `_m` suffix means metres, and `0.5`
@@ -281,7 +281,7 @@ def resolve_metre_args(tag: str, values: "dict[str, Any]") -> "tuple[dict, list[
 # runs, and that is the wrong owner: `_check_plan_step_magnitudes` phrases this
 # rejection deliberately — it names the step by index AND label, quantifies how
 # far out the value is, offers the µm/nm readings as arithmetic, and explicitly
-# disclaims knowing what the caller meant ( pinned by
+# disclaims knowing what the caller meant (pinned by
 # test_show_plan_on_map_magnitude.py). A pydantic "Input should be less than or
 # equal to 1e-05" would replace all of that with a true, useless sentence.
 #
@@ -462,7 +462,7 @@ def make_meta_tools(provider: Provider) -> list:
     # ── 切换（2026-07-28）─────────────────────────────────────────
     #
     # 实验和样品都是永久的、可以来回切的。模型必须能自己切回一个旧实验 ——
-    # 常见的场景是:做了一个月这个,又要切回去做那个。
+    # 例如做了一个月这个实验之后又要回去做另一个。
     #
     # 这几个工具**必须接受名字**：模型永远拿不到 UUID（它看不见 DB）。歧义时
     # 返回候选列表让它去问用户，绝不猜。
@@ -1437,7 +1437,7 @@ def make_meta_tools(provider: Provider) -> list:
                    "message": f"已在后台启动任务(agent={agent},priority={priority})。前台可继续;"
                               "完成后结果会带回本群聊。"})
 
-    # ── 多图规划(要求的第三个场景) ─────────────────────────────
+    # ── 多图规划 ─────────────────────────────
     @tool("plan_scan_batch")
     def plan_scan_batch(kind: str, n_images: int = 0, size_nm: float = 0.0,
                         feature: str = "", final_size_nm: float = 0.0,

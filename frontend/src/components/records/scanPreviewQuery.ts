@@ -1,29 +1,28 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import { tr } from "../../lib/i18n";
 
-// GET /api/scans/preview 的共用查询。
+// Shared query for GET /api/scans/preview.
 //
 // One definition rather than one per component: the grid card, the preview panel
-// and the lightbox all ask the same endpoint at different sizes, and three
-// copies of a query key is how one of them ends up not sharing the cache with
-// the others (the same "两份拷贝＝改一处漏一处" shape RecentFrameThumb was
-// extracted to end).
+// and the lightbox all ask the same endpoint at different sizes, and separate
+// copies of a query key are how one of them ends up not sharing the cache.
 
-/** 去衬底档位。`auto` measures the frame and is slow — grids must not send it. */
+/** Background-subtraction mode. `auto` measures the frame and is slow — grids must not send it. */
 export type FlattenMode = "raw" | "plane" | "line" | "auto";
 
-/** 网格里可选的档位。`auto` is deliberately absent: see useScanPreview. */
+/** Modes offered in the grid. `auto` is deliberately absent: see useScanPreview. */
 export const GRID_FLATTEN_MODES: FlattenMode[] = ["raw", "plane", "line"];
 export const ALL_FLATTEN_MODES: FlattenMode[] = ["raw", "plane", "line", "auto"];
 
 export const FLATTEN_LABEL: Record<string, string> = {
-  raw: "原始",
-  plane: "扣平面",
-  line: "逐行平场",
-  auto: "自动",
+  raw: tr("原始", "Raw"),
+  plane: tr("扣平面", "Plane"),
+  line: tr("逐行平场", "Line-by-line"),
+  auto: tr("自动", "Auto"),
   // What `auto` can resolve to — shown after the fact, so these need names too.
-  poly2: "扣二阶曲面",
-  masked_line: "主台面逐行",
+  poly2: tr("扣二阶曲面", "2nd-order surface"),
+  masked_line: tr("主台面逐行", "Main-terrace line-by-line"),
 };
 
 export function flattenLabel(mode: string | null | undefined): string {

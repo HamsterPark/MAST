@@ -221,7 +221,11 @@ def test_cancel_busy_and_emergency_stop_through_the_real_gateway(mcp, world):
     t.start()
     assert held.wait(5)
     try:
-        text, err = mcp.call("mast_run", {"skill": "ExtWrite", "wait_s": 20})
+        # 7.0：驱动仪器的技能要带最新观测的令牌（一动一观）—— 先看，再动
+        text, err = mcp.call("mast_observe", {})
+        assert not err, text[:800]
+        token = re.search(r'"next_token":"([A-Z0-9-]+)"', text).group(1)
+        text, err = mcp.call("mast_run", {"skill": "ExtWrite", "wait_s": 20, "after": token})
         assert err and "refused_busy" in text and "群聊任务" in text, text[:800]
         assert ("ExtWrite", {}) not in RAN
     finally:

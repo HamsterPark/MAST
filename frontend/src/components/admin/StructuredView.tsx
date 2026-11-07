@@ -1,6 +1,7 @@
 import { type ReactNode, useState } from "react";
 import clsx from "clsx";
 import { SubTabs } from "@/components/controls";
+import { tr } from "@/lib/i18n";
 
 /** StructuredView — a smart, recursive read-only renderer that turns arbitrary
  *  nested JSON (knowledge ktypes + encyclopedia sections) into a readable,
@@ -29,10 +30,12 @@ const isScalarList = (v: Json[]): boolean => v.every(isScalar);
 const isObjectList = (v: Json[]): boolean =>
   v.length > 0 && v.every((x) => isPlainObject(x));
 
-/** Humanize a snake_case / camelCase key into a readable Chinese-friendly label
- *  (we only de-underscore + title the latin word fragments; non-latin passes
- *  through untouched). */
+/** Humanize a snake_case / camelCase key into a readable label (only de-underscores
+ *  and title-cases the latin word fragments; CJK keys from the data pass through).
+ *  The two synthetic column keys used by RecordMapTable are translated for display. */
 function humanizeKey(key: string): string {
+  if (key === "名称") return tr("名称", "Name");
+  if (key === "值") return tr("值", "Value");
   if (/[一-鿿]/.test(key)) return key; // already CJK — leave as-is
   return key
     .replace(/[_-]+/g, " ")
@@ -65,7 +68,7 @@ function ScalarValue({ value }: { value: string | number | boolean | null }) {
 
 // ── chips for a list of scalars ─────────────────────────────────────────────
 function ScalarChips({ items }: { items: Json[] }) {
-  if (!items.length) return <span className="text-mast-muted">（空）</span>;
+  if (!items.length) return <span className="text-mast-muted">{tr("（空）", "(empty)")}</span>;
   return (
     <div className="flex flex-wrap gap-1.5">
       {items.map((it, i) => (
@@ -110,7 +113,7 @@ function TableCell({ value }: { value: Json }) {
     if (!value.length) return <span className="text-mast-muted">—</span>;
     if (isScalarList(value)) return <ScalarChips items={value} />;
     return (
-      <CellExpandable label={`${value.length} 项`}>
+      <CellExpandable label={tr(`${value.length} 项`, `${value.length} items`)}>
         <StructuredValue value={value} depth={2} />
       </CellExpandable>
     );
@@ -118,7 +121,7 @@ function TableCell({ value }: { value: Json }) {
   // nested object
   const keys = Object.keys(value as Record<string, Json>);
   return (
-    <CellExpandable label={`${keys.length} 字段`}>
+    <CellExpandable label={tr(`${keys.length} 字段`, `${keys.length} fields`)}>
       <StructuredValue value={value} depth={2} />
     </CellExpandable>
   );
@@ -172,9 +175,9 @@ function ObjectTable({ rows }: { rows: Record<string, Json>[] }) {
 
 // A dict is "tabbable" only when it is a FEW (2–8) named SECTIONS each holding a
 // sizable container (e.g. experiment_design's 5 big sub-docs) — those read well
-// as one-section-per-tab. Everything else (a long id→record/lookup map like
-// 复合层级 13 / 技能验证 50, or any dict of scalar/list values) is rendered as a
-// TABLE so the DETAILS are visible — NOT 13/50 useless tabs.
+// as one-section-per-tab. Everything else (a long id→record lookup map such as the
+// composite hierarchy or skill verification, or any dict of scalar/list values) is
+// rendered as a table so the details are visible instead of dozens of tabs.
 function isTabbable(entries: [string, Json][]): boolean {
   if (entries.length < 2 || entries.length > 8) return false;
   return entries.every(
@@ -185,9 +188,9 @@ function isTabbable(entries: [string, Json][]): boolean {
 }
 
 /** A dict keyed by id/name → a table: the KEY is the first column; an object
- *  value spreads into field columns, a scalar/list value goes in a single 值
- *  column (rendered by TableCell — scalars inline, lists as chips, nested as an
- *  expandable). So 复合层级 (键→步骤列表) and 技能验证 (键→字符串) show details. */
+ *  value spreads into field columns, a scalar/list value goes in a single value
+ *  column (rendered by TableCell: scalars inline, lists as chips, nested as an
+ *  expandable). */
 function RecordMapTable({ obj, keyLabel = "名称" }: { obj: Record<string, Json>; keyLabel?: string }) {
   const rows = Object.entries(obj).map(([k, v]) =>
     isPlainObject(v) ? { [keyLabel]: k, ...v } : { [keyLabel]: k, 值: v },
@@ -198,7 +201,7 @@ function RecordMapTable({ obj, keyLabel = "名称" }: { obj: Record<string, Json
 // ── key→value rows for a dict of scalars (or shallow mixed dict) ────────────
 function KeyValueRows({ obj }: { obj: Record<string, Json> }) {
   const entries = Object.entries(obj);
-  if (!entries.length) return <p className="text-sm text-mast-muted">（空）</p>;
+  if (!entries.length) return <p className="text-sm text-mast-muted">{tr("（空）", "(empty)")}</p>;
   return (
     <dl className="divide-y divide-mast-border overflow-hidden rounded-mast-card border border-mast-border shadow-mast">
       {entries.map(([k, v]) => (
@@ -221,7 +224,7 @@ function StructuredValue({ value, depth = 0 }: { value: Json; depth?: number }) 
   if (isScalar(value)) return <ScalarValue value={value} />;
 
   if (Array.isArray(value)) {
-    if (!value.length) return <span className="text-mast-muted">（空列表）</span>;
+    if (!value.length) return <span className="text-mast-muted">{tr("（空列表）", "(empty list)")}</span>;
     if (isScalarList(value)) return <ScalarChips items={value} />;
     if (isObjectList(value)) return <ObjectTable rows={value as Record<string, Json>[]} />;
     // mixed / nested list — render each item stacked
@@ -276,8 +279,8 @@ function TopSection({
 }
 
 function describeValue(v: Json): string | undefined {
-  if (Array.isArray(v)) return `${v.length} 项`;
-  if (isPlainObject(v)) return `${Object.keys(v).length} 字段`;
+  if (Array.isArray(v)) return tr(`${v.length} 项`, `${v.length} items`);
+  if (isPlainObject(v)) return tr(`${Object.keys(v).length} 字段`, `${Object.keys(v).length} fields`);
   return undefined;
 }
 
@@ -285,21 +288,21 @@ function describeValue(v: Json): string | undefined {
  *  per key; top-level list ⇒ a single table/chips; scalar ⇒ inline. The first
  *  few sections open by default so the surface is immediately readable. */
 export function StructuredView({ value }: { value: Json }) {
-  if (value == null) return <p className="text-sm text-mast-muted">（无默认值）</p>;
+  if (value == null) return <p className="text-sm text-mast-muted">{tr("（无默认值）", "(no default value)")}</p>;
 
   // top-level scalar
   if (isScalar(value)) return <ScalarValue value={value} />;
 
   // top-level list → render directly (table / chips / stacked)
   if (Array.isArray(value)) {
-    if (!value.length) return <p className="text-sm text-mast-muted">（空）</p>;
+    if (!value.length) return <p className="text-sm text-mast-muted">{tr("（空）", "(empty)")}</p>;
     return <StructuredValue value={value} />;
   }
 
   // top-level dict → ONE TAB per key (so a big multi-section block is browsed one
-  // section at a time instead of a giant scroll). A single-key dict renders直接.
+  // section at a time instead of a giant scroll). A single-key dict renders directly.
   const entries = Object.entries(value as Record<string, Json>);
-  if (!entries.length) return <p className="text-sm text-mast-muted">（空）</p>;
+  if (!entries.length) return <p className="text-sm text-mast-muted">{tr("（空）", "(empty)")}</p>;
   if (entries.length === 1) {
     const [k, v] = entries[0]!;
     return (
@@ -309,8 +312,8 @@ export function StructuredView({ value }: { value: Json }) {
     );
   }
   // A few big heterogeneous sections (experiment_design's 5 sub-docs) → tabs.
-  // Everything else — a long id→record/lookup map (复合层级 / 技能验证), or any
-  // dict of scalar/list values — → ONE table with details visible.
+  // Everything else (a long id→record lookup map, or any dict of scalar/list
+  // values) becomes one table with the details visible.
   if (isTabbable(entries)) return <DictTabs entries={entries} />;
   return <RecordMapTable obj={value as Record<string, Json>} />;
 }

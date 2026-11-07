@@ -1,10 +1,12 @@
+// Figures page (docs/v2/design/data_gallery.md section 10).
 //
-// 出图结果按类别排列，支持预览、下载和重新生成；这里按
-// 类别列（标记帧 / 网格谱 / 拉线谱 / 单根谱拼接 / 旋转系列），外加三件它没有的事：
-// 在页面上发起、看进度、按原参数「重出」。每张图的 options 与 summary 来自服务端写在
-// 图旁边的 figure.json——它既是重出的依据，也是和绘图实现对账的抓手。
+// Figures are listed by category (marked frames / grid spectra / line-scan spectra / single
+// spectrum stitching / rotation series). Besides browsing, the page can start a job, show its
+// progress, and re-run a figure with its original parameters. Each figure's options and summary
+// come from the figure.json the server writes next to the image; it is the basis for re-running.
 //
-// 后端没接上时（degraded）照样把五个类别摆出来，每一栏写着「怎么出」，而不是白屏。
+// When the backend is not connected (degraded) the five categories are still shown, each
+// describing how to produce it, instead of a blank page.
 
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -27,6 +29,7 @@ import { toast } from "../toast";
 import { useGalleryFigures } from "./useFigures";
 import { FigureJobBar, startFigureJob } from "./figureJob";
 import { FigureViewer } from "./FigureViewer";
+import { tr } from "@/lib/i18n";
 
 const ACC = "!border-mast-accent !bg-mast-accent !text-mast-accent-ink";
 
@@ -44,7 +47,7 @@ export function FiguresView() {
   const markedFrames = () => {
     const n = parsePositiveInt(maxSeries);
     if (n == null) {
-      toast("系列帧数上限要是正整数", "err");
+      toast(tr("系列帧数上限要是正整数", "The series frame limit must be a positive integer"), "err");
       return;
     }
     void startFigureJob(qc, { kind: "marked_frames", options: { max_series_frames: n, include_grids: includeGrids } });
@@ -52,44 +55,54 @@ export function FiguresView() {
 
   return (
     <div>
-      <H1>出图 · {nAll}</H1>
+      <H1>{tr("出图", "Figures")} · {nAll}</H1>
       <Sub>
-        从标记与系列生成正式图：标记帧对比、网格谱逐层、拉线谱热图与瀑布、单根谱拼接、旋转系列拼图与叠加。产物在图库状态目录的
-        figures/ 下；每张图旁边的 figure.json 记着输入与参数，「重出」就是按它再跑一遍。点预览看全尺寸（←/→ 翻页，Esc 关）。
+        {tr(
+          "从标记与系列生成正式图：标记帧对比、网格谱逐层、拉线谱热图与瀑布、单根谱拼接、旋转系列拼图与叠加。产物在图库状态目录的 figures/ 下；每张图旁边的 figure.json 记着输入与参数，「重出」就是按它再跑一遍。点预览看全尺寸（←/→ 翻页，Esc 关）。",
+          "Generate publication figures from marks and series: marked-frame comparisons, per-layer grid spectra, line-scan heatmaps and waterfalls, single-spectrum stitching, rotation-series mosaics and stacks. Output lives under figures/ in the gallery state directory; the figure.json next to each image records its inputs and parameters, and \"Re-run\" runs it again from those. Click a preview for full size (←/→ to page, Esc to close).",
+        )}
       </Sub>
-      {list.isPending && <Spinner label="读取出图列表…" />}
+      {list.isPending && <Spinner label={tr("读取出图列表…", "Reading figure list…")} />}
       {list.isError && <ErrorNote error={list.error} />}
       {list.data?.degraded && (
         <div className="mb-2 rounded-mast-ctl border border-mast-warn-border bg-mast-warn-bg px-3 py-2 text-sm text-mast-warn">
-          出图后端不可用：{list.data.detail || "未知原因"}。已有的图列不出来，发起的出图会提示「没有开始」。
+          {tr("出图后端不可用：", "Figure backend unavailable: ")}
+          {list.data.detail || tr("未知原因", "unknown reason")}
+          {tr("。已有的图列不出来，发起的出图会提示「没有开始」。", ". Existing figures cannot be listed, and starting a job will report that it did not start.")}
         </div>
       )}
 
       <div className="my-2 flex flex-wrap items-center gap-2 text-[13px]">
         <label
           className="flex items-center gap-1"
-          title="帧数超过它的系列不逐张出对比图（绘图实现默认 100；一百多帧的旋转系列用系列页的「16:9 拼图」）"
+          title={tr(
+            "帧数超过它的系列不逐张出对比图（默认 100；一百多帧的旋转系列用系列页的「16:9 拼图」）",
+            "Series with more frames than this do not get per-frame comparison figures (default 100; for rotation series of over a hundred frames use \"16:9 sheet\" on the series page)",
+          )}
         >
-          系列帧数上限
+          {tr("系列帧数上限", "Series frame limit")}
           <input className={`${SMALL_SELECT} w-16`} value={maxSeries} onChange={(e) => setMaxSeries(e.target.value)} />
         </label>
         <label className="flex items-center gap-1">
           <input type="checkbox" checked={includeGrids} onChange={(e) => setIncludeGrids(e.target.checked)} />
-          同时出全部网格谱
+          {tr("同时出全部网格谱", "Also export all grid spectra")}
         </label>
         <button
           type="button"
           className={clsx(SMALL_BTN, ACC)}
           onClick={markedFrames}
-          title="单条标记的帧 + 帧数不超过上限的系列成员，逐张出「原版 | 逐行调平」对比图"
+          title={tr(
+            "单条标记的帧 + 帧数不超过上限的系列成员，逐张出「原版 | 逐行调平」对比图",
+            "For individually marked frames plus members of series within the frame limit, export one \"original | line-flattened\" comparison figure each",
+          )}
         >
-          为已标记出图
+          {tr("为已标记出图", "Make figures for marked")}
         </button>
         <button type="button" className={SMALL_BTN} onClick={() => void startFigureJob(qc, { kind: "grid_sheets" })}>
-          全部网格谱出图
+          {tr("全部网格谱出图", "Make figures for all grids")}
         </button>
         <button type="button" className={SMALL_BTN} disabled={list.isFetching} onClick={() => void list.refetch()}>
-          {list.isFetching ? "刷新中…" : "刷新列表"}
+          {list.isFetching ? tr("刷新中…", "Refreshing…") : tr("刷新列表", "Refresh list")}
         </button>
       </div>
 
@@ -103,7 +116,10 @@ export function FiguresView() {
               {cat.title} · {figs.length}
             </h2>
             {figs.length === 0 ? (
-              <Sub>还没有。{CATEGORY_HINT[cat.key] ?? ""}</Sub>
+              <Sub>
+                {tr("还没有。", "None yet. ")}
+                {CATEGORY_HINT[cat.key] ?? ""}
+              </Sub>
             ) : (
               <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2.5">
                 {figs.map((entry, j) => (
@@ -147,19 +163,19 @@ function FigureCard({ entry, onOpen, onRerun }: { entry: FigureEntry; onOpen: ()
   const nSeries = entry.series?.length ?? 0;
   return (
     <div className="flex flex-col overflow-hidden rounded-[3px] border border-mast-border bg-mast-panel">
-      <button type="button" onClick={onOpen} className="block cursor-zoom-in bg-[#181614]" title="看全尺寸（←/→ 翻页，Esc 关）">
+      <button type="button" onClick={onOpen} className="block cursor-zoom-in bg-[#181614]" title={tr("看全尺寸（←/→ 翻页，Esc 关）", "View full size (←/→ to page, Esc to close)")}>
         {pv ? (
           <img loading="lazy" src={pv} alt={entry.base} className="block h-auto w-full" />
         ) : (
-          <div className="flex h-32 items-center justify-center text-xs text-[#9aa4af]">没有预览图</div>
+          <div className="flex h-32 items-center justify-center text-xs text-[#9aa4af]">{tr("没有预览图", "No preview")}</div>
         )}
       </button>
       <div className="px-2 py-1.5 text-[12px]">
         <div className="break-all font-medium text-mast-text">{entry.title || entry.base}</div>
         <div className="font-mono text-[11.5px] text-mast-muted">
           {KIND_LABEL[entry.kind]} · {entry.created || "—"}
-          {nIds ? ` · ${nIds} 个条目` : ""}
-          {nSeries ? ` · ${nSeries} 个系列` : ""}
+          {nIds ? tr(` · ${nIds} 个条目`, ` · ${nIds} items`) : ""}
+          {nSeries ? tr(` · ${nSeries} 个系列`, ` · ${nSeries} series`) : ""}
         </div>
         {chips.length > 0 && (
           <div className="mt-0.5">
@@ -181,8 +197,8 @@ function FigureCard({ entry, onOpen, onRerun }: { entry: FigureEntry; onOpen: ()
               {f.label}
             </a>
           ))}
-          <button type="button" className={SMALL_BTN} onClick={onRerun} title="按原来的输入与参数再出一次">
-            重出
+          <button type="button" className={SMALL_BTN} onClick={onRerun} title={tr("按原来的输入与参数再出一次", "Run again with the original inputs and parameters")}>
+            {tr("重出", "Re-run")}
           </button>
         </div>
       </div>

@@ -10,6 +10,9 @@ import { Field, StatusPill, SuccessPill, fmtTime } from "./shared";
 import { ExperimentDocuments } from "./ExperimentDocuments";
 import { useCurrentScope, useSwitchSample } from "@/api/scope";
 import { TipHistoryDialog } from "@/components/scope/TipControls";
+import { RECORDS_DETAIL_POLL_MS } from "@/lib/pollRates";
+import { newestFirst } from "@/lib/recordsOrder";
+import { tr } from "@/lib/i18n";
 
 type ExperimentDetail = components["schemas"]["ExperimentDetail"];
 type SampleSummary = components["schemas"]["SampleSummary"];
@@ -28,13 +31,14 @@ function useExperimentDetail(id: string) {
       if (error) throw error;
       return data;
     },
+    refetchInterval: RECORDS_DETAIL_POLL_MS,
   });
 }
 
 const MARKER_COLUMNS: ColumnDef<MapMarker, any>[] = [
-  { accessorKey: "kind", header: "类型" },
-  { accessorKey: "skill_name", header: "技能", cell: (c) => c.getValue() || "—" },
-  { accessorKey: "label", header: "标签", cell: (c) => c.getValue() || "—" },
+  { accessorKey: "kind", header: tr("类型", "Type") },
+  { accessorKey: "skill_name", header: tr("技能", "Skill"), cell: (c) => c.getValue() || "—" },
+  { accessorKey: "label", header: tr("标签", "Label"), cell: (c) => c.getValue() || "—" },
   {
     accessorKey: "x_m",
     header: "X (nm)",
@@ -53,20 +57,20 @@ const MARKER_COLUMNS: ColumnDef<MapMarker, any>[] = [
   },
   {
     accessorKey: "status",
-    header: "状态",
+    header: tr("状态", "Status"),
     cell: (c) => <StatusPill status={c.getValue() as string | null} />,
   },
-  { accessorKey: "source", header: "来源" },
+  { accessorKey: "source", header: tr("来源", "Source") },
 ];
 
 const FEEDBACK_COLUMNS: ColumnDef<FeedbackEntry, any>[] = [
-  { accessorKey: "kind", header: "类别" },
-  { accessorKey: "rating", header: "评分", cell: (c) => c.getValue() || "—" },
-  { accessorKey: "comment", header: "评论", cell: (c) => c.getValue() || "—" },
+  { accessorKey: "kind", header: tr("类别", "Category") },
+  { accessorKey: "rating", header: tr("评分", "Rating"), cell: (c) => c.getValue() || "—" },
+  { accessorKey: "comment", header: tr("评论", "Comment"), cell: (c) => c.getValue() || "—" },
   { accessorKey: "agent", header: "Agent", cell: (c) => c.getValue() || "—" },
   {
     accessorKey: "timestamp",
-    header: "时间",
+    header: tr("时间", "Time"),
     cell: (c) => fmtTime(c.getValue() as string | null),
   },
 ];
@@ -85,29 +89,29 @@ export function ExperimentDetailPane({
   const actionColumns: ColumnDef<ActionSummary, any>[] = [
     {
       accessorKey: "skill_name",
-      header: "技能",
+      header: tr("技能", "Skill"),
       cell: (c) => (
         <button
           className="text-mast-accent hover:underline"
           onClick={() => onSelectAction(c.row.original.id)}
         >
-          {c.getValue() || "(未知)"}
+          {c.getValue() || tr("(未知)", "(unknown)")}
         </button>
       ),
     },
     {
       accessorKey: "success",
-      header: "结果",
+      header: tr("结果", "Result"),
       cell: (c) => <SuccessPill success={c.getValue() as boolean | null} />,
     },
     {
       accessorKey: "duration_s",
-      header: "耗时(s)",
+      header: tr("耗时(s)", "Duration (s)"),
       cell: (c) => (c.getValue() as number)?.toFixed(2) ?? "0.00",
     },
     {
       accessorKey: "error",
-      header: "错误",
+      header: tr("错误", "Error"),
       cell: (c) => {
         const v = c.getValue() as string | null;
         return v ? <span className="text-mast-danger">{v}</span> : "—";
@@ -115,7 +119,7 @@ export function ExperimentDetailPane({
     },
     {
       accessorKey: "timestamp",
-      header: "时间",
+      header: tr("时间", "Time"),
       cell: (c) => fmtTime(c.getValue() as string | null),
     },
   ];
@@ -123,7 +127,7 @@ export function ExperimentDetailPane({
   return (
     <div className="space-y-6">
       <button onClick={onBack} className="text-sm text-mast-accent hover:underline">
-        ← 返回实验列表
+        {tr("← 返回实验列表", "← Back to experiment list")}
       </button>
 
       {q.isPending && <Spinner />}
@@ -133,13 +137,13 @@ export function ExperimentDetailPane({
   );
 }
 
-// Sentinel for the "全部样品" (all samples) navigation option — empty string,
+// Sentinel for the "all samples" navigation option — empty string,
 // distinct from any real sample id, so the scope key stays a plain string.
 const ALL_SAMPLES = "";
 
 const sampleLabel = (s: SampleSummary) => s.name || `${s.id.slice(0, 8)}…`;
 
-/** Compact "起 → 止" time range for a sample. Prefers the sample's own
+/** Compact "start → end" time range for a sample. Prefers the sample's own
  *  start/end columns; falls back to the min/max timestamp of its actions so a
  *  sample with no recorded range still shows a meaningful span. */
 function sampleTimeRange(
@@ -164,7 +168,7 @@ function sampleTimeRange(
  *  scopes the timeline / markers / feedback below. Shows name + type + status +
  *  action count + time range so samples read as a real navigation dimension. */
 
-/** 「设为当前样品」。样品可以来回切 —— 换样品不会结束上一个。 */
+/** "Set as current sample". Samples can be switched back and forth; switching does not end the previous one. */
 function SetCurrentSample({
   experimentId,
   sampleId,
@@ -178,16 +182,16 @@ function SetCurrentSample({
   const switchSmp = useSwitchSample();
   const isCurrent = scope.data?.sample?.id === sampleId;
   if (isCurrent) {
-    return <span className="text-mast-accent">当前样品</span>;
+    return <span className="text-mast-accent">{tr("当前样品", "Current sample")}</span>;
   }
   return (
     <button
       className="rounded-mast-ctl border border-mast-border-strong px-2 py-0.5 text-xs hover:bg-mast-panel-2 disabled:opacity-50"
       disabled={switchSmp.isPending}
       onClick={() => switchSmp.mutate({ experimentId, sampleId })}
-      title={`把「${name}」设为当前样品`}
+      title={tr(`把「${name}」设为当前样品`, `Set "${name}" as the current sample`)}
     >
-      {switchSmp.isPending ? "切换中…" : "设为当前"}
+      {switchSmp.isPending ? tr("切换中…", "Switching…") : tr("设为当前", "Set as current")}
     </button>
   );
 }
@@ -231,7 +235,7 @@ function SampleNavCard({
           {title}
         </span>
         <span className="shrink-0 rounded bg-mast-border/40 px-1.5 py-0.5 text-xs text-mast-muted">
-          {count} 动作
+          {tr(`${count} 动作`, `${count} actions`)}
         </span>
       </div>
       <div className="flex flex-wrap items-center gap-2 text-xs text-mast-muted">
@@ -279,10 +283,10 @@ function DetailBody({
   }, [actions]);
   const sampleCount = (s: SampleSummary) =>
     s.action_count || countBySample.get(s.id) || 0;
-  // Actions with no sample attribution — surfaced under 全部样品 so nothing is lost.
+  // Actions with no sample attribution are surfaced under "all samples" so nothing is lost.
   const unscopedActions = actions.filter((a) => !a.sample_id).length;
 
-  // 按样品过滤动作 / 地图标记 / 反馈。"全部样品" 时原样返回。
+  // Filter actions / map markers / feedback by sample; "all samples" returns them unchanged.
   const filtered = useMemo(() => {
     if (!effectiveFilter) return { actions, markers, feedback };
     return {
@@ -292,54 +296,58 @@ function DetailBody({
     };
   }, [effectiveFilter, actions, markers, feedback]);
 
-  if (data.degraded) return <DegradedNote what="实验详情" />;
+  if (data.degraded) return <DegradedNote what={tr("实验详情", "experiment details")} />;
   if (data.found === false) {
-    return <EmptyNote label={`未找到实验 ${data.id}`} />;
+    return <EmptyNote label={tr(`未找到实验 ${data.id}`, `Experiment ${data.id} not found`)} />;
   }
 
   const selectedSample =
     effectiveFilter ? samples.find((s) => s.id === effectiveFilter) : undefined;
   const scopeSuffix = effectiveFilter
-    ? ` · 样品 ${selectedSample ? sampleLabel(selectedSample) : effectiveFilter.slice(0, 8) + "…"}`
+    ? ` · ${tr("样品", "Sample")} ${selectedSample ? sampleLabel(selectedSample) : effectiveFilter.slice(0, 8) + "…"}`
     : "";
 
   return (
     <>
-      <Section title={data.name || "(未命名实验)"}>
+      <Section title={data.name || tr("(未命名实验)", "(unnamed experiment)")}>
         <Card>
           <Field label="ID">{data.id}</Field>
-          <Field label="目标">{data.goal_text || "—"}</Field>
-          {/* 「状态」降级为历史遗留字段 (2026-07-28)：实验没有生命周期状态，
-              「哪个是当前」由服务端指针回答。旧库里已有的 superseded/completed
-              仍然展示出来，因为用户要能读懂历史数据。 */}
+          <Field label={tr("目标", "Goal")}>{data.goal_text || "—"}</Field>
+          {/* Status is a legacy field: experiments have no lifecycle state (the
+              server's scope pointer says which one is current). Values already
+              stored in old databases (superseded/completed) are still shown so
+              historical data stays readable. */}
           {data.status && data.status !== "running" && (
-            <Field label="历史状态（旧版）">
+            <Field label={tr("历史状态（旧版）", "Legacy status")}>
               <StatusPill status={data.status} />
             </Field>
           )}
-          <Field label="开始">{fmtTime(data.start_time)}</Field>
-          {data.end_time && <Field label="结束">{fmtTime(data.end_time)}</Field>}
-          {data.notes && <Field label="备注">{data.notes}</Field>}
+          <Field label={tr("开始", "Started")}>{fmtTime(data.start_time)}</Field>
+          {data.end_time && <Field label={tr("结束", "Ended")}>{fmtTime(data.end_time)}</Field>}
+          {data.notes && <Field label={tr("备注", "Notes")}>{data.notes}</Field>}
         </Card>
       </Section>
 
-      {/* 本实验期间在役的针尖（「针尖记录等是不是也应该在实验记录中?」）。
-          放在样品之前 —— 读一份实验记录时,「当时用的是哪根针」和「样品是什么」
-          是同一层的前提。 */}
+      {/* Tips in service during this experiment. Placed before the samples: when
+          reading a record, "which tip was used" and "what the sample was" are
+          premises of the same level. */}
       <TipsInService tips={data.tips ?? []} />
 
-      {/* 样品 = 实验内的一级导航维度。选中某样品后，下方动作时间线 / 地图标记 /
-          反馈仅显示该样品；"全部样品" 显示整个实验。 */}
-      <Section title={`样品 (${samples.length})`}>
+      {/* Sample = first-level navigation inside an experiment. Selecting a sample
+          limits the action timeline / map markers / feedback below to it; "all
+          samples" shows the whole experiment. */}
+      <Section title={`${tr("样品", "Samples")} (${samples.length})`}>
         {samples.length === 0 ? (
-          <EmptyNote label="该实验暂无样品" />
+          <EmptyNote label={tr("该实验暂无样品", "This experiment has no samples")} />
         ) : (
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
             <SampleNavCard
               active={effectiveFilter === ALL_SAMPLES}
-              title="全部样品"
-              subtitle={`${samples.length} 个样品${
-                unscopedActions ? ` · ${unscopedActions} 个未归属动作` : ""
+              title={tr("全部样品", "All samples")}
+              subtitle={`${tr(`${samples.length} 个样品`, `${samples.length} samples`)}${
+                unscopedActions
+                  ? ` · ${tr(`${unscopedActions} 个未归属动作`, `${unscopedActions} unassigned actions`)}`
+                  : ""
               }`}
               count={actions.length}
               range={{ start: data.start_time ?? null, end: data.end_time ?? null }}
@@ -367,7 +375,7 @@ function DetailBody({
         {effectiveFilter ? (
           <div className="mt-3 flex items-center gap-2 text-sm text-mast-muted">
             <span>
-              当前查看：
+              {tr("当前查看：", "Viewing: ")}
               <span className="text-mast-text">
                 {selectedSample ? sampleLabel(selectedSample) : effectiveFilter}
               </span>
@@ -377,26 +385,26 @@ function DetailBody({
               onClick={() => setSampleFilter(ALL_SAMPLES)}
               className="rounded border border-mast-border px-2 py-0.5 text-xs text-mast-muted hover:text-mast-text"
             >
-              查看全部样品
+              {tr("查看全部样品", "View all samples")}
             </button>
           </div>
         ) : null}
       </Section>
 
       {selectedSample && (
-        <Section title={`样品详情 · ${sampleLabel(selectedSample)}`}>
+        <Section title={`${tr("样品详情", "Sample details")} · ${sampleLabel(selectedSample)}`}>
           <Card>
             <Field label="ID">{selectedSample.id}</Field>
-            <Field label="类型">{selectedSample.sample_type ?? "—"}</Field>
-            <Field label="子类型">{selectedSample.sample_subtype ?? "—"}</Field>
+            <Field label={tr("类型", "Type")}>{selectedSample.sample_type ?? "—"}</Field>
+            <Field label={tr("子类型", "Subtype")}>{selectedSample.sample_subtype ?? "—"}</Field>
             {selectedSample.status && selectedSample.status !== "active" && (
-              <Field label="历史状态（旧版）">
+              <Field label={tr("历史状态（旧版）", "Legacy status")}>
                 <StatusPill status={selectedSample.status} />
               </Field>
             )}
-            <Field label="动作数">{sampleCount(selectedSample)}</Field>
-            <Field label="开始">{fmtTime(selectedSample.start_time)}</Field>
-            <Field label="当前">
+            <Field label={tr("动作数", "Actions")}>{sampleCount(selectedSample)}</Field>
+            <Field label={tr("开始", "Started")}>{fmtTime(selectedSample.start_time)}</Field>
+            <Field label={tr("当前", "Current")}>
               <SetCurrentSample
                 experimentId={String(data.id)}
                 sampleId={String(selectedSample.id)}
@@ -404,7 +412,7 @@ function DetailBody({
               />
             </Field>
             {selectedSample.description && (
-              <Field label="描述">{selectedSample.description}</Field>
+              <Field label={tr("描述", "Description")}>{selectedSample.description}</Field>
             )}
           </Card>
         </Section>
@@ -412,27 +420,27 @@ function DetailBody({
 
       <ExperimentDocuments experimentId={String(data.id)} />
 
-      <Section title={`动作时间线 (${filtered.actions.length})${scopeSuffix}`}>
+      <Section title={`${tr("动作时间线", "Action timeline")} (${filtered.actions.length})${scopeSuffix}`}>
         <DataTable
-          data={filtered.actions}
+          data={newestFirst(filtered.actions)}
           columns={actionColumns}
-          empty={effectiveFilter ? "该样品暂无动作" : "暂无动作"}
+          empty={effectiveFilter ? tr("该样品暂无动作", "No actions for this sample") : tr("暂无动作", "No actions")}
         />
       </Section>
 
-      <Section title={`地图标记 (${filtered.markers.length})${scopeSuffix}`}>
+      <Section title={`${tr("地图标记", "Map markers")} (${filtered.markers.length})${scopeSuffix}`}>
         <DataTable
           data={filtered.markers}
           columns={MARKER_COLUMNS}
-          empty={effectiveFilter ? "该样品暂无地图标记" : "暂无地图标记"}
+          empty={effectiveFilter ? tr("该样品暂无地图标记", "No map markers for this sample") : tr("暂无地图标记", "No map markers")}
         />
       </Section>
 
-      <Section title={`用户反馈 (${filtered.feedback.length})${scopeSuffix}`}>
+      <Section title={`${tr("用户反馈", "Feedback")} (${filtered.feedback.length})${scopeSuffix}`}>
         <DataTable
           data={filtered.feedback}
           columns={FEEDBACK_COLUMNS}
-          empty={effectiveFilter ? "该样品暂无反馈" : "暂无反馈"}
+          empty={effectiveFilter ? tr("该样品暂无反馈", "No feedback for this sample") : tr("暂无反馈", "No feedback")}
         />
       </Section>
     </>
@@ -440,29 +448,35 @@ function DetailBody({
 }
 
 
-// ── 本实验期间在役的针尖 ─────────────────────────────────────────
+// ── Tips in service during this experiment ──────────────────────────────────
 //
-// 「针尖记录等是不是也应该在实验记录中?」—— 是,但**不是搬家**。
+// Tips are owned by the instrument domain (the `tips` table): one tip spans many
+// experiments and one experiment may use several tips, so tips are siblings of
+// experiments/samples, not children. What was missing was this side: when
+// reading an experiment record, "which tip was used" could not be answered.
 //
-// 针尖是仪器域的真源(`tips` 表):一根针跨很多次实验,一次实验也可能换好几根,
-// 所以它与实验/样品**并列**而不是它们的下级 —— 右栏那个针尖卡片旁边的注释里
-// 早就写着这句话。真正缺的是这一侧:读一份实验记录的时候,「当时用的是哪根针」
-// 答不出来。
-//
-// 所以这里是**展示层聚合**,零写入、零新表。时间窗交集在服务端算(SQL,两张表在
-// 同一个库里),因为 NULL 的口径(实验没结束 / 针尖还在役 / 装入时刻是回填的纯日期)
-// 每一条写错都是**静默变空**,而空区块读起来像「这次实验没换过针」。
-// 那些判断只该有一处,而且该在写这些字符串的那一侧。
+// This is a display-layer aggregation: no writes, no new tables. The time-window
+// overlap is computed on the server (SQL; both tables live in the same
+// database) because the NULL semantics (experiment not ended / tip still in
+// service / install time back-filled as a plain date) fail silently as an empty
+// block, which reads as "no tip change during this experiment". Those rules
+// belong in one place, on the side that writes the data.
 
 function TipsInService({ tips }: { tips: TipInService[] }) {
   const [historyFor, setHistoryFor] = useState<string | null>(null);
 
   return (
-    <Section title={`在役针尖 (${tips.length})`}>
+    <Section title={`${tr("在役针尖", "Tips in service")} (${tips.length})`}>
       {tips.length === 0 ? (
-        // 「查不到」和「确实没换过针」措辞上要分得开:这一段时间里 tips 表没有
-        // 任何一行覆盖得上,最常见的原因是那时候还没开始登记针尖。
-        <EmptyNote label="这段时间里没有登记过在役的针尖(可能是登记功能启用之前的实验)" />
+        // Worded so "nothing found" is distinguishable from "no tip change": no
+        // row of the tips table covers this period, most often because tip
+        // registration had not started yet.
+        <EmptyNote
+          label={tr(
+            "这段时间里没有登记过在役的针尖(可能是登记功能启用之前的实验)",
+            "No tip was registered as in service during this period (possibly an experiment from before tip registration existed)",
+          )}
+        />
       ) : (
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {tips.map((t) => (
@@ -470,26 +484,34 @@ function TipsInService({ tips }: { tips: TipInService[] }) {
               <div className="flex items-baseline justify-between gap-2">
                 <span className="font-semibold text-mast-text">
                   {t.tip_index ? `T${String(t.tip_index).padStart(2, "0")} ` : ""}
-                  {t.name || "未命名"}
+                  {t.name || tr("未命名", "unnamed")}
                 </span>
                 <span className={t.in_service_now ? "text-mast-auto" : "text-mast-faint"}>
-                  {t.in_service_now ? "在用" : "已取出"}
+                  {t.in_service_now ? tr("在用", "In use") : tr("已取出", "Removed")}
                 </span>
               </div>
               <div className="text-mast-muted">
                 {[t.material, t.fabrication, t.form].filter(Boolean).join(" · ") || "—"}
               </div>
               <div className="text-mast-faint">
-                {t.installed_at ? `${t.installed_at.slice(0, 10)} 装入` : "装入日期未记录"}
-                {t.removed_at ? ` → ${t.removed_at.slice(0, 10)} 取出` : ""}
+                {t.installed_at
+                  ? tr(`${t.installed_at.slice(0, 10)} 装入`, `installed ${t.installed_at.slice(0, 10)}`)
+                  : tr("装入日期未记录", "install date not recorded")}
+                {t.removed_at
+                  ? tr(` → ${t.removed_at.slice(0, 10)} 取出`, ` → removed ${t.removed_at.slice(0, 10)}`)
+                  : ""}
               </div>
               {!t.overlap_exact && (
-                // 「确实在役」与「大概在役」必须看得出区别。装入时刻是回填的纯日期
-                // (等价于当天 00:00)或者压根没填(退回用建档时刻)时,时间窗对上的
-                // 那一端是个**下界** —— 偏早,宁可多列一根也不漏掉一根。
-                // 不说出来的话,一个推断会被印得和一个事实一模一样。
+                // "Certainly in service" and "probably in service" must look
+                // different. When the install time is a back-filled plain date
+                // (00:00 that day) or missing (falls back to the record creation
+                // time), the overlapping end is a lower bound: it errs early, so a
+                // tip may be listed that was not used but none is missed.
                 <div className="text-mast-warn">
-                  装入时刻只精确到天(或未记录),与本实验的重叠是按下界推的
+                  {tr(
+                    "装入时刻只精确到天(或未记录),与本实验的重叠是按下界推的",
+                    "Install time is only accurate to the day (or not recorded); the overlap with this experiment is estimated as a lower bound",
+                  )}
                 </div>
               )}
               <button
@@ -497,16 +519,17 @@ function TipsInService({ tips }: { tips: TipInService[] }) {
                 onClick={() => setHistoryFor(t.id)}
                 className="text-mast-accent hover:underline"
               >
-                在换针史中查看 →
+                {tr("在换针史中查看 →", "View in tip history →")}
               </button>
             </Card>
           ))}
         </div>
       )}
-      {/* 链到**真正的**那张针尖卡片(全仓唯一一份渲染),而不是在这里再画一份像它
-          的东西 —— 针尖卡片上写的是材料/制法/服役期这类会被拿去做判断的事实,
-          两份会各自演化。针尖没有 per-tip 路由,所以「链接」的形式是把换针史打开
-          并圈出这一行。 */}
+      {/* Link to the real tip card (the only renderer of it) instead of drawing a
+          look-alike here: the card states material / fabrication / service period,
+          facts that get used for decisions, and two copies would drift apart. Tips
+          have no per-tip route, so the link opens the tip history and highlights
+          this row. */}
       <TipHistoryDialog
         open={historyFor !== null}
         highlightId={historyFor}

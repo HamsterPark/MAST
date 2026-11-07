@@ -32,6 +32,20 @@ software uses 1 pulse = 1 nm for the delay stage (counts_per_unit = 1000 for
 µm). The 32-bit word order across the 2 registers (``word_order_big``) is the
 one thing to confirm on the bench — a wrong order makes the read-back position
 obviously garbage, which OpticalStageWiggle catches immediately.
+
+Velocity and homing, as the vendor spec has them:
+
+* ``close_setpoint_speed`` (holding 20): "实际速度 = pid_set_speed × 1 脉冲代表的位移
+  (µm)（mm/s）", default 100 = 2 mm/s on the vendor's 20 nm stage — i.e. pulses per
+  millisecond, so ``register = v[unit/s] × counts_per_unit / 1000``. The safe
+  speed depends on the stage and the encoder filter ("速度超过 16 mm/s 时需改小"
+  ``filter_num``, which MAST never changes), so a velocity is only set on an axis
+  whose config carries ``max_velocity``, and never above 16 mm/s.
+* ``enc_look_zero`` (coil 3) starts a find-zero: the controller MOVES the stage to
+  the encoder's Z index; ``zero_status`` (discrete 0) reports "找零点到位". Whether
+  the counter is then reset depends on the controller's ``enc_useZ`` setting,
+  which MAST leaves alone. A stop clears ``enc_look_zero`` as well as the closed
+  loop, so it also ends a find-zero.
 """
 
 from __future__ import annotations
@@ -55,6 +69,7 @@ from mast.instruments.base import (
     MotionAxis,
     MotionController,
     MotionTimeout,
+    serial_open_hint,
 )
 
 logger = logging.getLogger(__name__)
@@ -205,11 +220,18 @@ class PztcRegisterMap:
 
 # ── axis ──────────────────────────────────────────────────────────────────
 
+#: µm per axis unit, for the vendor's mm/s speed bound
+_UM_PER_UNIT = {"nm": 1e-3, "um": 1.0, "µm": 1.0, "μm": 1.0, "mm": 1e3}
+#: vendor spec: above this the encoder filter (filter_num) must be lowered
+_ENCODER_FILTER_MAX_MM_S = 16.0
+
 
 class PztcAxis(MotionAxis):
     """One PZTC channel. Native unit = encoder counts scaled by
     ``counts_per_unit`` (counts / AxisConfig.unit); positions exposed to
     callers are in the axis's configured unit."""
+
+    SUPPORTS = frozenset({"home", "velocity"})
 
     def __init__(
         self,
@@ -218,13 +240,17 @@ class PztcAxis(MotionAxis):
         *,
         counts_per_unit: float = 1.0,
         position_tolerance: float = 5.0,   # counts
+        on_target_mode: str = "place_achieve",
     ):
         super().__init__(config, controller)
         if counts_per_unit <= 0:
             raise ValueError("counts_per_unit must be > 0")
+        if on_target_mode not in ("place_achieve", "position"):
+            raise ValueError("on_target_mode must be 'place_achieve' or 'position'")
         self._pztc: PztcController = controller
         self._counts_per_unit = float(counts_per_unit)
         self._tolerance_counts = float(position_tolerance)
+        self._on_target_mode = on_target_mode
         self._last_target_counts: int | None = None
         self._last_pos_counts: int | None = None
 
@@ -260,14 +286,20 @@ class PztcAxis(MotionAxis):
         m = self._pztc._map
         regs = self._pztc.read_input(m.input_addr(m.place_counter, ch), 2)
         counts = self._pztc._join_i32(regs)
-        # on-target from the hardware 'place_achieve' discrete input, which the
-        # controller auto-clears when a new setpoint is written — authoritative,
-        # no position-delta heuristic. Unknown before the first move.
+        # on-target, two ways (``on_target_mode``):
+        #  * "place_achieve" — the hardware discrete input, which the controller
+        #    auto-clears when a new setpoint is written;
+        #  * "position" — |target − position| ≤ tolerance counts. This criterion
+        #    never reads place_achieve.
+        # Unknown before the first move.
         on_target: bool | None = None
         if self._last_target_counts is not None:
-            on_target = self._pztc.read_discrete_input(
-                m.discrete_addr(m.place_achieve, ch)
-            )
+            if self._on_target_mode == "position":
+                on_target = abs(counts - self._last_target_counts) <= self._tolerance_counts
+            else:
+                on_target = self._pztc.read_discrete_input(
+                    m.discrete_addr(m.place_achieve, ch)
+                )
         return AxisStatus(
             position=self._from_counts(counts),
             moving=(on_target is False),
@@ -278,16 +310,88 @@ class PztcAxis(MotionAxis):
     def _stop_raw(self) -> None:
         ch = int(self.config.channel)
         m = self._pztc._map
-        # abort by disabling the closed-loop-move coil (0 = 关闭).
-        self._pztc.write_coil(m.coil_addr(m.close_loop_move, ch), False)
+        # abort by disabling the closed-loop-move coil (0 = 关闭) — and the
+        # find-zero coil, or a stop during homing would leave the stage walking.
+        # Both writes are tried even if the first one fails.
         self._last_target_counts = None
+        first: Exception | None = None
+        for coil in (m.close_loop_move, m.enc_look_zero):
+            try:
+                self._pztc.write_coil(m.coil_addr(coil, ch), False)
+            except Exception as exc:  # noqa: BLE001 - try the other coil anyway
+                first = first or exc
+        if first is not None:
+            raise first
 
-    def home(self, *, wait: bool = True, timeout: float | None = None) -> AxisStatus:
-        """Find-zero via the ``enc_look_zero`` coil, polling the
-        ``zero_status`` discrete input (not ``place_achieve``, which tracks
-        setpoint moves) for completion."""
+    def _status_details_raw(self) -> dict:
         ch = int(self.config.channel)
         m = self._pztc._map
+        out: dict = {}
+        unit_s = f"{self.config.unit}/s"
+        reads = (
+            ("velocity", lambda: self._from_rate(
+                self._pztc.read_holding(m.holding_addr(m.setpoint_speed, ch), 1)[0])),
+            ("speed_now", lambda: self._from_rate(
+                self._pztc.read_input(m.input_addr(m.speed_counter, ch), 1)[0])),
+            ("zero_found", lambda: self._pztc.read_discrete_input(
+                m.discrete_addr(m.zero_status, ch))),
+            ("closed_loop", lambda: self._pztc.read_coil(m.coil_addr(m.close_loop_move, ch))),
+        )
+        for key, read in reads:
+            try:
+                out[key] = read()
+            except InstrumentError:
+                continue
+        if "velocity" in out or "speed_now" in out:
+            out["velocity_unit"] = unit_s
+        return out
+
+    def _from_rate(self, pulses_per_ms: int) -> float:
+        """Speed register (pulses / ms, vendor spec) → axis unit / s."""
+        return int(pulses_per_ms) * 1000.0 / self._counts_per_unit
+
+    def _set_velocity_raw(self, velocity: float) -> float | None:
+        cfg = self.config
+        if cfg.max_velocity is None:
+            raise InstrumentError(
+                f"axis {cfg.name!r}: no max_velocity in the device config — the PZTC's safe "
+                "speed depends on the stage and its encoder filter (vendor spec: above 16 mm/s "
+                "filter_num must be lowered), so MAST sets a velocity only where the config "
+                "says how fast this axis may go")
+        um = _UM_PER_UNIT.get(str(cfg.unit).strip())
+        if um is None:
+            raise InstrumentError(
+                f"axis {cfg.name!r}: unit {cfg.unit!r} has no mm conversion — cannot check "
+                "the vendor's 16 mm/s encoder bound, velocity not set")
+        mm_s = velocity * um / 1000.0
+        if mm_s > _ENCODER_FILTER_MAX_MM_S:
+            raise InstrumentError(
+                f"axis {cfg.name!r}: {velocity:g} {cfg.unit}/s = {mm_s:g} mm/s is above the "
+                "16 mm/s the vendor spec allows with the default encoder filter — refused")
+        reg = int(round(velocity * self._counts_per_unit / 1000.0))
+        if not 1 <= reg <= 0xFFFF:
+            raise InstrumentError(
+                f"axis {cfg.name!r}: {velocity:g} {cfg.unit}/s is {reg} pulses/ms — the speed "
+                "register takes 1…65535")
+        ch = int(cfg.channel)
+        m = self._pztc._map
+        addr = m.holding_addr(m.setpoint_speed, ch)
+        self._pztc.write_holding(addr, reg)
+        back = self._pztc.read_holding(addr, 1)[0]
+        if back != reg:
+            raise InstrumentError(
+                f"axis {cfg.name!r}: speed register written {reg}, reads back {back}")
+        return self._from_rate(back)
+
+    def home(self, *, wait: bool = True, timeout: float | None = None,
+             check_abort=None) -> AxisStatus:
+        """Find-zero via the ``enc_look_zero`` coil, polling the
+        ``zero_status`` discrete input (not ``place_achieve``, which tracks
+        setpoint moves) for completion. ``check_abort`` as in the base class:
+        an abort stops the axis and raises."""
+        ch = int(self.config.channel)
+        m = self._pztc._map
+        self._abort_point(check_abort, "find-zero", stop=False)
         with self._controller._io_lock:
             self._pztc.write_coil(m.coil_addr(m.enc_look_zero, ch), True)
         self._last_target_counts = None
@@ -295,6 +399,7 @@ class PztcAxis(MotionAxis):
             return self.get_status()
         deadline = time.monotonic() + (timeout or self.DEFAULT_TIMEOUT_S)
         while time.monotonic() < deadline:
+            self._abort_point(check_abort, "find-zero")
             with self._controller._io_lock:
                 done = self._pztc.read_discrete_input(
                     m.discrete_addr(m.zero_status, ch)
@@ -334,6 +439,8 @@ class PztcController(MotionController):
         position_tolerance: float = 5.0,
         transport: SerialLike | None = None,
         inter_frame_gap_s: float = 0.004,
+        on_target_mode: str = "place_achieve",
+        axis_setup: Mapping[str, Mapping[str, object]] | None = None,
     ):
         super().__init__()
         if transport is None and not port:
@@ -345,6 +452,12 @@ class PztcController(MotionController):
         self._axis_configs = list(axes or [])
         self._counts_per_unit = float(counts_per_unit)
         self._position_tolerance = float(position_tolerance)
+        self._on_target_mode = str(on_target_mode)
+        #: per-axis init writes, by axis name: ``encoder_reversed`` (bool → the
+        #: enc_dir coil) and ``pid1`` (int → the fine-position PI register). The
+        #: vendor setup software typically writes both at every connect; without the encoder direction a closed loop can run
+        #: the wrong way. Absent keys are left exactly as the controller has them.
+        self._axis_setup = {str(k): dict(v) for k, v in (axis_setup or {}).items()}
         self._transport: SerialLike | None = transport
         self._owns_transport = transport is None
         # RS-422 half-duplex style bus: keep a minimal silent gap between
@@ -366,8 +479,21 @@ class PztcController(MotionController):
                 t = open_transport(settings)
                 t.open()
             except SerialUnavailable as exc:
-                raise InstrumentUnavailable(f"PZTC on {self._port}: {exc}") from exc
+                raise InstrumentUnavailable(
+                    f"PZTC on {self._port}: {exc}{serial_open_hint(self._port)}") from exc
             self._transport = t
+        self._apply_axis_setup()
+
+    def _apply_axis_setup(self) -> None:
+        """Init writes performed at every connect (see ``axis_setup``)."""
+        m = self._map
+        for cfg in self._axis_configs:
+            setup = self._axis_setup.get(cfg.name) or {}
+            ch = int(cfg.channel)
+            if setup.get("encoder_reversed") is not None:
+                self.write_coil(m.coil_addr(m.enc_dir, ch), bool(setup["encoder_reversed"]))
+            if setup.get("pid1") is not None:
+                self.write_holding(m.holding_addr(m.pid1, ch), int(setup["pid1"]) & 0xFFFF)
 
     def _close_raw(self) -> None:
         t = self._transport
@@ -385,6 +511,7 @@ class PztcController(MotionController):
                 self,
                 counts_per_unit=self._counts_per_unit,
                 position_tolerance=self._position_tolerance,
+                on_target_mode=self._on_target_mode,
             )
             for cfg in self._axis_configs
         }
@@ -433,6 +560,14 @@ class PztcController(MotionController):
             raise InstrumentError(
                 f"discrete-input read at {address} returned {data.hex(' ')}"
             )
+        return bool(data[1] & 0x01)
+
+    def read_coil(self, address: int) -> bool:
+        """Read one coil (fn 0x01) — the same bit the write side sets."""
+        payload = address.to_bytes(2, "big") + (1).to_bytes(2, "big")
+        data = self._transact(0x01, payload, resp_len=6)
+        if len(data) < 2:
+            raise InstrumentError(f"coil read at {address} returned {data.hex(' ')}")
         return bool(data[1] & 0x01)
 
     def write_holding(self, address: int, value: int) -> None:

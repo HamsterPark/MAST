@@ -1,18 +1,18 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { api } from "@/api/client";
+import { tr } from "@/lib/i18n";
 import { readSseStream, sseBroke, sseEndMessage } from "@/lib/sse";
 import { AGENTS, SUPERVISOR, SUP_ID } from "./registry";
 
 // ════════════════════════════════════════════════════════════════════════════
-// runTaskStore — the 群聊 (multi-agent orchestrator) conversation, hoisted OUT
-// of the React component into a module-scoped zustand store.
+// runTaskStore — the group-chat (multi-agent orchestrator) conversation, held in
+// a module-scoped zustand store rather than component state.
 //
-// WHY: the conversation used to live in RunTaskPanel's local useState, so any
-// navigation / sub-tab switch UNMOUNTED the panel and wiped the whole thread —
-// and the unmount cleanup even aborted the live SSE stream. The conversation was
-// an ephemeral demo. Hoisting the state + driving the SSE loop from module scope
-// means:
+// WHY: with the conversation in a component's local useState, any navigation or
+// sub-tab switch would unmount the panel and wipe the thread (and an unmount
+// cleanup would abort the live SSE stream). Holding the state and driving the SSE
+// loop from module scope means:
 //   • switching tabs / pages no longer clears the conversation (the store holds
 //     it for the whole SPA session) and no longer kills a running stream;
 //   • the durable group conversation_id is persisted (localStorage), so a reload
@@ -86,10 +86,9 @@ export function normalizeAsk(raw: unknown): AskQuestion | null {
 
 export type Entry =
   | { kind: "operator"; text: string; target: string; t: number }
-  // A `message` whose role is "tool" carries a one-line SUMMARY in `text`
-  // (— the panel used to show `name(a=1, b=2, , )`, clipped
-  // mid-argument with the closing paren pasted on after). What the summary
-  // leaves out rides along so the operator can expand it:
+  // A `message` whose role is "tool" carries a one-line SUMMARY in `text` (rather
+  // than a raw call string clipped mid-argument). What the summary leaves out
+  // rides along so the operator can expand it:
   //   tool/args        — a tool CALL's name + its full arguments as pretty JSON
   //   detail           — a tool RETURN's raw payload, digested in `text`
   //   argsClipped      — the arguments were too big to send WHOLE; say so
@@ -107,10 +106,10 @@ export type Entry =
     }
   | { kind: "status"; text: string; backend?: string; t: number }
   // The context middleware replaced a stretch of this agent's history with a
-  // summary. Every count is
-  // OPTIONAL on purpose: the row renders as a bare "此处发生过一次上下文压缩"
-  // divider when the backend didn't carry numbers, rather than showing a made-up
-  // one. Above such a divider the transcript is NOT what was said.
+  // summary. Every count is OPTIONAL on purpose: the row renders as a bare
+  // "context compaction happened here" divider when the backend carried no
+  // numbers, rather than showing a made-up one. Above such a divider the
+  // transcript is NOT what was said.
   | {
       kind: "compaction";
       agent?: string;
@@ -123,11 +122,10 @@ export type Entry =
       t: number;
     }
   | { kind: "interrupt"; pending: Pending; t: number }
-  // `aborted` alone could not say WHY a run stopped, so a backend crash, an
-  // unanswered approval and a real operator abort all rendered as 「已中止」 —
-  // and a branch that died silently rendered as 「任务完成」. `failed` +
-  // `stopReason` are the backend's own distinction (kind:"done" carries both);
-  // consuming them is what makes the three outcomes three outcomes.
+  // `aborted` alone cannot say WHY a run stopped: a backend crash, an unanswered
+  // approval and a real operator abort would all render as aborted, and a branch
+  // that died silently as complete. `failed` + `stopReason` are the backend's own
+  // distinction (kind:"done" carries both); consuming them keeps the outcomes apart.
   | {
       kind: "done";
       finalText: string;
@@ -207,22 +205,24 @@ interface RunTaskState {
   // the client can't re-attach the live SSE, but can show the persisted tail).
   serverActive: boolean;
   // Turn-progress visibility: how far in / what the ceiling is, so the panel can
-  // always show "N/限". The NAMES are historical (they were super-step counts);
-  // `progressUnit` says what the numbers actually count, because the backend's
-  // answer changes with the engine — "super_step" on the LangGraph path,
+  // always show "N/limit". The field names are historical (they were super-step
+  // counts); `progressUnit` says what the numbers actually count, because the
+  // backend's answer changes with the engine: "super_step" on the LangGraph path,
   // "model_call" on the v2 AgentLoop. Absent = the old path, which never said.
   step: number;
   stepLimit: number;
   progressUnit: string;
-  // operator pause: a global __all__ hold — the
-  // orchestrator parks at the next agent boundary until released.
+  // operator pause: a global __all__ hold; the orchestrator parks at the next
+  // agent boundary until released.
   paused: boolean;
-  // 目标终止判据（2026-08-28）。只有下发时带了 `done_when` 的 run 才会收到
-  // `goal` 帧；没带的 run 这里永远是 null，面板上一个字都不多。
+  // Goal termination criterion. Only runs dispatched with `done_when` receive
+  // `goal` frames; for other runs this stays null and the panel shows nothing extra.
   //
-  // 后端每次 supervisor 访问都会带上最新一次求值 —— 这个字段存在的理由是
-  // 「代码认为还差什么」要**看得见**：Gate 1 会不问模型就结束、Gate 2 会拦下
-  // 一次结束并转人问，而用户如果看不到判据，这两件事都像是系统在自作主张。
+  // The backend attaches the latest evaluation on every supervisor visit. The
+  // field exists so that what the code still considers missing is visible: Gate 1
+  // can end a run without asking the model and Gate 2 can intercept an ending and
+  // ask the operator, and without a visible criterion both look like the system
+  // acting on its own.
   goal: {
     verdict: string;
     met: number;
@@ -277,8 +277,8 @@ export function parseRowMeta(meta?: string | null): {
 
 /** Pull a compaction's facts out of a live frame's `compaction` object or a
  *  persisted row's JSON sidecar. Each field is carried over ONLY when it really
- *  arrived as a number/string — a missing count stays missing so the divider can
- *  say "压缩过" without inventing "压掉了 N 条". */
+ *  arrived as a number/string; a missing count stays missing so the divider can
+ *  say "compacted" without inventing "N removed". */
 export function parseCompactionMeta(raw: unknown): {
   removed?: number;
   kept?: number;
@@ -328,10 +328,10 @@ function transcriptRowToEntry(r: {
     case "status":
       return { kind: "status", text: r.text ?? "", t };
     case "interrupt":
-      return { kind: "status", text: `⚠ 审批 · ${r.text ?? ""}`, t };
+      return { kind: "status", text: tr(`⚠ 审批 · ${r.text ?? ""}`, `⚠ Approval · ${r.text ?? ""}`), t };
     case "compaction":
-      // Replays exactly like the live divider — this is the one row whose
-      // ABSENCE on reload would put the operator back where // found them: reading a rewritten history that looks untouched.
+      // Replays exactly like the live divider. Its absence on reload would leave
+      // the operator reading a rewritten history that looks untouched.
       return {
         kind: "compaction",
         ...(r.agent_id ? { agent: r.agent_id } : {}),
@@ -342,9 +342,8 @@ function transcriptRowToEntry(r: {
     case "done": {
       // The persisted marker is one of exactly three shapes written by
       // `_terminal_label`: "完成", "已中止" (a genuine operator abort), or
-      // "运行出错，已停止：<reason>". Matching only on "已中止" meant a CRASHED
-      // conversation replayed as 「任务完成」 — the crash label does not contain
-      // that word (2026-07-28 audit, 附带发现).
+      // "运行出错，已停止：<reason>". Matching only "已中止" would replay a CRASHED
+      // conversation as complete, since the crash label does not contain that word.
       const marker = (r.text ?? "").trim();
       const failed = marker.startsWith("运行出错");
       const abortedRow = marker.includes("已中止");
@@ -366,9 +365,9 @@ function transcriptRowToEntry(r: {
         role: (r.role as Role) || "agent",
         text: r.text ?? "",
         t,
-        // A replayed row expands exactly like a live one. Rows written before
-        // 2026-07-28 have no sidecar and simply have nothing to expand — their
-        // `text` is still the old raw call string, unchanged.
+        // A replayed row expands exactly like a live one. Older rows have no
+        // sidecar and simply have nothing to expand; their `text` is still the
+        // raw call string.
         ...parseRowMeta(r.meta),
       };
   }
@@ -385,25 +384,23 @@ export const useRunTaskStore = create<RunTaskState>()(
             degradedNote:
               typeof f.message === "string" && f.message
                 ? f.message
-                : "编排器后端降级（独立开发模式或未接入核心）。",
+                : tr("编排器后端降级（独立开发模式或未接入核心）。", "Orchestrator backend degraded (standalone dev mode or core not connected)."),
           }));
         }
         const now = Date.now() / 1000;
         // Surface the turn's progress from any frame that carries it.
         //
         // Two spellings, on purpose. `progress` / `progress_limit` /
-        // `progress_unit` are the runtime-agnostic pair (event protocol v2,
-        // 2026-08-26); `step` / `step_limit` are the LangGraph super-step count
-        // the backend has always sent. The super-step number is not a unit
-        // anybody can reason about — its exchange rate with "how much work is
-        // left in this turn" drifts with the middleware count (the same literal
-        // 50 bought ~9 tool calls in June and 3 in August, with no diff ever
-        // saying "limit lowered"). And once the LangGraph exit lands there are no
+        // `progress_unit` are the runtime-agnostic fields (event protocol v2);
+        // `step` / `step_limit` are the LangGraph super-step count the backend has
+        // always sent. A super-step count is not a unit anyone can reason about:
+        // its exchange rate with "how much work is left in this turn" drifts with
+        // the middleware count, and once LangGraph is removed there are no
         // super-steps at all.
         //
-        // So: prefer the new fields, fall back to the old ones. Both engines can
-        // then talk to this client unchanged, and the day the old fields stop
-        // being sent nothing here has to move.
+        // So prefer the new fields and fall back to the old ones. Both engines
+        // can talk to this client unchanged, and nothing here has to move when the
+        // old fields stop being sent.
         if (typeof f?.progress === "number") set(() => ({ step: f.progress }));
         else if (typeof f?.step === "number") set(() => ({ step: f.step }));
         if (typeof f?.progress_limit === "number") set(() => ({ stepLimit: f.progress_limit }));
@@ -422,11 +419,12 @@ export const useRunTaskStore = create<RunTaskState>()(
               stepLimit: Number(f.progress_limit ?? f.step_limit) || 0,
               progressUnit: typeof f.progress_unit === "string" ? f.progress_unit : "",
             }));
-            pushEntry(set, { kind: "status", text: `任务已下发：${f.task ?? ""}`, t: now });
+            pushEntry(set, { kind: "status", text: tr(`任务已下发：${f.task ?? ""}`, `Task dispatched: ${f.task ?? ""}`), t: now });
             break;
           case "goal":
-            // 未知 kind 在 default 里是 no-op，所以这一条即使前端旧一版也不会
-            // 出错；加它是因为「生产方接了、消费方缺席」在本仓是有名字的病。
+            // Unknown kinds are a no-op in the default branch, so an older frontend
+            // is unaffected; this case exists so the goal frame has a consumer
+            // rather than a producer with nobody reading it.
             set(() => ({
               goal: {
                 verdict: String(f.verdict ?? ""),
@@ -462,7 +460,7 @@ export const useRunTaskStore = create<RunTaskState>()(
             pushEntry(set, {
               kind: "compaction",
               ...(f.agent ? { agent: String(f.agent) } : {}),
-              text: String(f.text ?? "上下文压缩"),
+              text: String(f.text ?? tr("上下文压缩", "Context compaction")),
               t: f.t ?? now,
               ...parseCompactionMeta(f.compaction),
             });
@@ -493,7 +491,7 @@ export const useRunTaskStore = create<RunTaskState>()(
             });
             break;
           case "error":
-            set(() => ({ streamErr: String(f.message ?? "编排器出错") }));
+            set(() => ({ streamErr: String(f.message ?? tr("编排器出错", "Orchestrator error")) }));
             break;
           case "done":
             pushEntry(set, {
@@ -537,20 +535,18 @@ export const useRunTaskStore = create<RunTaskState>()(
           if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`);
           const end = await readSseStream(resp, { onFrame: handleFrame, controller: ctrl });
           if (sseBroke(end)) {
-            // A body that ends WITHOUT the server's `done` frame, or 75 s of
-            // total silence through the keep-alive, is a cut connection — not a
-            // finished run. This used to be indistinguishable from success
-            // (`if (done) break`), so a Tailscale roam left the transcript
-            // stopping mid-sentence with no error, no spinner and no reconnect
-            // banner: the conversation looked finished when it was not
-            //.
+            // A body that ends WITHOUT the server's `done` frame, or 75 s of total
+            // silence through the keep-alive, is a cut connection, not a finished
+            // run. Treating it as success would leave the transcript stopping
+            // mid-sentence with no error, spinner or reconnect banner, so the
+            // conversation would look finished when it is not.
             breakCause = sseEndMessage(end);
             set(() => ({ streamErr: breakCause }));
             streamBroke = true;
           }
         } catch (err) {
           if ((err as Error)?.name !== "AbortError") {
-            breakCause = `连接出错：${String((err as Error)?.message ?? err)}`;
+            breakCause = tr(`连接出错：${String((err as Error)?.message ?? err)}`, `Connection error: ${String((err as Error)?.message ?? err)}`);
             set(() => ({ streamErr: breakCause }));
             // The stream died on us; the RUN did not. Keep serverActive so the
             // abort button stays reachable — see the finally below.
@@ -559,13 +555,11 @@ export const useRunTaskStore = create<RunTaskState>()(
         } finally {
           // Losing the stream is NOT the run ending.
           //
-          // This used to clear `serverActive` unconditionally, which meant a
-          // network blip / tab switch / refresh made the abort button vanish
-          // (it is gated on `running || serverActive`) while the backend kept
-          // going — and the next message then bounced off the busy guard with
-          // "该群聊仍在后端运行". That left no way out and a
-          // hint pointing at a button that does not exist. That is the "UI must never freeze" invariant being broken
-          // not by a frozen screen but by a functional dead end.
+          // Clearing `serverActive` unconditionally would make a network blip, tab
+          // switch or refresh hide the abort button (it is gated on
+          // `running || serverActive`) while the backend kept going, and the next
+          // message would bounce off the busy guard. The operator would have no
+          // way out: a functional dead end.
           //
           // So: `running` (this tab is streaming) always clears, but
           // `serverActive` (the backend is working) is only cleared when the
@@ -578,14 +572,15 @@ export const useRunTaskStore = create<RunTaskState>()(
           _abortCtrl = null;
         }
 
-        // ── auto-recover from a cut stream  ─────────────────────────────
-        // Losing the connection must not cost the operator anything they'd have
-        // to notice and repair by hand. `running` is false by now, so hydrate()
-        // is allowed to run: it replays the persisted transcript (catching the
-        // view up on everything that arrived after the cut) and reports whether
-        // the backend run is still going. Only THEN can we say what the break
-        // actually means — hydrate clears streamErr on success (that is what
-        // 刷新进展 means), so the explanation is restated with its consequence.
+        // ── auto-recover from a cut stream ───────────────────────────────────
+        // Losing the connection must not cost the operator anything they would
+        // have to notice and repair by hand. `running` is false by now, so
+        // hydrate() is allowed to run: it replays the persisted transcript
+        // (catching the view up on everything that arrived after the cut) and
+        // reports whether the backend run is still going. Only then can we say
+        // what the break means. hydrate clears streamErr on success (that is what
+        // "Refresh progress" does), so the explanation is restated with its
+        // consequence.
         if (streamBroke) {
           try {
             await get().hydrate(true);
@@ -595,10 +590,10 @@ export const useRunTaskStore = create<RunTaskState>()(
           const stillRunning = get().serverActive;
           set(() => ({
             streamErr:
-              (breakCause ?? "连接中断。") +
+              (breakCause ?? tr("连接中断。", "Connection lost. ")) +
               (stillRunning
-                ? "后端任务仍在继续 —— 上方已自动补上最新进展；要停止请点「中止后端运行」。"
-                : "后端任务已结束 —— 上方已是最终记录。"),
+                ? tr("后端任务仍在继续 —— 上方已自动补上最新进展；要停止请点「中止后端运行」。", "The backend task is still running; the latest progress has been filled in above. To stop it, click \"Abort backend run\".")
+                : tr("后端任务已结束 —— 上方已是最终记录。", "The backend task has finished; the record above is final.")),
           }));
         }
       };
@@ -612,7 +607,7 @@ export const useRunTaskStore = create<RunTaskState>()(
           });
           if (error) throw error;
           if (data?.ok && !data.degraded) return { ok: true };
-          return { ok: false, detail: data?.detail ?? "编排器未在运行 / 后端降级" };
+          return { ok: false, detail: data?.detail ?? tr("编排器未在运行 / 后端降级", "orchestrator not running / backend degraded") };
         } catch (e) {
           return { ok: false, detail: String((e as Error)?.message ?? e) };
         }
@@ -629,8 +624,9 @@ export const useRunTaskStore = create<RunTaskState>()(
         serverActive: false,
         step: 0,
         stepLimit: 0,
-        // 空串 = 后端没说单位（旧引擎的老帧）。刻意不猜一个默认值：
-        // 「读不到」与「是 super_step」是两件事。
+        // Empty string = the backend did not state a unit (old-engine frames).
+        // Deliberately no guessed default: "unknown" and "is super_step" are
+        // different things.
         progressUnit: "",
         goal: null,
         paused: false,
@@ -691,8 +687,7 @@ export const useRunTaskStore = create<RunTaskState>()(
           return { degraded };
         },
 
-        // Global pause/resume (群聊缺少暂停和继续功能).
-        // Sets/clears the backend's __all__ hold; the run-task stream honours it
+        // Global pause/resume. Sets/clears the backend's __all__ hold; the run-task stream honours it
         // at the next agent boundary (_honor_holds) and yields held/resumed
         // status frames, so the transcript narrates the pause too.
         togglePause: async () => {
@@ -730,13 +725,13 @@ export const useRunTaskStore = create<RunTaskState>()(
               get().markResolved(it.interrupt_id);
               return { ok: true, applied: true };
             }
-            // NOT resolved. `answer_invalid` / `route_not_allowed` mean the
-            // backend deliberately left the worker blocked so the operator can
-            // correct and resubmit — greying the card out here would strand a
-            // run that is still sitting there waiting for an answer.
+            // NOT resolved. `answer_invalid` / `route_not_allowed` mean the backend
+            // deliberately left the worker blocked so the operator can correct and
+            // resubmit; greying the card out here would strand a run still waiting
+            // for an answer.
             return {
               ok: false,
-              detail: data?.detail ?? "后端降级或中断已处理",
+              detail: data?.detail ?? tr("后端降级或中断已处理", "backend degraded or interrupt already handled"),
               ...(data?.status ? { status: data.status } : {}),
             };
           } catch (e) {

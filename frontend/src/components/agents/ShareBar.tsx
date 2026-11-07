@@ -2,12 +2,14 @@ import { agentColorVar } from "@/components/agents/registry";
 import type { Share } from "@/lib/contextInjection";
 import { fmtChars } from "@/lib/contextInjection";
 
-// 一条横向堆叠条 + 图例。**不引图表库**：全仓没有 recharts/d3，为一条百分比条
-// 引一个是纯负债；而且这里要的是「一眼看出谁最大」，不是可交互图表。
+// A horizontal stacked bar plus legend. No chart library: the repo has none, and a
+// single percentage bar does not justify one; the goal is seeing the largest share
+// at a glance, not an interactive chart.
 //
-// 颜色只用已存在的设计 token（`designTokens.test.ts` 会核每个 var(--…) 真的
-// 定义过）。静态提示用该 agent 自己的身份色，其余走一组固定的循环色 —— 循环色
-// 是刻意的：块的数量会随版本变，写死一块一色的表迟早对不上。
+// Colors use only existing design tokens (`designTokens.test.ts` checks that every
+// var(--…) is defined). The static prompt uses the agent's own identity color; the
+// rest cycle through a fixed palette, since the number of blocks varies by version
+// and a hard-coded one-color-per-block table would drift out of date.
 
 const BLOCK_COLORS = [
   "var(--mast-info)",
@@ -34,7 +36,7 @@ export function ShareBar({
   caption?: string;
 }) {
   if (shares.length === 0) return null;
-  // 屏幕阅读器拿到的是同一份信息，而不是「一张图」。
+  // Screen readers get the same information as text rather than just an image.
   const summary = shares.map((s) => `${s.label} ${s.pct}%`).join(" · ");
   let blockIndex = -1;
   const colored = shares.map((s) => {
@@ -52,11 +54,11 @@ export function ShareBar({
         {colored.map(({ share, color }, i) => (
           <span
             key={`${share.key}-${share.id ?? i}`}
-            title={`${share.label} — ${fmtChars(share.chars)}（${share.pct}%）`}
+            title={`${share.label} — ${fmtChars(share.chars)}(${share.pct}%)`}
             style={{
               width: `${share.pct}%`,
               background: color,
-              // 估算的那一段画成斜纹：一个和实测长得一样的估算值会被当成实测读。
+              // Estimated segments are hatched so they are not mistaken for measured values.
               backgroundImage: share.estimated
                 ? "repeating-linear-gradient(45deg, rgba(255,255,255,.35) 0 3px, transparent 3px 6px)"
                 : undefined,

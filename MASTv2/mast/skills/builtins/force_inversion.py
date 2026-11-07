@@ -24,6 +24,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -64,45 +65,54 @@ class InvertForceSaderJarvis(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "把一条 Δf(z) 的 .dat 用 Sader–Jarvis 方法反演成力 F(z) 与势能 U(z),"
+                tr("把一条 Δf(z) 的 .dat 用 Sader–Jarvis 方法反演成力 F(z) 与势能 U(z),"
                 "报出力的极小值(pN)、它相对 Δf 极小值的位置、短程力衰减长度与结合能"
                 "(meV)。给了干净表面的背景曲线就先相减。只读文件,不碰硬件。"
                 "verdict 取 'well' / 'no_well' / 'undecidable'。另外报两条诊断:正向残差"
                 "(反演出的力再算回 Δf 与实测差多少),以及振幅与力衰减长度之比 —— 后者"
-                "的门限**未标定**,它提示换个振幅复测,不替你下结论。"
+                "的门限**未标定**,它提示换个振幅复测,不替你下结论。", "Invert a delta-f(z) .dat into force F(z) and potential energy U(z) with the Sader-Jarvis method, "
+"and report the force minimum (pN), its position relative to the delta-f minimum, the short-range force decay length and the binding energy "
+"(meV). If a clean-surface background curve is given it is subtracted first. Reads files only, never touches hardware. "
+"verdict is 'well' / 'no_well' / 'undecidable'. Two diagnostics are also reported: the forward residual "
+"(how far the delta-f recomputed from the inverted force is from the measured one), and the ratio of amplitude to force decay length -- the threshold "
+"of the latter is **uncalibrated**; it suggests re-measuring at another amplitude and does not draw the conclusion for you.")
             ),
             parameters=[
                 ParameterSpec(name="dat_path", type="str",
-                              description="Δf(z) 曲线的 .dat 路径。", required=True),
+                              description=tr("Δf(z) 曲线的 .dat 路径。", "Path of the delta-f(z) curve .dat."), required=True),
                 ParameterSpec(name="background_dat_path", type="str",
-                              description="干净表面上同样扫程的 Δf(z),用来扣长程背景。",
+                              description=tr("干净表面上同样扫程的 Δf(z),用来扣长程背景。", "delta-f(z) with the same sweep on a clean surface, used to subtract the long-range background."),
                               required=False, default=""),
                 # 传感器参数刻意没有 default:缺席要能触发回落链。
                 ParameterSpec(name="f0_hz", type="float",
-                              description=("传感器共振频率,单位**赫兹**(普通数字,例如 "
-                                           "30000)。留空则从 .dat 头或仪器档案取。"),
+                              description=(tr("传感器共振频率,单位**赫兹**(普通数字,例如 "
+                                           "30000)。留空则从 .dat 头或仪器档案取。", "Sensor resonance frequency, in **hertz** (a plain number, e.g. "
+"30000). Empty = taken from the .dat header or the instrument profile.")),
                               required=False, min_value=1.0, max_value=1e7),
                 ParameterSpec(name="k_n_per_m", type="float",
-                              description=("传感器弹性常数,单位 **N/m**(普通数字,qPlus "
+                              description=(tr("传感器弹性常数,单位 **N/m**(普通数字,qPlus "
                                            "常见 1800)。任何 Nanonis 头里都没有这个数,"
-                                           "留空则从仪器档案/针尖登记信息取。"),
+                                           "留空则从仪器档案/针尖登记信息取。", "Sensor spring constant, in **N/m** (a plain number, qPlus "
+"typically 1800). No Nanonis header carries this number; "
+"empty = taken from the instrument profile / tip registration.")),
                               required=False, min_value=1.0, max_value=1e6),
                 ParameterSpec(name="amplitude_m", type="float", unit="m",
-                              description=("振荡振幅,例如 '50p'(SI 前缀必须写)。留空则"
-                                           "从 .dat 的振幅列或头里取。"),
+                              description=(tr("振荡振幅,例如 '50p'(SI 前缀必须写)。留空则"
+                                           "从 .dat 的振幅列或头里取。", "Oscillation amplitude, e.g. '50p' (the SI prefix is required). Empty = "
+"taken from the amplitude column or header of the .dat.")),
                               required=False, min_value=1e-13, max_value=1e-8),
                 ParameterSpec(name="direction", type="str",
-                              description="用正扫、反扫、还是两者平均。",
+                              description=tr("用正扫、反扫、还是两者平均。", "Use forward, backward, or the average of both."),
                               required=False, default="auto",
                               allowed_values=["auto", "forward", "backward", "average"]),
                 ParameterSpec(name="smooth_points", type="int",
-                              description="反演前对 Δf 做几点平滑(0 = 不平滑)。",
+                              description=tr("反演前对 Δf 做几点平滑(0 = 不平滑)。", "How many points to smooth delta-f over before inversion (0 = no smoothing)."),
                               required=False, default=0, min_value=0, max_value=99),
                 ParameterSpec(name="df_column", type="str",
-                              description="频移列的列名(留空自动找)。",
+                              description=tr("频移列的列名(留空自动找)。", "Name of the frequency-shift column (empty = find automatically)."),
                               required=False, default=""),
                 ParameterSpec(name="z_column", type="str",
-                              description="z 列的列名(留空自动找)。",
+                              description=tr("z 列的列名(留空自动找)。", "Name of the z column (empty = find automatically)."),
                               required=False, default=""),
             ],
             estimated_duration_s=6.0,
@@ -115,18 +125,18 @@ class InvertForceSaderJarvis(BaseSkill):
 
         path = str(params.get("dat_path") or "")
         if not path or not Path(path).exists():
-            return SkillResult(skill_name=_NAME, success=False, error=f"文件不存在: {path}")
+            return SkillResult(skill_name=_NAME, success=False, error=tr(f"文件不存在: {path}", f"File does not exist: {path}"))
         try:
             import numpy as np
 
             from mast.io.nanonis_files import read_dat
             from mast.vision.force_inversion import invert_force_curve
         except ImportError as exc:
-            return SkillResult(skill_name=_NAME, success=False, error=f"缺依赖: {exc}")
+            return SkillResult(skill_name=_NAME, success=False, error=tr(f"缺依赖: {exc}", f"Missing dependency: {exc}"))
         try:
             got = read_dat(path)
         except Exception as exc:  # noqa: BLE001
-            return SkillResult(skill_name=_NAME, success=False, error=f".dat 读取失败: {exc}")
+            return SkillResult(skill_name=_NAME, success=False, error=tr(f".dat 读取失败: {exc}", f"Failed to read .dat: {exc}"))
 
         cols = got.get("columns") or {}
         header = got.get("header") or {}
@@ -134,7 +144,7 @@ class InvertForceSaderJarvis(BaseSkill):
         df_col = params.get("df_column") or _pick(cols, _DF_PATTERNS)
         if z_col not in cols or df_col not in cols:
             return SkillResult(skill_name=_NAME, success=False,
-                               error=f"谱里没有 z 或频移列(有的是 {sorted(cols)})")
+                               error=tr(f"谱里没有 z 或频移列(有的是 {sorted(cols)})", f"The spectrum has no z or frequency-shift column (it has {sorted(cols)})"))
         z = np.asarray(cols[z_col], dtype=float)
         df = np.asarray(cols[df_col], dtype=float)
 
@@ -150,16 +160,18 @@ class InvertForceSaderJarvis(BaseSkill):
         if missing:
             return SkillResult(
                 skill_name=_NAME, success=False,
-                error=(f"缺传感器参数:{', '.join(missing)}。"
+                error=(tr(f"缺传感器参数:{', '.join(missing)}。"
                        "f0 与振幅通常在 .dat 的 Oscillation Control 头里;"
-                       "弹性常数 k 不在任何头里,要从针尖登记信息拿(qPlus 常见 1800 N/m)。"))
+                       "弹性常数 k 不在任何头里,要从针尖登记信息拿(qPlus 常见 1800 N/m)。", f"Missing sensor parameters: {', '.join(missing)}. "
+"f0 and amplitude are usually in the Oscillation Control header of the .dat; "
+"the spring constant k is in no header and has to come from the tip registration (qPlus typically 1800 N/m).")))
 
         bg = None
         bg_path = str(params.get("background_dat_path") or "")
         if bg_path:
             if not Path(bg_path).exists():
                 return SkillResult(skill_name=_NAME, success=False,
-                                   error=f"背景文件不存在: {bg_path}")
+                                   error=tr(f"背景文件不存在: {bg_path}", f"Background file does not exist: {bg_path}"))
             try:
                 bg_got = read_dat(bg_path)
                 bg_cols = bg_got.get("columns") or {}
@@ -169,7 +181,7 @@ class InvertForceSaderJarvis(BaseSkill):
                 bg = np.interp(np.sort(z), bz[order], bdf[order])
             except Exception as exc:  # noqa: BLE001
                 return SkillResult(skill_name=_NAME, success=False,
-                                   error=f"背景曲线读取失败: {exc}")
+                                   error=tr(f"背景曲线读取失败: {exc}", f"Failed to read the background curve: {exc}"))
 
         res = invert_force_curve(z, df, f0_hz=f0, k_n_per_m=k, amplitude_m=amp,
                                  background_df_hz=bg,
@@ -193,11 +205,13 @@ class InvertForceSaderJarvis(BaseSkill):
                 "reasons": list(res.reasons), "warnings": list(res.warnings),
                 "dat_path": path, "background_dat_path": bg_path or None}
         if res.f_min_pn is not None:
-            summary = (f"F_min = {res.f_min_pn:.1f} pN,E_b = {res.e_bind_mev:.0f} meV,"
+            summary = (tr(f"F_min = {res.f_min_pn:.1f} pN,E_b = {res.e_bind_mev:.0f} meV,"
                        f"衰减长度 {(res.decay_length_pm or 0):.0f} pm"
-                       f"(正向残差 {res.forward_residual:.3f},{res.well_posedness})")
+                       f"(正向残差 {res.forward_residual:.3f},{res.well_posedness})", f"F_min = {res.f_min_pn:.1f} pN, E_b = {res.e_bind_mev:.0f} meV, "
+f"decay length {(res.decay_length_pm or 0):.0f} pm "
+f"(forward residual {res.forward_residual:.3f}, {res.well_posedness})"))
         else:
-            summary = f"反演判定 {res.verdict}:{'、'.join(res.reasons) or '无'}"
+            summary = tr(f"反演判定 {res.verdict}:{'、'.join(res.reasons) or '无'}", f"Inversion verdict {res.verdict}: {', '.join(res.reasons) or 'none'}")
         return SkillResult(skill_name=_NAME, success=True, data=data, summary=summary)
 
     # ── helpers ──

@@ -12,57 +12,59 @@ import {
   Spinner,
 } from "@/components/ui";
 import { Button, useToast } from "@/components/controls";
+import { tr } from "@/lib/i18n";
 
-// 高级管理 → 系统/全局 → 上下文注入
+// Advanced → System / global → Context injection
 //
-// Every agent call carries a pile of text nobody could read in one place: a
-// static SYSTEM_PROMPT per agent plus whatever the middlewares append. The
-// 2026-07-27 coordinate incident (the model wrote 1.2531 for 1.2531e-6 m) came
-// out of OUR OWN injection — live_state printing "(= 1253.1 nm)" beside the
-// metre value — and went unnoticed because there was nowhere to look.
+// Every agent call carries a pile of text that is hard to read in one place: a
+// static SYSTEM_PROMPT per agent plus whatever the middlewares append. A text
+// injected next to a metre value (e.g. "(= 1253.1 nm)") can mislead the model about
+// units, so the injected text needs to be inspectable.
 //
-// TWO HALVES, deliberately unequal in prominence:
+// Two halves, deliberately unequal in prominence:
 //   A. the inventory + editor (default view)
-//   B. "agent 实际收到了什么" — real captured requests, DEFAULT COLLAPSED and
-//      lazily fetched. Operator's words: 一般用户不让他们关心这个。
+//   B. "what the agent actually received": real captured requests, collapsed by
+//      default and fetched lazily. Most users do not need it.
 //
-// THE HONESTY RULE: a block that needs live hardware or per-request state is
-// shown as unavailable WITH the reason, never as a plausible sample. This page
-// only has value if everything on it is the real text.
+// Honesty rule: a block that needs live hardware or per-request state is shown as
+// unavailable with the reason, never as a plausible sample. This page only has
+// value if everything on it is the real text.
 
 type PromptSummary = components["schemas"]["PromptSummary"];
 type PromptDetail = components["schemas"]["PromptDetail"];
 type CaptureSummary = components["schemas"]["PromptCaptureSummary"];
 
 const CATEGORY_LABEL: Record<string, string> = {
-  agent_system: "Agent 系统提示",
-  routing: "路由",
-  middleware: "运行时注入 (middleware)",
-  sub_llm: "辅助模型提示",
+  agent_system: tr("Agent 系统提示", "Agent system prompts"),
+  routing: tr("路由", "Routing"),
+  middleware: tr("运行时注入 (middleware)", "Runtime injection (middleware)"),
+  sub_llm: tr("辅助模型提示", "Auxiliary model prompts"),
 };
 const CATEGORY_ORDER = ["agent_system", "routing", "middleware", "sub_llm"];
 
 type Availability = { label: string; tone: string };
 const AVAILABILITY: Record<string, Availability> = {
-  static: { label: "固定文本", tone: "AUTO" },
-  live: { label: "实时渲染", tone: "INFO" },
-  needs_hardware: { label: "需实时硬件", tone: "WARN" },
-  needs_request: { label: "需运行时上下文", tone: "WARN" },
+  static: { label: tr("固定文本", "Static text"), tone: "AUTO" },
+  live: { label: tr("实时渲染", "Rendered live"), tone: "INFO" },
+  needs_hardware: { label: tr("需实时硬件", "Needs live hardware"), tone: "WARN" },
+  needs_request: { label: tr("需运行时上下文", "Needs runtime context"), tone: "WARN" },
 };
-const UNKNOWN_AVAILABILITY: Availability = { label: "未知", tone: "INFO" };
+const UNKNOWN_AVAILABILITY: Availability = { label: tr("未知", "Unknown"), tone: "INFO" };
 
 function availabilityOf(key: string | undefined): Availability {
   return AVAILABILITY[key ?? ""] ?? UNKNOWN_AVAILABILITY;
 }
 
 function fmtChars(n: number): string {
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k 字符` : `${n} 字符`;
+  return n >= 1000
+    ? tr(`${(n / 1000).toFixed(1)}k 字符`, `${(n / 1000).toFixed(1)}k chars`)
+    : tr(`${n} 字符`, `${n} chars`);
 }
 
 function fmtAge(sec: number): string {
-  if (sec < 60) return `${Math.round(sec)} 秒前`;
-  if (sec < 3600) return `${Math.round(sec / 60)} 分钟前`;
-  return `${(sec / 3600).toFixed(1)} 小时前`;
+  if (sec < 60) return tr(`${Math.round(sec)} 秒前`, `${Math.round(sec)} s ago`);
+  if (sec < 3600) return tr(`${Math.round(sec / 60)} 分钟前`, `${Math.round(sec / 60)} min ago`);
+  return tr(`${(sec / 3600).toFixed(1)} 小时前`, `${(sec / 3600).toFixed(1)} h ago`);
 }
 
 // ── A. inventory + editor ────────────────────────────────────────────────────
@@ -94,11 +96,11 @@ function PromptDetailPanel({ promptId, onClose }: { promptId: string; onClose: (
     },
     onSuccess: (data) => {
       setDraft(null);
-      toast(data?.message || "已保存", data?.ok ? "ok" : "err");
+      toast(data?.message || tr("已保存", "Saved"), data?.ok ? "ok" : "err");
       queryClient.invalidateQueries({ queryKey: ["admin", "prompt", promptId] });
       queryClient.invalidateQueries({ queryKey: ["admin", "prompts"] });
     },
-    onError: () => toast("保存失败", "err"),
+    onError: () => toast(tr("保存失败", "Save failed"), "err"),
   });
 
   const reset = useMutation({
@@ -111,11 +113,11 @@ function PromptDetailPanel({ promptId, onClose }: { promptId: string; onClose: (
     },
     onSuccess: (data) => {
       setDraft(null);
-      toast(data?.message || "已恢复默认", "ok");
+      toast(data?.message || tr("已恢复默认", "Restored to default"), "ok");
       queryClient.invalidateQueries({ queryKey: ["admin", "prompt", promptId] });
       queryClient.invalidateQueries({ queryKey: ["admin", "prompts"] });
     },
-    onError: () => toast("恢复默认失败", "err"),
+    onError: () => toast(tr("恢复默认失败", "Restore failed"), "err"),
   });
 
   const d = q.data;
@@ -132,16 +134,16 @@ function PromptDetailPanel({ promptId, onClose }: { promptId: string; onClose: (
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-base font-semibold text-mast-text">{d?.label ?? promptId}</h3>
             <Badge tone={avail.tone}>{avail.label}</Badge>
-            {d?.overridden && <Badge tone="WARN">已覆写</Badge>}
+            {d?.overridden && <Badge tone="WARN">{tr("已覆写", "Overridden")}</Badge>}
           </div>
           <p className="mt-1 font-mono text-[0.7rem] text-mast-muted">{d?.source || promptId}</p>
         </div>
-        <Button variant="ghost" onClick={onClose}>收起</Button>
+        <Button variant="ghost" onClick={onClose}>{tr("收起", "Collapse")}</Button>
       </div>
 
       {q.isPending && <Spinner />}
       {q.error && <ErrorNote error={q.error} />}
-      {d?.degraded && <DegradedNote what="上下文注入" />}
+      {d?.degraded && <DegradedNote what={tr("上下文注入", "Context injection")} />}
 
       {d && !d.degraded && (
         <>
@@ -157,7 +159,7 @@ function PromptDetailPanel({ promptId, onClose }: { promptId: string; onClose: (
           {d.effective_text && (
             <>
               <div className="mb-1 flex items-center justify-between text-xs text-mast-muted">
-                <span>{editable ? "生效中的文本（可编辑）" : "生效中的文本（只读）"}</span>
+                <span>{editable ? tr("生效中的文本（可编辑）", "Effective text (editable)") : tr("生效中的文本（只读）", "Effective text (read-only)")}</span>
                 <span className="font-mono">{fmtChars(d.effective_chars ?? 0)}</span>
               </div>
               <textarea
@@ -173,7 +175,10 @@ function PromptDetailPanel({ promptId, onClose }: { promptId: string; onClose: (
 
           {!editable && d.effective_text && (
             <p className="mt-2 text-xs text-mast-muted">
-              这一块的内容由运行时状态计算，没有可替换的固定文本 —— 只读。
+              {tr(
+                "这一块的内容由运行时状态计算，没有可替换的固定文本 —— 只读。",
+                "This block is computed from runtime state and has no fixed text to replace, so it is read-only.",
+              )}
             </p>
           )}
 
@@ -185,18 +190,21 @@ function PromptDetailPanel({ promptId, onClose }: { promptId: string; onClose: (
                 disabled={!dirty}
                 onClick={() => save.mutate(draft ?? "")}
               >
-                保存覆写
+                {tr("保存覆写", "Save override")}
               </Button>
               <Button
                 loading={reset.isPending}
                 disabled={!d.overridden && !dirty}
                 onClick={() => (dirty ? setDraft(null) : reset.mutate())}
               >
-                {dirty ? "撤销未保存的修改" : "恢复默认"}
+                {dirty ? tr("撤销未保存的修改", "Discard unsaved changes") : tr("恢复默认", "Reset to default")}
               </Button>
               {d.overridden && (
                 <span className="text-xs text-mast-muted">
-                  代码默认 {fmtChars(d.default_chars ?? 0)}，当前覆写 {fmtChars(d.effective_chars ?? 0)}。
+                  {tr(
+                    `代码默认 ${fmtChars(d.default_chars ?? 0)}，当前覆写 ${fmtChars(d.effective_chars ?? 0)}。`,
+                    `Code default ${fmtChars(d.default_chars ?? 0)}, current override ${fmtChars(d.effective_chars ?? 0)}.`,
+                  )}
                 </span>
               )}
             </div>
@@ -205,7 +213,7 @@ function PromptDetailPanel({ promptId, onClose }: { promptId: string; onClose: (
           {d.overridden && d.default_text && (
             <details className="mt-3">
               <summary className="cursor-pointer text-xs text-mast-muted hover:text-mast-text">
-                查看代码默认文本（对照用）
+                {tr("查看代码默认文本（对照用）", "Show the code default text (for comparison)")}
               </summary>
               <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-mast-ctl border border-mast-border bg-mast-bg p-3 font-mono text-[12px] leading-relaxed text-mast-muted">
                 {d.default_text}
@@ -247,30 +255,42 @@ function PromptInventory() {
   return (
     <div>
       <p className="mb-3 text-xs leading-relaxed text-mast-muted">
-        每次调用 agent 前注入上下文的<strong className="text-mast-text">全部话术</strong>。
-        标注为「固定文本」的可以编辑并持久化（保存在 <code>config/overrides/prompt_overrides.json</code>，
-        重启后仍在，且进入「覆盖历史」）；标注为「需实时硬件 / 需运行时上下文」的<strong className="text-mast-text">
-        不会伪造示例文本</strong> —— 要看它们的真实内容，请展开页面下方的真实请求快照。
+        {tr("每次调用 agent 前注入上下文的", "All the wording injected into the context before each agent call (")}
+        <strong className="text-mast-text">{tr("全部话术", "every prompt")}</strong>
+        {tr(
+          "。标注为「固定文本」的可以编辑并持久化（保存在 ",
+          "). Items marked “Static text” can be edited and persisted (saved in ",
+        )}
+        <code>config/overrides/prompt_overrides.json</code>
+        {tr(
+          "，重启后仍在，且进入「覆盖历史」）；标注为「需实时硬件 / 需运行时上下文」的",
+          ", kept across restarts and recorded in Override history). Items marked “Needs live hardware / Needs runtime context” ",
+        )}
+        <strong className="text-mast-text">{tr("不会伪造示例文本", "get no made-up sample text")}</strong>
+        {tr(
+          " —— 要看它们的真实内容，请展开页面下方的真实请求快照。",
+          "; to see their real content, expand the captured requests below.",
+        )}
       </p>
 
       <input
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="搜索…（agent 名、话术 ID、中英文关键词）"
+        placeholder={tr("搜索…（agent 名、话术 ID、中英文关键词）", "Search… (agent name, prompt ID, keywords)")}
         className="mb-3 w-full rounded-mast-ctl border border-mast-border bg-mast-bg px-3 py-2 text-sm text-mast-text outline-none focus:border-mast-accent"
       />
 
-      {q.isPending && <Spinner label="读取注入清单…" />}
+      {q.isPending && <Spinner label={tr("读取注入清单…", "Loading injection inventory…")} />}
       {q.error && <ErrorNote error={q.error} />}
-      {q.data?.degraded && <DegradedNote what="上下文注入清单" />}
-      {q.data && !q.data.degraded && groups.length === 0 && <EmptyNote label="没有匹配的话术" />}
+      {q.data?.degraded && <DegradedNote what={tr("上下文注入清单", "Context injection inventory")} />}
+      {q.data && !q.data.degraded && groups.length === 0 && <EmptyNote label={tr("没有匹配的话术", "No matching prompts")} />}
 
       {q.data && !q.data.degraded && (
         <>
           <div className="mb-3 text-xs text-mast-muted">
-            共 {q.data.count} 条
+            {tr(`共 ${q.data.count} 条`, `${q.data.count} prompts`)}
             {(q.data.overridden_count ?? 0) > 0 && (
-              <> · <span className="text-mast-warn">{q.data.overridden_count} 条已被覆写</span></>
+              <> · <span className="text-mast-warn">{tr(`${q.data.overridden_count} 条已被覆写`, `${q.data.overridden_count} overridden`)}</span></>
             )}
           </div>
 
@@ -295,7 +315,7 @@ function PromptInventory() {
                           <span className="text-mast-accent">{isOpen ? "▾" : "▸"}</span>
                           <span className="text-sm text-mast-text">{row.label}</span>
                           <Badge tone={avail.tone}>{avail.label}</Badge>
-                          {row.overridden && <Badge tone="WARN">已覆写</Badge>}
+                          {row.overridden && <Badge tone="WARN">{tr("已覆写", "Overridden")}</Badge>}
                           <span className="ml-auto font-mono text-[0.7rem] text-mast-muted">
                             {row.effective_chars ? fmtChars(row.effective_chars) : "—"}
                           </span>
@@ -324,7 +344,7 @@ function PromptInventory() {
   );
 }
 
-// ── B. "agent 实际收到了什么" — DEFAULT COLLAPSED, lazily loaded ─────────────
+// ── B. What the agent actually received: collapsed by default, lazily loaded ──
 
 function CaptureDetail({ index }: { index: number }) {
   const q = useQuery({
@@ -338,10 +358,10 @@ function CaptureDetail({ index }: { index: number }) {
     },
   });
 
-  if (q.isPending) return <Spinner label="读取快照…" />;
+  if (q.isPending) return <Spinner label={tr("读取快照…", "Loading snapshot…")} />;
   if (q.error) return <ErrorNote error={q.error} />;
   const d = q.data;
-  if (!d || !d.found) return <EmptyNote label="这条快照已被新的请求挤出缓冲区" />;
+  if (!d || !d.found) return <EmptyNote label={tr("这条快照已被新的请求挤出缓冲区", "This snapshot has been pushed out of the buffer by newer requests")} />;
 
   return (
     <div className="mt-2 space-y-2">
@@ -349,7 +369,7 @@ function CaptureDetail({ index }: { index: number }) {
         {new Date((d.ts ?? 0) * 1000).toLocaleString()} · {fmtAge(d.age_s ?? 0)} ·{" "}
         {d.source} · {d.model_id}
         {(d.dropped_messages ?? 0) > 0 && (
-          <span className="text-mast-warn"> · 另有 {d.dropped_messages} 条消息因体积上限未记录</span>
+          <span className="text-mast-warn"> · {tr(`另有 ${d.dropped_messages} 条消息因体积上限未记录`, `${d.dropped_messages} more message(s) not recorded due to the size limit`)}</span>
         )}
       </p>
       {(d.messages ?? []).map((m, i) => (
@@ -358,7 +378,7 @@ function CaptureDetail({ index }: { index: number }) {
             <span className="font-mono text-mast-accent">{m.role}</span>
             <span className="font-mono text-mast-muted">
               {fmtChars(m.chars ?? 0)}
-              {m.truncated && <span className="ml-2 text-mast-warn">已截断显示</span>}
+              {m.truncated && <span className="ml-2 text-mast-warn">{tr("已截断显示", "Display truncated")}</span>}
             </span>
           </div>
           <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-[12px] leading-relaxed text-mast-text">
@@ -400,39 +420,47 @@ function CapturePanel() {
   return (
     <div>
       <p className="mb-3 text-xs leading-relaxed text-mast-muted">
-        这里记录的是<strong className="text-mast-text">真实发生过的模型请求</strong> ——
-        provider 收到的原始消息列表，含所有 middleware 拼进去的内容。
-        不是模拟渲染：模拟无法复现当次的硬件读数、对话历史与 middleware 顺序，
-        看起来像却不是真的东西比没有更糟。代价是它<strong className="text-mast-text">可能过期</strong>
-        （每条都带时间戳），且本进程还没发生过调用时是空的。
-        仅保存在内存里最近 {q.data?.capacity ?? 0} 次，不落盘。
+        {tr("这里记录的是", "These are ")}
+        <strong className="text-mast-text">{tr("真实发生过的模型请求", "model requests that really happened")}</strong>
+        {tr(
+          " —— provider 收到的原始消息列表，含所有 middleware 拼进去的内容。不是模拟渲染：模拟无法复现当次的硬件读数、对话历史与 middleware 顺序，看起来像却不是真的东西比没有更糟。代价是它",
+          ": the raw message list the provider received, including everything the middlewares added. They are not simulated renderings, which cannot reproduce that call's hardware readings, conversation history or middleware order; something that looks real but is not is worse than nothing. The trade-off is that a snapshot ",
+        )}
+        <strong className="text-mast-text">{tr("可能过期", "may be stale")}</strong>
+        {tr(
+          `（每条都带时间戳），且本进程还没发生过调用时是空的。仅保存在内存里最近 ${q.data?.capacity ?? 0} 次，不落盘。`,
+          ` (each one is timestamped), and the list is empty until this process has made a call. Only the last ${q.data?.capacity ?? 0} calls are kept, in memory, never written to disk.`,
+        )}
       </p>
       <p className="mb-3 text-xs leading-relaxed text-mast-faint">
-        范围说明：这里只有<strong className="text-mast-muted">消息列表</strong>。
-        工具定义（IC 的 ~250 个工具 schema）是绑在模型上的，不走消息，因此不在这份记录里 ——
-        要看工具清单去「Agents → 工具」。
+        {tr("范围说明：这里只有", "Scope: only the ")}
+        <strong className="text-mast-muted">{tr("消息列表", "message list")}</strong>
+        {tr(
+          "。工具定义（IC 的 ~250 个工具 schema）是绑在模型上的，不走消息，因此不在这份记录里 —— 要看工具清单去「Agents → 工具」。",
+          " is recorded. Tool definitions (the ~250 IC tool schemas) are bound to the model rather than sent as messages, so they are not included; see Agents → Tools for the tool list.",
+        )}
       </p>
 
       <div className="mb-3 flex items-center gap-3">
-        <Button onClick={() => q.refetch()} loading={q.isFetching}>刷新</Button>
+        <Button onClick={() => q.refetch()} loading={q.isFetching}>{tr("刷新", "Refresh")}</Button>
         <Button
           variant="ghost"
           disabled={items.length === 0}
           loading={clear.isPending}
           onClick={() => clear.mutate()}
         >
-          清空
+          {tr("清空", "Clear")}
         </Button>
         {(q.data?.total_seen ?? 0) > 0 && (
-          <span className="text-xs text-mast-muted">本次运行累计 {q.data?.total_seen} 次调用</span>
+          <span className="text-xs text-mast-muted">{tr(`本次运行累计 ${q.data?.total_seen} 次调用`, `${q.data?.total_seen} calls so far in this run`)}</span>
         )}
       </div>
 
-      {q.isPending && <Spinner label="读取快照列表…" />}
+      {q.isPending && <Spinner label={tr("读取快照列表…", "Loading snapshot list…")} />}
       {q.error && <ErrorNote error={q.error} />}
-      {q.data?.degraded && <DegradedNote what="真实请求快照" />}
+      {q.data?.degraded && <DegradedNote what={tr("真实请求快照", "Captured requests")} />}
       {q.data && !q.data.degraded && items.length === 0 && (
-        <EmptyNote label={q.data.note || "暂无快照"} />
+        <EmptyNote label={q.data.note || tr("暂无快照", "No snapshots yet")} />
       )}
 
       <div className="space-y-1.5">
@@ -448,10 +476,10 @@ function CapturePanel() {
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="text-mast-accent">{isOpen ? "▾" : "▸"}</span>
                   <span className="text-mast-text">{row.source}</span>
-                  <Badge tone="INFO">{row.model_id || "未知模型"}</Badge>
+                  <Badge tone="INFO">{row.model_id || tr("未知模型", "Unknown model")}</Badge>
                   <span className="text-xs text-mast-muted">{fmtAge(row.age_s ?? 0)}</span>
                   <span className="ml-auto font-mono text-[0.7rem] text-mast-muted">
-                    {row.message_count} 条消息 · system {fmtChars(row.system_chars ?? 0)} · 合计{" "}
+                    {tr(`${row.message_count} 条消息`, `${row.message_count} messages`)} · system {fmtChars(row.system_chars ?? 0)} · {tr("合计", "total")}{" "}
                     {fmtChars(row.total_chars ?? 0)}
                   </span>
                 </div>
@@ -465,14 +493,14 @@ function CapturePanel() {
   );
 }
 
-/** The whole 上下文注入 surface. Part B is collapsed until asked for — it does
- *  not render, and does not fetch, while closed. */
+/** The whole context-injection surface. Part B is collapsed until asked for: it
+ *  neither renders nor fetches while closed. */
 export function PromptInspector() {
   const [showCapture, setShowCapture] = useState(false);
 
   return (
     <div>
-      <Section title="上下文注入话术">
+      <Section title={tr("上下文注入话术", "Context injection prompts")}>
         <PromptInventory />
       </Section>
 
@@ -484,10 +512,10 @@ export function PromptInspector() {
         >
           <span className="text-sm text-mast-muted">
             <span className="text-mast-accent">{showCapture ? "▾" : "▸"}</span>{" "}
-            agent 实际收到了什么（真实请求快照）
-            <span className="ml-2 text-xs text-mast-faint">排障用，一般不需要打开</span>
+            {tr("agent 实际收到了什么（真实请求快照）", "What the agent actually received (captured requests)")}
+            <span className="ml-2 text-xs text-mast-faint">{tr("排障用，一般不需要打开", "For troubleshooting; usually not needed")}</span>
           </span>
-          <span className="text-mast-muted">{showCapture ? "收起" : "展开"}</span>
+          <span className="text-mast-muted">{showCapture ? tr("收起", "Collapse") : tr("展开", "Expand")}</span>
         </button>
         {showCapture && (
           <div className="border-t border-mast-border p-4">

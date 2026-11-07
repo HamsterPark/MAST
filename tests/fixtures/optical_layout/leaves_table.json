@@ -1,0 +1,169 @@
+{
+  "name": "leaves_table",
+  "description": "Rays that find nothing end at the table rectangle expanded by 1 m: L1 along +x ends at x = 1200 + 1000, L2 along +y at y = 900 + 1000, L3 (225 degrees) leaves through the bottom edge at y = -1000 after 2050.610 mm.",
+  "layout": {
+    "schema": 1,
+    "id": "leave",
+    "title": "Leaving the table",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 50.0,
+        "y_mm": 62.5,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "las2",
+        "type": "laser",
+        "label": "L2",
+        "x_mm": 100.0,
+        "y_mm": 100.0,
+        "angle_deg": 90.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "las3",
+        "type": "laser",
+        "label": "L3",
+        "x_mm": 600.0,
+        "y_mm": 450.0,
+        "angle_deg": 225.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 62.5,
+              "x1": 2200.0,
+              "y1": 62.5
+            }
+          ],
+          "events": [],
+          "end": "left_table"
+        }
+      ]
+    },
+    {
+      "source": "las2",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 100.0,
+              "y0": 100.0,
+              "x1": 100.0,
+              "y1": 1900.0
+            }
+          ],
+          "events": [],
+          "end": "left_table"
+        }
+      ]
+    },
+    {
+      "source": "las3",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 600.0,
+              "y0": 450.0,
+              "x1": -850.0,
+              "y1": -1000.0
+            }
+          ],
+          "events": [],
+          "end": "left_table"
+        }
+      ]
+    }
+  ]
+}

@@ -30,6 +30,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.skills.base import BaseSkill
 
 _MAX_PROBE = 7   # Nanonis multi-probe tops out well below this; a generous bound.
@@ -53,8 +54,10 @@ def _probe_spec() -> ParameterSpec:
     """The probe index. Required, always — see the module docstring."""
     return ParameterSpec(
         name="probe", type="int",
-        description=("**哪一根探针**（扫描器序号，0 起算）。必填 —— 没有默认值，"
-                     "因为默认下去会撞坏错的那根针尖。"),
+        description=(tr("**哪一根探针**（扫描器序号，0 起算）。必填 —— 没有默认值，"
+                     "因为默认下去会撞坏错的那根针尖。",
+                        "**Which probe** (scanner index, counted from 0). Required - there is no default, "
+                        "because a default would crash the wrong tip.")),
         required=True, min_value=0, max_value=_MAX_PROBE,
     )
 
@@ -69,28 +72,37 @@ class SetProbeZController(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "设定**某一根**探针的 Z 控制器：开／关它，并设定它的设定值与增益。\n"
+                tr("设定**某一根**探针的 Z 控制器：开／关它，并设定它的设定值与增益。\n"
                 "\n"
                 "当心。把一根探针的 Z 环打开、而设定值又是它根本达不到的，会把那根探针**扎进样品**。"
                 "把它关掉则会让探针停在当前 Z 上、没有任何东西托着它 —— 想让探针处于安全状态，请用 WithdrawProbe，"
                 "而不是关掉。\n"
                 "\n"
                 "这个技能只作用于你点名的那根探针，别的一根都不动。普通的 ZController 技能作用于**主**通道，"
-                "那是某一根特定的探针 —— 除非它恰好就是当前的扫描探针，否则不是这一根。"
+                "那是某一根特定的探针 —— 除非它恰好就是当前的扫描探针，否则不是这一根。",
+                   "Set the Z controller of **one** probe: switch it on/off, and set its setpoint and gains.\n"
+                   "\n"
+                   "Caution. Turning on one probe's Z loop with a setpoint it can never reach will **drive that probe into the sample**. "
+                   "Turning it off leaves the probe at its current Z with nothing holding it up - to put a probe in a safe state use WithdrawProbe, "
+                   "not switching it off.\n"
+                   "\n"
+                   "This skill acts only on the probe you name and touches no other. The ordinary ZController skill acts on the **main** channel, "
+                   "which is one specific probe - and not this one unless it happens to be the current scan probe.")
             ),
             parameters=[
                 _probe_spec(),
                 ParameterSpec(name="on", type="bool",
-                              description="闭合这根探针的 Z 反馈环",
+                              description=tr("闭合这根探针的 Z 反馈环", "Close this probe's Z feedback loop"),
                               required=True),
                 ParameterSpec(name="setpoint", type="float",
-                              description="Z 控制器设定值（电流，单位 A）—— 不传则保持不变",
+                              description=tr("Z 控制器设定值（电流，单位 A）—— 不传则保持不变",
+                                             "Z controller setpoint (current, in A) - unchanged if not given"),
                               unit="A", required=False, default=None),
                 ParameterSpec(name="p_gain", type="float",
-                              description="比例增益 —— 不传则保持不变",
+                              description=tr("比例增益 —— 不传则保持不变", "Proportional gain - unchanged if not given"),
                               required=False, default=None, min_value=0.0),
                 ParameterSpec(name="i_gain", type="float",
-                              description="积分增益 —— 不传则保持不变",
+                              description=tr("积分增益 —— 不传则保持不变", "Integral gain - unchanged if not given"),
                               required=False, default=None, min_value=0.0),
             ],
             estimated_duration_s=2.0,
@@ -137,7 +149,7 @@ class SetProbeZController(BaseSkill):
         return SkillResult(
             skill_name=name, success=True, nanonis_calls=calls,
             data={"probe": probe, "controller_on": on},
-            summary=f"探针 {probe} 的 Z 反馈已{'闭合' if on else '断开'}",
+            summary=tr(f"探针 {probe} 的 Z 反馈已{'闭合' if on else '断开'}", f"Probe {probe} Z feedback {'closed' if on else 'opened'}"),
         )
 
 
@@ -151,8 +163,10 @@ class GetProbeZController(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读**某一根**探针的 Z 控制器：它是否开着、它的设定值、增益、Z 位置与 Z 限值。"
-                "移动那根探针之前先读这个。"
+                tr("读**某一根**探针的 Z 控制器：它是否开着、它的设定值、增益、Z 位置与 Z 限值。"
+                "移动那根探针之前先读这个。",
+                   "Read the Z controller of **one** probe: whether it is on, its setpoint, gains, Z position and Z limits. "
+                   "Read this before moving that probe.")
             ),
             parameters=[_probe_spec()],
             estimated_duration_s=1.0,
@@ -191,11 +205,16 @@ class WithdrawProbe(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "退回**某一根**探针：关掉它的 Z 控制器，并把它的 Z 驱到安全（完全退出）的那一端。"
+                tr("退回**某一根**探针：关掉它的 Z 控制器，并把它的 Z 驱到安全（完全退出）的那一端。"
                 "\n"
                 "\n"
                 "这是一根探针的**安全**状态，而且永远允许 —— 包括在 abort 之后。拿不准某根探针的状态，"
-                "就把它退回来。普通的 Withdraw 技能只作用于主通道；在多探针装置上，你进过针的每一根探针都必须各自退回。"
+                "就把它退回来。普通的 Withdraw 技能只作用于主通道；在多探针装置上，你进过针的每一根探针都必须各自退回。",
+                   "Withdraw **one** probe: turn off its Z controller and drive its Z to the safe (fully retracted) end."
+                   "\n"
+                   "\n"
+                   "This is the **safe** state of a probe and is always allowed - including after an abort. If unsure about the state of a probe, "
+                   "withdraw it. The ordinary Withdraw skill acts only on the main channel; on a multiprobe setup, every probe you have approached must be withdrawn separately.")
             ),
             parameters=[_probe_spec()],
             estimated_duration_s=3.0,
@@ -210,7 +229,7 @@ class WithdrawProbe(BaseSkill):
             return _fail("WithdrawProbe", f"MProbeZCtrl_Withdraw failed: {rec.error}", [rec])
         return SkillResult(skill_name="WithdrawProbe", success=True, nanonis_calls=[rec],
                            data={"probe": probe, "withdrawn": True},
-                           summary=f"探针 {probe} 已退回")
+                           summary=tr(f"探针 {probe} 已退回", f"Probe {probe} withdrawn"))
 
 
 class ConfigureProbeScanner(BaseSkill):
@@ -223,24 +242,28 @@ class ConfigureProbeScanner(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "设定**某一根**探针的扫描器标定（X/Y/Z 系数）与移动速度。\n"
+                tr("设定**某一根**探针的扫描器标定（X/Y/Z 系数）与移动速度。\n"
                 "\n"
                 "标定把下达的伏特换算成米。它不是一个装点门面的设置：X 系数错了，就意味着 MoveProbeXY 走的距离和你要的不一样（方向倒是一样）"
-                "，而且不会报错 —— 在多探针装置上，这意味着把一根探针开进另一根里去。"
+                "，而且不会报错 —— 在多探针装置上，这意味着把一根探针开进另一根里去。",
+                   "Set the scanner calibration (X/Y/Z coefficients) and move speed of **one** probe.\n"
+                   "\n"
+                   "The calibration converts the volts applied to meters. It is not a cosmetic setting: a wrong X coefficient means MoveProbeXY travels a different distance from the one you asked for (the direction is the same)"
+                   ", with no error - on a multiprobe setup that means driving one probe into another.")
             ),
             parameters=[
                 _probe_spec(),
                 ParameterSpec(name="speed", type="float",
-                              description="扫描器移动速度（m/s）—— 不传则保持不变",
+                              description=tr("扫描器移动速度（m/s）—— 不传则保持不变", "Scanner move speed (m/s) - unchanged if not given"),
                               unit="m/s", required=False, default=None, min_value=0.0),
                 ParameterSpec(name="factor_x", type="float",
-                              description="X 标定系数 —— 不传则保持不变",
+                              description=tr("X 标定系数 —— 不传则保持不变", "X calibration coefficient - unchanged if not given"),
                               required=False, default=None),
                 ParameterSpec(name="factor_y", type="float",
-                              description="Y 标定系数 —— 不传则保持不变",
+                              description=tr("Y 标定系数 —— 不传则保持不变", "Y calibration coefficient - unchanged if not given"),
                               required=False, default=None),
                 ParameterSpec(name="factor_z", type="float",
-                              description="Z 标定系数 —— 不传则保持不变",
+                              description=tr("Z 标定系数 —— 不传则保持不变", "Z calibration coefficient - unchanged if not given"),
                               required=False, default=None),
             ],
             estimated_duration_s=2.0,
@@ -277,7 +300,7 @@ class ConfigureProbeScanner(BaseSkill):
                 return _fail(name, f"MProbeScanner_SpeedSet failed: {rec.error}", calls)
 
         return SkillResult(skill_name=name, success=True, nanonis_calls=calls,
-                           data={"probe": probe}, summary=f"探针 {probe} 扫描器已配置")
+                           data={"probe": probe}, summary=tr(f"探针 {probe} 扫描器已配置", f"Probe {probe} scanner configured"))
 
 
 class MoveProbeXY(BaseSkill):
@@ -290,23 +313,31 @@ class MoveProbeXY(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.DANGEROUS,
             description=(
-                "把**某一根**探针移动到一个绝对 (X, Y) 位置，单位**米**。\n"
+                tr("把**某一根**探针移动到一个绝对 (X, Y) 位置，单位**米**。\n"
                 "\n"
                 "DANGEROUS。这会真的驱动一根针尖横穿样品。在多探针装置上，各根探针共用同一个表面、"
                 "彼此可能只隔几微米 —— 一次按错误探针的坐标系算出来的移动、或者用错扫描器标定的移动，"
                 "会把一根针尖开进另一根里、或者开上一道台阶边。\n"
                 "\n"
                 "坐标单位是**米**：100 nm 是 100n，不是 100。先用 GetProbeZController 加扫描器自己的 XY 读取接口读一下当前位置，"
-                "并且优先用小步的相对移动。StopProbeScanner 能中止一次正在进行的移动，按 中止 也能。"
+                "并且优先用小步的相对移动。StopProbeScanner 能中止一次正在进行的移动，按 中止 也能。",
+                   "Move **one** probe to an absolute (X, Y) position, in **meters**.\n"
+                   "\n"
+                   "DANGEROUS. This really drives a tip across the sample. On a multiprobe setup the probes share one surface "
+                   "and may be only a few micrometers apart - a move computed in the wrong probe's coordinate frame, or with the wrong scanner calibration, "
+                   "can drive one tip into another or over a step edge.\n"
+                   "\n"
+                   "Coordinates are in **meters**: 100 nm is 100n, not 100. First read the current position with GetProbeZController plus the scanner's own XY readback, "
+                   "and prefer small relative moves. StopProbeScanner can abort a move in progress, and so can the Abort button.")
             ),
             parameters=[
                 _probe_spec(),
                 ParameterSpec(name="x_m", type="float",
-                              description="绝对 X，单位**米**（100 nm = 100n）",
+                              description=tr("绝对 X，单位**米**（100 nm = 100n）", "Absolute X, in **meters** (100 nm = 100n)"),
                               unit="m", required=True,
                               min_value=-1e-3, max_value=1e-3),
                 ParameterSpec(name="y_m", type="float",
-                              description="绝对 Y，单位**米**（100 nm = 100n）",
+                              description=tr("绝对 Y，单位**米**（100 nm = 100n）", "Absolute Y, in **meters** (100 nm = 100n)"),
                               unit="m", required=True,
                               min_value=-1e-3, max_value=1e-3),
             ],
@@ -323,7 +354,7 @@ class MoveProbeXY(BaseSkill):
             return _fail("MoveProbeXY", f"MProbeScanner_XYPosSet failed: {rec.error}", [rec])
         return SkillResult(skill_name="MoveProbeXY", success=True, nanonis_calls=[rec],
                            data={"probe": probe, "x_m": x, "y_m": y},
-                           summary=f"探针 {probe} 已移动到 ({x:.3e}, {y:.3e}) m")
+                           summary=tr(f"探针 {probe} 已移动到 ({x:.3e}, {y:.3e}) m", f"Probe {probe} moved to ({x:.3e}, {y:.3e}) m"))
 
 
 class StopProbeScanner(BaseSkill):
@@ -336,8 +367,10 @@ class StopProbeScanner(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "立即停止**某一根**探针的扫描器运动。永远允许，包括在 abort 之后。停止只是中止这次移动 —— 它**不会**把探针退回来；"
-                "要退请用 WithdrawProbe。"
+                tr("立即停止**某一根**探针的扫描器运动。永远允许，包括在 abort 之后。停止只是中止这次移动 —— 它**不会**把探针退回来；"
+                "要退请用 WithdrawProbe。",
+                   "Stop the scanner motion of **one** probe immediately. Always allowed, including after an abort. Stopping only aborts the move - it **does not** withdraw the probe; "
+                   "use WithdrawProbe for that.")
             ),
             parameters=[_probe_spec()],
             estimated_duration_s=1.0,
@@ -351,7 +384,7 @@ class StopProbeScanner(BaseSkill):
         if rec.error:
             return _fail("StopProbeScanner", f"MProbeScanner_Stop failed: {rec.error}", [rec])
         return SkillResult(skill_name="StopProbeScanner", success=True, nanonis_calls=[rec],
-                           data={"probe": probe}, summary=f"探针 {probe} 扫描器已停止")
+                           data={"probe": probe}, summary=tr(f"探针 {probe} 扫描器已停止", f"Probe {probe} scanner stopped"))
 
 
 class SetProbeBias(BaseSkill):
@@ -364,15 +397,19 @@ class SetProbeBias(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "设定**某一根**探针的偏压，单位**伏特**。\n"
+                tr("设定**某一根**探针的偏压，单位**伏特**。\n"
                 "\n"
                 "每根探针都有自己的偏压。设 probe 1 的偏压不会改变 probe 0 的 —— 而普通的 SetBias 技能作用于主通道，"
-                "那是某一根特定的探针，未必是你心里想的那一根。"
+                "那是某一根特定的探针，未必是你心里想的那一根。",
+                   "Set the bias of **one** probe, in **volts**.\n"
+                   "\n"
+                   "Every probe has its own bias. Setting probe 1's bias does not change probe 0's - and the ordinary SetBias skill acts on the main channel, "
+                   "which is one specific probe and not necessarily the one you have in mind.")
             ),
             parameters=[
                 _probe_spec(),
                 ParameterSpec(name="bias_v", type="float",
-                              description="偏压，单位**伏特**",
+                              description=tr("偏压，单位**伏特**", "Bias, in **volts**"),
                               unit="V", required=True, min_value=-10.0, max_value=10.0),
             ],
             estimated_duration_s=1.0,
@@ -388,7 +425,7 @@ class SetProbeBias(BaseSkill):
             return _fail("SetProbeBias", f"MProbeBias_Set failed: {rec.error}", [rec])
         return SkillResult(skill_name="SetProbeBias", success=True, nanonis_calls=[rec],
                            data={"probe": probe, "bias_v": v},
-                           summary=f"探针 {probe} 偏压 = {v:g} V")
+                           summary=tr(f"探针 {probe} 偏压 = {v:g} V", f"Probe {probe} bias = {v:g} V"))
 
 
 class PulseProbeBias(BaseSkill):
@@ -401,7 +438,7 @@ class PulseProbeBias(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "在**某一根**探针上施加一次偏压**脉冲**：跳到某个值、维持一段设定的宽度，然后回来。"
+                tr("在**某一根**探针上施加一次偏压**脉冲**：跳到某个值、维持一段设定的宽度，然后回来。"
                 "\n"
                 "\n"
                 "当心。偏压脉冲正是你用来**蓄意改造**针尖或表面的手段 —— 它是 TipPulse 的多探针版本。"
@@ -409,24 +446,34 @@ class PulseProbeBias(BaseSkill):
                 "。\n"
                 "\n"
                 "hold_z=true 会在脉冲期间冻结 Z 控制器（标准做法 —— 反馈环绝不能去追那个电流尖峰）"
-                "。relative=true 让这个值成为相对当前偏压的偏移量，而不是绝对值。"
+                "。relative=true 让这个值成为相对当前偏压的偏移量，而不是绝对值。",
+                   "Apply a bias **pulse** on **one** probe: jump to a value, hold it for a set width, then come back."
+                   "\n"
+                   "\n"
+                   "Caution. A bias pulse is exactly the tool you use to **deliberately modify** the tip or the surface - it is the multiprobe version of TipPulse. "
+                   "It can blunt the tip, dig a pit, or move an adsorbate, and it does so on purpose. The width is in **seconds** (1 ms = 0.001)"
+                   ".\n"
+                   "\n"
+                   "hold_z=true freezes the Z controller during the pulse (standard practice - the feedback loop must never chase the current spike)"
+                   ". relative=true makes the value an offset from the current bias instead of an absolute value.")
             ),
             parameters=[
                 _probe_spec(),
                 ParameterSpec(name="value_v", type="float",
-                              description="脉冲偏压，单位**伏特**（绝对值；relative 时则为偏移量）",
+                              description=tr("脉冲偏压，单位**伏特**（绝对值；relative 时则为偏移量）",
+                                             "Pulse bias, in **volts** (absolute; an offset when relative)"),
                               unit="V", required=True, min_value=-10.0, max_value=10.0),
                 ParameterSpec(name="width_s", type="float",
-                              description="脉冲宽度，单位**秒**（1 ms = 0.001）",
+                              description=tr("脉冲宽度，单位**秒**（1 ms = 0.001）", "Pulse width, in **seconds** (1 ms = 0.001)"),
                               unit="s", required=True, min_value=1e-6, max_value=10.0),
                 ParameterSpec(name="hold_z", type="bool",
-                              description="脉冲期间冻结 Z 控制器（标准做法）",
+                              description=tr("脉冲期间冻结 Z 控制器（标准做法）", "Freeze the Z controller during the pulse (standard practice)"),
                               required=False, default=True),
                 ParameterSpec(name="relative", type="bool",
-                              description="value_v 是相对当前偏压的偏移量",
+                              description=tr("value_v 是相对当前偏压的偏移量", "value_v is an offset from the current bias"),
                               required=False, default=False),
                 ParameterSpec(name="wait", type="bool",
-                              description="阻塞直到脉冲结束",
+                              description=tr("阻塞直到脉冲结束", "Block until the pulse ends"),
                               required=False, default=True),
             ],
             estimated_duration_s=3.0,
@@ -451,8 +498,10 @@ class PulseProbeBias(BaseSkill):
             skill_name="PulseProbeBias", success=True, nanonis_calls=[rec],
             data={"probe": probe, "value_v": float(params["value_v"]),
                   "width_s": float(params["width_s"])},
-            summary=(f"探针 {probe} 偏压脉冲：{float(params['value_v']):g} V × "
-                     f"{float(params['width_s']):g} s"),
+            summary=(tr(f"探针 {probe} 偏压脉冲：{float(params['value_v']):g} V × "
+                     f"{float(params['width_s']):g} s",
+                        f"Probe {probe} bias pulse: {float(params['value_v']):g} V × "
+                        f"{float(params['width_s']):g} s")),
         )
 
 
@@ -465,7 +514,7 @@ class GetProbeBias(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读**某一根**探针的偏压、它的量程设置与标定。",
+            description=tr("读**某一根**探针的偏压、它的量程设置与标定。", "Read the bias of **one** probe, its range settings and calibration."),
             parameters=[_probe_spec()],
             estimated_duration_s=1.0,
             composition_level=0,
@@ -498,7 +547,8 @@ class GetProbeCurrent(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读**某一根**探针的隧道电流（单位安培）及其可用的前放增益档。用这个逐探针的读数来判断那一根特定探针是否处在隧穿距离内 —— 主 Current 通道只报其中一根。"
+                tr("读**某一根**探针的隧道电流（单位安培）及其可用的前放增益档。用这个逐探针的读数来判断那一根特定探针是否处在隧穿距离内 —— 主 Current 通道只报其中一根。",
+                   "Read the tunneling current of **one** probe (in amperes) and the preamp gain steps available to it. Use this per-probe reading to judge whether that specific probe is within tunneling distance - the main Current channel reports only one of them.")
             ),
             parameters=[_probe_spec()],
             estimated_duration_s=1.0,
@@ -531,19 +581,25 @@ class ConfigureProbeCurrentGain(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "设定**某一根**探针的电流前放增益与滤波器，用的是该探针自己那份增益表里的**序号**（表用 GetProbeCurrent 读）"
+                tr("设定**某一根**探针的电流前放增益与滤波器，用的是该探针自己那份增益表里的**序号**（表用 GetProbeCurrent 读）"
                 "。\n"
                 "\n"
                 "改增益会改变同一个电流**读出来是多少**。要做就在 Z 控制器关闭、或探针已退回的状态下做："
-                "环闭合时，一次增益改变在反馈看来就是电流突变，而环的回应是去移动这根探针。"
+                "环闭合时，一次增益改变在反馈看来就是电流突变，而环的回应是去移动这根探针。",
+                   "Set the current preamp gain and filter of **one** probe, using an **index** into that probe's own gain table (read the table with GetProbeCurrent)"
+                   ".\n"
+                   "\n"
+                   "Changing the gain changes **what the same current reads as**. Do it with the Z controller off, or with the probe withdrawn: "
+                   "with the loop closed, a gain change looks to the feedback like a sudden current change, and the loop responds by moving this probe.")
             ),
             parameters=[
                 _probe_spec(),
                 ParameterSpec(name="gain_index", type="int",
-                              description="这根探针增益表里的序号（表来自 GetProbeCurrent）",
+                              description=tr("这根探针增益表里的序号（表来自 GetProbeCurrent）",
+                                             "Index into this probe's gain table (the table comes from GetProbeCurrent)"),
                               required=True, min_value=0, max_value=31),
                 ParameterSpec(name="filter_index", type="int",
-                              description="这根探针滤波器表里的序号",
+                              description=tr("这根探针滤波器表里的序号", "Index into this probe's filter table"),
                               required=False, default=0, min_value=0, max_value=31),
             ],
             estimated_duration_s=1.0,
@@ -562,4 +618,5 @@ class ConfigureProbeCurrentGain(BaseSkill):
         return SkillResult(skill_name="ConfigureProbeCurrentGain", success=True,
                            nanonis_calls=[rec],
                            data={"probe": probe, "gain_index": int(params["gain_index"])},
-                           summary=f"探针 {probe} 前放增益索引 = {params['gain_index']}")
+                           summary=tr(f"探针 {probe} 前放增益索引 = {params['gain_index']}",
+                                      f"Probe {probe} preamp gain index = {params['gain_index']}"))

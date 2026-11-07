@@ -126,7 +126,7 @@ class InstrumentState:
                 state.z_controller_on = (code == 2)
                 state.z_controller_status = _ZCTRL_STATUS.get(code, f"Unknown({code})")
 
-        # ACTIVE Z-controller identity. Multiple
+        # ACTIVE Z-controller identity Multiple
         # Z controllers can be defined (e.g. "Current", "log Current", "df"); the
         # active one is the live feedback channel. Read it here so it rides in the
         # live-state block on every LLM call instead of only via GetZCtrlList.
@@ -308,8 +308,15 @@ class InstrumentState:
         "scan_angle_deg",
     })
 
-    # 缓存通过后台刷新和 apply_patch 更新。
-    # 工具调用与 composite 子步骤共用 patch_state_from_result，使下一步读取最新已确认状态。
+    # NOTE 写回这个缓存的入口只有两个:1 Hz 后台 refresh(),和下面这个 apply_patch。
+    # 而 apply_patch **全仓曾经只有一个调用点** —— agent 的工具调用边界
+    # (skill_adapter)。composite 的子步骤走的是 ExecutionContext.run,不经过那里,
+    # 所以一个子步骤把硬件改了之后,**下一个子步骤的前置检查读到的仍是最多 1 秒前
+    # 的旧值**。用真类复现:ZControllerOnOff(True) 成功且回读 verified,
+    # 紧接着 MoveToXY 报 `z_controller_on is False` —— 与真机报错一致。
+    # 也就是说那个「移动前先开反馈」的修复在 composite 路径上
+    # **结构上不可能生效**。写回的实现见 :func:`patch_state_from_result`(单一真源,
+    # 两条路径共用)。
     def apply_patch(self, **fields) -> None:
         """Patch known state fields onto the cached snapshot IN PLACE (e.g. after a
         write-skill returns the value it just set). Only whitelisted keys are
@@ -409,10 +416,27 @@ class InstrumentState:
 # ── 写回:一个成功的写技能立刻更新缓存 ────────────────────────────────────────
 
 def patch_state_from_result(state: Any, data: Any, *, what: str = "") -> None:
-    """把成功技能的结果字段写回状态缓存，供工具边界和 composite 子步骤共用。
-    
-    子步骤不经过工具 post hook；若只在那里回写，后续步骤会读取陈旧状态，
-    即使上一动作已成功也可能错误地拒绝。尽力而为，缓存更新失败不改变技能结果。"""
+    """把一个**成功**技能的结果字段写回仪器状态缓存。**两条路径共用这一份。**
+
+    为什么要有这个函数(而不是在两处各写一遍):写回从前只存在于 agent 的工具调用
+    边界(``skill_adapter``)。composite 的子步骤走 ``ExecutionContext.run``,不经过
+    那里 —— 于是子步骤把硬件改了之后,**下一个子步骤读到的还是最多 1 秒前的旧值**。
+
+    用真类复现(真 InstrumentState / ExecutionContext / ZControllerOnOff
+    / MoveToXY,假 pool)::
+
+        ZControllerOnOff(True) -> success=True data={'z_controller_on': True,
+                                                     'verified': True}
+          hardware now: True   status_code: 2
+          cache STILL: False
+        MoveToXY -> success=False error=Precondition 'z_controller_on' not met
+
+    最后那行与真机上 ForgeAuTip 的报错一致。也就是说
+    那个「移动前先开反馈」的修复在 composite 路径上**结构上不可能生效**
+    —— 不是没生效,是补的洞不在那儿。
+
+    尽力而为:写回失败绝不能影响技能结果(它是缓存的一致性,不是执行的正确性)。
+    """
     if not isinstance(data, dict) or not data:
         return
     patch = getattr(state, "apply_patch", None)

@@ -19,6 +19,21 @@
 这里把四件事收在一处，老端点与外部网关（``mast.api.ext``）都走它。**执行路径仍然
 只有 ``ExecutionContext.run``**：安全闸门、仪器仲裁、中止、状态回写都在那里面。
 
+## human 节点（只在光学站）
+
+**光学站上**，组合技能里的 ``human`` 节点在这条路径上不再被拒。``run_and_record`` 在 ``ec.run`` 外面
+开一个 ``mast.operator_hitl.human_node.direct_scope``（带着这次执行的 ``check_abort``）；
+``skills.composite.interpreter.human_channel`` 看到它，就把节点变成一条结构化操作员提示，阻塞等
+操作员在网页 / 启动器弹窗里答 —— 有上限（缺省 30 min，至多 4 h）、随作业取消而取消。超时、被关闭、
+被取消都以明确的失败结束。作业在等的时候 ``waiting_operator``（含 prompt_id）出现在作业视图里
+（``api/ext/jobs.py``）；组合技能一直持有仪器令牌（下一步要的是前几步留下的仪器状态），停止类技能
+（``instrument_lock.BYPASS_NAMES``）照常能跑。LangGraph（agent）路径不设作用域，仍然是 ``interrupt()``。
+
+**STM 站上**作用域照常开（作业归属不丢），但 ``human_nodes`` 是 False（``_waits_for_human_nodes``，读
+``mast.station``）：``human_channel`` 走老路径，节点立刻明确失败（没有人工决策通道），不问谁、不弹窗、
+不替一个可能不在的人占着令牌 —— 和没有操作员提示之前一模一样。``needs_human_node`` 的来源不变：
+human_channel 以外的 ``GraphInterrupt``、技能自己起的线程里的 human 节点。
+
 ## 刻意不做的事
 
 * 不取仪器令牌、不发任何 Nanonis 命令 —— 那是 ``ExecutionContext.run`` 的事。
@@ -32,6 +47,9 @@
 
 from __future__ import annotations
 
+from mast.i18n import tr
+import contextlib
+import copy
 import logging
 import math
 import re
@@ -171,19 +189,36 @@ class DirectRun:
         return dict(h) if isinstance(h, dict) else {}
 
 
+#: 要回执（``recorded`` / ``v2_action_id``）的调用方最多等入账多久（秒）。库正常时一次入账
+#: 是毫秒级，回执与改动前完全一样；库被锁时等到这里就带着 ``pending: True`` 先回去，入账在
+#: 后台写入器里照写（见 ``mast.logging.record_writer``）。不要回执的调用方传 ``0``。
+DEFAULT_RECORD_WAIT_S = 2.0
+
+#: 后台写入时单条记录撞锁的重试预算（秒），见 ``CoreRuntime._record_direct_skill_call``。
+RECORD_LOCK_RETRY_S = 60.0
+
+
 def run_and_record(ec: Any, skill: str, params: dict | None = None, *,
                    runtime: Any = None, agent_id: str | None = None,
                    thread_id: str | None = None, tool_call_id: str | None = None,
-                   context: str = "", approval_source: str = APPROVAL_AUTO) -> DirectRun:
+                   context: str = "", approval_source: str = APPROVAL_AUTO,
+                   record_wait_s: float | None = None) -> DirectRun:
     """在 *ec* 上跑 *skill*，然后把结果记进实验记录。**永不抛。**
 
     ``agent_id`` / ``thread_id`` 只在给了的时候写进入账载荷 —— 不给就保持
     ``_record_v2_action`` 原来的缺省（``instrument_control`` / 当前活动线程）。
     ``context`` 写进 v1 ``actions.context``（外部身份的落点）。
+
+    ``record_wait_s``：入账交给后台写入器之后，这里最多等它多久（默认
+    :data:`DEFAULT_RECORD_WAIT_S`）。``0`` = 一刻不等（技能直调 API：它的回执里本来就没有
+    ``recorded``）。等不到 ⇒ ``run.recorded`` 是 ``{"pending": True, "v1": None, ...}``——
+    「还没写完」，不是「没写进去」。曾出现：入账在请求线程上同步写，实验库
+    被锁时一次 ``GetSignalValues`` 的回执会卡很久，而仪器命令早已执行完。
     """
     params = dict(params or {})
     t0 = time.monotonic()
     meta = _metadata_of(ec, skill)
+    wait_s = DEFAULT_RECORD_WAIT_S if record_wait_s is None else max(0.0, float(record_wait_s))
 
     # 1. SI 字符串还原（与 agent 路径同一个函数）。真 float 原样放行。
     if meta is not None:
@@ -198,7 +233,7 @@ def run_and_record(ec: Any, skill: str, params: dict | None = None, *,
             res = _failed(skill, f"[{skill}] precondition_failed: {'; '.join(si_errors)}")
             return _finish(ec, skill, params, meta, res, t0, "si_parse", None,
                            runtime, agent_id, thread_id, tool_call_id, context,
-                           approval_source)
+                           approval_source, wait_s)
 
     # 2. 样品门控：门口判一次，放行后子步继承（照 wrap_skill）。
     if meta is not None:
@@ -211,7 +246,7 @@ def run_and_record(ec: Any, skill: str, params: dict | None = None, *,
         elif gate:
             return _finish(ec, skill, params, meta, _failed(skill, gate), t0,
                            "sample_gate", None, runtime, agent_id, thread_id,
-                           tool_call_id, context, approval_source)
+                           tool_call_id, context, approval_source, wait_s)
         else:
             try:
                 ec._scope_admitted = True
@@ -223,28 +258,72 @@ def run_and_record(ec: Any, skill: str, params: dict | None = None, *,
     state_before = _snapshot(ec)
     refused_by: str | None = None
     try:
-        result = ec.run(skill, params)
+        # 光学站上，组合技能里的 human 节点在这条路径上不再被拒：human_channel 看到这个作用域，
+        # 就把节点变成一条结构化操作员提示并**阻塞等操作员答**（有上限、随 ec 的中止事件取消）。
+        # STM 站上作用域的 human_nodes 是 False：老行为，立刻明确失败。LangGraph 路径不设作用域，
+        # 行为不变。见 mast.operator_hitl.human_node。
+        with _human_scope(ec, skill, agent_id, tool_call_id):
+            result = ec.run(skill, params)
     except Exception as exc:  # noqa: BLE001 — 技能抛异常也要如实回、如实记
         if _is_graph_interrupt(exc):
             refused_by = "needs_human_node"
             result = _failed(skill, (
-                f"[{skill}] 这个组合技能里有需要人决定的 human 节点 —— 直调路径上没有人"
-                "接得住那个暂停，执行已停在那里。请在 MAST 界面里跑它，或改用不含 "
-                "human 节点的版本。"))
+                tr(f"[{skill}] 这个组合技能里有需要人决定的 human 节点 —— 直调路径上没有人"
+                   "接得住那个暂停，执行已停在那里。请在 MAST 界面里跑它，或改用不含 "
+                   "human 节点的版本。",
+                   f"[{skill}] This composite skill has a human node that needs a person's decision - "
+                   "nobody on the direct-call path can handle that pause, so execution stopped there. "
+                   "Run it from the MAST UI, or use a version without human nodes.")))
         else:
             result = _failed(skill, f"{type(exc).__name__}: {exc}")
     if refused_by is None and _is_busy(result):
         refused_by = "busy"
     return _finish(ec, skill, params, meta, result, t0, refused_by, state_before,
                    runtime, agent_id, thread_id, tool_call_id, context,
-                   approval_source)
+                   approval_source, wait_s)
+
+
+#: 门口就拒了、技能根本没跑的几种 —— 它们不发 ``SKILL_STEP``。
+_NOT_RUN = frozenset({"si_parse", "sample_gate", "busy"})
+
+
+def _publish_skill_step(skill: str, success: bool, category: str | None = None) -> None:
+    """跑完一个技能就发一条 ``SKILL_STEP``，与遗留的 ``SkillExecutor`` 同一个事件。
+
+    电流监测的「余辉期」（进针 / 退针 / STS 这类技能刚结束的几秒里，它的瞬态不算告警，
+    ``monitoring/service.py`` 的 ``_on_bus_event``）只听这一个事件，而 v2 的两条执行
+    入口 —— 这里与 agent 侧的 ``skill_adapter.wrap_skill`` —— 从来不发：外部 agent 的 STS 与退针之后的电流变化
+    因此曾被判成 RTN。永不抛。
+
+    ``category``：技能的类别（``read`` / ``write`` / ``composite`` /
+    ``analysis``）跟着事件走。电流监测只按**名字子串**挑要 pin 的技能，于是
+    ``GetAutoApproachStatus``（含 ``autoapproach``）这种纯状态读，每调一次都对监测库做一次
+    pin_range UPDATE、再开一段余辉期 —— 外部看守会每隔几秒查一次进针状态。读类技能
+    不碰结，不该 pin、也不该让后面几秒的告警静音。"""
+    try:
+        from mast.core.events import EventBus
+
+        EventBus.get().publish_skill_step(skill=skill, step=0, success=bool(success),
+                                          category=category)
+    except Exception:  # noqa: BLE001 — 通知失败绝不影响已经发生的动作
+        logger.debug("direct-exec: SKILL_STEP for %s not published", skill, exc_info=True)
+
+
+def _category_of(meta: Any) -> str | None:
+    """技能元数据里的类别值（``"read"`` 等）；读不到 ⇒ None（事件保持老形状）。"""
+    cat = getattr(meta, "category", None) if meta is not None else None
+    val = getattr(cat, "value", cat)
+    return str(val).lower() if val else None
 
 
 def _finish(ec, skill, params, meta, result, t0, refused_by, state_before, runtime,
-            agent_id, thread_id, tool_call_id, context, approval_source) -> DirectRun:
+            agent_id, thread_id, tool_call_id, context, approval_source,
+            wait_s: float = DEFAULT_RECORD_WAIT_S) -> DirectRun:
     elapsed = time.monotonic() - t0
     out = DirectRun(skill=skill, params=params, result=result, elapsed_s=elapsed,
                     refused_by=refused_by, abort=_abort_state(ec))
+    if refused_by not in _NOT_RUN:
+        _publish_skill_step(skill, out.success, _category_of(meta))
     rec = getattr(runtime, "_record_direct_skill_call", None) if runtime is not None else None
     if callable(rec):
         payload = record_payload(
@@ -252,11 +331,94 @@ def _finish(ec, skill, params, meta, result, t0, refused_by, state_before, runti
             state_before=state_before, state_after=_snapshot(ec),
             agent_id=agent_id, thread_id=thread_id, tool_call_id=tool_call_id,
             context=context, approval_source=approval_source)
+        out.recorded = _record_in_background(runtime, rec, payload, skill=skill,
+                                             wait_s=wait_s)
+    return out
+
+
+def _record_in_background(runtime: Any, rec: Any, payload: dict, *, skill: str,
+                          wait_s: float) -> dict:
+    """把一次直调的入账交给后台写入器，最多等 ``wait_s`` 秒拿回执。**永不抛、永不无界等。**
+
+    ## 为什么
+
+    入账原来在请求线程上同步写两行（v1 ``mast_experiments.db`` + v2）。外部看守
+    高频轮询 ``GetSignalValues``，环境监测也在写同一个库，写者在 SQLite 锁上
+    排队：``V1 action record failed for GetSignalValues … sqlite3.OperationalError:
+    database is locked``，每次都先等满 busy timeout —— 回执可能卡很久，看守判
+    「失明」而反复停止进针；而 ``StopAutoApproach`` 这类命令其实**当场**就执行了。
+
+    ## 三件必须留在请求线程上的事
+
+    1. **活动戳**（``_note_skill_activity``）：手动操作监视器靠它把这段时间的状态变化归给
+       技能。挪到写入线程上会晚到，那几秒的变化就会被算成人手动做的。
+    2. **归属快照**（``_direct_record_attribution``）：写入时「当前实验 / 会话」可能已经
+       换了，记录要挂在动作发生时的那一个上。
+    3. **载荷本身**：``record_payload`` 在这里已经建好，写入线程只读它。
+
+    回执：写完了 ⇒ 与原来同形（``v1`` / ``v2_action_id`` / ``experiment_id`` /
+    ``sample_id``）；没等到 ⇒ ``{"pending": True, "v1": None, "v2_action_id": None, …}``
+    —— 「还没写完」与「没写进去」（``v1: False``）是两句话；队列满被丢 ⇒ ``dropped: True``。
+    """
+    att: dict = {}
+    snap = getattr(runtime, "_direct_record_attribution", None)
+    if callable(snap):
         try:
-            out.recorded = dict(rec(payload) or {})
-        except Exception as exc:  # noqa: BLE001 — 记账失败绝不能反噬已经发生的动作
-            logger.warning("direct-exec: %s 入账失败: %s", skill, exc)
-            out.recorded = {"v1": False, "v2_action_id": None, "error": str(exc)[:200]}
+            att = dict(snap() or {})
+        except Exception:  # noqa: BLE001 — 快照不到就按「写入时的当前」记（旧行为）
+            att = {}
+    if att:
+        payload["_attribution"] = att
+    # 状态快照必须在这里定格：``InstrumentState.snapshot()`` 返回的是**活的**缓存对象，
+    # ``apply_patch`` 原地改它。入账推迟到写入线程之后（库被锁时晚几十秒），下一个技能
+    # 打上去的补丁就会被记成这一次的 state_before / state_after。
+    for key in ("state_before", "state_after"):
+        st = payload.get(key)
+        if st is not None:
+            try:
+                payload[key] = copy.deepcopy(st)
+            except Exception:  # noqa: BLE001 — 拷不了就按原样记（与改动前同）
+                pass
+    _note_activity(runtime)
+    kwargs = _record_kwargs(rec)
+
+    def _write() -> dict:
+        return dict(rec(payload, **kwargs) or {})
+
+    try:
+        from mast.logging.record_writer import get_writer
+
+        ticket = get_writer().submit(_write, label=skill)
+    except Exception as exc:  # noqa: BLE001 — 写入器起不来：退回同步写（旧行为），照旧吞
+        logger.warning("direct-exec: 后台写入器不可用（%s），%s 改为同步入账", exc, skill)
+        try:
+            return _write()
+        except Exception as exc2:  # noqa: BLE001 — 记账失败绝不能反噬已经发生的动作
+            logger.warning("direct-exec: %s 入账失败: %s", skill, exc2)
+            return {"v1": False, "v2_action_id": None, "error": str(exc2)[:200]}
+    res = ticket.wait(wait_s)
+    if res is not None:
+        return res
+    return {"v1": None, "v2_action_id": None, "pending": True,
+            "experiment_id": att.get("experiment_id"), "sample_id": att.get("sample_id")}
+
+
+def _record_kwargs(rec: Any) -> dict:
+    """``rec`` 认得的写入器专用关键字参数（旧签名的替身 / 测试桩 ⇒ ``{}``）。
+
+    不用「先带参数调、TypeError 再不带参数重调」：技能载荷里任何地方抛出的 TypeError
+    都会被误当成签名不符，于是同一条记录写两遍。"""
+    try:
+        import inspect
+
+        names = set(inspect.signature(rec).parameters)
+    except (TypeError, ValueError):
+        return {}
+    out: dict = {}
+    if "note_activity" in names:
+        out["note_activity"] = False
+    if "lock_retry_s" in names:
+        out["lock_retry_s"] = RECORD_LOCK_RETRY_S
     return out
 
 
@@ -332,6 +494,33 @@ def _sample_gate_message(meta: Any, skill: str) -> Any:
         logger.warning("direct-exec: 样品门控判不出来（%s）—— 门口放行，子步各自再判", skill,
                        exc_info=True)
         return _GATE_UNREADABLE
+
+
+def _waits_for_human_nodes() -> bool:
+    """Whether a ``human`` node on this path asks a real operator: only on the optical station
+    (``mast.station``). An STM station keeps what it always did - the node
+    ends the job with ``needs_human_node``. Unreadable profile = STM: **永不抛**."""
+    try:
+        from mast import station
+
+        return bool(station.is_optical())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _human_scope(ec: Any, skill: str, agent_id: str | None, tool_call_id: str | None) -> Any:
+    """``ec.run`` 期间的 human 节点作用域（见 ``mast.operator_hitl.human_node``）。**永不抛**：
+    取不到就是不设作用域，human 节点退回老行为（没有通道 ⇒ 明确失败）。"""
+    try:
+        from mast.operator_hitl import human_node
+
+        check = getattr(ec, "check_abort", None)
+        return human_node.direct_scope(check_abort=check if callable(check) else None,
+                                       skill=skill, agent_id=agent_id, job_id=tool_call_id,
+                                       human_nodes=_waits_for_human_nodes())
+    except Exception:  # noqa: BLE001
+        logger.debug("direct-exec: human 节点作用域不可用", exc_info=True)
+        return contextlib.nullcontext()
 
 
 def _note_activity(runtime: Any) -> None:
@@ -461,6 +650,7 @@ def jsonable(obj: Any, _depth: int = 0) -> Any:
 __all__ = [
     "APPROVAL_AUTO",
     "APPROVAL_LLM",
+    "DEFAULT_RECORD_WAIT_S",
     "DirectRun",
     "actor_slug",
     "build_context",

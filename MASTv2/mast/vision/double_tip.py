@@ -26,14 +26,14 @@ frames he reads as usable):
    metres* guard, and a real STM frame's z-std is 1e-10 m (Au(111) steps are
    236 pm). All seven normal frames tripped it and returned
    ``is_double=False, score=0.0`` — a fake "clean". The only two frames that got
-   past it were the two the operator had already binned (``_0102`` z-span
-   75.6 nm, ``_0092`` 79.8 nm), i.e. the guard was an *inverted* filter: it
+   past it were two the operator had already binned for excessive z-span,
+   i.e. the guard was an *inverted* filter: it
    admitted only the garbage. The guard is now dimensionless (see ``_prepare``).
 
 2. **Even fed a normalised frame it does not rank multi tip above clean.**
-   Autocorr scores: _0110 (multi tip) 0.118, versus clean _0104 0.181,
-   _0086 0.180, _0108 0.175, _0064 0.155. The only frame over the 0.18 default
-   threshold was a *clean* one. AUROC ≈ 0.33 — below chance on this surface.
+   On a labelled set the multi-tip frame scored below the clean frames. The only
+   frame over the default threshold was a *clean* one, and the AUROC was below
+   chance on this surface.
 
 3. **Why: the echo is linear in CURRENT, not in z.** With N apexes the feedback
    holds Σ_i a_i·exp(2κ·z_true(r−d_i)) constant, so
@@ -639,9 +639,8 @@ STEP_SPLIT_TOL = 0.25
 def rig_step_m() -> float:
     """**这台仪器读出来的**单原子台阶高度(米)。
 
-    不是物理值 —— 「我们的仪器没有校准,好像是 z 差 15%,
-    不用管,就假设我们的金是差 15% 对的。」判据量的是仪器读数,尺子就得用
-    仪器的刻度。没设过就退回物理值(那时判据会整体偏,报文里会说)。
+    不是物理值 —— 仪器的 Z 若未校准,读数与物理值会有偏差,
+    约定以仪器读数为准。判据量的是仪器读数,尺子就得用仪器的刻度。没设过就退回物理值(那时判据会整体偏,报文里会说)。
     """
     try:
         from mast.core.instrument_profile import get_config
@@ -651,9 +650,15 @@ def rig_step_m() -> float:
     except Exception:  # noqa: BLE001
         return AU111_STEP_M
 
-# 台阶图判据的最小视野（米），用于限制应用范围。
-# 视野需包含可比对的台阶边缘；单团簇的不同高度不能当作台面能级。
-# 达到视野门仍不证明存在台阶，后续还需非周期内容检查。
+
+#: 判台阶劈裂**至少要多大的图**(米)。
+#:
+#: 需要避免的误判:台面上扫图根本没有台阶时被判成劈裂。
+#: 这条门是必需的:10 nm 簇图上会有一部分被判成「劈裂」——
+#: 那上面根本没有台阶,被当成台面能级的是团簇自己的几个高度。
+#: 取 **100 nm**(100 nm 以上才测,小图不测)。
+#: 台面宽度通常只有十几 nm,100 nm 装得下五六条台阶 —— 够自相关
+#: 在图上找到「同一条边缘出现了两次」。
 STEP_SPLIT_MIN_FRAME_M = 100e-9
 
 # 大图上判多针尖的自相关 replica score 阈值。
@@ -666,14 +671,34 @@ def step_splitting(image, *, step_m: "float | None" = None,
                    frame_m: "float | None" = None,
                    score_threshold: float = DOUBLE_TIP_SCORE_ON_STEPS,
                    min_levels: int = 3) -> dict:
-    """大尺度图上的多针尖判读，返回 single / split / undecidable。
+    """大尺度图上的多针尖判读。三态 ``single`` / ``split`` / ``undecidable``。
 
-    主判据是非周期形貌的自相关复制峰。高度直方图仅报告台面上下文，
-    不能独自判定多针尖，因为横向复制不一定改变台阶高度差。
+    ═══════════════════════════════════════════════════════════════════════
+    为什么不用高度直方图当判据
+    ═══════════════════════════════════════════════════════════════════════
 
-    视野小于 STEP_SPLIT_MIN_FRAME_M，或自相关报告 no_aperiodic_content
-    时拒判。morphology_dominated 不单独拒判：有台阶的大图本来就可能
-    以形貌为主。阈值适用性须由调用方针对目标成像条件验证。
+    直观的思路是:先调平再看所有点的高度统计分组,看台阶高度,
+    劈裂就是多针尖。但拿人工标注的多针尖图一验,**不成立**:
+    台面能级的相邻差可以是**干干净净的整数倍台阶,一点没劈**。
+
+    也就是说这根多针尖不是把**高度**劈开,是把台阶边缘在**横向**复制成两道。
+    高度直方图原理上看不见它:两个顶点等高时才会出现半高台阶,而这里不等高。
+
+    ⇒ 判据换成本模块原有的**自相关 replica**(它量的正是「同一个形貌在图上
+      重复出现」),阈值用人工标注的标签标定(见 ``DOUBLE_TIP_SCORE_ON_STEPS``)。
+      高度直方图那几个数**仍然报出来**当上下文 —— 它对「这张图有几个台面」
+      是有信息的,只是不该由它下多针尖的判决。
+
+    两道防误判的门(已知风险:台面上扫图根本没有台阶时
+    容易误判):
+
+      · **视野** < ``STEP_SPLIT_MIN_FRAME_M``(100 nm)⇒ 拒答。
+        10 nm 簇图上会有一部分被判成劈裂 —— 那上面根本没有台阶。
+      · 自相关说 ``no_aperiodic_content``(图上没有可比对的结构)⇒ 拒答。
+
+    ⚠️ ``morphology_dominated`` **不再当作拒答理由**:那道门是为 10 nm 簇图
+    写的(一个大团簇占满画面),而**有台阶的大图按定义就是形貌主导的** ——
+    人工标注的多针尖大图正是被它压成 ``undetermined`` 的。
     """
     import numpy as np
 

@@ -21,7 +21,7 @@
 * 真正的安全地板在更下面两层：``execution_context._ABORT_SAFE_WRITES``（Nanonis
   verb 级）与 watchdog 的紧急端口 SafeRetract。订阅门被绕过、被关掉、被导入一份
   乱七八糟的清单，那两层一个字都不会松。
-* 2026-08-20 conduct 层的拍板是「工具面全开 + 服务端包络裁决」：把关靠**包络**，
+* conduct 层的原则是「工具面全开 + 服务端包络裁决」：把关靠**包络**，
   不靠「不给工具」。订阅列表服从同一条哲学 —— 它整理的是**便利**，裁决的是别人。
 
 所以这个模块的失败方向与 ``hardware_modules`` **相反**：那边读不懂就 fail-closed
@@ -73,6 +73,8 @@ import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable
+
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -185,12 +187,14 @@ reset_for_tests = reset_default_store
 def _parse(raw) -> _State:
     """把盘上的 JSON 变成状态。看不懂的部分丢掉，看得懂的留下。"""
     if not isinstance(raw, dict):
-        raise ValueError(f"顶层不是对象而是 {type(raw).__name__}")
+        raise ValueError(tr(f"顶层不是对象而是 {type(raw).__name__}",
+                           f"top level is {type(raw).__name__}, not an object"))
     entries = raw.get("entries")
     if entries is None:
         entries = []
     if not isinstance(entries, (list, tuple, set, frozenset)):
-        raise ValueError(f"entries 不是列表而是 {type(entries).__name__}")
+        raise ValueError(tr(f"entries 不是列表而是 {type(entries).__name__}",
+                           f"entries is {type(entries).__name__}, not a list"))
     names = frozenset(str(x) for x in entries if isinstance(x, str) and str(x).strip())
 
     pending: list[dict] = []
@@ -441,7 +445,9 @@ def _mutate(names: Iterable[str], *, add: bool,
                 # 不知道全集就 materialise，等于把没列出来的全部退订 —— 宁可拒绝。
                 return {"ok": False, "changed": [],
                         "skipped_mandatory": skipped_mandatory,
-                        "reason": "首次定制需要知道市场全集（内部错误：调用方没传 all_names）"}
+                        "reason": tr("首次定制需要知道市场全集（内部错误：调用方没传 all_names）",
+                                     "The first customisation needs the full market list "
+                                     "(internal error: caller did not pass all_names)")}
             st = _materialised(st, all_names, via)
             materialised = True
         before = st.entries
@@ -483,7 +489,7 @@ def add_recommendation(skill: str, *, by_agent: str = "", reason: str = "",
     """
     skill = str(skill or "").strip()
     if not skill:
-        return {"ok": False, "reason": "技能名为空"}
+        return {"ok": False, "reason": tr("技能名为空", "Skill name is empty")}
     with _lock:
         st = _state if _state is not None else _load_locked()
         for p in st.pending:
@@ -513,9 +519,12 @@ def resolve_recommendation(rec_id: str, accept: bool, *,
                 found = p
                 break
         if found is None:
-            return {"ok": False, "reason": f"没有这条推荐：{rec_id}"}
+            return {"ok": False,
+                    "reason": tr(f"没有这条推荐：{rec_id}", f"No such recommendation: {rec_id}")}
         if found.get("status") != REC_PENDING:
-            return {"ok": False, "reason": f"这条推荐已经是 {found.get('status')}",
+            return {"ok": False,
+                    "reason": tr(f"这条推荐已经是 {found.get('status')}",
+                                 f"This recommendation is already {found.get('status')}"),
                     "recommendation": dict(found)}
         skill = str(found.get("skill") or "")
         new_status = REC_ACCEPTED if accept else REC_REJECTED

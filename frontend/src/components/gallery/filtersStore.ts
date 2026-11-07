@@ -1,7 +1,8 @@
-// filtersStore —— 数据图库的筛选条状态（旧版兼容格式 app.js 的全局 F）。
+// filtersStore: filter-bar state of the data gallery.
 //
-// 各视图共用一份（从某目录切到「全部帧」时偏压、标签这些筛选跟着走，原版如此），
-// 存 localStorage["mast.gallery.filters"]，搜索词不存。读时校验在 lib/gallery/filters.ts。
+// One copy is shared by all views (switching from a directory to "All frames" keeps the bias,
+// tag and other filters), persisted in localStorage["mast.gallery.filters"]; the search text is
+// not persisted. Validation on read is in lib/gallery/filters.ts.
 
 import { create } from "zustand";
 import {
@@ -32,7 +33,7 @@ export const useFiltersStore = create<FiltersStore>()((set, get) => ({
     try {
       localStorage.setItem(FILTERS_KEY, serializeFilters(F));
     } catch {
-      /* 记不住筛选也要能用 */
+      /* Filters must work even when they cannot be remembered */
     }
   },
 }));

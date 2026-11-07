@@ -1,28 +1,31 @@
-/** 「这个 agent 每次调用到底收到了什么、各占多大」——纯逻辑。
+/** What an agent actually receives on each call, and how much each part takes: pure logic.
  *
- *  ## 为什么单独一个文件
+ *  ## Why a separate file
  *
- *  `.tsx` 在这个仓里跑不了单测（`npm run test:unit` 是 `node --test`，JSX 剥不
- *  掉），所以凡是**会算错**的东西都要住在 `.ts` 里。这里算的每一件事都有算错
- *  的方式：占比会加总到 99%，码点偏移会切错一位，未知大小的块会被当成 0 从而
- *  把条画得比实际短。
+ *  `.tsx` cannot be unit-tested in this repo (`npm run test:unit` is `node --test`, which
+ *  cannot strip JSX), so anything that can be computed wrongly lives in a `.ts`. Every
+ *  calculation here has a way to go wrong: shares can sum to 99%, code-point offsets can
+ *  cut one position off, and a block of unknown size can be treated as 0 so the bar is
+ *  drawn shorter than reality.
  *
- *  ## 几条不显然的约定
+ *  ## Non-obvious conventions
  *
- *  * **supervisor 前后端两个名字**：前端 `_supervisor`，后端 `orchestrator`
- *    （`make_chat_model("orchestrator")`、登记表的 `agent="orchestrator"`）。
- *    不映射的话 SUP 那一列永远是空的 —— 而空看起来像「编排器没有注入」。
- *  * **快照末尾那条 `ai:response` 是模型的输出**，不是输入。它不计进
- *    `total_chars`，历史条数与占比都要把它剔掉。
- *  * **偏移按码点**：后端 Python 的 `len()` 数码点，JS 的 `.length` 数 UTF-16
- *    码元。一个 emoji 就能让所有段错一位。
- *  * **`chars` 是截断前的原长**，`content` 可能已被截到 20 k。切分要钳位并说
- *    出来，不能假装没截。
+ *  * **The supervisor has two names**: `_supervisor` in the frontend, `orchestrator` in
+ *    the backend (`make_chat_model("orchestrator")`, `agent="orchestrator"` in the
+ *    registry). Without the mapping the SUP column is always empty, and empty looks like
+ *    "the orchestrator injects nothing".
+ *  * **The `ai:response` entry at the end of a snapshot is the model's output**, not its
+ *    input. It is not counted in `total_chars`, and the history count and shares exclude it.
+ *  * **Offsets are in code points**: Python's `len()` on the backend counts code points,
+ *    JS `.length` counts UTF-16 code units. A single emoji shifts every later segment.
+ *  * **`chars` is the length before truncation**, while `content` may already be cut to
+ *    20k. Splitting must clamp and say so, not pretend nothing was truncated.
  */
 
 import type { components } from "@/api/schema";
+import { tr } from "./i18n.ts";
 
-// ── 契约类型（生成物的别名，别在这里重抄一份字段）─────────────────────────
+// ── Contract types (aliases of generated types; do not copy fields here) ──
 
 export type InjectionBlock = components["schemas"]["InjectionBlock"];
 export type AgentInfo = components["schemas"]["AgentInfo"];
@@ -32,51 +35,51 @@ export type LatestCapture = components["schemas"]["LatestCaptureResponse"];
 export type CapturedMessage = components["schemas"]["CapturedMessageModel"];
 export type ToolSurface = components["schemas"]["ToolSurfaceInfo"];
 
-/** 后端 registry 里「全员」的那个值。 */
+/** The registry value meaning "all agents". */
 export const ALL_AGENTS = "*";
 
-/** 前端 supervisor 的 id（`registry.tsx` 的 `SUP_ID`）。 */
+/** Frontend supervisor id (`SUP_ID` in `registry.tsx`). */
 export const UI_SUPERVISOR = "_supervisor";
-/** 后端同一个东西的 id。 */
+/** Backend id of the same thing. */
 export const BACKEND_SUPERVISOR = "orchestrator";
 
-/** 前端 agent id → 后端 id。 */
+/** Frontend agent id -> backend id. */
 export function toBackendAgentId(uiId: string): string {
   return uiId === UI_SUPERVISOR ? BACKEND_SUPERVISOR : uiId;
 }
 
-/** 后端 agent id → 前端 id。 */
+/** Backend agent id -> frontend id. */
 export function toUiAgentId(backendId: string): string {
   return backendId === BACKEND_SUPERVISOR ? UI_SUPERVISOR : backendId;
 }
 
-// ── 词表 ────────────────────────────────────────────────────────────────
+// ── Vocabulary ───────────────────────────────────────────────────────────
 
 const WHEN_LABEL: Record<string, string> = {
-  always: "每次调用",
-  when_set: "设了才有",
-  on_event: "出事才有",
-  on_mode: "看模式",
-  build_time: "建图时定",
+  always: tr("每次调用", "Every call"),
+  when_set: tr("设了才有", "Only when set"),
+  on_event: tr("出事才有", "Only on an event"),
+  on_mode: tr("看模式", "Depends on mode"),
+  build_time: tr("建图时定", "Fixed at graph build"),
 };
 
 const POSITION_LABEL: Record<string, string> = {
-  system: "系统消息",
-  last_human: "最后一条用户消息",
-  new_human: "新插一条消息",
-  state_messages: "改写消息列表",
-  tool_result: "改写工具返回",
-  tools: "工具面",
+  system: tr("系统消息", "System message"),
+  last_human: tr("最后一条用户消息", "Last user message"),
+  new_human: tr("新插一条消息", "Inserted message"),
+  state_messages: tr("改写消息列表", "Rewritten message list"),
+  tool_result: tr("改写工具返回", "Rewritten tool result"),
+  tools: tr("工具面", "Tool surface"),
 };
 
 const AVAILABILITY_LABEL: Record<string, string> = {
-  static: "固定文本",
-  live: "按当前状态渲染",
-  needs_hardware: "需要实时硬件",
-  needs_request: "只存在于一次请求内",
+  static: tr("固定文本", "Fixed text"),
+  live: tr("按当前状态渲染", "Rendered from current state"),
+  needs_hardware: tr("需要实时硬件", "Needs live hardware"),
+  needs_request: tr("只存在于一次请求内", "Exists only within one request"),
 };
 
-/** 未知值**原样返回**，不写「未知」—— 后端加一个枚举值时，页面不该变成一片未知。 */
+/** Unknown values are returned verbatim, never as "unknown": when the backend adds an enum value the page should not turn into a wall of "unknown". */
 function labelOf(table: Record<string, string>, key: string): string {
   return table[key] ?? key;
 }
@@ -85,12 +88,12 @@ export const whenLabel = (w: string) => labelOf(WHEN_LABEL, w);
 export const positionLabel = (p: string) => labelOf(POSITION_LABEL, p);
 export const availabilityLabel = (a: string) => labelOf(AVAILABILITY_LABEL, a);
 
-/** 这一块的正文能直接显示吗。`needs_*` 一律不能 —— 那是诚实性铁律的类型化。 */
+/** Can the text of this block be shown directly? Never for `needs_*`: that is the honesty rule expressed as a type. */
 export function canShowText(block: Pick<InjectionBlock, "availability">): boolean {
   return block.availability === "static" || block.availability === "live";
 }
 
-/** 这一块会到 `agent` 手上吗。 */
+/** Does this block reach `agent`? */
 export function appliesTo(
   block: Pick<InjectionBlock, "agents">,
   backendId: string,
@@ -100,12 +103,12 @@ export function appliesTo(
   return list.includes(ALL_AGENTS) || list.includes(backendId);
 }
 
-// ── 消息拆分 ────────────────────────────────────────────────────────────
+// ── Message splitting ────────────────────────────────────────────────────
 
 export type SplitMessages = {
   system: CapturedMessage[];
   history: CapturedMessage[];
-  /** 模型自己的输出（快照末尾那条）。不是输入。 */
+  /** The model's own output (the last entry of the snapshot). Not input. */
   response: CapturedMessage | null;
 };
 
@@ -124,16 +127,16 @@ export function splitMessages(messages: CapturedMessage[] | undefined): SplitMes
   };
 }
 
-// ── 按块切分一条消息 ────────────────────────────────────────────────────
+// ── Splitting one message by block ───────────────────────────────────────
 
 export type Segment = {
-  /** null = 这一段没有归属（注入 helper 之外的文本）。 */
+  /** null = this segment has no owner (text outside the injection helpers). */
   id: string | null;
   start: number;
   end: number;
   text: string;
   chars: number;
-  /** 这一段落在了 `content` 之外（原文被截断过）。 */
+  /** This segment lies beyond `content` (the original was truncated). */
   clipped: boolean;
 };
 
@@ -144,17 +147,18 @@ export type SegmentIssue =
 
 type BlockRef = { id: string; start: number; end: number; chars: number };
 
-/** 把一条消息的文本按块切成带来源标签的分段。
+/** Split a message's text by block into segments carrying a source label.
  *
- *  空洞补成 `id: null` 的未归属段，而不是丢掉 —— 丢掉的话各段加起来不等于全文，
- *  而「加起来对不上」正是这个页面要暴露的那类问题。
+ *  Gaps are filled with unattributed segments (`id: null`) rather than dropped: dropped
+ *  gaps would make the segments not add up to the full text, and "does not add up" is
+ *  exactly the kind of problem this page exists to expose.
  */
 export function splitByBlocks(
   content: string,
   chars: number,
   blocks: BlockRef[] | null | undefined,
 ): { segments: Segment[]; issues: SegmentIssue[] } {
-  // 按**码点**切：后端的偏移是 Python 的 len()，数的是码点。
+  // Cut by code point: backend offsets come from Python len(), which counts code points.
   const cp = Array.from(content ?? "");
   const n = cp.length;
   const issues: SegmentIssue[] = [];
@@ -175,7 +179,8 @@ export function splitByBlocks(
   for (const b of list) {
     if (prevEnd >= 0 && b.start < prevEnd) {
       issues.push({ kind: "overlap",
-                    detail: `${b.id} 与前一块重叠（start ${b.start} < ${prevEnd}）` });
+                    detail: tr(`${b.id} 与前一块重叠（start ${b.start} < ${prevEnd}）`,
+                               `${b.id} overlaps the previous block (start ${b.start} < ${prevEnd})`) });
     }
     prevEnd = b.end;
     const start = Math.max(0, Math.min(b.start, n));
@@ -188,7 +193,8 @@ export function splitByBlocks(
     const clipped = b.end > n;
     if (clipped) {
       issues.push({ kind: "beyond_content",
-                    detail: `${b.id} 的结束位置 ${b.end} 超出了可见文本长度 ${n}（原文被截断过）` });
+                    detail: tr(`${b.id} 的结束位置 ${b.end} 超出了可见文本长度 ${n}（原文被截断过）`,
+                               `${b.id} ends at ${b.end}, beyond the visible text length ${n} (the original was truncated)`) });
     }
     segments.push({ id: b.id, start, end, text: cut(start, end),
                     chars: b.chars, clipped });
@@ -202,12 +208,13 @@ export function splitByBlocks(
   const claimed = list.reduce((s, b) => s + (b.chars || 0), 0);
   if (chars > 0 && claimed > chars) {
     issues.push({ kind: "chars_mismatch",
-                  detail: `各块声称的 ${claimed} 字符多于这条消息的 ${chars}` });
+                  detail: tr(`各块声称的 ${claimed} 字符多于这条消息的 ${chars}`,
+                               `The blocks claim ${claimed} characters, more than this message's ${chars}`) });
   }
   return { segments, issues };
 }
 
-// ── 占比条 ──────────────────────────────────────────────────────────────
+// ── Share bar ────────────────────────────────────────────────────────────
 
 export type ShareKey = "static" | "block" | "unattributed" | "history" | "tools";
 
@@ -216,14 +223,14 @@ export type Share = {
   id?: string;
   label: string;
   chars: number;
-  /** 百分比，**整数，加总恰好 100**。 */
+  /** Percentage: an integer, and the shares sum to exactly 100. */
   pct: number;
-  /** 这一段是估算（工具面按建图时的口径量的）。 */
+  /** This part is an estimate (the tool surface is measured as at graph build time). */
   estimated: boolean;
 };
 
-/** 最大余数法：各自 `Math.round` 会加总成 99 或 101，而一条加不满的占比条
- *  会让人以为有一块没被算进去。 */
+/** Largest-remainder method: rounding each value separately can sum to 99 or 101, and a
+ *  share bar that does not fill up suggests that some block was not counted. */
 function toPercents(values: number[]): number[] {
   const total = values.reduce((a, b) => a + b, 0);
   if (total <= 0) return values.map(() => 0);
@@ -254,7 +261,7 @@ export function composeShares(args: {
   for (const seg of args.segments) {
     if (seg.chars <= 0) continue;
     if (seg.id === null) {
-      parts.push({ key: "unattributed", label: "未归属", chars: seg.chars,
+      parts.push({ key: "unattributed", label: tr("未归属", "Unattributed"), chars: seg.chars,
                    estimated: false });
     } else {
       const isStatic = seg.id.startsWith("agent.") || seg.id === "system.base";
@@ -263,15 +270,15 @@ export function composeShares(args: {
                    estimated: false });
     }
   }
-  // 历史用**原长** `chars`，不是可能被截过的 `content.length`。
+  // History uses the original `chars`, not the possibly truncated `content.length`.
   const histChars = args.history.reduce((s, m) => s + (m.chars || 0), 0);
   if (histChars > 0) {
-    parts.push({ key: "history", label: `对话历史（${args.history.length} 条）`,
+    parts.push({ key: "history", label: tr(`对话历史（${args.history.length} 条）`, `Conversation history (${args.history.length})`),
                  chars: histChars, estimated: false });
   }
-  // null 与 0 不一样：null = 没量到（不画这一段），0 = 量到了、就是没有。
+  // null differs from 0: null = not measured (do not draw this part), 0 = measured and truly empty.
   if (args.toolsChars !== null && args.toolsChars !== undefined) {
-    parts.push({ key: "tools", label: "工具面（估算）", chars: args.toolsChars,
+    parts.push({ key: "tools", label: tr("工具面（估算）", "Tool surface (estimate)"), chars: args.toolsChars,
                  estimated: true });
   }
   if (parts.length === 0) return [];
@@ -279,7 +286,7 @@ export function composeShares(args: {
   return parts.map((p, i) => ({ ...p, pct: pcts[i] ?? 0 }));
 }
 
-// ── 矩阵 ────────────────────────────────────────────────────────────────
+// ── Matrix ───────────────────────────────────────────────────────────────
 
 export type MatrixRow = {
   block: InjectionBlock;
@@ -307,9 +314,9 @@ export function buildMatrix(
 }
 
 export type Footprint = {
-  /** 能算出字符数的块。 */
+  /** Characters in blocks whose size is known. */
   knownChars: number;
-  /** 只在真实请求里才有内容的块 —— 计数，**不当成 0**。 */
+  /** Blocks with content only in a real request: counted, never treated as 0. */
   unknownCount: number;
   sharedCount: number;
   exclusiveCount: number;
@@ -331,28 +338,28 @@ export function agentFootprint(
   return out;
 }
 
-// ── 杂项 ────────────────────────────────────────────────────────────────
+// ── Miscellaneous ────────────────────────────────────────────────────────
 
 export function fmtChars(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
-  if (n < 1000) return `${n} 字符`;
-  return `${(n / 1000).toFixed(1)}k 字符`;
+  if (n < 1000) return tr(`${n} 字符`, `${n} chars`);
+  return tr(`${(n / 1000).toFixed(1)}k 字符`, `${(n / 1000).toFixed(1)}k chars`);
 }
 
 export function fmtAge(seconds: number | null | undefined): string {
   if (seconds === null || seconds === undefined) return "—";
   const s = Math.max(0, Math.round(seconds));
-  if (s < 60) return `${s} 秒前`;
-  if (s < 3600) return `${Math.round(s / 60)} 分钟前`;
-  return `${(s / 3600).toFixed(1)} 小时前`;
+  if (s < 60) return tr(`${s} 秒前`, `${s} s ago`);
+  if (s < 3600) return tr(`${Math.round(s / 60)} 分钟前`, `${Math.round(s / 60)} min ago`);
+  return tr(`${(s / 3600).toFixed(1)} 小时前`, `${(s / 3600).toFixed(1)} h ago`);
 }
 
-/** 段落锚点 id。`.` 保留 —— 换成 `-` 会让 `mw.a.b` 与 `mw.a_b` 撞成一个。 */
+/** Segment anchor id. `.` is kept: replacing it with `-` would make `mw.a.b` and `mw.a_b` collide. */
 export function segmentAnchor(id: string): string {
   return `ctx-seg-${id.replace(/[^a-zA-Z0-9_.-]/g, "_")}`;
 }
 
-/** 快照拿不到时的说明。四种原因指向四个不同的动作，不能揉成一句「暂无数据」。 */
+/** Explanation for when no snapshot is available. The four causes call for four different actions and must not be merged into a single "no data". */
 export function captureEmptyMessage(reasonCode: string, reason: string): string {
-  return reason || `没有快照（${reasonCode || "原因不明"}）。`;
+  return reason || tr(`没有快照（${reasonCode || "原因不明"}）。`, `No snapshot (${reasonCode || "reason unknown"}).`);
 }

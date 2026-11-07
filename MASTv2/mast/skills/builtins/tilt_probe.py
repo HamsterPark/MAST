@@ -33,6 +33,7 @@ from mast.core.types import (
 )
 from mast.skills.base import BaseSkill
 from mast.vision.tilt import CIRCLE_MIN_POINTS, fit_circle_tilt
+from mast.i18n import tr
 
 _log = logging.getLogger(__name__)
 
@@ -83,19 +84,19 @@ class TiltProbeCircle(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "在 Z 反馈**开启**（恒流）的状态下让针尖绕一个小圆走一圈，并拟合 Z(theta)，"
+                tr("在 Z 反馈**开启**（恒流）的状态下让针尖绕一个小圆走一圈，并拟合 Z(theta)，"
                 "以此测量样品倾斜。这是 Nanonis SmarTilt 按钮的自建等价物（TCP 协议没有把它暴露出来）"
                 "。与拟合一整幅扫描帧不同，两条轴是在同一个数秒量级的时间尺度上测出来的，因此谁都不会被热漂移污染。"
                 "它需要一块**平坦**的位置 —— 一个跨过台阶的圆会被它的拟合残差挡掉。返回测得的倾斜；"
-                "它**不会**改变任何硬件的倾斜设置（要闭环请用 AutoTilt）。"
+                "它**不会**改变任何硬件的倾斜设置（要闭环请用 AutoTilt）。", "With Z feedback **on** (constant current), walk the tip around a small circle and fit Z(theta) to measure the sample tilt. This is a home-built equivalent of the Nanonis SmarTilt button (the TCP protocol does not expose it). Unlike fitting a whole scan frame, the two axes are measured on the same timescale of a few seconds, so neither is contaminated by thermal drift. It needs a **flat** location - a circle that crosses a step is rejected by its fit residual. Returns the measured tilt; it does **not** change any hardware tilt setting (use AutoTilt to close the loop).")
             ),
             parameters=[
                 ParameterSpec(
                     name="radius_m",
                     type="float",
                     description=(
-                        "圆半径，单位**米**。不传则由当前扫描帧推出（取短边的 0.4 倍，也就是留了余量地落在内切圆里）"
-                        "。"
+                        tr("圆半径，单位**米**。不传则由当前扫描帧推出（取短边的 0.4 倍，也就是留了余量地落在内切圆里）"
+                        "。", "Circle radius, in **metres**. If not passed it is derived from the current scan frame (0.4 times the short side, i.e. with margin inside the inscribed circle).")
                     ),
                     unit="m",
                     required=False,
@@ -106,7 +107,7 @@ class TiltProbeCircle(BaseSkill):
                     name="n_points",
                     type="int",
                     description=(
-                        "沿圆周取多少个采样点。点越多，噪声平均得越干净，但也越慢。"
+                        tr("沿圆周取多少个采样点。点越多，噪声平均得越干净，但也越慢。", "How many sample points around the circle. More points average the noise better, but are slower.")
                     ),
                     required=False,
                     default=24,
@@ -117,7 +118,7 @@ class TiltProbeCircle(BaseSkill):
                     name="settle_s",
                     type="float",
                     description=(
-                        "每个点上读 Z 之前的稳定时间，好让反馈在横向移动之后跟上来。"
+                        tr("每个点上读 Z 之前的稳定时间，好让反馈在横向移动之后跟上来。", "Settling time before reading Z at each point, so that the feedback catches up after the lateral move.")
                     ),
                     unit="s",
                     required=False,
@@ -129,7 +130,7 @@ class TiltProbeCircle(BaseSkill):
                     name="center_x_m",
                     type="float",
                     description=(
-                        "圆心 X。不传则用针尖当前位置。"
+                        tr("圆心 X。不传则用针尖当前位置。", "Circle center X. If not passed the current tip position is used.")
                     ),
                     unit="m",
                     required=False,
@@ -139,7 +140,7 @@ class TiltProbeCircle(BaseSkill):
                 ParameterSpec(
                     name="center_y_m",
                     type="float",
-                    description="圆心 Y。不传则用当前位置。",
+                    description=tr("圆心 Y。不传则用当前位置。", "Circle center Y. If not passed the current position is used."),
                     unit="m",
                     required=False,
                     min_value=-1.5e-6,
@@ -149,7 +150,7 @@ class TiltProbeCircle(BaseSkill):
                     name="noise_floor_m",
                     type="float",
                     description=(
-                        "用来判断拟合残差的 Z 噪声本底（一个跨过台阶的圆会被挡掉）。不传则由起始点上的重复读数估出来。"
+                        tr("用来判断拟合残差的 Z 噪声本底（一个跨过台阶的圆会被挡掉）。不传则由起始点上的重复读数估出来。", "Z noise floor used to judge the fit residual (a circle that crosses a step is rejected). If not passed it is estimated from repeated readings at the start point.")
                     ),
                     unit="m",
                     required=False,
@@ -179,7 +180,7 @@ class TiltProbeCircle(BaseSkill):
             calls.append(rec)
             pos = _two_floats(rec) if not rec.error else None
             if pos is None:
-                return None, "读不到针尖当前位置(FolMe_XYPosGet)"
+                return None, tr("读不到针尖当前位置(FolMe_XYPosGet)", "Cannot read the current tip position (FolMe_XYPosGet)")
             cx, cy = pos if cx is None or cy is None else (cx, cy)
 
         if radius is None:
@@ -196,12 +197,12 @@ class TiltProbeCircle(BaseSkill):
                         width = height = None
             if not width or not height:
                 return None, (
-                    "读不到当前扫描框尺寸,无法推导圆半径 —— "
-                    "请显式给 radius_m"
+                    tr("读不到当前扫描框尺寸,无法推导圆半径 —— "
+                    "请显式给 radius_m", "Cannot read the current scan frame size, cannot derive the circle radius - please give radius_m explicitly")
                 )
             radius = min(width, height) * DEFAULT_RADIUS_FRAC
-            note = (f"半径由扫描框推导: min({width:.3g}, {height:.3g}) × "
-                    f"{DEFAULT_RADIUS_FRAC} = {radius:.3g} m")
+            note = (tr(f"半径由扫描框推导: min({width:.3g}, {height:.3g}) × "
+                    f"{DEFAULT_RADIUS_FRAC} = {radius:.3g} m", f"Radius derived from the scan frame: min({width:.3g}, {height:.3g}) x {DEFAULT_RADIUS_FRAC} = {radius:.3g} m"))
 
         radius = max(MIN_RADIUS_M, min(MAX_RADIUS_M, float(radius)))
         return (float(cx), float(cy), radius, note), ""
@@ -262,7 +263,7 @@ class TiltProbeCircle(BaseSkill):
                 if context.check_abort():
                     return SkillResult(
                         skill_name="TiltProbeCircle", success=False,
-                        error="用户中止 —— 圆周测量未完成",
+                        error=tr("用户中止 —— 圆周测量未完成", "Aborted by user - the circle measurement was not completed"),
                         data={"points_done": len(z_vals)},
                         nanonis_calls=calls,
                     )
@@ -299,8 +300,8 @@ class TiltProbeCircle(BaseSkill):
         if len(z_vals) < CIRCLE_MIN_POINTS:
             return SkillResult(
                 skill_name="TiltProbeCircle", success=False,
-                error=(f"圆周上只取到 {len(z_vals)} 个有效点"
-                       f"(需要 ≥{CIRCLE_MIN_POINTS};{failures} 次读写失败)"),
+                error=(tr(f"圆周上只取到 {len(z_vals)} 个有效点"
+                       f"(需要 ≥{CIRCLE_MIN_POINTS};{failures} 次读写失败)", f"Only {len(z_vals)} valid points obtained on the circle (need >= {CIRCLE_MIN_POINTS}; {failures} read/write failures)")),
                 data={"points_done": len(z_vals), "failures": failures},
                 nanonis_calls=calls,
             )
@@ -325,14 +326,14 @@ class TiltProbeCircle(BaseSkill):
             # 数字,下游会拿它去调硬件。
             reason = {
                 "residual_too_large": (
-                    f"圆周上的 Z 起伏不符合单一倾斜平面"
+                    tr(f"圆周上的 Z 起伏不符合单一倾斜平面"
                     f"(残差 {fit.residual_rms_m:.3g} m = 噪声底的 "
                     f"{fit.residual_ratio:.1f} 倍)—— 圆多半跨过了台阶或污染物。"
-                    f"换一块更平的地方再测。"),
-                "too_few_points": "有效点太少,无法拟合",
-                "fit_failed": "正弦拟合失败",
-                "bad_radius": "半径无效",
-                "shape_mismatch": "角度与 Z 数组长度不一致",
+                    f"换一块更平的地方再测。", f"The Z variation around the circle does not fit a single tilted plane (residual {fit.residual_rms_m:.3g} m = {fit.residual_ratio:.1f} times the noise floor) - the circle most likely crossed a step or contamination. Measure again on a flatter area.")),
+                "too_few_points": tr("有效点太少,无法拟合", "too few valid points to fit"),
+                "fit_failed": tr("正弦拟合失败", "sine fit failed"),
+                "bad_radius": tr("半径无效", "invalid radius"),
+                "shape_mismatch": tr("角度与 Z 数组长度不一致", "angle and Z arrays have different lengths"),
             }.get(fit.invalid_reason, fit.invalid_reason)
             return SkillResult(
                 skill_name="TiltProbeCircle", success=False,
@@ -344,10 +345,10 @@ class TiltProbeCircle(BaseSkill):
             success=True,
             data=data,
             summary=(
-                f"倾斜 {fit.slope_mag_deg:.4f}° "
+                tr(f"倾斜 {fit.slope_mag_deg:.4f}° "
                 f"(x={fit.tilt_x_deg:+.4f}°, y={fit.tilt_y_deg:+.4f}°), "
                 f"下坡方向 {fit.downhill_deg:.0f}°, "
-                f"半径 {radius * 1e9:.1f} nm / {len(z_vals)} 点"
+                f"半径 {radius * 1e9:.1f} nm / {len(z_vals)} 点", f"Tilt {fit.slope_mag_deg:.4f} deg (x={fit.tilt_x_deg:+.4f} deg, y={fit.tilt_y_deg:+.4f} deg), downhill direction {fit.downhill_deg:.0f} deg, radius {radius * 1e9:.1f} nm / {len(z_vals)} points")
             ),
             nanonis_calls=calls,
         )

@@ -22,7 +22,9 @@ official composite — worth reading before you build the same thing twice. Send
 the format description directly from MAST instead of guessing at it.
 
 `POST /composites` saves a validated spec and hot-registers it under your signature (`ext:<actor>`):
-from that point on it runs like any other skill, through `POST /jobs`. Saving over your own earlier
+from that point on it runs like any other skill, with `mast_run` or through `POST /jobs`; one that
+drives the instrument needs the observation token once your session uses the visual harness (see
+[Concepts](02-concepts.md)). Saving over your own earlier
 version needs `base_version` — the version number you last read back — as an optimistic lock;
 saving identical content again does not create a pointless new version. A composite made by a
 person, rather than by an agent, is never overwritten this way: save yours under a different name
@@ -33,9 +35,8 @@ instead.
 A spec has a `name`, a `safety_level`, a list of `params`, and a list of `nodes`. On this track the
 allowed node types are purely structural: `step`, `if`, `loop`, `try`, `set`, `succeed`, `fail`,
 `break` and `continue` — human, LLM and agent-delegation nodes are not available here. A `try` node
-with a `finally` body expresses cleanup for ordinary completion or failure. A hard interruption
-(`GeneratorExit`) skips that body, and process termination cannot guarantee it runs. Even when
-cleanup executes, verify its hardware result; a `finally` block is not proof that the tip withdrew.
+with a `finally` body is how a sequence gets a guaranteed cleanup, such as withdrawing the tip no
+matter how the rest of it went.
 
 Three rules make the expressions readable: a step's result is referenced by **subscript**, using
 its own `id` (`s1['bias_v']`, where `s1` is the id of a `step` node; `last` means the most recently

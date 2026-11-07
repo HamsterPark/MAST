@@ -1,0 +1,1080 @@
+{
+  "name": "max_events_ping_pong",
+  "description": "Two mirrors face each other and the beam bounces between them at normal incidence: after 64 events the branch ends with max_events (no segment after the 64th event).",
+  "layout": {
+    "schema": 1,
+    "id": "pingpong",
+    "title": "Ping-pong",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 100.0,
+        "y_mm": 62.5,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "ma",
+        "type": "mirror",
+        "label": "MA",
+        "x_mm": 200.0,
+        "y_mm": 62.5,
+        "angle_deg": 180.0,
+        "aperture_mm": 25.4,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "mb",
+        "type": "mirror",
+        "label": "MB",
+        "x_mm": 20.0,
+        "y_mm": 62.5,
+        "angle_deg": 0.0,
+        "aperture_mm": 25.4,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 100.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 20.0,
+              "y0": 62.5,
+              "x1": 200.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 200.0,
+              "y0": 62.5,
+              "x1": 20.0,
+              "y1": 62.5
+            }
+          ],
+          "events": [
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 100.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 280.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 460.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 640.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 820.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 1000.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 1180.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 1360.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 1540.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 1720.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 1900.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 2080.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 2260.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 2440.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 2620.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 2800.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 2980.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 3160.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 3340.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 3520.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 3700.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 3880.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 4060.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 4240.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 4420.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 4600.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 4780.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 4960.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 5140.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 5320.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 5500.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 5680.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 5860.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 6040.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 6220.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 6400.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 6580.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 6760.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 6940.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 7120.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 7300.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 7480.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 7660.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 7840.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 8020.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 8200.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 8380.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 8560.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 8740.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 8920.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 9100.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 9280.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 9460.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 9640.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 9820.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 10000.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 10180.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 10360.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 10540.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 10720.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 10900.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 11080.0
+            },
+            {
+              "component": "ma",
+              "action": "reflect",
+              "x": 200.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 11260.0
+            },
+            {
+              "component": "mb",
+              "action": "reflect",
+              "x": 20.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 11440.0
+            }
+          ],
+          "end": "max_events"
+        }
+      ]
+    }
+  ]
+}

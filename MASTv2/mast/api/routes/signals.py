@@ -24,6 +24,7 @@ House style (mirrors routes/admin.py, routes/records.py):
 from __future__ import annotations
 
 import logging
+from mast.i18n import tr
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -46,11 +47,11 @@ router = APIRouter(tags=["signals"])
 _WINDOWS: list[WindowOption] = [
     WindowOption(value="hann", label="Hann"),
     WindowOption(value="hamming", label="Hamming"),
-    WindowOption(value="rect", label="矩形/无窗 (Rect)"),
+    WindowOption(value="rect", label=tr("矩形/无窗 (Rect)", "Rectangular / no window (Rect)")),
 ]
 _OUTPUT_MODES: list[OutputModeOption] = [
-    OutputModeOption(value="magnitude", label="幅度 |FFT|"),
-    OutputModeOption(value="power", label="功率谱 PSD"),
+    OutputModeOption(value="magnitude", label=tr("幅度 |FFT|", "Magnitude |FFT|")),
+    OutputModeOption(value="power", label=tr("功率谱 PSD", "Power spectrum PSD")),
 ]
 
 
@@ -164,7 +165,8 @@ def _execution_context(ctx: Any):
         # told which entry point is holding the instrument token, instead of a
         # bare "busy" (审计 致命一).
         return ExecutionContext(pool=pool, state=state, registry=registry,
-                                abort_event=abort, owner="信号采集 API")
+                                abort_event=abort,
+                                owner="信号采集 API")  # identity, not display text: see instrument_lock.owner_label
     except Exception as exc:  # noqa: BLE001 — degrade, never crash
         logger.warning("signals: ExecutionContext build failed: %s", exc)
         return None
@@ -186,8 +188,8 @@ def list_signal_channels(request: Request) -> SignalChannelsResponse:
         # No live core wired → standalone default list, never a 500.
         # 「nanonis not wired」在 2026-08-02 的实机上是**假话**：Nanonis 连着，
         # 缺的是 ctx 上的某个单例（当时是 state）。别让一句诊断把人往连接问题上引。
-        return _degraded_response("内核单例未接线（见服务日志 signals: 那一行），"
-                                  "与 Nanonis 连接状态无关")
+        return _degraded_response(tr("内核单例未接线（见服务日志 signals: 那一行），"
+                                  "与 Nanonis 连接状态无关", "Core singleton not wired (see the \"signals:\" line in the service log); unrelated to the Nanonis connection state"))
 
     # ── Channels (Signals_NamesGet via ListSignalChannels) ──
     channels: list[SignalChannel] = []

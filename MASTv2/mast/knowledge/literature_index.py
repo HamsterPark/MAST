@@ -184,12 +184,17 @@ def _index_snapshot() -> tuple[np.ndarray, pd.DataFrame]:
     return vecs, meta
 
 
+def index_available() -> bool:
+    """True when the big index files exist on disk (cheap stat check)."""
+    return VECTORS_PATH.exists() and METADATA_PATH.exists()
+
+
 def corpus_size() -> int:
     """Live row count of the loaded index (0 if unavailable).
 
     Lets callers report the REAL corpus size instead of a hardcoded number that
-    drifts as the index is regenerated (审查: the tool output said
-    "36,792 papers" long after the index grew to ~50k). Best-effort: returns 0
+    drifts as the index is regenerated (a stale "36,792 papers" label outlived
+    growth of the index to ~50k). Best-effort: returns 0
     rather than raising if the index can't be loaded.
     """
     try:
@@ -205,8 +210,8 @@ def corpus_size() -> int:
 def _int_or_zero(v: Any) -> int:
     """Coerce a (possibly NaN/None) numeric cell to int, 0 when missing.
 
-    The obvious ``int(v or 0)`` does NOT work here, and that is exactly how the
-    field crash happened ( twice in one session)::
+    The obvious ``int(v or 0)`` does NOT work here, and that is a known
+    crash path::
 
         bool(float('nan'))  ->  True          # NaN is truthy
         float('nan') or 0   ->  nan           # so the guard never fires
@@ -373,8 +378,8 @@ def _resolve_work_id(work_id: str, merge_map: dict[str, str]) -> str:
 # corpus parquet files key rows by the FULL URL form ("https://openalex.org/W…")
 # but agents/users routinely pass the BARE id ("W…") — the tool docstrings even
 # use the bare form as the example. An exact-keyed lookup must therefore accept
-# both forms interchangeably.  (lib_search surfaces URL-form
-# ids; the model echoed them back bare → fetch_abstract missed every row.)
+# both forms interchangeably.  (lib_search surfaces URL-form ids; the model
+# echoed them back bare → fetch_abstract missed every row.)
 _OPENALEX_ID_RE = re.compile(r"[Ww]\d{2,}")
 #: 整串校验用的形态。``\d+``（而不是 ``\d{2,}``）是刻意的：配 ``fullmatch`` 用，
 #: 不可能截断，所以下限放宽只会让**短 id 的双形去重也正确**（``W3`` 与
@@ -672,7 +677,8 @@ def _keyword_search_diag(
     text or no term match).
 
     Also returns a diagnostics dict so a caller can tell the difference between
-    "keyword retrieval worked" and "keyword retrieval produced noise". A Chinese query
+    "keyword retrieval worked" and "keyword retrieval produced noise". Example:
+    a Chinese query
     ``'STM 偏压依赖成像 表面态 电子结构'`` split into four terms of which only
     ``'stm'`` occurs in this English corpus, so 50k papers tied at score 3.000
     and the top 8 were an arbitrary slice — yet the agent read them as
@@ -835,8 +841,8 @@ def search_with_status(
 ) -> tuple[list[dict], dict]:
     """:func:`search`, plus an explicit account of HOW the results were obtained.
 
-    The semantic embedder was unavailable for an
-    entire session (68 fallbacks). Degrading instead of raising was right; doing
+    Observed once: the semantic embedder was unavailable for an
+    entire session (many fallbacks). Degrading instead of raising was right; doing
     it *invisibly* was not. The only trace was a WARNING in a log nobody reads —
     the returned rows looked exactly like semantic hits (title, DOI, citation
     count), so the literature agent read a tied-score keyword slice and reported
@@ -861,7 +867,13 @@ def search_with_status(
     }
     if not query or not query.strip():
         return [], status
-    _load_index()
+    try:
+        _load_index()
+    except FileNotFoundError:
+        # No bundled/provisioned index: report it, return nothing, never raise.
+        status.update(retrieval="unavailable", degraded=True, trustworthy=False,
+                      reason="literature index not provisioned")
+        return [], status
     try:
         qv = _embed_query(query)
     except Exception as exc:  # missing key / network → degraded keyword search
@@ -1098,7 +1110,7 @@ def fetch_abstract(work_id: str) -> dict:
         out["cited_by_count"] = _int_or_zero(row.get("cited_by_count"))
     # `title` is carried on abstracts.parquet rows (OpenAlex + user-contributed /
     # manual entries) — surface it so a hand-entered paper round-trips with its
-    # title, not just its abstract .
+    # title, not just its abstract.
     for opt in ("title", "year", "journal"):
         v = _str_or_empty(row.get(opt))
         if v:
@@ -1190,11 +1202,28 @@ def ensure_manifest() -> dict:
 
 
 def index_stats() -> dict:
-    """Return index size + path info; loads on demand."""
-    _load_index()
+    """Return index size + path info; loads on demand.
+
+    When the index is not provisioned, returns an empty summary with
+    ``available: False`` instead of raising."""
+    try:
+        _load_index()
+    except FileNotFoundError:
+        return {
+            "available": False,
+            "n_papers": 0,
+            "dim": 0,
+            "model": _MODEL,
+            "vectors_path": str(VECTORS_PATH),
+            "metadata_path": str(METADATA_PATH),
+            "abstracts_present": bool(ABSTRACTS_PATH.exists()),
+            "classified_present": bool(CLASSIFIED_PATH.exists()),
+            "year_range": [0, 0],
+        }
     vec: np.ndarray = _cache["vectors"]
     meta: pd.DataFrame = _cache["metadata"]
     return {
+        "available": True,
         "n_papers": int(len(vec)),
         "dim": int(vec.shape[1]),
         "model": _MODEL,

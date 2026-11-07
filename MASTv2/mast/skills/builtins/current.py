@@ -4,6 +4,7 @@ vendored from v1 mast/skills/builtins/current.py 2026-04-23"""
 
 from __future__ import annotations
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -23,19 +24,19 @@ class SetCurrentGain(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置电流放大器的增益档位与滤波器。",
+            description=tr("设置电流放大器的增益档位与滤波器。", "Set the current amplifier's gain range and filter."),
             parameters=[
                 ParameterSpec(
                     name="gain_index",
                     type="int",
-                    description="增益档位索引，取自 Current.GainsGet 返回的列表",
+                    description=tr("增益档位索引，取自 Current.GainsGet 返回的列表", "Gain range index, from the list returned by Current.GainsGet"),
                     required=True,
                     min_value=0,
                 ),
                 ParameterSpec(
                     name="filter_index",
                     type="int",
-                    description="滤波器索引",
+                    description=tr("滤波器索引", "Filter index"),
                     required=False,
                     default=0,
                     min_value=0,
@@ -86,8 +87,9 @@ class GetCurrentGains(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读回电流前放的增益档位表、当前档位与该档的满量程(安培)。只读,不改硬件。"
-                "增益名是跨阻(V/A),满量程 = 10 V / 跨阻。"
+                tr("读回电流前放的增益档位表、当前档位与该档的满量程(安培)。只读,不改硬件。"
+                "增益名是跨阻(V/A),满量程 = 10 V / 跨阻。",
+                "Read back the current preamp's gain range table, the current range and that range's full scale (A). Read-only, changes no hardware. The gain name is the transimpedance (V/A), full scale = 10 V / transimpedance.")
             ),
             estimated_duration_s=0.5,
             composition_level=0,
@@ -119,8 +121,8 @@ class GetCurrentGains(BaseSkill):
                 except (TypeError, ValueError):
                     data["full_scale_a"] = None
         fs = data.get("full_scale_a")
-        summary = ("增益档 %s(第 %s 档),满量程 %.3g A"
-                   % (data.get("gain"), data.get("gain_index"), fs)) if fs else "读回增益档"
+        summary = (tr("增益档 %s(第 %s 档),满量程 %.3g A", "Gain range %s (range #%s), full scale %.3g A")
+                   % (data.get("gain"), data.get("gain_index"), fs)) if fs else tr("读回增益档", "Read back the gain range")
         return SkillResult(skill_name="GetCurrentGains", success=True, data=data,
                            summary=summary, nanonis_calls=[record])
 
@@ -134,7 +136,7 @@ class GetCurrentBEEM(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="从 Current 模块读取 BEEM 电流值。",
+            description=tr("从 Current 模块读取 BEEM 电流值。", "Read the BEEM current value from the Current module."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["current", "beem", "read"],
@@ -180,19 +182,19 @@ class SetCurrentCalibration(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="为 Current 模块中选定的增益档位设置标定值与偏移量。",
+            description=tr("为 Current 模块中选定的增益档位设置标定值与偏移量。", "Set the calibration value and offset for the selected gain range in the Current module."),
             parameters=[
                 ParameterSpec(
                     name="gain_index",
                     type="int",
-                    description="增益档位索引（-1 = 当前选中的增益档）",
+                    description=tr("增益档位索引（-1 = 当前选中的增益档）", "Gain range index (-1 = the currently selected gain range)"),
                     required=False,
                     default=-1,
                 ),
                 ParameterSpec(
                     name="calibration",
                     type="float",
-                    description="标定值（float64，A/A 倍率）",
+                    description=tr("标定值（float64，A/A 倍率）", "Calibration value (float64, A/A multiplier)"),
                     required=True,
                     # Sanity ceiling (rig-tunable), NOT a precise calibration
                     # window. Nominal is ~1.0; bound to 1e-3 … 1e3 so an agent
@@ -205,7 +207,7 @@ class SetCurrentCalibration(BaseSkill):
                 ParameterSpec(
                     name="offset",
                     type="float",
-                    description="偏移量（float64，A）",
+                    description=tr("偏移量（float64，A）", "Offset (float64, A)"),
                     unit="A",
                     required=True,
                     # Sanity ceiling (rig-tunable): a huge additive offset also

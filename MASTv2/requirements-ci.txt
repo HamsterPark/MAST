@@ -17,3 +17,7 @@ langchain-core==1.3.*
 langgraph==1.1.*
 # 命令名存在性（V02）读厂商库的源码；不装它，这一项会被标成 SKIPPED（不算通过）
 nanonis-spm>=1.0.9
+# 文档守卫 test_optical_layout_guide 核对路由与上限，要 import 外部面的路由模块
+# tests/v2/unit/docs/test_optical_layout_guide.py imports the external routes to check the guide against them
+fastapi>=0.136.1
+python-multipart>=0.0.9

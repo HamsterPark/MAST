@@ -29,7 +29,9 @@
 
 from __future__ import annotations
 
+from mast.i18n import tr
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -104,12 +106,12 @@ def _cap_data(data: Any) -> Any:
     try:
         size = len(json.dumps(j, ensure_ascii=False))
     except Exception:  # noqa: BLE001
-        return {"_truncated": True, "note": "结果无法序列化"}
+        return {"_truncated": True, "note": tr("结果无法序列化", "Result cannot be serialised")}
     if size <= DATA_CAP_BYTES:
         return j
     keys = list(j)[:60] if isinstance(j, dict) else []
     return {"_truncated": True, "bytes": size, "keys": keys,
-            "note": "结果太大，只列键名；原始数据请用 /data/file 或 /data/frame 取。"}
+            "note": tr("结果太大，只列键名；原始数据请用 /data/file 或 /data/frame 取。", "Result too large; only key names are listed. Fetch the raw data with /data/file or /data/frame.")}
 
 
 @dataclass
@@ -134,10 +136,24 @@ class Job:
     abort: dict | None = None
     recorded: dict = field(default_factory=dict)
     params_used: dict | None = None
+    #: ``skill``（单个技能）或 ``act``（VISTA 的一步动作：几步技能 + 归档 + 观测，见
+    #: ``mast.vista.service``）。act 作业的 ``skill`` 是标签（``act:scan`` 或原始技能名）。
+    kind: str = "skill"
+    #: act 作业的回合号、工作区等（进 journal，作业视图里叫 ``vista``）
+    extra: dict = field(default_factory=dict)
+    #: 动作开跑前就能算出的耗时估计（秒），比如扫描按策略表解析出的「像素 × 行时 × 2」。
+    #: 视图里叫 ``estimated_s``；运行中再给 ``eta_s``（估计减去已用，不小于 0）。
+    estimate_s: float | None = None
+    #: 作业正阻塞等操作员时的 ``{prompt_id, kind, title, since}``（组合技能的 human 节点或
+    #: ``AskOperator`` 发出的操作员提示）；不在等就是 None。只在视图里（live）出现，不进 journal ——
+    #: 重启后作业本来就标 ``lost_on_restart``。
+    waiting_operator: dict | None = field(default=None, repr=False)
     # 运行期对象（不进 journal）
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
     done: threading.Event = field(default_factory=threading.Event, repr=False)
     thread: threading.Thread | None = field(default=None, repr=False)
+    body: Any = field(default=None, repr=False)
+    started_mono: float | None = field(default=None, repr=False)
 
     @property
     def run_id(self) -> str:
@@ -147,21 +163,38 @@ class Job:
     def terminal(self) -> bool:
         return self.state in TERMINAL
 
-    def view(self) -> dict:
-        return {
-            "job_id": self.job_id, "skill": self.skill, "params": direct_exec.jsonable(self.params),
+    def view(self, *, live: bool = True) -> dict:
+        """作业视图。``live``（API 回答）：在跑的作业给出到此刻的 ``elapsed_s`` 与 ``eta_s`` ——
+        从前它们在跑完之前一直是 null，外部 agent 不知道一个八分钟的扫描还要等多久。
+        journal 用 ``live=False``：只记确定的值（重启后不能把「写 journal 那一刻的已用时间」
+        当成作业的耗时）。"""
+        elapsed = self.elapsed_s
+        if (live and elapsed is None and self.started_mono is not None and not self.terminal):
+            elapsed = round(time.monotonic() - self.started_mono, 1)
+        v = {
+            "job_id": self.job_id, "kind": self.kind, "skill": self.skill,
+            "params": direct_exec.jsonable(self.params),
             "params_used": direct_exec.jsonable(self.params_used) if self.params_used is not None else None,
             "actor": self.actor, "session": self.session, "request_id": self.request_id,
             "note": self.note, "run_id": self.run_id,
             "state": self.state, "terminal": self.terminal,
             "created_at": self.created_at, "started_at": self.started_at,
-            "finished_at": self.finished_at, "elapsed_s": self.elapsed_s,
+            "finished_at": self.finished_at, "elapsed_s": elapsed,
             "cancel_requested": self.cancel_event.is_set() or bool(self.cancel_reason),
             "cancel_reason": self.cancel_reason,
             "result": self.result, "refused_by": self.refused_by,
             "busy_holder": self.busy_holder, "abort": self.abort,
             "recorded": self.recorded,
         }
+        if self.estimate_s is not None:
+            v["estimated_s"] = round(float(self.estimate_s), 1)
+            if live and not self.terminal and isinstance(elapsed, (int, float)):
+                v["eta_s"] = round(max(0.0, float(self.estimate_s) - float(elapsed)), 1)
+        if self.extra:
+            v["vista"] = direct_exec.jsonable(self.extra)
+        if live and self.waiting_operator and not self.terminal:
+            v["waiting_operator"] = dict(self.waiting_operator)
+        return v
 
     @classmethod
     def from_view(cls, v: dict) -> "Job":
@@ -170,7 +203,9 @@ class Job:
                 session=str(v.get("session") or ""), request_id=v.get("request_id"),
                 fp=str(v.get("fp") or ""), note=str(v.get("note") or ""),
                 state=str(v.get("state") or "queued"),
-                created_at=str(v.get("created_at") or _now()))
+                created_at=str(v.get("created_at") or _now()),
+                kind=str(v.get("kind") or "skill"),
+                extra=dict(v.get("vista") or {}))
         j.started_at = v.get("started_at")
         j.finished_at = v.get("finished_at")
         j.elapsed_s = v.get("elapsed_s")
@@ -181,6 +216,8 @@ class Job:
         j.abort = v.get("abort")
         j.recorded = dict(v.get("recorded") or {})
         j.params_used = v.get("params_used")
+        est = v.get("estimated_s")
+        j.estimate_s = float(est) if isinstance(est, (int, float)) and not isinstance(est, bool) else None
         if j.terminal:
             j.done.set()
         return j
@@ -214,7 +251,7 @@ class JobManager:
         ``JOURNAL_COMPACT_BYTES`` 就在这里当场压实（每个作业只留最新一行），
         而不是只在下一次进程启动时。
         """
-        rec = {"ev": "job", "job": {**job.view(), "fp": job.fp}}
+        rec = {"ev": "job", "job": {**job.view(live=False), "fp": job.fp}}
         try:
             p = self.journal_path
             p.parent.mkdir(parents=True, exist_ok=True)
@@ -285,7 +322,7 @@ class JobManager:
         tmp = p.with_suffix(".jsonl.tmp")
         with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
             for job in self._jobs.values():
-                fh.write(json.dumps({"ev": "job", "job": {**job.view(), "fp": job.fp}},
+                fh.write(json.dumps({"ev": "job", "job": {**job.view(live=False), "fp": job.fp}},
                                     ensure_ascii=False, default=str) + "\n")
             self._compacted_bytes = fh.tell()
         os.replace(tmp, p)
@@ -320,7 +357,157 @@ class JobManager:
         with self._lock:
             return sum(1 for j in self._jobs.values() if not j.terminal)
 
+    def find_request(self, actor: str, request_id: str | None) -> Job | None:
+        """``(actor, request_id)`` 已经提交过的作业（幂等表），没有就 None。"""
+        if not request_id:
+            return None
+        self._ensure_loaded()
+        with self._lock:
+            jid = self._by_request.get((actor, request_id))
+            return self._jobs.get(jid) if jid else None
+
     # ── 提交 ─────────────────────────────────────────────────────────
+
+    def door(self, ctx: Any, skill: str) -> Any:
+        """门口检查（抛 :class:`ExtError`）：注册表接线、有这个技能、它与声明式子步都不在本机
+        关闭名单里。返回技能类。单技能作业与 VISTA 的原始技能动作共用这一道门。
+
+        注册表里没有、但它是开放给外部 agent 的仪器 agent 工具（:mod:`mast.api.ext.agent_tools`）
+        时返回 ``agent_tools.AGENT_TOOL``；是不开放的那几个（把活交给内部 agent）时 403 并说明理由。"""
+        registry = getattr(ctx, "skill_registry", None) or getattr(ctx, "registry", None)
+        if registry is None:
+            raise ExtError(503, "not_wired", tr("技能注册表未接线（独立开发模式？）", "Skill registry not wired (standalone dev mode?)"),
+                           missing=["skill_registry"])
+        try:
+            cls = registry.get(skill)
+        except Exception:  # noqa: BLE001
+            from mast.api.ext import agent_tools
+
+            if agent_tools.is_offered(skill):
+                return agent_tools.AGENT_TOOL
+            reason = agent_tools.excluded_reason(skill)
+            if reason:
+                raise ExtError(403, "not_offered", reason, skill=skill) from None
+            near = _did_you_mean(registry, skill)
+            raise ExtError(404, "unknown_skill", tr(f"注册表里没有 {skill!r}。先用 "
+                              "/skills/search 按动作找技能。",
+                              f"{skill!r} is not in the registry. Use "
+                              "/skills/search first to find skills by action."), did_you_mean=near) from None
+        disabled = _disabled_names(registry)
+        blocked = sorted(({skill} | _spec_steps(cls)) & disabled)
+        if blocked:
+            raise ExtError(422, "skill_disabled",
+                           tr(f"本机关闭了：{'、'.join(blocked)}（硬件模块不存在或该能力未授予）。"
+                              "关闭是操作员的决定，包一层组合技能不会打开它。",
+                              f"Disabled on this machine: {', '.join(blocked)} (the hardware module is "
+                              "absent or the capability is not granted). Disabling is the operator's "
+                              "decision; wrapping it in a composite skill does not enable it.",),
+                           disabled=blocked)
+        return cls
+
+    def submit_act(self, ctx: Any, caller: Caller, *, label: str, params: dict,
+                   body: Any, request_id: str | None = None, note: str = "",
+                   fp: str | None = None, extra: dict | None = None) -> tuple[Job, bool]:
+        """VISTA 动作作业（``kind="act"``）：``body(job, ec) -> dict`` 在作业线程里跑。
+
+        与单技能作业同一套：幂等（``fp`` 由调用方给，覆盖动作全部参数）、并发上限、
+        journal、取消（``ec`` 带着作业的中止事件）、关停。观测令牌的闸在调用方（服务）
+        那一侧，**先于**这里；这里不再查一遍。``body`` 返回
+        ``{success, summary, error, data, refused_by}``。
+        """
+        self._ensure_loaded()
+        if not self._accepting:
+            raise ExtError(503, "shutting_down", tr("服务正在关停，不再接新作业。", "The service is shutting down and accepts no new jobs."))
+        fp = fp or fingerprint(label, params)
+        with self._lock:
+            if request_id:
+                prior_id = self._by_request.get((caller.actor, request_id))
+                prior = self._jobs.get(prior_id) if prior_id else None
+                if prior is not None:
+                    if prior.fp and prior.fp != fp:
+                        raise ExtError(409, "request_id_conflict",
+                                       tr(f"request_id {request_id!r} 已经用于另一次内容不同的提交。", f"request_id {request_id!r} was already used for a different submission."),
+                                       existing_job_id=prior.job_id)
+                    return prior, True
+            running = sum(1 for j in self._jobs.values() if not j.terminal)
+            if running >= self.max_concurrent:
+                raise ExtError(429, "too_many_jobs",
+                               tr(f"同时在跑的作业已达上限 {self.max_concurrent}。等它们结束，"
+                                  "或取消不需要的。",
+                                  f"The limit of {self.max_concurrent} concurrent jobs has been reached. "
+                                  "Wait for them to finish, or cancel the ones you do not need."),
+                               running=running)
+            job = Job(job_id=f"j_{secrets.token_hex(6)}", skill=label, params=dict(params),
+                      actor=caller.actor, session=caller.session, request_id=request_id,
+                      fp=fp, note=note, kind="act", extra=dict(extra or {}))
+            job.body = body
+            self._jobs[job.job_id] = job
+            if request_id:
+                self._by_request[(caller.actor, request_id)] = job.job_id
+            self._trim()
+        self._append(job)
+        t = threading.Thread(target=self._run_act, args=(job, ctx, caller),
+                             name=f"ext-act-{job.job_id}", daemon=True)
+        job.thread = t
+        t.start()
+        return job, False
+
+    def _run_act(self, job: Job, ctx: Any, caller: Caller) -> None:
+        t0 = time.monotonic()
+        try:
+            with self._lock:
+                job.state = "running"
+                job.started_at = _now()
+                job.started_mono = t0
+            self._append(job)
+            ec, missing = direct_exec.build_context(
+                ctx, owner=caller.owner, extra_aborts=[job.cancel_event], run_id=job.run_id)
+            if ec is None:
+                job.result = {"success": False, "summary": "",
+                              "error": tr(f"执行上下文不可用，缺少：{missing}", f"Execution context unavailable, missing: {missing}"),
+                              "data": {}, "nanonis_calls": 0, "elapsed_s": 0.0}
+                job.refused_by = "not_wired"
+                job.state = "failed"
+                return
+            with self._operator_wait_sink(job):
+                out = job.body(job, ec) or {}
+            ok = bool(out.get("success"))
+            calls = out.get("nanonis_calls")
+            # what a plain skill job reports for its one skill, summed over the act's steps
+            # (``mast.vista.service._StepContext``); from 7.0.0 to here act jobs said 0 and {}
+            job.result = {"success": ok, "summary": str(out.get("summary") or ""),
+                          "error": str(out.get("error") or ""),
+                          "data": _cap_data(out.get("data") or {}),
+                          "nanonis_calls": int(calls) if isinstance(calls, int)
+                          and not isinstance(calls, bool) else 0,
+                          "elapsed_s": round(time.monotonic() - t0, 3)}
+            if isinstance(out.get("recorded"), dict):
+                job.recorded = direct_exec.jsonable(out["recorded"])
+            if out.get("params_used") is not None:
+                job.params_used = direct_exec.jsonable(out["params_used"])
+            job.refused_by = out.get("refused_by")
+            job.busy_holder = direct_exec.jsonable(out.get("busy_holder"))
+            if job.refused_by == "busy" and not ok:
+                job.state = "refused_busy"
+            elif job.cancel_event.is_set() and not ok:
+                job.state = "cancelled"
+            elif ok:
+                job.state = "succeeded"
+            else:
+                job.state = "failed"
+        except BaseException as exc:  # noqa: BLE001 — 线程里的任何意外都要落成一个终态
+            logger.exception("ext-gateway: 动作作业 %s 执行线程异常", job.job_id)
+            job.result = {"success": False, "summary": "",
+                          "error": f"{type(exc).__name__}: {exc}",
+                          "data": {}, "nanonis_calls": 0, "elapsed_s": 0.0}
+            job.state = "crashed"
+        finally:
+            job.body = None
+            job.waiting_operator = None
+            job.elapsed_s = round(time.monotonic() - t0, 3)
+            job.finished_at = _now()
+            self._append(job)
+            job.done.set()
 
     def submit(self, ctx: Any, caller: Caller, skill: str, params: dict, *,
                request_id: str | None = None, note: str = "") -> tuple[Job, bool]:
@@ -332,24 +519,11 @@ class JobManager:
         """
         self._ensure_loaded()
         if not self._accepting:
-            raise ExtError(503, "shutting_down", "服务正在关停，不再接新作业。")
-        registry = getattr(ctx, "skill_registry", None) or getattr(ctx, "registry", None)
-        if registry is None:
-            raise ExtError(503, "not_wired", "技能注册表未接线（独立开发模式？）",
-                           missing=["skill_registry"])
-        try:
-            cls = registry.get(skill)
-        except Exception:  # noqa: BLE001
-            near = _did_you_mean(registry, skill)
-            raise ExtError(404, "unknown_skill", f"注册表里没有 {skill!r}。先用 "
-                           "/skills/search 按动作找技能。", did_you_mean=near)
-        disabled = _disabled_names()
-        blocked = sorted(({skill} | _spec_steps(cls)) & disabled)
-        if blocked:
-            raise ExtError(422, "skill_disabled",
-                           f"本机关闭了：{'、'.join(blocked)}（硬件模块不存在或该能力未授予）。"
-                           "关闭是操作员的决定，包一层组合技能不会打开它。",
-                           disabled=blocked)
+            raise ExtError(503, "shutting_down", tr("服务正在关停，不再接新作业。", "The service is shutting down and accepts no new jobs."))
+        from mast.api.ext.agent_tools import AGENT_TOOL
+
+        # 仪器 agent 工具（不在注册表里）：kind="tool"，不建执行上下文、不碰仪器
+        kind = "tool" if self.door(ctx, skill) is AGENT_TOOL else "skill"
         fp = fingerprint(skill, params)
         with self._lock:
             if request_id:
@@ -358,7 +532,7 @@ class JobManager:
                 if prior is not None:
                     if prior.fp and prior.fp != fp:
                         raise ExtError(409, "request_id_conflict",
-                                       f"request_id {request_id!r} 已经用于另一次内容不同的提交。",
+                                       tr(f"request_id {request_id!r} 已经用于另一次内容不同的提交。", f"request_id {request_id!r} was already used for a different submission."),
                                        existing_job_id=prior.job_id)
                     return prior, True
             running = sum(1 for j in self._jobs.values() if not j.terminal)
@@ -366,12 +540,15 @@ class JobManager:
             # 作业堆满的时刻（与仪器锁对它们放行同一个理由，同一份名单）。
             if running >= self.max_concurrent and not _is_remedy(skill):
                 raise ExtError(429, "too_many_jobs",
-                               f"同时在跑的作业已达上限 {self.max_concurrent}。等它们结束，"
-                               "或取消不需要的。停止 / 退针类技能不受这个上限约束。",
+                               tr(f"同时在跑的作业已达上限 {self.max_concurrent}。等它们结束，"
+                                  "或取消不需要的。停止 / 退针类技能不受这个上限约束。",
+                                  f"The limit of {self.max_concurrent} concurrent jobs has been reached. "
+                                  "Wait for them to finish, or cancel the ones you do not need. Stop / "
+                                  "withdraw skills are not subject to this limit."),
                                running=running)
             job = Job(job_id=f"j_{secrets.token_hex(6)}", skill=skill, params=dict(params),
                       actor=caller.actor, session=caller.session, request_id=request_id,
-                      fp=fp, note=note)
+                      fp=fp, note=note, kind=kind)
             self._jobs[job.job_id] = job
             if request_id:
                 self._by_request[(caller.actor, request_id)] = job.job_id
@@ -389,22 +566,27 @@ class JobManager:
             with self._lock:
                 job.state = "running"
                 job.started_at = _now()
+                job.started_mono = t0
             self._append(job)
+            if job.kind == "tool":
+                self._run_tool(job, ctx, caller)
+                return
             ec, missing = direct_exec.build_context(
                 ctx, owner=caller.owner, extra_aborts=[job.cancel_event], run_id=job.run_id)
             if ec is None:
                 job.result = {"success": False, "summary": "",
-                              "error": f"执行上下文不可用，缺少：{missing}",
+                              "error": tr(f"执行上下文不可用，缺少：{missing}", f"Execution context unavailable, missing: {missing}"),
                               "data": {}, "nanonis_calls": 0, "elapsed_s": 0.0}
                 job.refused_by = "not_wired"
                 job.state = "failed"
                 return
-            run = direct_exec.run_and_record(
-                ec, job.skill, job.params,
-                runtime=direct_exec.live_runtime(ctx),
-                agent_id=caller.agent_id, thread_id=caller.thread_id,
-                tool_call_id=job.job_id, context=caller.thread_id,
-                approval_source=direct_exec.APPROVAL_LLM)
+            with self._operator_wait_sink(job):
+                run = direct_exec.run_and_record(
+                    ec, job.skill, job.params,
+                    runtime=direct_exec.live_runtime(ctx),
+                    agent_id=caller.agent_id, thread_id=caller.thread_id,
+                    tool_call_id=job.job_id, context=caller.thread_id,
+                    approval_source=direct_exec.APPROVAL_LLM)
             job.params_used = run.params
             job.result = {"success": run.success, "summary": run.summary, "error": run.error,
                           "data": _cap_data(run.data), "nanonis_calls": run.nanonis_calls,
@@ -428,10 +610,43 @@ class JobManager:
                           "data": {}, "nanonis_calls": 0, "elapsed_s": 0.0}
             job.state = "crashed"
         finally:
+            job.waiting_operator = None
             job.elapsed_s = round(time.monotonic() - t0, 3)
             job.finished_at = _now()
             self._append(job)
             job.done.set()
+
+    def _operator_wait_sink(self, job: Job):
+        """While the block runs, a ``human`` node or ``AskOperator`` waiting for the operator
+        shows up as ``waiting_operator`` (with the prompt id) in the job's view. Never raises."""
+        try:
+            from mast.operator_hitl import human_node
+        except Exception:  # noqa: BLE001 - a build without the operator package: nothing to show
+            return contextlib.nullcontext()
+
+        def _set(info: dict | None) -> None:
+            with self._lock:
+                job.waiting_operator = dict(info) if info else None
+
+        return human_node.wait_sink(_set)
+
+    def _run_tool(self, job: Job, ctx: Any, caller: Caller) -> None:
+        """``kind="tool"``：一个仪器 agent 工具（:mod:`mast.api.ext.agent_tools`）。不建执行上下文 ——
+        它不碰仪器，也不该因为没接控制器而跑不了（查知识库、列实验都不需要 Nanonis）。结果与入账
+        的形状与单技能作业相同；``nanonis_calls`` 恒为 0。由 :meth:`_run` 调用（终态由它收尾）。"""
+        from mast.api.ext import agent_tools
+
+        run = agent_tools.run_and_record(ctx, caller, job.skill, job.params, job_id=job.job_id)
+        job.params_used = direct_exec.jsonable(run.params)
+        job.result = {"success": run.success, "summary": run.summary, "error": run.error,
+                      "data": _cap_data(run.data), "nanonis_calls": 0,
+                      "elapsed_s": round(run.elapsed_s, 3)}
+        job.refused_by = run.refused_by
+        job.recorded = direct_exec.jsonable(run.recorded)
+        if job.cancel_event.is_set() and not run.success:
+            job.state = "cancelled"
+        else:
+            job.state = "succeeded" if run.success else "failed"
 
     # ── 取消 / 关停 ──────────────────────────────────────────────────
 
@@ -443,9 +658,9 @@ class JobManager:
             return job
         from mast.core.execution_context import mark_abort
 
-        why = f"外部 agent 取消（{by}）" + (f"：{reason}" if reason else "")
+        why = tr(f"外部 agent 取消（{by}）", f"Cancelled by external agent ({by})") + (f": {reason}" if reason else "")
         with self._lock:
-            job.cancel_reason = reason or "(未说明)"
+            job.cancel_reason = reason or tr("(未说明)", "(no reason given)")
         mark_abort(job.cancel_event, why[:200])
         self._append(job)
         return job
@@ -462,7 +677,7 @@ class JobManager:
         running = [j for j in self.list(limit=KEEP) if not j.terminal]
         if not running:
             return
-        self.cancel_all(by="service", reason="服务正在关停")
+        self.cancel_all(by="service", reason=tr("服务正在关停", "service shutting down"))
         deadline = time.monotonic() + max(0.0, float(timeout_s))
         for job in running:
             t = job.thread
@@ -486,12 +701,16 @@ class JobManager:
 # 门口的小判据（永不抛）
 # ─────────────────────────────────────────────────────────────────────
 
-def _disabled_names() -> frozenset[str]:
-    """本机关闭的技能：硬件模块 ∪ 高级能力。订阅门**不**算 —— 它不是安全机制。"""
+def _disabled_names(registry=None) -> frozenset[str]:
+    """本机关闭的技能：硬件模块 ∪ 高级能力。订阅门**不**算 —— 它不是安全机制。
+
+    站点画像门（并在 ``hardware`` 里）按技能类分类：手里有注册表就显式交给它（``door``
+    交的是请求所属的那一份），不靠全局绑定。无参调用（VISTA 绑定的就是这个函数本身）
+    才退回绑定的注册表。"""
     try:
         from mast.skills.tool_face import compute
 
-        face = compute()
+        face = compute(registry=registry)
         return frozenset(face.hardware | face.advanced)
     except Exception as exc:  # noqa: BLE001
         logger.warning("ext-gateway: 关闭名单读不到(%s) —— 本次不按它拒绝", exc)
@@ -517,14 +736,41 @@ def _spec_steps(cls: Any) -> set[str]:
         return set()
 
 
+def _refuse_gated_driving(caller: Caller, skill: str) -> None:
+    """一动一观的另一个入口：已经接入 VISTA（调过 ``/vista/*``）的会话，驱动仪器的技能
+    只能走 ``/vista/act``（带观测令牌）。读、分析、停止 / 退针照常走 ``/jobs``。
+    没接入 VISTA 的调用方（6.5.0 的桥、脚本）行为不变。"""
+    try:
+        from mast.vista.service import peek_service
+    except Exception:  # noqa: BLE001 — 没有 VISTA 层就没有这道闸
+        return
+    svc = peek_service()
+    if svc is None or not svc.is_gated(caller.session):
+        return
+    if svc.is_instrument_driving(skill):
+        raise ExtError(409, "use_act",
+                       tr(f"{skill} 驱动仪器，而这个会话已接入一动一观：请用 mast_run（它会带上最新"
+                          "观测的令牌 after）或 mast_act 提交，不要直接 POST /jobs。",
+                          f"{skill} drives the instrument, and this session is on one-act-one-observation: "
+                          "submit it with mast_run (which carries the latest observation token as after) "
+                          "or mast_act, not directly with POST /jobs."),
+                       skill=skill)
+
+
 def _did_you_mean(registry: Any, skill: str) -> list[str]:
     q = str(skill or "").lower()
     try:
         names = [m.name for m in registry.list_skills()]
     except Exception:  # noqa: BLE001
-        return []
+        names = []
+    try:
+        from mast.api.ext.agent_tools import OFFERED
+
+        names += list(OFFERED)
+    except Exception:  # noqa: BLE001
+        pass
     hits = [n for n in names if q and (q in n.lower() or n.lower() in q)]
-    return sorted(hits)[:8]
+    return sorted(set(hits))[:8]
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -537,7 +783,7 @@ router = APIRouter(tags=["jobs"])
 def _jm(request: Request) -> JobManager:
     jm = getattr(request.app.state, "jobs", None)
     if jm is None:
-        raise ExtError(503, "not_wired", "作业管理器未接线")
+        raise ExtError(503, "not_wired", tr("作业管理器未接线", "Job manager not wired"))
     return jm
 
 
@@ -546,7 +792,9 @@ def submit_job(body: JobSubmit, request: Request):
     """提交一个技能作业。新作业 202；``request_id`` 幂等命中原作业 200 +
     ``idempotent_replay: true``。技能自身失败不是 HTTP 错误 —— 作业以终态结束。"""
     caller = caller_of(request)
-    job, replay = _jm(request).submit(ctx_of(request), caller, body.skill.strip(),
+    skill = body.skill.strip()
+    _refuse_gated_driving(caller, skill)
+    job, replay = _jm(request).submit(ctx_of(request), caller, skill,
                                       dict(body.params or {}),
                                       request_id=(body.request_id or None), note=body.note)
     view = {**job.view(), "idempotent_replay": replay}
@@ -572,8 +820,10 @@ async def get_job(job_id: str, request: Request,
     jm = _jm(request)
     job = jm.get(job_id)
     if job is None:
-        raise ExtError(404, "unknown_job", f"没有作业 {job_id!r}（进程重启前的作业在 "
-                       "journal 里；超过保留数量的旧作业会被丢掉）")
+        raise ExtError(404, "unknown_job", tr(f"没有作业 {job_id!r}（进程重启前的作业在 "
+                          "journal 里；超过保留数量的旧作业会被丢掉）",
+                          f"No such job {job_id!r} (jobs from before a process restart are in the "
+                          "journal; old jobs beyond the retention count are dropped)"))
     if wait_s > 0 and not job.terminal:
         await jm.wait(job, wait_s)
     return job.view()
@@ -586,7 +836,7 @@ def cancel_job(job_id: str, body: CancelBody, request: Request):
     caller = caller_of(request)
     job = _jm(request).cancel(job_id, by=caller.agent_id, reason=body.reason)
     if job is None:
-        raise ExtError(404, "unknown_job", f"没有作业 {job_id!r}")
+        raise ExtError(404, "unknown_job", tr(f"没有作业 {job_id!r}", f"No such job {job_id!r}"))
     return job.view()
 
 

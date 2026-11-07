@@ -24,6 +24,7 @@ from typing import Any, Iterator
 
 import numpy as np
 
+from mast.i18n import tr
 from mast.core.state import coerce_number, reply_scalar
 from mast.core.types import (
     NanonisCallRecord,
@@ -56,7 +57,7 @@ class GetBias(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取当前偏压（bias）。",
+            description=tr("读取当前偏压（bias）。", "Read the current bias."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["bias", "read"],
@@ -80,8 +81,9 @@ class GetBias(BaseSkill):
             return SkillResult(
                 skill_name="GetBias",
                 success=False,
-                error=("读到的偏压值不是一个数(回包解不出) —— 拒绝把它当成读数。"
-                       "多半是 Nanonis 数值字段的元组包装没解开。"),
+                error=(tr("读到的偏压值不是一个数(回包解不出) —— 拒绝把它当成读数。"
+                       "多半是 Nanonis 数值字段的元组包装没解开。",
+                       "The bias value read back is not a number (the reply could not be decoded); refusing to treat it as a reading. Most likely the tuple wrapper of the Nanonis numeric field was not unpacked.")),
                 nanonis_calls=[record],
             )
         return SkillResult(
@@ -102,14 +104,15 @@ class SetBias(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "设置偏压。大幅改变电压时，用 slew_rate_v_per_s "
-                "做渐进 ramp。"
+                tr("设置偏压。大幅改变电压时，用 slew_rate_v_per_s "
+                "做渐进 ramp。",
+                "Set the bias. For a large voltage change, use slew_rate_v_per_s for a gradual ramp.")
             ),
             parameters=[
                 ParameterSpec(
                     name="bias_v",
                     type="float",
-                    description="目标偏压，单位伏特",
+                    description=tr("目标偏压，单位伏特", "Target bias, in volts"),
                     unit="V",
                     required=True,
                     min_value=-10.0,
@@ -119,8 +122,9 @@ class SetBias(BaseSkill):
                     name="slew_rate_v_per_s",
                     type="float",
                     description=(
-                        "偏压最大变化速率（V/s）。省略则瞬时切换。"
-                        "大幅跳变电压时建议使用，以保护样品/针尖。"
+                        tr("偏压最大变化速率（V/s）。省略则瞬时切换。"
+                        "大幅跳变电压时建议使用，以保护样品/针尖。",
+                        "Maximum bias change rate (V/s). If omitted, the bias switches instantly. Recommended for large voltage jumps, to protect the sample/tip.")
                     ),
                     unit="V/s",
                     required=False,
@@ -241,7 +245,7 @@ class GetCurrent(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取隧道电流。",
+            description=tr("读取隧道电流。", "Read the tunnelling current."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["current", "read"],
@@ -265,8 +269,9 @@ class GetCurrent(BaseSkill):
             return SkillResult(
                 skill_name="GetCurrent",
                 success=False,
-                error=("读到的电流值不是一个数(回包解不出) —— 拒绝把它当成读数。"
-                       "这多半是 Nanonis 数值字段的元组包装没解开,不是电流异常。"),
+                error=(tr("读到的电流值不是一个数(回包解不出) —— 拒绝把它当成读数。"
+                       "这多半是 Nanonis 数值字段的元组包装没解开,不是电流异常。",
+                       "The current value read back is not a number (the reply could not be decoded); refusing to treat it as a reading. Most likely the tuple wrapper of the Nanonis numeric field was not unpacked; it is not a real current anomaly.")),
                 nanonis_calls=[record],
             )
         return SkillResult(
@@ -286,7 +291,7 @@ class GetBiasCalibration(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取偏压的标定系数与偏移量。",
+            description=tr("读取偏压的标定系数与偏移量。", "Read the bias calibration factor and offset."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["bias", "calibration", "read"],
@@ -326,12 +331,12 @@ class SetBiasCalibration(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置偏压的标定系数与偏移量。会影响所有偏压测量。",
+            description=tr("设置偏压的标定系数与偏移量。会影响所有偏压测量。", "Set the bias calibration factor and offset. Affects every bias measurement."),
             parameters=[
                 ParameterSpec(
                     name="calibration",
                     type="float",
-                    description="偏压标定系数（V/V 倍率）",
+                    description=tr("偏压标定系数（V/V 倍率）", "Bias calibration factor (V/V multiplier)"),
                     required=True,
                     # Sanity ceiling (rig-tunable), NOT a precise calibration
                     # window. Nominal is ~1.0; bound to 1e-3 … 1e3 so an agent
@@ -344,7 +349,7 @@ class SetBiasCalibration(BaseSkill):
                 ParameterSpec(
                     name="offset",
                     type="float",
-                    description="偏压偏移量（V）",
+                    description=tr("偏压偏移量（V）", "Bias offset (V)"),
                     unit="V",
                     required=True,
                     # Sanity ceiling (rig-tunable): a huge additive offset also
@@ -386,12 +391,12 @@ class SetBiasRange(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="按索引选择偏压量程。",
+            description=tr("按索引选择偏压量程。", "Select the bias range by index."),
             parameters=[
                 ParameterSpec(
                     name="range_index",
                     type="int",
-                    description="要选择的偏压量程的索引",
+                    description=tr("要选择的偏压量程的索引", "Index of the bias range to select"),
                     required=True,
                     min_value=0,
                 ),
@@ -475,15 +480,16 @@ class SetBiasRamp(CompositeSkillGraph):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "把偏压从起始值分小步 ramp 到目标值"
+                tr("把偏压从起始值分小步 ramp 到目标值"
                 "（受 slew rate 限制）。大幅改变偏压时用它，"
-                "以保护样品 / 针尖。"
+                "以保护样品 / 针尖。",
+                "Ramp the bias from its starting value to the target in small steps (limited by the slew rate). Use it for large bias changes, to protect the sample / tip.")
             ),
             parameters=[
                 ParameterSpec(
                     name="bias_v_end",
                     type="float",
-                    description="目标偏压，单位伏特",
+                    description=tr("目标偏压，单位伏特", "Target bias, in volts"),
                     unit="V",
                     required=True,
                     min_value=-10.0,
@@ -493,8 +499,9 @@ class SetBiasRamp(CompositeSkillGraph):
                     name="bias_v_start",
                     type="float",
                     description=(
-                        "起始偏压。省略则取当前的 "
-                        "Bias_Get 读数。"
+                        tr("起始偏压。省略则取当前的 "
+                        "Bias_Get 读数。",
+                        "Starting bias. If omitted, the current Bias_Get reading is used.")
                     ),
                     unit="V",
                     required=False,
@@ -506,8 +513,9 @@ class SetBiasRamp(CompositeSkillGraph):
                     name="slew_rate_v_per_s",
                     type="float",
                     description=(
-                        "偏压最大变化速率（V/s）。ramp 会被切成 "
-                        "N=max(1, |Δv| / (slew * step_interval)) 步。"
+                        tr("偏压最大变化速率（V/s）。ramp 会被切成 "
+                        "N=max(1, |Δv| / (slew * step_interval)) 步。",
+                        "Maximum bias change rate (V/s). The ramp is cut into N=max(1, |Δv| / (slew * step_interval)) steps.")
                     ),
                     unit="V/s",
                     required=False,
@@ -518,7 +526,7 @@ class SetBiasRamp(CompositeSkillGraph):
                 ParameterSpec(
                     name="step_interval_s",
                     type="float",
-                    description="两步 ramp 之间的等待时长",
+                    description=tr("两步 ramp 之间的等待时长", "Wait time between two ramp steps"),
                     unit="s",
                     required=False,
                     default=0.1,

@@ -44,6 +44,10 @@ from mast.core import diagnostics as diag  # noqa: E402
 @pytest.fixture(autouse=True)
 def _clean(tmp_path, monkeypatch):
     monkeypatch.setenv("MAST2_PROJECT_ROOT", str(tmp_path))
+    # this file tests the DEFAULT location (<project root>/artifacts/diagnostics), so it drops
+    # the suite-wide MAST_DIAGNOSTICS_DIR override (tests/v2/conftest.py); its own project root
+    # is tmp_path, so nothing reaches the checkout either way
+    monkeypatch.delenv("MAST_DIAGNOSTICS_DIR", raising=False)
     diag.clear()
     diag.set_run_id("")
     yield
@@ -72,7 +76,7 @@ class TestRefusalsReachTheLedger:
         assert unmet, "test is vacuous — bias_v=0 must violate bias_nonzero"
 
         rows = diag.recent(kinds=("precondition_block",))
-        assert rows, "an unmet precondition left NO trace — #28 all over again"
+        assert rows, "an unmet precondition left NO trace"
         r = rows[0]
         assert r["subject"] == "AutoApproach"
         assert r["reason"], "the refusal has no reason"
@@ -204,7 +208,7 @@ class TestItCannotBreakAnything:
 
 class TestReading:
     def test_summary_shows_the_shape_of_a_spin(self):
-        """#31 without anyone reading a log: ONE subject dominating a count IS the
+        """Without anyone reading a log: ONE subject dominating a count IS the
         spin, and the summary says so at a glance."""
         for _ in range(7):
             diag.record("precondition_block", "AutoApproach", "bias_nonzero 未满足")
@@ -232,3 +236,12 @@ class TestReading:
         log = tmp_path / "artifacts" / "diagnostics" / "refusals.jsonl"
         assert log.is_file(), "nothing on disk — the record dies with the process"
         assert "TipShape" in log.read_text(encoding="utf-8")
+
+    def test_an_explicit_diagnostics_dir_wins_over_the_project_root(self, tmp_path, monkeypatch):
+        """``MAST_DIAGNOSTICS_DIR`` (the suite points it at tmp) takes the ledger out of
+        ``<project root>/artifacts`` — the checkout's copy had collected 6180 test refusals."""
+        elsewhere = tmp_path / "elsewhere"
+        monkeypatch.setenv("MAST_DIAGNOSTICS_DIR", str(elsewhere))
+        diag.record("safety_block", "TipShape", "safe 模式禁止修针")
+        assert (elsewhere / "refusals.jsonl").is_file()
+        assert not (tmp_path / "artifacts" / "diagnostics" / "refusals.jsonl").exists()

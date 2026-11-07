@@ -38,6 +38,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +256,7 @@ def export_all_history(
                 src = exp_dir / name
                 if not src.exists():
                     continue
-                _note(f"快照数据库 {name} …")
+                _note(tr(f"快照数据库 {name} …", f"Snapshotting database {name} ..."))
                 flat = _flat_db_name(name)
                 tmp = dest_zip.parent / f".{flat}.export-tmp"
                 if _backup_db(src, tmp):
@@ -278,14 +279,14 @@ def export_all_history(
                             manifest["total_bytes"] += sz
 
             # ── 2. experiments/ — jsonl logs, plans, snapshots (db handled above) ──
-            _note("打包 experiments/ 会话与日志 …")
+            _note(tr("打包 experiments/ 会话与日志 …", "Packaging experiments/ sessions and logs ..."))
             _add_tree(zf, exp_dir, root, manifest,
                       skip_db=True, include_heavy=include_heavy, dest_zip=dest_zip)
 
             # ── 3. artifacts/ — captured traces, mosaics, analysis products ──
             for aroot in artifact_roots:
                 if aroot.is_dir():
-                    _note(f"打包 {aroot.relative_to(root).as_posix()} 数据产物 …")
+                    _note(tr(f"打包 {aroot.relative_to(root).as_posix()} 数据产物 …", f"Packaging data products of {aroot.relative_to(root).as_posix()} ..."))
                     _add_tree(zf, aroot, root, manifest,
                               skip_db=False, include_heavy=include_heavy,
                               dest_zip=dest_zip)
@@ -302,5 +303,5 @@ def export_all_history(
             except OSError:
                 pass
 
-    _note("打包完成。")
+    _note(tr("打包完成。", "Packaging finished."))
     return manifest

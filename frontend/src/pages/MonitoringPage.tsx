@@ -5,6 +5,7 @@ import type { components } from "@/api/schema";
 import { Card, DegradedNote, ErrorNote, Section, Spinner } from "@/components/ui";
 import { Accordion, useToast } from "@/components/controls";
 import { useWsConnection, useWsEvent } from "@/hooks/useWsEvents";
+import { tr } from "@/lib/i18n";
 import { VerdictBanner } from "@/components/monitoring/VerdictBanner";
 import { DaemonControls } from "@/components/monitoring/DaemonControls";
 import { LiveCurrentChart } from "@/components/monitoring/LiveCurrentChart";
@@ -29,7 +30,7 @@ import {
 
 type MonitoringStatus = components["schemas"]["MonitoringStatus"];
 
-// 电流监控 — the tunnelling current, recorded natively and continuously.
+// Current monitor — the tunnelling current, recorded natively and continuously.
 //
 // ── where each number comes from ───────────────────────────────────────────
 // The daemon holds the ONE oscilloscope subscription and writes a segment per
@@ -64,9 +65,9 @@ const FEATURE_WINDOW_S = 600;
  * a 20 pm/s drift is a flat line. Same reason these sample at 1 Hz rather than
  * riding the oscilloscope — see docs/v2/design/monitoring_aux_channels.md.
  *
- * Adjustable — the auxiliary channels needed both a short- and long-term view: the picker
- * lives in AuxChannels and reaches 24 h, which is real history — aux samples are
- * persisted for `cm_aux_keep_hours` (168 h), not held in the 300 s ring.
+ * Adjustable: the picker lives in AuxChannels and reaches 24 h, which is real
+ * history — aux samples are persisted for `cm_aux_keep_hours` (168 h), not held
+ * in the 300 s ring.
  */
 const AUX_WINDOW_DEFAULT_S = 900;
 
@@ -193,7 +194,7 @@ export default function MonitoringPage() {
   const lastTraceInvalidate = useRef(0);
   const pendingTrace = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Read inside the trailing timer, not captured by it: a bump queued a moment
-  // before the operator hit 暂停 would otherwise still fire and move the chart
+  // before the operator hit Pause would otherwise still fire and move the chart
   // they just froze. `refetchInterval: false` does not stop an explicit
   // invalidate, so the check has to live here.
   const pausedRef = useRef(paused);
@@ -251,10 +252,11 @@ export default function MonitoringPage() {
       return data;
     },
     onSuccess: (d) => {
-      toast(d?.note || "已启动", d?.ok ? "ok" : "err");
+      toast(d?.note || tr("已启动", "Started"), d?.ok ? "ok" : "err");
       qc.invalidateQueries({ queryKey: STATUS_KEY });
     },
-    onError: (e) => toast(`启动失败：${String((e as Error)?.message ?? e)}`, "err"),
+    onError: (e) =>
+      toast(tr(`启动失败：${String((e as Error)?.message ?? e)}`, `Start failed: ${String((e as Error)?.message ?? e)}`), "err"),
   });
 
   const stop = useMutation({
@@ -264,10 +266,11 @@ export default function MonitoringPage() {
       return data;
     },
     onSuccess: (d) => {
-      toast(d?.note || "已停止", d?.ok ? "ok" : "err");
+      toast(d?.note || tr("已停止", "Stopped"), d?.ok ? "ok" : "err");
       qc.invalidateQueries({ queryKey: STATUS_KEY });
     },
-    onError: (e) => toast(`停止失败：${String((e as Error)?.message ?? e)}`, "err"),
+    onError: (e) =>
+      toast(tr(`停止失败：${String((e as Error)?.message ?? e)}`, `Stop failed: ${String((e as Error)?.message ?? e)}`), "err"),
   });
 
   // ── freshness ─────────────────────────────────────────────────────────────
@@ -288,17 +291,19 @@ export default function MonitoringPage() {
   return (
     <div>
       <Section
-        title="电流监控"
-        subtitle="常开采集隧道电流：逐段落库、判级告警，并留作针尖状态的训练语料"
+        title={tr("电流监控", "Current monitor")}
+        subtitle={tr(
+          "常开采集隧道电流：逐段落库、判级告警，并留作针尖状态的训练语料",
+          "Always-on tunnelling-current acquisition: stored per segment, graded, and kept as a training corpus of tip states",
+        )}
       >
-        {/* 实现细节归代码注释，页面只留操作者视角的事实。
-            删掉的是「独立守护进程 / 曲线走 REST / WebSocket 推标量」——
-            那是这一页怎么取数，不是用户需要知道的事。
-            留下的是「不占用 Nanonis 通信端口」：它回答的是一个真问题
-            ——「我一直开着这一页，会不会影响正在跑的实验」。 */}
+        {/* Implementation details (daemon, REST, WebSocket scalars) belong in code
+            comments, not on the page. What stays is the one fact an operator needs:
+            leaving this page open does not affect a running experiment. */}
         <p className="mb-4 text-sm text-mast-muted">
-          本页只读已落库的数据，<strong>不占用 Nanonis 通信端口</strong>——
-          开着它不会影响正在跑的实验。
+          {tr("本页只读已落库的数据，", "This page only reads stored data and ")}
+          <strong>{tr("不占用 Nanonis 通信端口", "does not use the Nanonis communication port")}</strong>
+          {tr("——开着它不会影响正在跑的实验。", "; leaving it open does not affect a running experiment.")}
         </p>
 
         {status.isPending ? (
@@ -307,7 +312,7 @@ export default function MonitoringPage() {
           <ErrorNote error={status.error} />
         ) : (
           <div className="space-y-4">
-            {degraded && <DegradedNote what="电流监控" />}
+            {degraded && <DegradedNote what={tr("电流监控", "Current monitor")} />}
 
             <VerdictBanner status={status.data} stale={stale} ageS={ageS} />
 
@@ -323,7 +328,7 @@ export default function MonitoringPage() {
             </Card>
 
             <Card>
-              <div className="mb-2 text-sm font-medium text-mast-text">实时电流</div>
+              <div className="mb-2 text-sm font-medium text-mast-text">{tr("实时电流", "Live current")}</div>
               <LiveCurrentChart
                 tS={trace.data?.t_s ?? []}
                 iMinA={trace.data?.i_min_a ?? []}
@@ -341,9 +346,9 @@ export default function MonitoringPage() {
 
             <Card>
               <div className="mb-2 text-sm font-medium text-mast-text">
-                辅助通道
+                {tr("辅助通道", "Auxiliary channels")}
                 <span className="ml-2 text-xs font-normal text-mast-muted">
-                  Z 位置 · qPlus 振幅 · 频率偏移 · dI/dV
+                  {tr("Z 位置 · qPlus 振幅 · 频率偏移 · dI/dV", "Z position · qPlus amplitude · frequency shift · dI/dV")}
                 </span>
               </div>
               {/* No spinner: by the time this renders the status poll has
@@ -362,10 +367,14 @@ export default function MonitoringPage() {
 
             <Card>
               <div className="mb-2 text-sm font-medium text-mast-text">
-                特征趋势
+                {tr("特征趋势", "Feature trends")}
                 <span className="ml-2 text-xs font-normal text-mast-muted">
-                  近 {FEATURE_WINDOW_S / 60} 分钟
-                  {features.data?.thinned && "（已按告警等级抽稀，最严重的一条必被保留）"}
+                  {tr(`近 ${FEATURE_WINDOW_S / 60} 分钟`, `Last ${FEATURE_WINDOW_S / 60} min`)}
+                  {features.data?.thinned &&
+                    tr(
+                      "（已按告警等级抽稀，最严重的一条必被保留）",
+                      " (thinned by alert level; the most severe point is always kept)",
+                    )}
                 </span>
               </div>
               {features.isPending ? (
@@ -381,20 +390,19 @@ export default function MonitoringPage() {
 
             <Card>
               <div className="mb-2 text-sm font-medium text-mast-text">
-                告警历史
+                {tr("告警历史", "Alert history")}
                 {alerts.data?.total ? (
                   <span className="ml-2 text-xs font-normal text-mast-muted">
-                    共 {alerts.data.total} 条
+                    {tr(`共 ${alerts.data.total} 条`, `${alerts.data.total} total`)}
                   </span>
                 ) : null}
               </div>
               {alerts.isPending ? (
                 <Spinner />
               ) : (
-                // ⚠️ `degraded` 这一个变量来自 **status** 端点。告警表读的是
-                // 另一个端点，它有自己的 `degraded` —— 漏掉它，一次告警查询
-                // 失败就会画成「暂无告警——这是好消息」。上面实时曲线与辅助
-                // 通道两处都写了 `degraded || (…data?.degraded)`，只有这里没写。
+                // `degraded` here comes from the status endpoint. The alerts table reads
+                // a different endpoint with its own `degraded`; without OR-ing it in, a
+                // failed alerts query would render as "no alerts".
                 <AlertsTable
                   alerts={alerts.data?.alerts ?? []}
                   degraded={degraded || (alerts.data?.degraded ?? false)}
@@ -403,11 +411,11 @@ export default function MonitoringPage() {
               )}
             </Card>
 
-            {/* Opened by a `?seg=` deep link : a current-monitor event
-                tile links straight at one segment's waveform, and landing on a
-                page where the panel holding it is collapsed is a dead link. */}
+            {/* Opened by a `?seg=` deep link: a current-monitor event tile links
+                straight at one segment's waveform, and landing on a page where the
+                panel holding it is collapsed is a dead link. */}
             <Accordion
-              title="段浏览 · 人工标注（好针尖 / 坏针尖）"
+              title={tr("段浏览 · 人工标注（好针尖 / 坏针尖）", "Segment browser · manual labels (good tip / bad tip)")}
               defaultOpen={deepLinkedSeg}
             >
               <SegmentBrowser degraded={degraded} />

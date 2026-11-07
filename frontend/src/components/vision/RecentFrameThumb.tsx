@@ -1,32 +1,27 @@
 import { useState } from "react";
+import { tr } from "@/lib/i18n";
 import { framePlaceholder, type FrameLike } from "@/lib/visionFrames";
 import { SegmentCurveThumb } from "@/components/monitoring/SegmentCurveThumb";
 import { Modal } from "@/components/controls";
 
-// The thumbnail slot of a 近期标注帧 tile.
+// The thumbnail slot of a "recent annotated frame" tile.
 //
-// Extracted because ChatPage and VisionPage each carried a byte-identical copy,
-// and is about the text this renders — two copies means fixing it
-// once and having the operator meet the old wording on the other page. #62 (the
-// current-monitor curve) lands here for the same reason. #93 (click to enlarge)
-// is the third: putting the lightbox in the two PAGES would have been the same
-// mistake a third time.
+// Shared by ChatPage and VisionPage so the rendered text, the current-monitor
+// curve and the click-to-enlarge lightbox live in one place; putting any of them
+// in the pages would leave the other page with the old behaviour.
 //
-// ── 点开放大 ────────────────────────────────────────────
-// Could not enlarge. This rendered a bare <img> with
-// no handler, and neither page wrapped it in one. The current-monitor tiles were
-// the exception all along (SegmentCurveThumb is a <Link> to the full waveform),
-// which is why only the PICTURE tiles were dead ends.
+// ── click to enlarge ──────────────────────────────────────────────────────
+// A picture tile is a button that opens a lightbox. The current-monitor tiles
+// are different: SegmentCurveThumb is a <Link> to the full waveform.
 //
 // The enlarged picture comes from `/api/vision/recent-frame/{seqno}` and NOT
-// from scaling up `image_b64`: that thumbnail is 160 px. Stretching it in the
-// browser would be a 放大 button that produces the same 160 px with bigger
-// squares — the shape of "看着做了其实没做".
+// from scaling up `image_b64`: that thumbnail is 160 px, so stretching it in the
+// browser would produce the same 160 px with bigger squares.
 //
-// The modal opens ONLY on click. It is never opened by an effect: an
-// auto-opened full-screen overlay would hide the readings exactly when human
-// intervention needs them visible, and a picture is never urgent enough to cover the
-// readings. `test/recentFrameZoom.test.ts` holds that line.
+// The modal opens ONLY on click. It is never opened by an effect: an auto-opened
+// full-screen overlay hides the live readings during manual intervention, and a
+// picture is never urgent enough for that. `test/recentFrameZoom.test.ts` holds
+// that line.
 
 function FrameLightbox({
   frame,
@@ -39,18 +34,25 @@ function FrameLightbox({
   const seqno = frame.seqno;
   const name = frame.file_path?.split(/[\\/]/).pop();
   return (
-    <Modal open onClose={onClose} wide title={`标注帧 #${seqno} · ${frame.kind || "事件"}`}>
+    <Modal open onClose={onClose} wide title={`${tr("标注帧", "Annotated frame")} #${seqno} · ${frame.kind || tr("事件", "event")}`}>
       {failed ? (
         <div className="py-10 text-center text-sm text-mast-muted">
-          这一帧的图取不回来了。
+          {tr("这一帧的图取不回来了。", "The image for this frame could not be loaded.")}
           <div className="mt-1 text-xs text-mast-faint">
-            事件还在，图不在 —— 文件可能已被移动或删除。缩略图是之前渲染并缓存下来的。
+            {tr(
+              "事件还在，图不在 —— 文件可能已被移动或删除。缩略图是之前渲染并缓存下来的。",
+              "The event is still recorded but the image is gone — the file may have been moved or deleted. The thumbnail was rendered and cached earlier.",
+            )}
           </div>
         </div>
       ) : (
         <img
           src={`/api/vision/recent-frame/${encodeURIComponent(String(seqno))}`}
-          alt={frame.kind ? `标注帧 #${seqno}（${frame.kind}）` : `标注帧 #${seqno}`}
+          alt={
+            frame.kind
+              ? `${tr("标注帧", "Annotated frame")} #${seqno} (${frame.kind})`
+              : `${tr("标注帧", "Annotated frame")} #${seqno}`
+          }
           onError={() => setFailed(true)}
           /* object-contain, not cover: the tile crops to a square grid cell, and
              seeing the whole frame is the entire point of opening this. */
@@ -77,7 +79,7 @@ export function RecentFrameThumb({ frame, alt }: { frame: FrameLike; alt?: strin
     const img = (
       <img
         src={`data:image/png;base64,${frame.image_b64}`}
-        alt={alt || frame.kind || "标注帧"}
+        alt={alt || frame.kind || tr("标注帧", "Annotated frame")}
         className="aspect-square w-full rounded border border-mast-border object-cover"
       />
     );
@@ -87,7 +89,7 @@ export function RecentFrameThumb({ frame, alt }: { frame: FrameLike; alt?: strin
         <button
           type="button"
           onClick={() => setZoom(true)}
-          title="点击放大"
+          title={tr("点击放大", "Click to enlarge")}
           className="block w-full rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-mast-accent"
         >
           {img}
@@ -98,7 +100,7 @@ export function RecentFrameThumb({ frame, alt }: { frame: FrameLike; alt?: strin
   }
 
   // No image, but this event points at data of its OWN. Draw that — never
-  // something borrowed from a neighbouring event .
+  // something borrowed from a neighbouring event.
   if (placeholder.source?.kind === "current_monitor") {
     return <SegmentCurveThumb segId={placeholder.source.segmentId} hint={placeholder.hint} />;
   }

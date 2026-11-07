@@ -79,7 +79,7 @@ class SkillAuthor:
 
         1. Validate ``name`` is a plain identifier (no path traversal).
         2. Build prompt with BaseSkill template + existing skills as examples
-        3. Claude generates Python code
+        3. The LLM generates Python code
         4. AST safety check (best-effort static guard; NOT a sandbox).
         5. Write to mast/skills/custom/{name}.py
         6. ONLY if ``allow_exec=True`` (explicit human confirmation):

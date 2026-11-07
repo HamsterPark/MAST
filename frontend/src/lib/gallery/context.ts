@@ -5,14 +5,17 @@
 // REC 晚于 mtime（中途停过）时按 `mt − ACQ × 已扫行比例` 估。谱的开始 = Start time，
 // 结束 = mtime；网格 = Start / End time。
 //
-// 坐标：SCAN_ANGLE 为正 = 扫描框相对压电坐标顺时针转。
-// 帧的 y 向上，帧内分数坐标 v 自上沿量起。
+// Coordinates (design T6): a positive SCAN_ANGLE rotates the scan frame **clockwise** relative to
+// the piezo axes. Verified on a series of frames at known rotation angles:
+// "in-frame lattice angle − SCAN_ANGLE" is concentrated, whereas the "+" convention is not.
+// Frame y points up; the in-frame fractional coordinate v is measured from the top edge.
 //
 // 缩略图几何（设计 T5）：帧缩略图 = 定向后第 [r0, r1) 行 + 底部 STRIP_PX 信息条。
 // 原版用 `sd === 'u' ? rall − rows : 0` 猜有效行的起点，有效行不从扫描起点开始时
 // 十字圈会画偏；索引现在显式给 r0/r1，这里只用它们。
 // ════════════════════════════════════════════════════════════════════════════
 
+import { tr } from "../i18n.ts";
 import type { Anchor, GalleryItem } from "./types.ts";
 import { dur, fmtTs } from "./format.ts";
 
@@ -80,16 +83,28 @@ export interface Relation {
   desc: string;
 }
 
+const NOUN_EN: Record<string, string> = { 谱: "spectrum", 系列: "series" };
+
 /** 这张帧相对谱（或系列）的时间关系与说明文字。 */
 export function relation(f: GalleryItem, t0: number, t1: number, noun = "谱"): Relation {
   const mt = f.mt ?? 0;
-  if (mt <= t0 + 1) return { rel: "prev", dt: mt - t0, desc: `${noun}开始前 ${dur(t0 - mt)}保存` };
+  // `noun` may arrive as the Chinese word or already in English; map the Chinese one for the English text.
+  const nz = noun;
+  const ne = NOUN_EN[noun] ?? noun;
+  if (mt <= t0 + 1) {
+    return { rel: "prev", dt: mt - t0, desc: tr(`${nz}开始前 ${dur(t0 - mt)}保存`, `Saved ${dur(t0 - mt)} before ${ne} start`) };
+  }
   const st = fStart(f);
-  if (st >= t1 - 1) return { rel: "next", dt: st - t1, desc: `${noun}结束后 ${dur(st - t1)}开始扫描` };
+  if (st >= t1 - 1) {
+    return { rel: "next", dt: st - t1, desc: tr(`${nz}结束后 ${dur(st - t1)}开始扫描`, `Scan started ${dur(st - t1)} after ${ne} end`) };
+  }
   return {
     rel: mt < t1 ? "prev" : "next",
     dt: mt - t0,
-    desc: `与${noun}时间交叠：${fmtTs(st)} 开始、${fmtTs(mt)} 保存`,
+    desc: tr(
+      `与${nz}时间交叠：${fmtTs(st)} 开始、${fmtTs(mt)} 保存`,
+      `Overlaps the ${ne} in time: started ${fmtTs(st)}, saved ${fmtTs(mt)}`,
+    ),
   };
 }
 

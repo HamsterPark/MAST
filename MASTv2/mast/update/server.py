@@ -12,6 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from mast.i18n import tr
+
 # ⚠️ 这个名字必须在**模块** namespace 里。本文件顶部有
 # ``from __future__ import annotations``（PEP 563），函数签名里的注解因此是字符串，
 # 而 FastAPI 靠 ``get_type_hints`` 在**模块**全局里解析它们 —— 一个只在
@@ -87,10 +89,14 @@ def write_token(data_root: Path, token: str) -> Path:
     p = data_root / "api key" / TOKEN_FILE
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(
-        "# MAST 推送服务器**客户端** token。客户端 update_client_token.env 填同一个值。\n"
-        "# 它随安装包分发，等价于公开值 —— 只够读，以及客户端自己的投稿/反馈。\n"
-        "# 发布技能包用的是另一把：update_publish_token.env。\n"
-        f"{token.strip()}\n",
+        tr("# MAST 推送服务器**客户端** token。客户端 update_client_token.env 填同一个值。\n"
+           "# 它随安装包分发，等价于公开值 —— 只够读，以及客户端自己的投稿/反馈。\n"
+           "# 发布技能包用的是另一把：update_publish_token.env。\n",
+           "# MAST push server **client** token. Put the same value in the client's update_client_token.env.\n"
+           "# It ships with the installer and is equivalent to a public value - enough to read, plus the "
+           "client's own submissions / feedback.\n"
+           "# Publishing skill packs uses a different token: update_publish_token.env.\n")
+        + f"{token.strip()}\n",
         encoding="utf-8",
     )
     return p
@@ -101,10 +107,14 @@ def write_publish_token(data_root: Path, token: str) -> Path:
     p = data_root / "api key" / PUBLISH_TOKEN_FILE
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(
-        "# MAST **发布** token —— 只有它能调 POST /skills/pack/publish。\n"
-        "# 只放在发布机上；不要写进 push_defaults*.json，也不要随包分发。\n"
-        "# 客户端拉更新用的是另一把：update_client_token.env。\n"
-        f"{token.strip()}\n",
+        tr("# MAST **发布** token —— 只有它能调 POST /skills/pack/publish。\n"
+           "# 只放在发布机上；不要写进 push_defaults*.json，也不要随包分发。\n"
+           "# 客户端拉更新用的是另一把：update_client_token.env。\n",
+           "# MAST **publish** token - only it can call POST /skills/pack/publish.\n"
+           "# Keep it on the publishing machine only; do not write it into push_defaults*.json and do not "
+           "ship it with the package.\n"
+           "# Clients pull updates with a different token: update_client_token.env.\n")
+        + f"{token.strip()}\n",
         encoding="utf-8",
     )
     return p
@@ -174,18 +184,24 @@ def build_app(data_root: Path):
             if not pub:
                 raise HTTPException(
                     status_code=503,
-                    detail="publish token not configured — 发布凭据未配置。"
-                           "在发布机上跑 `python -m mast.update publish-token` "
-                           f"生成，它会写进 <data>/api key/{PUBLISH_TOKEN_FILE}。"
-                           "**不要**用客户端 token 代替：那个值随安装包分发。")
+                    detail=tr("publish token not configured — 发布凭据未配置。"
+                              "在发布机上跑 `python -m mast.update publish-token` "
+                              f"生成，它会写进 <data>/api key/{PUBLISH_TOKEN_FILE}。"
+                              "**不要**用客户端 token 代替：那个值随安装包分发。",
+                              "publish token not configured. "
+                              "Run `python -m mast.update publish-token` on the publishing "
+                              f"machine; it is written to <data>/api key/{PUBLISH_TOKEN_FILE}. "
+                              "Do **not** substitute the client token: that value ships "
+                              "with the installer."))
             if not presented:
                 raise HTTPException(status_code=401, detail="missing bearer token")
             # Constant-time comparison to avoid leaking the token via timing.
             if not secrets.compare_digest(presented, pub):
                 raise HTTPException(
                     status_code=403,
-                    detail="this endpoint needs the PUBLISH token, not the "
-                           "client one — 发布端点要发布凭据，客户端 token 不够")
+                    detail=tr("this endpoint needs the PUBLISH token, not the "
+                              "client one — 发布端点要发布凭据，客户端 token 不够",
+                              "this endpoint needs the PUBLISH token, not the client one"))
             return
 
         token = _read_token(data_root)
@@ -325,8 +341,8 @@ def build_app(data_root: Path):
     # 而经验在这个仓库里一直没有被表达的地方。
     #
     # 红线与 /skills/upload 同一条，而且**收得更紧**：条目的键是**白名单**
-    # （name/source/version/spec），不是黑名单。理由是黑名单要求我预见到所有能藏
-    # 代码的键名，而白名单只要求我说清楚哪几个键是数据 —— 后者我答得上来。
+    # （name/source/version/spec），不是黑名单。理由是黑名单要求预见到所有能藏
+    # 代码的键名，而白名单只要求说清楚哪几个键是数据。
     # 内嵌的 spec 仍然必须是 CompositeSpec 形状（nodes 是 list），与老门同判。
 
     _SUB_KIND = "mast-skill-subscription"
@@ -581,8 +597,9 @@ def run_server(data_root: Path, host: str = "0.0.0.0", port: int = 8766,
                 "generated a fresh random one (%s).", new_token,
             )
             print(
-                f"\n=== MAST 推送服务器 token (NEW — copy to clients!) ===\n"
-                f"{new_token}\n已写入: {file_path}\n"
+                tr("\n=== MAST 推送服务器 token (NEW — copy to clients!) ===\n",
+                   "\n=== MAST push server token (NEW - copy to clients!) ===\n")
+                + f"{new_token}\n" + tr(f"已写入: {file_path}", f"Written to: {file_path}") + "\n"
             )
 
     push_dir(data_root)

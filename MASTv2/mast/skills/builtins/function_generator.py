@@ -6,7 +6,8 @@ Nanonis has two waveform generators and MAST had a skill for neither:
   * ``FunGen2Ch_*`` (13 methods) — the two-channel generator, with a selectable
     waveform SHAPE per channel and an on/off per channel.
 
-They belong with ``UserOut``: this is the same gap, with a time axis on it. A user
+They belong with ``UserOut``: it is the same capability
+(custom output control) with a time axis on it. A user
 output holds a value; a function generator *sweeps* one — a modulation, a
 reference, a ramp, a chopper drive. For a pump–probe / TERS setup that is not a
 nicety.
@@ -30,6 +31,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 # FunGen2Ch_WaveformSet(Channel_index, Shape)
 _SHAPES = {"sine": 0, "square": 1, "triangle": 2, "sawtooth": 3, "ramp": 4}
@@ -56,48 +58,51 @@ class ConfigureWaveform(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "配置一台 Nanonis 函数发生器：幅度、频率，以及（仅 2 通道发生器）波形形状。"
+                tr("配置一台 Nanonis 函数发生器：幅度、频率，以及（仅 2 通道发生器）波形形状。"
                 "它驱动的是 MAST 看不见的 EXTERNAL 硬件 —— 一路调制、一路 lock-in 参考、一个斩波器、"
-                "一条栅极斜坡。配置不等于启动；之后还要调用 StartWaveform。"
+                "一条栅极斜坡。配置不等于启动；之后还要调用 StartWaveform。", "Configure a Nanonis function generator: amplitude, frequency, and (2-channel generators only) waveform shape. "
+"It drives EXTERNAL hardware MAST cannot see -- a modulation, a lock-in reference, a chopper, "
+"a gate ramp. Configuring is not starting; call StartWaveform afterwards.")
             ),
             parameters=[
                 ParameterSpec(
                     name="generator", type="str",
-                    description="'1ch'（单通道）或 '2ch'（双通道）",
+                    description=tr("'1ch'（单通道）或 '2ch'（双通道）", "'1ch' (single channel) or '2ch' (dual channel)"),
                     required=True, allowed_values=["1ch", "2ch"],
                 ),
                 ParameterSpec(
                     name="amplitude", type="float",
-                    description="波形幅度，用该输出的物理单位",
+                    description=tr("波形幅度，用该输出的物理单位", "Waveform amplitude, in the physical unit of that output"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="frequency_hz", type="float",
                     description=(
-                        "1 通道发生器的频率（Hz）。2 通道发生器那边 Nanonis 收的是 PERIOD（s）—— "
-                        "你传频率，它会被换算。"
+                        tr("1 通道发生器的频率（Hz）。2 通道发生器那边 Nanonis 收的是 PERIOD（s）—— "
+                        "你传频率，它会被换算。", "Frequency (Hz) of the 1-channel generator. On the 2-channel generator Nanonis takes a PERIOD (s) -- "
+"you pass a frequency and it is converted.")
                     ),
                     unit="Hz", required=True, min_value=1e-6, max_value=1e6,
                 ),
                 ParameterSpec(
                     name="channel", type="int",
-                    description="通道索引（仅 2 通道发生器）",
+                    description=tr("通道索引（仅 2 通道发生器）", "Channel index (2-channel generator only)"),
                     required=False, default=1, min_value=1, max_value=2,
                 ),
                 ParameterSpec(
                     name="shape", type="str",
-                    description="sine/square/triangle/sawtooth/ramp（仅 2 通道）",
+                    description=tr("sine/square/triangle/sawtooth/ramp（仅 2 通道）", "sine/square/triangle/sawtooth/ramp (2-channel only)"),
                     required=False, default="sine",
                     allowed_values=list(_SHAPES),
                 ),
                 ParameterSpec(
                     name="polarity", type="int",
-                    description="0 = 双极性，1 = 单极性（厂商约定）",
+                    description=tr("0 = 双极性，1 = 单极性（厂商约定）", "0 = bipolar, 1 = unipolar (vendor convention)"),
                     required=False, default=0, min_value=0, max_value=1,
                 ),
                 ParameterSpec(
                     name="direction", type="int",
-                    description="0 = 先向上，1 = 先向下",
+                    description=tr("0 = 先向上，1 = 先向下", "0 = upward first, 1 = downward first"),
                     required=False, default=0, min_value=0, max_value=1,
                 ),
             ],
@@ -127,13 +132,13 @@ class ConfigureWaveform(BaseSkill):
 
         if gen != "2ch":
             return _fail("ConfigureWaveform",
-                         f"generator 必须是 '1ch' 或 '2ch'，收到 {gen!r}", [])
+                         tr(f"generator 必须是 '1ch' 或 '2ch'，收到 {gen!r}", f"generator must be '1ch' or '2ch', got {gen!r}"), [])
 
         ch = int(params.get("channel", 1) or 1)
         shape = str(params.get("shape", "sine")).strip().lower()
         if shape not in _SHAPES:
             return _fail("ConfigureWaveform",
-                         f"shape 必须是 {list(_SHAPES)} 之一，收到 {shape!r}", [])
+                         tr(f"shape 必须是 {list(_SHAPES)} 之一，收到 {shape!r}", f"shape must be one of {list(_SHAPES)}, got {shape!r}"), [])
 
         rec = context.safe_call("FunGen2Ch_WaveformSet", ch, _SHAPES[shape])
         calls.append(rec)
@@ -170,23 +175,24 @@ class StartWaveform(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "启动一台函数发生器，运行指定的周期数（0 = 一直跑到被停止）。先用 ConfigureWaveform "
-                "配置它。这会在一条输出线上放出一个真实信号 —— MAST 看不见另一端接的是什么。"
+                tr("启动一台函数发生器，运行指定的周期数（0 = 一直跑到被停止）。先用 ConfigureWaveform "
+                "配置它。这会在一条输出线上放出一个真实信号 —— MAST 看不见另一端接的是什么。", "Start a function generator, running the given number of periods (0 = run until stopped). Configure it first with ConfigureWaveform. "
+"This puts a real signal on an output line -- MAST cannot see what is connected at the other end.")
             ),
             parameters=[
                 ParameterSpec(
                     name="generator", type="str",
-                    description="'1ch' 或 '2ch'",
+                    description=tr("'1ch' 或 '2ch'", "'1ch' or '2ch'"),
                     required=True, allowed_values=["1ch", "2ch"],
                 ),
                 ParameterSpec(
                     name="periods", type="int",
-                    description="要运行的周期数；0 = 连续",
+                    description=tr("要运行的周期数；0 = 连续", "Number of periods to run; 0 = continuous"),
                     required=False, default=0, min_value=0, max_value=1000000,
                 ),
                 ParameterSpec(
                     name="wait_until_finished", type="bool",
-                    description="阻塞直到这次 burst 结束（periods=0 时本项被忽略）",
+                    description=tr("阻塞直到这次 burst 结束（periods=0 时本项被忽略）", "Block until this burst ends (ignored when periods=0)"),
                     required=False, default=False,
                 ),
             ],
@@ -201,7 +207,7 @@ class StartWaveform(BaseSkill):
         wait = 1 if params.get("wait_until_finished", False) else 0
         if gen not in ("1ch", "2ch"):
             return _fail("StartWaveform",
-                         f"generator 必须是 '1ch' 或 '2ch'，收到 {gen!r}", [])
+                         tr(f"generator 必须是 '1ch' 或 '2ch'，收到 {gen!r}", f"generator must be '1ch' or '2ch', got {gen!r}"), [])
         # Literal verbs, deliberately. Every safety tool MAST has reads the
         # Nanonis verb back out of the source by grepping `safe_call("…")` —
         # the post-abort allow-list guard, the coverage census, any future
@@ -234,13 +240,14 @@ class StopWaveform(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "停止一台正在运行的函数发生器。STOP 永远是允许的 —— 对一路输出来说，"
-                "这是你永远希望自己做得到的那件事。"
+                tr("停止一台正在运行的函数发生器。STOP 永远是允许的 —— 对一路输出来说，"
+                "这是你永远希望自己做得到的那件事。", "Stop a running function generator. STOP is always allowed -- for an output line, "
+"this is the one thing you always want to be able to do.")
             ),
             parameters=[
                 ParameterSpec(
                     name="generator", type="str",
-                    description="'1ch' 或 '2ch'",
+                    description=tr("'1ch' 或 '2ch'", "'1ch' or '2ch'"),
                     required=True, allowed_values=["1ch", "2ch"],
                 ),
             ],
@@ -253,7 +260,7 @@ class StopWaveform(BaseSkill):
         gen = str(params["generator"]).strip().lower()
         if gen not in ("1ch", "2ch"):
             return _fail("StopWaveform",
-                         f"generator 必须是 '1ch' 或 '2ch'，收到 {gen!r}", [])
+                         tr(f"generator 必须是 '1ch' 或 '2ch'，收到 {gen!r}", f"generator must be '1ch' or '2ch', got {gen!r}"), [])
         if gen == "1ch":
             rec = context.safe_call("FunGen1Ch_Stop")
         else:
@@ -275,18 +282,19 @@ class GetWaveformStatus(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读一台函数发生器的状态与当前设置（幅度 / 频率 / 形状 / idle 值）。"
-                "启动一台不是你自己配置的发生器之前，先查一下。"
+                tr("读一台函数发生器的状态与当前设置（幅度 / 频率 / 形状 / idle 值）。"
+                "启动一台不是你自己配置的发生器之前，先查一下。", "Read the state and current settings of a function generator (amplitude / frequency / shape / idle value). "
+"Check before starting a generator you did not configure yourself.")
             ),
             parameters=[
                 ParameterSpec(
                     name="generator", type="str",
-                    description="'1ch' 或 '2ch'",
+                    description=tr("'1ch' 或 '2ch'", "'1ch' or '2ch'"),
                     required=True, allowed_values=["1ch", "2ch"],
                 ),
                 ParameterSpec(
                     name="channel", type="int",
-                    description="通道索引（仅 2 通道发生器）",
+                    description=tr("通道索引（仅 2 通道发生器）", "Channel index (2-channel generator only)"),
                     required=False, default=1, min_value=1, max_value=2,
                 ),
             ],
@@ -299,7 +307,7 @@ class GetWaveformStatus(BaseSkill):
         gen = str(params["generator"]).strip().lower()
         if gen not in ("1ch", "2ch"):
             return _fail("GetWaveformStatus",
-                         f"generator 必须是 '1ch' 或 '2ch'，收到 {gen!r}", [])
+                         tr(f"generator 必须是 '1ch' 或 '2ch'，收到 {gen!r}", f"generator must be '1ch' or '2ch', got {gen!r}"), [])
         calls = []
         if gen == "1ch":
             st = context.safe_call("FunGen1Ch_StatusGet")
@@ -342,24 +350,26 @@ class SetWaveformIdleValue(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "设置函数发生器停止时保持的 IDLE 值。这是一条输出线的静息状态，所以它比听上去更要紧："
+                tr("设置函数发生器停止时保持的 IDLE 值。这是一条输出线的静息状态，所以它比听上去更要紧："
                 "外部硬件在两次 burst 之间、以及一次 StopWaveform 之后看到的就是它。"
-                "它**不一定**就是「关」—— 那取决于你的接线，而接线 MAST 看不见。"
+                "它**不一定**就是「关」—— 那取决于你的接线，而接线 MAST 看不见。", "Set the IDLE value a function generator holds when stopped. This is the resting state of an output line, so it matters more than it sounds: "
+"it is what external hardware sees between bursts and after a StopWaveform. "
+"It is **not necessarily** \"off\" -- that depends on your wiring, which MAST cannot see.")
             ),
             parameters=[
                 ParameterSpec(
                     name="generator", type="str",
-                    description="'1ch' 或 '2ch'",
+                    description=tr("'1ch' 或 '2ch'", "'1ch' or '2ch'"),
                     required=True, allowed_values=["1ch", "2ch"],
                 ),
                 ParameterSpec(
                     name="idle_value", type="float",
-                    description="静息值，用该输出的物理单位",
+                    description=tr("静息值，用该输出的物理单位", "Idle value, in the physical unit of that output"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="device", type="int",
-                    description="设备索引（仅 2 通道发生器）",
+                    description=tr("设备索引（仅 2 通道发生器）", "Device index (2-channel generator only)"),
                     required=False, default=1, min_value=1, max_value=2,
                 ),
             ],
@@ -378,7 +388,7 @@ class SetWaveformIdleValue(BaseSkill):
                                     int(params.get("device", 1) or 1), val)
         else:
             return _fail("SetWaveformIdleValue",
-                         f"generator 必须是 '1ch' 或 '2ch'，收到 {gen!r}", [])
+                         tr(f"generator 必须是 '1ch' 或 '2ch'，收到 {gen!r}", f"generator must be '1ch' or '2ch', got {gen!r}"), [])
         if rec.error:
             return _fail("SetWaveformIdleValue", rec.error, [rec])
         return SkillResult(
@@ -396,17 +406,17 @@ class SetWaveformChannelOnOff(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "启用或禁用 2 通道函数发生器中的一个通道，而不停掉另一个。"
+                tr("启用或禁用 2 通道函数发生器中的一个通道，而不停掉另一个。", "Enable or disable one channel of a 2-channel function generator without stopping the other.")
             ),
             parameters=[
                 ParameterSpec(
                     name="channel", type="int",
-                    description="通道索引（1 或 2）",
+                    description=tr("通道索引（1 或 2）", "Channel index (1 or 2)"),
                     required=True, min_value=1, max_value=2,
                 ),
                 ParameterSpec(
                     name="on", type="bool",
-                    description="True = 启用，False = 禁用",
+                    description=tr("True = 启用，False = 禁用", "True = enable, False = disable"),
                     required=True,
                 ),
             ],

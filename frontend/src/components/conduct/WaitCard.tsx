@@ -3,28 +3,28 @@ import { Badge, Card } from "@/components/ui";
 import { Button, Field, Modal, TextField } from "@/components/controls";
 import type { components } from "@/api/schema";
 import { fmtClock, fmtDuration, waitGateRows } from "@/lib/conduct";
+import { tr } from "@/lib/i18n";
 
 type ActiveWait = components["schemas"]["ActiveWaitView"];
 
-// ════════════════════════════════════════════════════════════════════════════
-// 等待大卡 —— 面板上唯一一块「现在轮到你了」。
+// Wait card: the one block of the panel that says "it is your turn now".
 //
-// 它要回答的**不是**「在等吗」,而是「**还缺哪一个**」。设计 §3-5 的原话:双闸
-// = 人的 ack AND 物理条件,两个证据回答两个问题、互不替代(人确认了不等于降到温,
-// 温度到位不等于样品换好了)。所以两个闸各占一行、各带各的话,而不是一个
-// 「还差 1 项」的计数 —— 计数答不出「差的是哪一个」,而那正是用户要做的下一件事。
+// It answers not "is it waiting?" but "which one is still missing?". The double gate is
+// the operator's ack AND a physical condition; the two pieces of evidence answer
+// different questions and do not substitute for each other (an operator confirming does
+// not mean the sample reached temperature, and reaching temperature does not mean the
+// sample was swapped). Each gate therefore gets its own row and its own message instead
+// of a "1 item missing" count, which cannot say which one is missing.
 //
-// ── 三个显示纪律 ────────────────────────────────────────────────────────────
-//
-// **一、stale 不是「没到」。** 温度读数过期是**判不了**:干等下去是错的。它用
-// 「读不到」的措辞和自己的颜色,并且直接把下一步动作写出来(温度采集程序还在跑吗)。
-//
-// **二、waive 标记持续显示。** 那个闸是人拿一条留痕的命令放过去的,报告里带着它,
-// 屏幕上也必须一直带着 —— 不是按下那一刻闪一次。
-//
-// **三、ack 按钮按下去不代表就走了。** 它只是把意图入队,下一 tick 才生效,而且
-// 另一个闸可能还缺。按钮回来的那句话说的是「还缺什么」,不是「已放行」。
-// ════════════════════════════════════════════════════════════════════════════
+// Display rules:
+// 1. Stale is not "not reached". An expired temperature reading means "cannot judge";
+//    waiting on it is wrong. It uses "unreadable" wording and its own color, and names the
+//    next action (is the temperature logger still running?).
+// 2. The waive marker stays visible. The gate was released by an operator through a logged
+//    command; the report carries that, and the screen must keep showing it.
+// 3. Pressing ack does not mean the conduct proceeds. It only enqueues the intent, which
+//    takes effect on the next tick, and the other gate may still be missing. The message
+//    that comes back says what is still missing, not "released".
 
 export function WaitCard({
   wait,
@@ -49,11 +49,16 @@ export function WaitCard({
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="text-[17px] font-semibold text-mast-text">
-            {lacking.length ? `等你：还缺 ${lacking.map((r) => r.label).join(" + ")}` : "两个闸都齐了，正在放行"}
+            {lacking.length
+              ? tr(
+                  `等你：还缺 ${lacking.map((r) => r.label).join(" + ")}`,
+                  `Waiting for you: still missing ${lacking.map((r) => r.label).join(" + ")}`,
+                )
+              : tr("两个闸都齐了，正在放行", "Both gates satisfied, releasing")}
           </h3>
           <p className="mt-1 whitespace-pre-wrap text-sm text-mast-text">{wait.message}</p>
         </div>
-        <Badge tone="WARN">等待中</Badge>
+        <Badge tone="WARN">{tr("等待中", "Waiting")}</Badge>
       </div>
 
       <ul className="mt-4 space-y-2">
@@ -77,8 +82,8 @@ export function WaitCard({
             <div className="min-w-0">
               <p className="text-sm font-medium text-mast-text">
                 {r.label}
-                {/* 「读不到」自己一个词,不混进「没过」—— 两者的下一步动作不同。 */}
-                {r.unreadable && <span className="ml-2 text-xs text-mast-warn">判不了</span>}
+                {/* "Unreadable" is its own state, not folded into "not passed": the next action differs. */}
+                {r.unreadable && <span className="ml-2 text-xs text-mast-warn">{tr("判不了", "Cannot judge")}</span>}
               </p>
               <p className="mt-0.5 text-xs text-mast-muted">{r.detail}</p>
             </div>
@@ -88,48 +93,60 @@ export function WaitCard({
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <Button variant="primary" onClick={() => onAck("")} disabled={busy || ackDone}>
-          {ackDone ? "已确认" : "我已确认"}
+          {ackDone ? tr("已确认", "Confirmed") : tr("我已确认", "I confirm")}
         </Button>
-        {/* waive 只在真有条件闸、且还没放行过的时候出现:一个不适用的按钮
-            比没有按钮更让人犹豫。 */}
+        {/* waive only appears when there is a condition gate that has not been waived yet:
+            an inapplicable button is more confusing than no button. */}
         {cond && !cond.waived && (
           <Button variant="default" onClick={() => setWaiveOpen(true)} disabled={busy}>
-            条件读不到，由我提供证据
+            {tr("条件读不到，由我提供证据", "Condition unreadable, I will provide evidence")}
           </Button>
         )}
         <span className="text-xs text-mast-faint">
-          进入于 {fmtClock(wait.entered_at)}
-          {wait.last_notified_at != null && `　·　上次通知 ${fmtClock(wait.last_notified_at)}`}
-          {wait.request_id && `　·　心愿单 ${wait.request_id}`}
+          {tr("进入于", "Entered at")} {fmtClock(wait.entered_at)}
+          {wait.last_notified_at != null &&
+            `　·　${tr("上次通知", "Last notified")} ${fmtClock(wait.last_notified_at)}`}
+          {wait.request_id && `　·　${tr("心愿单", "Wishlist")} ${wait.request_id}`}
         </span>
       </div>
 
       {cond?.stale_after_s != null && (
         <p className="mt-2 text-xs text-mast-faint">
-          读数超过 {fmtDuration(cond.stale_after_s)} 就算读不到（那时这条等待会降级为「要人来看」，而不是继续干等）。
+          {tr(
+            `读数超过 ${fmtDuration(cond.stale_after_s)} 就算读不到（那时这条等待会降级为「要人来看」，而不是继续干等）。`,
+            `A reading older than ${fmtDuration(cond.stale_after_s)} counts as unreadable (this wait then degrades to "needs a human" instead of waiting indefinitely).`,
+          )}
         </p>
       )}
 
-      <Modal open={waiveOpen} onClose={() => setWaiveOpen(false)} title="由人提供证据放行条件闸">
+      <Modal open={waiveOpen} onClose={() => setWaiveOpen(false)} title={tr("由人提供证据放行条件闸", "Release the condition gate with operator-provided evidence")}>
         <p className="text-sm text-mast-muted">
-          这**不是**默默放行：谁放的、为什么放，会进审计流，面板上会**一直**显示这个标记，报告里也带着它。
+          {tr(
+            "这**不是**默默放行：谁放的、为什么放，会进审计流，面板上会**一直**显示这个标记，报告里也带着它。",
+            "This is **not** a silent release: who released it and why goes into the audit trail, the panel shows this marker **permanently**, and the report carries it too.",
+          )}
         </p>
         <p className="mt-2 text-sm text-mast-muted">
-          它存在的理由是「能停不能解 = 死锁」——传感器读不到时这个闸会永远 stale，
-          人必须有一条显式、留痕的解锁路。
+          {tr(
+            "它存在的理由是「能停不能解 = 死锁」——传感器读不到时这个闸会永远 stale，人必须有一条显式、留痕的解锁路。",
+            "It exists because a stop with no release is a deadlock: when the sensor cannot be read the gate stays stale forever, so the operator needs an explicit, logged way through.",
+          )}
         </p>
         <div className="mt-4">
-          <Field label="理由（必填）" hint="写给三天后的自己看：当时凭什么认为条件其实满足了。">
+          <Field
+            label={tr("理由（必填）", "Reason (required)")}
+            hint={tr("写给三天后的自己看：当时凭什么认为条件其实满足了。", "Write it for yourself three days from now: why did you consider the condition met?")}
+          >
             <TextField
               value={reason}
               onChange={setReason}
-              placeholder="例：温度计 COM13 被 另一个串口程序 占着，手工读数 4.3 K"
+              placeholder={tr("例：温度计 COM13 被 另一个串口程序 占着，手工读数 4.3 K", "e.g. thermometer on COM13 is held by the 另一个串口程序; manual reading 4.3 K")}
             />
           </Field>
         </div>
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setWaiveOpen(false)}>
-            取消
+            {tr("取消", "Cancel")}
           </Button>
           <Button
             variant="primary"
@@ -140,7 +157,7 @@ export function WaitCard({
               setReason("");
             }}
           >
-            确认放行并留痕
+            {tr("确认放行并留痕", "Confirm release and log it")}
           </Button>
         </div>
       </Modal>

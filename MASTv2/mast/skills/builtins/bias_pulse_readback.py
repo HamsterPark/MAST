@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -46,66 +47,73 @@ class BiasPulseWithReadback(BaseSkill):
             # SafetyGate 双重限制,伤不到硬件。
             safety_level=SafetyLevel.AUTO,
             description=(
-                "发一个偏压脉冲，同时连续采集 Z 与电流，然后报告 Z 在脉冲前"
+                tr("发一个偏压脉冲，同时连续采集 Z 与电流，然后报告 Z 在脉冲前"
                 "的稳定值与脉冲后的稳定值之间跳了多远、往哪个方向跳"
                 "（脉冲进行中的瞬态不计）。当这一发脉冲的目的是修针、"
-                "而你需要知道它到底有没有起作用时，用它而不是 BiasPulse。"
+                "而你需要知道它到底有没有起作用时，用它而不是 BiasPulse。",
+                "Fire a bias pulse while continuously acquiring Z and current, then report how far Z jumped between its stable value before the pulse and its stable value after, and in which direction (the transient during the pulse is not counted). When the purpose of the pulse is tip conditioning and you need to know whether it actually worked, use this instead of BiasPulse.")
             ),
             parameters=[
                 ParameterSpec(
                     name="bias_v", type="float", unit="V",
-                    description="脉冲电压。贵金属上修针通常用 ±10 V；"
+                    description=tr("脉冲电压。贵金属上修针通常用 ±10 V；"
                                 "更温和的做法用 ±3–7 V。",
+                                "Pulse voltage. Tip conditioning on noble metals usually uses +-10 V; a gentler approach uses +-3-7 V."),
                     required=True, min_value=-10.0, max_value=10.0),
                 ParameterSpec(
                     name="width_s", type="float", unit="s",
-                    description="脉冲宽度（由硬件计时）",
+                    description=tr("脉冲宽度（由硬件计时）", "Pulse width (hardware timed)"),
                     required=False, default=0.5, min_value=1e-3, max_value=2.0),
                 ParameterSpec(
                     name="z_hold", type="int",
-                    description="脉冲期间的 Z controller：0=不变，1=保持，"
+                    description=tr("脉冲期间的 Z controller：0=不变，1=保持，"
                                 "2=不保持。默认 1 —— feedback 若还开着，一发脉冲"
                                 "会把电流抬高几个数量级，Z 会一路追着它"
                                 "直接扎进表面。",
+                                "Z controller during the pulse: 0=unchanged, 1=hold, 2=do not hold. Default 1 - if the feedback is still on, a pulse raises the current by several orders of magnitude and Z chases it all the way into the surface."),
                     required=False, default=1, allowed_values=[0, 1, 2]),
                 ParameterSpec(
                     name="absolute", type="bool",
-                    description="True=绝对偏压，False=相对当前值",
+                    description=tr("True=绝对偏压，False=相对当前值", "True=absolute bias, False=relative to the current value"),
                     required=False, default=True),
                 ParameterSpec(
                     name="poll_hz", type="float", unit="Hz",
-                    description="目标逐帧轮询速率（每帧各采一次电流+Z；"
+                    description=tr("目标逐帧轮询速率（每帧各采一次电流+Z；"
                                 "受 RTT 限制，每通道约 1 kHz 封顶）",
+                                "Target per-frame polling rate (one current + Z sample per frame; limited by RTT, capped at about 1 kHz per channel)"),
                     required=False, default=2000.0, min_value=10.0, max_value=8000.0),
                 ParameterSpec(
                     name="pre_roll_s", type="float", unit="s",
-                    description="脉冲**之前**采集的基线（这就是 z1）",
+                    description=tr("脉冲**之前**采集的基线（这就是 z1）", "Baseline acquired **before** the pulse (this is z1)"),
                     required=False, default=0.1, min_value=0.01, max_value=5.0),
                 ParameterSpec(
                     name="post_roll_s", type="float", unit="s",
-                    description="脉冲结束之后继续采集；它稳定下来的尾段"
+                    description=tr("脉冲结束之后继续采集；它稳定下来的尾段"
                                 "就是 z3",
+                                "Keep acquiring after the pulse ends; its stabilised tail is z3"),
                     required=False, default=DEFAULT_POST_ROLL_S,
                     min_value=0.02, max_value=5.0),
                 ParameterSpec(
                     name="max_capture_s", type="float", unit="s",
-                    description="整个采集窗口的硬上限",
+                    description=tr("整个采集窗口的硬上限", "Hard upper limit of the whole acquisition window"),
                     required=False, default=5.0, min_value=0.2, max_value=30.0),
                 ParameterSpec(
                     name="jump_k", type="float",
-                    description="跳变灵敏度：|Δ| > median+k·σ_robust 即标记。默认值是算法工作点，应按当前数据的噪声与误报代价验证。"
-                                ,
+                    description=tr("跳变灵敏度：|Δ| > median+k·σ_robust 即标记。"
+                                "8 是实测下不产生误报的下限。",
+                                "Jump sensitivity: flagged when |Δ| > median+k·σ_robust. 8 is the measured lower limit that gives no false alarms."),
                     required=False, default=z_trace.DEFAULT_JUMP_K,
                     min_value=1.0, max_value=50.0),
                 ParameterSpec(
                     name="step_tol_nm", type="float", unit="nm",
-                    description="z3−z1 上的死区（nm）；tol = max(此值, "
+                    description=tr("z3−z1 上的死区（nm）；tol = max(此值, "
                                 "step_tol_k·σ(baseline))。默认 0.5 nm：值得"
                                 "据以动作的脉冲台阶在几十 nm 量级。",
+                                "Dead band on z3-z1 (nm); tol = max(this value, step_tol_k·σ(baseline)). Default 0.5 nm: pulse steps worth acting on are tens of nm."),
                     required=False, default=0.5, min_value=0.0, max_value=1000.0),
                 ParameterSpec(
                     name="step_tol_k", type="float",
-                    description="若 step_tol_nm=0，则 tol = z1 基线的 k·σ",
+                    description=tr("若 step_tol_nm=0，则 tol = z1 基线的 k·σ", "If step_tol_nm=0, tol = k·σ of the z1 baseline"),
                     required=False, default=4.0, min_value=1.0, max_value=50.0),
             ],
             estimated_duration_s=6.0,
@@ -246,9 +254,9 @@ class BiasPulseWithReadback(BaseSkill):
         data.update(saved)
 
         dz_nm = float(verdict.get("delta_m") or 0.0) * 1e9
-        cn = {"up": "Z 向上跳变", "down": "Z 向下跳变",
-              "none": "Z 无跳变", "insufficient_data": "数据不足,判不了"}[direction]
-        summary = f"{bias_v:+.1f} V / {width_s * 1e3:.0f} ms 脉冲 → {cn}"
+        cn = {"up": tr("Z 向上跳变", "Z jumped up"), "down": tr("Z 向下跳变", "Z jumped down"),
+              "none": tr("Z 无跳变", "No Z jump"), "insufficient_data": tr("数据不足,判不了", "Insufficient data, cannot judge")}[direction]
+        summary = tr(f"{bias_v:+.1f} V / {width_s * 1e3:.0f} ms 脉冲 → {cn}", f"{bias_v:+.1f} V / {width_s * 1e3:.0f} ms pulse -> {cn}")
         if direction in ("up", "down"):
             summary += f" ({dz_nm:+.2f} nm)"
         # 指针写进摘要:摘要是**唯一**穿过工具边界的东西。

@@ -18,6 +18,7 @@ import {
   type MapViewMode,
 } from "@/lib/scanMapView";
 import { Modal } from "@/components/controls";
+import { tr } from "@/lib/i18n";
 
 type ScanMap = components["schemas"]["ScanMapResponse"];
 type Marker = components["schemas"]["MapMarkerView"];
@@ -27,20 +28,16 @@ type MapAnalysis = components["schemas"]["ScanMapAnalysisResponse"];
 // Native Konva render of the live experiment map. Coordinates are the Nanonis
 // stage frame, in METRES; we auto-fit every spatial element (frame + tip +
 // markers + plan) into the canvas with a metres→pixels affine and flip Y so +y
-// points up (lab convention). Redone 2026-07-01:
-//   • rotated footprints now pivot about their CENTRE (was: top-left corner →
-//     rotated scans landed in the wrong place)
-//   • marker colours match the backend KIND_STYLE exactly (was: 'tip_shape'
-//     fell through to grey; 'plan'/'frame' had no colour)
+// points up (lab convention).
+//   • rotated footprints pivot about their CENTRE, not the top-left corner
+//   • marker colours match the backend KIND_STYLE exactly
 //   • hover tooltip (label · kind · time), an nm grid, axis ticks and a scale
-//     bar so the map actually reads as a scientific surface map
+//     bar so the map reads as a scientific surface map
 //   • honest empty / degraded states
 
-// The canvas used to be a hardcoded 620×460 that no caller ever overrode, so a
-// wide monitor showed the same postage stamp as a laptop and the rest of the row
-// was dead space (「扫描地图这个占网页的面积太小」). It is now sized
-// from the width its container actually got; 620×460 survives as the fallback
-// for the first frame, before the ResizeObserver has reported.
+// The canvas is sized from the width its container actually got, so a wide monitor
+// uses the available space; 620 is the fallback for the first frame, before the
+// ResizeObserver has reported.
 const FALLBACK_W = 620;
 const PAD = 44;
 
@@ -62,19 +59,19 @@ const KIND_COLOR = {
   manual_avoid: "#e879f9",
 };
 const KIND_LABEL = {
-  scan: "扫图",
-  sts: "STS 点谱",
-  pulse: "电脉冲",
-  tip_shape: "修针尖",
-  move: "移动",
-  manual: "手动操作",
-  plan: "计划",
-  frame: "扫描框",
-  tip: "针尖",
-  coarse_move: "粗动换区",
-  approach: "进针",
-  crash: "撞针",
-  manual_avoid: "人工避让区",
+  scan: tr("扫图", "Scan"),
+  sts: tr("STS 点谱", "STS spectrum"),
+  pulse: tr("电脉冲", "Pulse"),
+  tip_shape: tr("修针尖", "Tip shaping"),
+  move: tr("移动", "Move"),
+  manual: tr("手动操作", "Manual action"),
+  plan: tr("计划", "Plan"),
+  frame: tr("扫描框", "Scan frame"),
+  tip: tr("针尖", "Tip"),
+  coarse_move: tr("粗动换区", "Coarse move"),
+  approach: tr("进针", "Approach"),
+  crash: tr("撞针", "Tip crash"),
+  manual_avoid: tr("人工避让区", "Manual avoid zone"),
 };
 // Opacity multiplier for a marker whose coordinate belongs to a superseded
 // coordinate generation. A lateral coarse move slides the sample stage, so those
@@ -84,12 +81,11 @@ const KIND_LABEL = {
 const STALE_EPOCH_OPACITY = 0.22;
 // Chrome colours — grid, ticks, scale bar, tooltip. Konva paints onto a canvas
 // and cannot read a CSS variable, so the palette has to be resolved in JS;
-// hard-coding the dark one is what left the map a black slab in light mode
-// (「扫描地图的黑色底不好看，应该跟随主界面的白天/黑夜模式」#24).
+// hard-coding the dark one would leave the map a black slab in light mode.
 //
 // The MARKER colours above are deliberately NOT themed: they mirror
 // mast/io/exp_map.py KIND_STYLE so the Konva map and the backend matplotlib
-// legend never disagree, and "扫图 is blue" must mean the same thing in a
+// legend never disagree, and "scan is blue" must mean the same thing in a
 // screenshot regardless of who took it.
 const CHROME = {
   dark: {
@@ -134,9 +130,8 @@ export function ScanMapCanvas({
 }) {
   const c = CHROME[useUiStore((st) => st.theme) === "light" ? "light" : "dark"];
   const [hover, setHover] = useState<{ x: number; y: number; text: string } | null>(null);
-  // 「扫描地图点击标记弹出具体信息、时间等」. The hover tooltip is
-  // one un-wrapped line capped at 200 px, so everything else the marker knows
-  // had nowhere to go.
+  // Click a marker for its full details. The hover tooltip is one un-wrapped line
+  // capped at 200 px, so everything else the marker knows needs somewhere to go.
   const [detail, setDetail] = useState<Marker | null>(null);
   const [boxRef, measuredW] = useElementWidth<HTMLDivElement>();
   const viewportH = useViewportHeight();
@@ -147,7 +142,7 @@ export function ScanMapCanvas({
     maxHeight: 900,
     viewportH,
   });
-  // Wheel zoom + drag pan ("扫描地图不能放大缩小").
+  // Wheel zoom + drag pan.
   // Zoom is about the cursor; drag pans when zoomed; double-click resets.
   const [zoom, setZoom] = useState<{ k: number; x: number; y: number }>({ k: 1, x: 0, y: 0 });
   // Zoom is a screen-space transform anchored to the extent it was applied to.
@@ -215,9 +210,12 @@ export function ScanMapCanvas({
         className="flex w-full items-center justify-center rounded-lg border border-mast-border text-center text-sm text-mast-muted"
         style={{ height: CANVAS_H, background: c.bg }}
       >
-        等待扫描范围…
+        {tr("等待扫描范围…", "Waiting for the scan range…")}
         <br />
-        开始扫描或读取仪器状态后，这里会显示扫描框、针尖与所有带位置的操作。
+        {tr(
+          "开始扫描或读取仪器状态后，这里会显示扫描框、针尖与所有带位置的操作。",
+          "Once a scan starts or the instrument state is read, the scan frame, tip and all positioned actions appear here.",
+        )}
       </div>
     );
   }
@@ -239,7 +237,7 @@ export function ScanMapCanvas({
 
   // Grid lines on nice nm boundaries. The step follows the VISIBLE span, so
   // zooming in subdivides the grid instead of leaving it at whole-map spacing
-  // — and keeps the scale bar a constant fraction of the canvas .
+  // — and keeps the scale bar a constant fraction of the canvas.
   const spanNm = (maxX - minX) * 1e9;
   const stepNm = visibleStepNm(spanNm, zoom.k);
   const gridXs: number[] = [];
@@ -390,7 +388,7 @@ export function ScanMapCanvas({
         {/* Chrome — axis numbers, scale bar, tooltip. This layer carries the
             INVERSE of the stage transform, so it stays pinned to the viewport
             at any zoom/pan: at 25× the operator still gets a readable scale
-            instead of a scale that slid off the canvas . */}
+            instead of a scale that slid off the canvas. */}
         <Layer listening={false} {...chrome}>
           {layers.grid && (
             <>
@@ -429,11 +427,14 @@ export function ScanMapCanvas({
       <div className="pointer-events-none absolute right-2 top-2 rounded bg-mast-panel/80 px-1.5 py-0.5 text-[10px] text-mast-muted">
         {fit.fellBack
           ? viewMode === "follow"
-            ? "无实时扫描框 · 已自动拟合"
-            : "压电范围未知 · 已自动拟合"
+            ? tr("无实时扫描框 · 已自动拟合", "No live scan frame · auto-fitted")
+            : tr("压电范围未知 · 已自动拟合", "Piezo range unknown · auto-fitted")
           : zoom.k > 1
-            ? `${zoom.k.toFixed(1)}× · 拖拽平移 · 双击复位`
-            : "滚轮缩放"}
+            ? tr(
+                `${zoom.k.toFixed(1)}× · 拖拽平移 · 双击复位`,
+                `${zoom.k.toFixed(1)}× · drag to pan · double-click to reset`,
+              )
+            : tr("滚轮缩放", "Wheel to zoom")}
       </div>
 
       <Modal
@@ -441,7 +442,7 @@ export function ScanMapCanvas({
         onClose={() => setDetail(null)}
         title={
           detail
-            ? detail.label || kindLabel(detail.kind) || detail.kind || "地图标记"
+            ? detail.label || kindLabel(detail.kind) || detail.kind || tr("地图标记", "Map marker")
             : ""
         }
       >
@@ -456,7 +457,9 @@ export function ScanMapCanvas({
               </div>
             ))}
             {markerDetailRows(detail, map.current_epoch).length === 0 && (
-              <p className="text-mast-muted">这个标记只记录了位置，没有别的信息。</p>
+              <p className="text-mast-muted">
+                {tr("这个标记只记录了位置，没有别的信息。", "This marker only records a position; there is no other information.")}
+              </p>
             )}
           </div>
         )}
@@ -552,9 +555,9 @@ function MarkerShape({
   const fade = stale ? STALE_EPOCH_OPACITY : 1;
   const dim = (planned ? 0.5 : 1) * fade;
   const tip =
-    `${m.label || kindLabel(m.kind) || m.kind || "操作"}` +
+    `${m.label || kindLabel(m.kind) || m.kind || tr("操作", "Action")}` +
     `${m.timestamp ? " · " + m.timestamp.slice(11, 19) : ""}` +
-    (stale ? " · 粗动前的旧坐标系" : "");
+    (stale ? tr(" · 粗动前的旧坐标系", " · pre-coarse-move coordinates") : "");
   const hoverProps = {
     onMouseEnter: (e: { target: { getStage: () => { container: () => HTMLElement } | null } }) => {
       onHover(tip);
@@ -649,7 +652,7 @@ function NextPositionShape({ at, sizePx, zoomK }: { at: Pt; sizePx: number; zoom
           clearing it); 4/-14 are the screen gap, so they do not. */}
       <Text
         {...pinnedLabel({ x: at.x + half, y: at.y - half }, 4, -14, zoomK)}
-        text="建议下一个位置"
+        text={tr("建议下一个位置", "Suggested next position")}
         fontSize={10}
         fill={C}
       />
@@ -697,9 +700,9 @@ function PlanRoute({
         const w = Math.abs(m.w_m ?? 0) * scale;
         const h = Math.abs(m.h_m ?? 0) * scale;
         const tip =
-          `计划 ${i + 1}/${plan.length}` +
+          tr(`计划 ${i + 1}/${plan.length}`, `Plan ${i + 1}/${plan.length}`) +
           (m.label ? ` · ${m.label}` : "") +
-          (i === 0 ? " · 下一步" : "");
+          (i === 0 ? tr(" · 下一步", " · next") : "");
         const hoverProps = {
           onMouseEnter: () => onHover(tip, p.x, p.y),
           onMouseMove: () => onHover(tip, p.x, p.y),
@@ -741,12 +744,12 @@ function PlanRoute({
           </Group>
         );
       })}
-      {/* The step about to be executed, ringed so it reads at a glance. NO text
-          label here: the route, the candidate sequence and 建议下一个位置 all
-          converge on the same few hundred nanometres, and a sentence pinned to
-          this point lands on top of them. 「计划 · <title> · 剩 N 步」 is a
-          status fact, not a map feature — it lives in the chip row above the
-          canvas, where it is readable at any zoom. */}
+      {/* The step about to be executed, ringed so it reads at a glance. No text
+          label here: the route, the candidate sequence and the suggested-next
+          label all converge on the same few hundred nanometres, and a sentence
+          pinned to this point would land on top of them. The plan title and the
+          remaining step count live in the chip row above the canvas, where they
+          are readable at any zoom. */}
       <Circle x={head.x} y={head.y} radius={9} stroke={C} strokeWidth={1.6} opacity={0.9} listening={false} />
     </Group>
   );
@@ -852,7 +855,7 @@ function PiezoRangeShape({
       />
       <Text
         {...pinnedLabel({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y) }, 4, 4, zoomK)}
-        text={`压电范围 ±${(half * 1e6).toFixed(2)} µm`}
+        text={tr(`压电范围 ±${(half * 1e6).toFixed(2)} µm`, `Piezo range ±${(half * 1e6).toFixed(2)} µm`)}
         fontSize={9}
         fill={stroke}
       />
@@ -889,7 +892,7 @@ function TipShape({ at, ring, zoomK }: { at: Pt; ring: string; zoomK: number }) 
       <Line points={[at.x - 10, at.y, at.x + 10, at.y]} stroke="#f43f5e" strokeWidth={0.8} opacity={0.5} />
       <Line points={[at.x, at.y - 10, at.x, at.y + 10]} stroke="#f43f5e" strokeWidth={0.8} opacity={0.5} />
       <Circle x={at.x} y={at.y} radius={5} fill="#f43f5e" stroke={ring} strokeWidth={1} />
-      <Text {...pinnedLabel(at, 8, -6, zoomK)} text="针尖" fontSize={11} fill="#f43f5e" />
+      <Text {...pinnedLabel(at, 8, -6, zoomK)} text={tr("针尖", "Tip")} fontSize={11} fill="#f43f5e" />
     </Group>
   );
 }
@@ -897,18 +900,18 @@ function TipShape({ at, ring, zoomK }: { at: Pt; ring: string; zoomK: number }) 
 // Legend reused by the page header — matches the backend KIND_STYLE palette.
 export function ScanMapLegend() {
   const items: [string, string][] = [
-    ["扫描框", KIND_COLOR.frame],
-    ["针尖", KIND_COLOR.tip],
-    ["扫图", KIND_COLOR.scan],
+    [tr("扫描框", "Scan frame"), KIND_COLOR.frame],
+    [tr("针尖", "Tip"), KIND_COLOR.tip],
+    [tr("扫图", "Scan"), KIND_COLOR.scan],
     ["STS", KIND_COLOR.sts],
-    ["电脉冲", KIND_COLOR.pulse],
-    ["修针尖", KIND_COLOR.tip_shape],
-    ["进针", KIND_COLOR.approach],
-    ["撞针", KIND_COLOR.crash],
-    ["粗动换区", KIND_COLOR.coarse_move],
-    ["移动", KIND_COLOR.move],
-    ["手动", KIND_COLOR.manual],
-    ["计划", KIND_COLOR.plan],
+    [tr("电脉冲", "Pulse"), KIND_COLOR.pulse],
+    [tr("修针尖", "Tip shaping"), KIND_COLOR.tip_shape],
+    [tr("进针", "Approach"), KIND_COLOR.approach],
+    [tr("撞针", "Tip crash"), KIND_COLOR.crash],
+    [tr("粗动换区", "Coarse move"), KIND_COLOR.coarse_move],
+    [tr("移动", "Move"), KIND_COLOR.move],
+    [tr("手动", "Manual"), KIND_COLOR.manual],
+    [tr("计划", "Plan"), KIND_COLOR.plan],
   ];
   return (
     <div className="flex flex-wrap gap-3 text-xs text-mast-muted">

@@ -17,6 +17,7 @@ from __future__ import annotations
 import html
 import logging
 
+from mast.i18n import tr
 from mast.memory.store import KINDS, MemoryStore
 
 logger = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ def render_memory_list_html(store: MemoryStore | None, namespace: str | None,
                             query: str | None = None) -> str:
     """A compact table of memories in a namespace (pinned first)."""
     if store is None:
-        return '<div style="color:#94a3b8;padding:12px;">记忆存储未就绪。</div>'
+        return '<div style="color:#94a3b8;padding:12px;">' + tr('记忆存储未就绪。', 'Memory store not ready.') + '</div>'
     ns = namespace or "global"
     try:
         if query:
@@ -81,10 +82,12 @@ def render_memory_list_html(store: MemoryStore | None, namespace: str | None,
             rows = store.list(ns, kind=kind, limit=200)
     except Exception as exc:  # pragma: no cover
         logger.debug("render_memory_list_html failed: %s", exc)
-        return f'<div style="color:#ef4444;padding:12px;">读取失败: {_esc(exc)}</div>'
+        return f'<div style="color:#ef4444;padding:12px;">{tr("读取失败", "Read failed")}: {_esc(exc)}</div>'
     if not rows:
         return ('<div style="color:#94a3b8;padding:12px;">'
-                f'命名空间 <code>{_esc(ns)}</code> 暂无记忆。</div>')
+                + tr(f'命名空间 <code>{_esc(ns)}</code> 暂无记忆。',
+                     f'No memories in namespace <code>{_esc(ns)}</code>.')
+                + '</div>')
     items = []
     for r in rows:
         icon = _KIND_ICON.get(r.get("kind"), "📄")
@@ -101,17 +104,18 @@ def render_memory_list_html(store: MemoryStore | None, namespace: str | None,
         )
     return (f'<div style="font-size:0.95em;">'
             f'<div style="color:#94a3b8;padding:4px 10px;">'
-            f'{len(rows)} 条 · 命名空间 <code>{_esc(ns)}</code></div>'
+            + tr(f'{len(rows)} 条 · 命名空间 <code>{_esc(ns)}</code>',
+                 f'{len(rows)} items · namespace <code>{_esc(ns)}</code>') + '</div>'
             + "".join(items) + '</div>')
 
 
 def render_memory_detail_html(store: MemoryStore | None, namespace: str | None,
                               path: str | None) -> str:
     if store is None or not path:
-        return '<div style="color:#94a3b8;padding:12px;">选择一条记忆查看详情。</div>'
+        return '<div style="color:#94a3b8;padding:12px;">' + tr('选择一条记忆查看详情。', 'Select a memory to see its details.') + '</div>'
     r = store.read(namespace or "global", path)
     if r is None:
-        return f'<div style="color:#94a3b8;padding:12px;">无此记忆: {_esc(path)}</div>'
+        return f'<div style="color:#94a3b8;padding:12px;">{tr("无此记忆", "No such memory")}: {_esc(path)}</div>'
     icon = _KIND_ICON.get(r.get("kind"), "📄")
     tags = " ".join(f'<span style="background:rgba(99,102,241,0.15);border-radius:3px;'
                     f'padding:0 5px;margin-right:3px;">{_esc(t)}</span>'
@@ -122,7 +126,7 @@ def render_memory_detail_html(store: MemoryStore | None, namespace: str | None,
         f'{_esc(r.get("title") or r.get("path"))}</div>'
         f'<div style="color:#64748b;font-size:0.82em;margin:4px 0;">'
         f'{_esc(r.get("kind"))} · {_esc(r.get("author") or "?")} · '
-        f'更新 {_esc((r.get("updated_at") or "")[:19])}</div>'
+        f'{tr("更新", "updated")} {_esc((r.get("updated_at") or "")[:19])}</div>'
         f'<div style="margin:4px 0;">{tags}</div>'
         f'<pre style="white-space:pre-wrap;background:rgba(15,23,42,0.4);'
         f'padding:8px;border-radius:5px;font-size:0.9em;">{_esc(r.get("content"))}</pre>'
@@ -136,41 +140,41 @@ def save_memory(store: MemoryStore | None, namespace: str | None, path: str,
                 content: str, *, kind: str = "note", title: str = "",
                 pin: bool = False) -> str:
     if store is None:
-        return "❌ 记忆存储未就绪"
+        return tr("❌ 记忆存储未就绪", "❌ Memory store not ready")
     if not (path or "").strip():
-        return "❌ 需要 path（如 insights/tip.md）"
+        return tr("❌ 需要 path（如 insights/tip.md）", "❌ `path` is required (e.g. insights/tip.md)")
     k = kind if kind in KINDS else "note"
     try:
         r = store.write(namespace or "global", path, content or "", title=title,
                         kind=k, author="user", pinned=bool(pin))
-        return f"✅ 已保存 {r['namespace']}/{r['path']}"
+        return tr(f"✅ 已保存 {r['namespace']}/{r['path']}", f"✅ Saved {r['namespace']}/{r['path']}")
     except Exception as exc:
-        return f"❌ 保存失败: {exc}"
+        return tr(f"❌ 保存失败: {exc}", f"❌ Save failed: {exc}")
 
 
 def delete_memory(store: MemoryStore | None, namespace: str | None,
                   path: str | None) -> str:
     if store is None or not path:
-        return "❌ 选择要删除的记忆"
+        return tr("❌ 选择要删除的记忆", "❌ Select a memory to delete")
     try:
         ok = store.delete(namespace or "global", path)
-        return "🗑 已删除" if ok else "（无此记忆）"
+        return (tr("🗑 已删除", "🗑 Deleted") if ok else tr("（无此记忆）", "(no such memory)"))
     except Exception as exc:
-        return f"❌ 删除失败: {exc}"
+        return tr(f"❌ 删除失败: {exc}", f"❌ Delete failed: {exc}")
 
 
 def toggle_pin_memory(store: MemoryStore | None, namespace: str | None,
                       path: str | None, on: bool = True) -> str:
     if store is None or not path:
-        return "❌ 选择记忆"
+        return tr("❌ 选择记忆", "❌ Select a memory")
     r = store.read(namespace or "global", path)
     if r is None:
-        return "（无此记忆）"
+        return tr("（无此记忆）", "(no such memory)")
     try:
         store.pin(int(r["id"]), bool(on))
-        return "📌 已置顶" if on else "已取消置顶"
+        return tr("📌 已置顶", "📌 Pinned") if on else tr("已取消置顶", "Unpinned")
     except Exception as exc:
-        return f"❌ 失败: {exc}"
+        return tr(f"❌ 失败: {exc}", f"❌ Failed: {exc}")
 
 
 # ── phase summaries (sharding) ────────────────────────────────────────
@@ -178,23 +182,26 @@ def toggle_pin_memory(store: MemoryStore | None, namespace: str | None,
 def render_phase_summaries_html(pm, experiment_id: str | None) -> str:
     """List conversation-phase summaries for an experiment (sharding output)."""
     if pm is None:
-        return '<div style="color:#94a3b8;padding:12px;">分片管理未就绪。</div>'
+        return '<div style="color:#94a3b8;padding:12px;">' + tr('分片管理未就绪。', 'Phase manager not ready.') + '</div>'
     try:
         phases = pm.list_phases(experiment_id)
     except Exception as exc:  # pragma: no cover
-        return f'<div style="color:#ef4444;padding:12px;">读取失败: {_esc(exc)}</div>'
+        return f'<div style="color:#ef4444;padding:12px;">{tr("读取失败", "Read failed")}: {_esc(exc)}</div>'
     if not phases:
         return ('<div style="color:#94a3b8;padding:12px;">'
-                '尚无对话阶段。长对话会自动/手动分片，每段产出压缩摘要。</div>')
+                + tr('尚无对话阶段。长对话会自动/手动分片，每段产出压缩摘要。',
+                     'No conversation phases yet. Long conversations are sharded automatically or manually, '
+                     'and each phase gets a compressed summary.')
+                + '</div>')
     items = []
     for p in phases:
-        title = p.get("title") or f"阶段 {p.get('phase_index')}"
-        summary = p.get("summary") or "(未摘要)"
+        title = p.get("title") or tr(f"阶段 {p.get('phase_index')}", f"Phase {p.get('phase_index')}")
+        summary = p.get("summary") or tr("(未摘要)", "(no summary)")
         open_ = p.get("ended_msg_id") is None
         items.append(
             '<div style="padding:6px 10px;border-bottom:1px solid rgba(148,163,184,0.15);">'
             f'<span style="font-weight:600;">#{_esc(p.get("phase_index"))} {_esc(title)}'
-            f'{" · 进行中" if open_ else ""}</span>'
+            f'{tr(" · 进行中", " · in progress") if open_ else ""}</span>'
             f'<div style="color:#cbd5e1;font-size:0.9em;margin-top:2px;">{_esc(summary)}</div>'
             '</div>'
         )
@@ -206,17 +213,18 @@ def render_phase_summaries_html(pm, experiment_id: str | None) -> str:
 def run_dream_now(db_path, store: MemoryStore | None, *, consolidator=None) -> str:
     """Run one dreaming-consolidation pass now and report what it wrote."""
     if store is None:
-        return "❌ 记忆存储未就绪"
+        return tr("❌ 记忆存储未就绪", "❌ Memory store not ready")
     try:
         from mast.memory.dreaming import DreamingService
         svc = DreamingService(db_path, store, consolidator=consolidator)
         written = svc.dream_once()
     except Exception as exc:
-        return f"❌ 做梦失败: {exc}"
+        return tr(f"❌ 做梦失败: {exc}", f"❌ Dreaming failed: {exc}")
     if not written:
-        return "🌙 做梦完成：无新的可固化内容（或已固化、被去重）。"
+        return tr("🌙 做梦完成：无新的可固化内容（或已固化、被去重）。", "🌙 Dreaming finished: nothing new to consolidate (or already consolidated / deduplicated).")
     paths = ", ".join(w.get("path", "?") for w in written)
-    return f"🌙 做梦完成：写入 {len(written)} 条记忆（{paths}）。标注「非实测，仅供参考」。"
+    return tr(f"🌙 做梦完成：写入 {len(written)} 条记忆（{paths}）。标注「非实测，仅供参考」。",
+              f"🌙 Dreaming finished: wrote {len(written)} memories ({paths}). Marked 'not measured, for reference only'.")
 
 
 # ── brainstorm (lazy — backend may land slightly later) ───────────────
@@ -232,14 +240,14 @@ def run_brainstorm_panel(db_path, experiment_id: str | None, *, topic: str = "",
     try:
         from mast.agents.brainstorm.graph import run_brainstorm
     except Exception:
-        return ('<div style="color:#94a3b8;padding:12px;">头脑风暴后端尚在构建中。</div>', "")
+        return ('<div style="color:#94a3b8;padding:12px;">' + tr("头脑风暴后端尚在构建中。", "The brainstorm backend is still being built.") + '</div>', "")
     vps = [v.strip() for v in (user_viewpoints or "").splitlines() if v.strip()]
     try:
         res = run_brainstorm(db_path, experiment_id, topic=topic,
                              user_viewpoints=vps, max_rounds=max_rounds,
                              llm=llm, memory_store=store)
     except Exception as exc:
-        return (f'<div style="color:#ef4444;padding:12px;">头脑风暴失败: {_esc(exc)}</div>', "")
+        return (f'<div style="color:#ef4444;padding:12px;">{tr("头脑风暴失败", "Brainstorm failed")}: {_esc(exc)}</div>', "")
     transcript = res.get("transcript", []) if isinstance(res, dict) else []
     summary = res.get("summary", "") if isinstance(res, dict) else ""
     rows = []
@@ -253,7 +261,7 @@ def run_brainstorm_panel(db_path, experiment_id: str | None, *, topic: str = "",
             '</div>'
         )
     html_out = ('<div style="font-size:0.95em;">'
-                + ("".join(rows) or '<div style="color:#94a3b8;padding:12px;">（空）</div>')
+                + ("".join(rows) or '<div style="color:#94a3b8;padding:12px;">' + tr("（空）", "(empty)") + '</div>')
                 + '</div>')
     return html_out, summary
 

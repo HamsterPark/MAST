@@ -1,8 +1,8 @@
-// 系列页上的出图入口（设计 D22）。
+// Figure entry points on the series page.
 //
-// 帧系列 →「16:9 拼图」（一列一个扫描转角、一行一轮）与「叠加…」（锚点 + 视野）；
-// 谱系列 →「拉线谱出图…」（弹层，见 StsLinesDialog）。混合系列两边的按钮都给——
-// 服务端只取对应种类的成员。
+// Frame series -> "16:9 sheet" (one column per scan angle, one row per round) and "Stack…"
+// (anchor + field of view); spectrum series -> "STS line figure…" (dialog, see StsLinesDialog).
+// A mixed series gets both sets of buttons; the server only takes members of the matching kind.
 
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -13,11 +13,12 @@ import { SMALL_BTN, SMALL_SELECT } from "../bits";
 import { toast } from "../toast";
 import { startFigureJob } from "./figureJob";
 import { StsLinesDialog } from "./StsLinesDialog";
+import { tr } from "@/lib/i18n";
 
 const ANCHORS: readonly (readonly [string, string])[] = [
-  ["darkest", "中心附近最暗处"],
-  ["brightest", "中心附近最亮处"],
-  ["center", "帧中心（不找锚点）"],
+  ["darkest", tr("中心附近最暗处（缺陷，默认做法）", "Darkest point near the center (a defect; default)")],
+  ["brightest", tr("中心附近最亮处", "Brightest point near the center")],
+  ["center", tr("帧中心（不找锚点）", "Frame center (no anchor search)")],
 ];
 
 const ACC = "!border-mast-accent !bg-mast-accent !text-mast-accent-ink";
@@ -37,7 +38,7 @@ export function SeriesFigureActions({ sid, mem, model }: { sid: string; mem: Gal
     const t = fov.trim();
     const f = /^\d*\.?\d+$/.test(t) ? Number(t) : NaN;
     if (!(f > 0)) {
-      toast("视野要是正数（nm）", "err");
+      toast(tr("视野要是正数（nm）", "The field of view must be a positive number (nm)"), "err");
       return;
     }
     void startFigureJob(qc, { kind: "series_stack", series: [sid], options: { anchor, fov_nm: f } });
@@ -46,24 +47,30 @@ export function SeriesFigureActions({ sid, mem, model }: { sid: string; mem: Gal
 
   return (
     <div className="my-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[13px]">
-      <span className="text-mast-muted">出图：</span>
+      <span className="text-mast-muted">{tr("出图：", "Figures:")}</span>
       {nF > 0 && (
         <>
           <button
             type="button"
             className={SMALL_BTN}
-            title="16:9 两页：一列一个扫描转角（从第 1 帧起按采集顺序），一行一轮；每帧转到第 1 帧朝向、以锚点为中心"
+            title={tr(
+              "16:9 两页：一列一个扫描转角（从第 1 帧起按采集顺序），一行一轮；每帧转到第 1 帧朝向、以锚点为中心",
+              "16:9, two pages: one column per scan angle (in acquisition order from frame 1), one row per round; each frame is rotated to frame 1's orientation and centered on the anchor",
+            )}
             onClick={() => void startFigureJob(qc, { kind: "series_slides", series: [sid] })}
           >
-            16:9 拼图
+            {tr("16:9 拼图", "16:9 sheet")}
           </button>
           <button
             type="button"
             className={clsx(SMALL_BTN, stackOpen && "!border-mast-accent")}
-            title="刚性叠加 + 晶格仿射校正叠加，另出配准表（漂移轨迹）与 npy 数组"
+            title={tr(
+              "刚性叠加 + 晶格仿射校正叠加，另出配准表（漂移轨迹）与 npy 数组",
+              "Rigid stack + lattice-affine-corrected stack, plus a registration table (drift trajectory) and npy arrays",
+            )}
             onClick={() => setStackOpen((o) => !o)}
           >
-            叠加…
+            {tr("叠加…", "Overlay…")}
           </button>
         </>
       )}
@@ -71,15 +78,18 @@ export function SeriesFigureActions({ sid, mem, model }: { sid: string; mem: Gal
         <button
           type="button"
           className={SMALL_BTN}
-          title="勾上同一条线的各个区组系列，出热图与瀑布（分区组比较 / 站位均值）"
+          title={tr(
+            "勾上同一条线的各个区组系列，出热图与瀑布（分区组比较 / 站位均值）",
+            "Tick the block series of the same line to export heatmaps and waterfalls (per-block comparison / per-site average)",
+          )}
           onClick={() => setLinesOpen(true)}
         >
-          拉线谱出图…
+          {tr("拉线谱出图…", "STS line figure…")}
         </button>
       )}
       {stackOpen && (
         <span className="inline-flex flex-wrap items-center gap-1.5 rounded-[3px] border border-mast-border bg-mast-panel px-2 py-1">
-          锚点
+          {tr("锚点", "Anchor")}
           <select className={SMALL_SELECT} value={anchor} onChange={(e) => setAnchor(e.target.value)}>
             {ANCHORS.map(([v, label]) => (
               <option key={v} value={v}>
@@ -87,14 +97,14 @@ export function SeriesFigureActions({ sid, mem, model }: { sid: string; mem: Gal
               </option>
             ))}
           </select>
-          视野
+          {tr("视野", "Field of view")}
           <input className={`${SMALL_SELECT} w-14`} value={fov} onChange={(e) => setFov(e.target.value)} />
           nm
           <button type="button" className={clsx(SMALL_BTN, ACC)} onClick={runStack}>
-            开始叠加
+            {tr("开始叠加", "Start stacking")}
           </button>
           <button type="button" className={SMALL_BTN} onClick={() => setStackOpen(false)}>
-            收起
+            {tr("收起", "Collapse")}
           </button>
         </span>
       )}

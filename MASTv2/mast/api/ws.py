@@ -28,6 +28,34 @@ router = APIRouter(tags=["realtime"])
 _PING_TIMEOUT_S = 15.0
 
 
+async def _until_disconnect(ws: WebSocket) -> None:
+    """Return when the client goes away — or when uvicorn closes the socket on shutdown.
+
+    Neither /ws/buffer nor /ws/events has client→server messages in its protocol
+    (the frontend only listens), so any stray text/binary frame is read and dropped;
+    only ``websocket.disconnect`` ends this. Someone HAS to be reading, though: a
+    handler that only waits on its queue never sees the close uvicorn sends during a
+    graceful shutdown, and lingers until its next ping fails — measured at +15 s on
+    every shutdown with a UI attached, uncomfortably close to the 20 s exit backstop.
+    """
+    try:
+        while True:
+            msg = await ws.receive()
+            if msg.get("type") == "websocket.disconnect":
+                return
+    except Exception:  # noqa: BLE001 — cannot read ⇒ the connection is gone
+        return
+
+
+def _cancel_all(*tasks: "asyncio.Task | None") -> None:
+    """Cancel helper tasks WITHOUT awaiting them: awaiting inside a ``finally`` while
+    the handler itself is being cancelled is how a CancelledError leaks out of the
+    server's (or TestClient's) cancel scope. Each task exits at its next await."""
+    for t in tasks:
+        if t is not None:
+            t.cancel()
+
+
 def _build_snapshot(ctx) -> BufferSnapshot:
     """Read a point-in-time snapshot from the live BufferService, or a degraded
     empty snapshot when none is wired. Never raises."""
@@ -78,6 +106,10 @@ async def ws_buffer(ws: WebSocket) -> None:
     await ws.send_json(WsFrame(kind="snapshot", snapshot=_build_snapshot(ctx)).model_dump(mode="json"))
 
     queue = None
+    # Disconnect watcher, raced against the queue below: a disconnect (or the server
+    # shutting down) ends the loop at once instead of at the next failed ping.
+    gone = asyncio.create_task(_until_disconnect(ws))
+    getter: asyncio.Task | None = None
     try:
         if buffer is not None:
             try:
@@ -87,26 +119,28 @@ async def ws_buffer(ws: WebSocket) -> None:
                 queue = None
 
         while True:
+            # Degraded (no producer): only the watcher and the idle heartbeat.
+            waiting: set = {gone}
             if queue is not None:
-                try:
-                    ev = await asyncio.wait_for(queue.get(), timeout=_PING_TIMEOUT_S)
-                    await ws.send_json(
-                        WsFrame(kind="event", event=ev).model_dump(mode="json")
-                    )
-                except asyncio.TimeoutError:
-                    await ws.send_json(WsFrame(kind="ping").model_dump(mode="json"))
+                if getter is None:
+                    getter = asyncio.create_task(queue.get())
+                waiting.add(getter)
+            done, _ = await asyncio.wait(waiting, timeout=_PING_TIMEOUT_S,
+                                         return_when=asyncio.FIRST_COMPLETED)
+            if gone in done:
+                break
+            if getter is not None and getter in done:
+                ev = getter.result()
+                getter = None
+                await ws.send_json(WsFrame(kind="event", event=ev).model_dump(mode="json"))
             else:
-                # Degraded: no producer. Wait on the client (so a disconnect is
-                # noticed immediately) and heartbeat on idle.
-                try:
-                    await asyncio.wait_for(ws.receive_text(), timeout=_PING_TIMEOUT_S)
-                except asyncio.TimeoutError:
-                    await ws.send_json(WsFrame(kind="ping").model_dump(mode="json"))
+                await ws.send_json(WsFrame(kind="ping").model_dump(mode="json"))
     except WebSocketDisconnect:
         pass
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("ws_buffer loop ended: %s", exc)
     finally:
+        _cancel_all(getter, gone)
         if queue is not None and buffer is not None:
             try:
                 buffer.unsubscribe_all(queue)
@@ -153,6 +187,8 @@ async def ws_events(ws: WebSocket) -> None:
       clients — new event kinds are added over time.
     * ``{"kind":"dropped","from":a,"to":b}`` says the client was too slow and
       lost that range; it should re-sync from ``since=b``.
+    * the client sends nothing; anything it does send is read and ignored (that
+      read is what notices a disconnect — or a server shutdown — immediately).
 
     Degradation: the HTTP polling path (``EventBus.recent_events_since``) stays
     exactly as it was. A blocked Upgrade, a dead socket, or a client that never
@@ -196,6 +232,10 @@ async def ws_events(ws: WebSocket) -> None:
         except RuntimeError:
             pass                      # loop already closing
 
+    # Disconnect watcher, raced against the queue below: a client that leaves (or a
+    # server shutting down) ends the loop at once, not at the next failed ping.
+    gone = asyncio.create_task(_until_disconnect(ws))
+    getter: asyncio.Task | None = None
     try:
         if bus is not None:
             # Replay BEFORE subscribing would lose anything published in
@@ -211,12 +251,17 @@ async def ws_events(ws: WebSocket) -> None:
                     "ts": item.get("ts")})
 
         while True:
-            try:
-                seq, event = await asyncio.wait_for(queue.get(),
-                                                    timeout=_PING_TIMEOUT_S)
-            except asyncio.TimeoutError:
+            if getter is None:
+                getter = asyncio.create_task(queue.get())
+            done, _ = await asyncio.wait({getter, gone}, timeout=_PING_TIMEOUT_S,
+                                         return_when=asyncio.FIRST_COMPLETED)
+            if gone in done:
+                break
+            if getter not in done:
                 await ws.send_json(WsFrame(kind="ping").model_dump(mode="json"))
                 continue
+            seq, event = getter.result()
+            getter = None
             if dropped:
                 lost, dropped[:] = list(dropped), []
                 await ws.send_json({"kind": "dropped",
@@ -227,6 +272,7 @@ async def ws_events(ws: WebSocket) -> None:
     except Exception as exc:  # pragma: no cover — defensive
         logger.debug("ws_events loop ended: %s", exc)
     finally:
+        _cancel_all(getter, gone)
         if bus is not None and handle is not None:
             try:
                 bus.unsubscribe(handle)

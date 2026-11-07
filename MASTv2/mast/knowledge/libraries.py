@@ -92,8 +92,8 @@ _SLUG_FALLBACK = "lib"
 # Resolved LAZILY through the one shared resolver (``knowledge/paths.py``).
 # The private ``_find_repo_root()`` that used to live here was one of five
 # near-identical copies across ``knowledge/*``; freezing any of them into a
-# module constant at import time is exactly how pointed every data
-# path at a non-existent directory in the frozen build. ``paths.libs_dir()``
+# module constant at import time pointed every data path at a non-existent
+# directory in the frozen build. ``paths.libs_dir()``
 # resolves to the same directory the old walk did (verified byte-for-byte on
 # 2026-07-29), and honours ``MAST_LITERATURE_LIBS_DIR``.
 
@@ -195,7 +195,7 @@ def _canonical_work_id(work_id: str) -> str:
         # **必须与真源逐字同义**：剥已知 URL 前缀 → 整串 fullmatch → 认不出就原样
         # 返回。原来这里是 ``search`` + 取匹配段，会把 ``W1998Barth`` 静默截断成
         # ``W1998``（一个不同的 id）；截断值会成为文件夹书目的 key 并传播进 registry，
-        # 而 registry 无备份、不可逆（2026-07-29 架构审查 M4）。
+        # 而 registry 无备份、不可逆。
         wid = (work_id or "").strip()
         if not wid or wid.lower().startswith("local:"):
             return wid
@@ -421,7 +421,7 @@ class LibraryRegistry:
         raw = m.get("work_id", "")
         if not _is_valid_work_id(raw):
             return None
-        # Store the CANONICAL bare form on disk : "W123" and
+        # Store the CANONICAL bare form on disk: "W123" and
         # "https://openalex.org/W123" collapse to one id, so a load→save round
         # trip can never keep two rows for the same paper. local:<…> and any
         # non-OpenAlex id pass through unchanged.
@@ -1234,7 +1234,7 @@ def apply_merge_map(
 def migrate_canonical(*, registry: LibraryRegistry | None = None) -> dict[str, Any]:
     """On-demand: re-normalise every library's members to canonical bare
     work_ids + collapse dual-form duplicates + persist (idempotent). Runs
-    automatically on registry load; this is the explicit trigger ."""
+    automatically on registry load; this is the explicit trigger."""
     return _reg(registry).migrate_canonical()
 
 

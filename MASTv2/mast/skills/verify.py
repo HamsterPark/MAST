@@ -9,8 +9,8 @@ though it were the value the instrument has.
     rec = context.safe_call("ZCtrl_OnOffSet", 0)
     return SkillResult(..., data={"z_controller_on": False})   # ← a CLAIM, not a READING
 
-That is the same defect the 2026-07-10 kept surfacing under
-different names — "AutoApproach 宣布进针成功 at 0.17 pA", "硬件『停止』≠『达标』".
+That is the same defect that shows up under other names: an approach
+announced as successful far from the setpoint, "hardware stopped" taken for "target reached".
 The agent downstream believes `z_controller_on: False` and runs a COARSE APPROACH.
 If the loop is in fact still closed, that is a tip crash.
 
@@ -49,6 +49,8 @@ import logging
 import math
 import time as _time
 from typing import Any
+
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -231,15 +233,21 @@ def z_off_or_reason(context) -> tuple[bool, str | None, Any]:
     """
     v = verify_z_controller(context, expect=False)
     if not v["verified"]:
-        return False, (
+        return False, tr(
             f"无法确认 Z 反馈是否已断开（ZCtrl_OnOffGet 读取失败：{v['error']}）。"
-            "读不到就当它还闭着——反馈环还在的时候做粗进针/换增益就是撞针。"
+            "读不到就当它还闭着——反馈环还在的时候做粗进针/换增益就是撞针。",
+            f"Cannot confirm that Z feedback is off (ZCtrl_OnOffGet read failed: {v['error']}). "
+            "If it cannot be read, treat it as still closed - a coarse approach or gain "
+            "change with the feedback loop on is a tip crash."
         ), v["record"]
     if v["on"]:
-        return False, (
+        return False, tr(
             "Z 反馈环仍然闭合（实时控制器回报 ON）。"
             "注意：Z-Controller 模块可能已显示 Off——两者不是一回事，"
-            "Nanonis 手册要求以实时控制器为准。"
+            "Nanonis 手册要求以实时控制器为准。",
+            "The Z feedback loop is still closed (the real-time controller reports ON). "
+            "Note: the Z-Controller module may already show Off - they are not the "
+            "same thing, and the Nanonis manual says to trust the real-time controller."
         ), v["record"]
     return True, None, v["record"]
 
@@ -291,15 +299,18 @@ def values_match(
         want = float(requested)  # type: ignore[arg-type]
         got = float(actual)      # type: ignore[arg-type]
     except (TypeError, ValueError):
-        return False, f"无法比较: 请求 {requested!r}, 读回 {actual!r}"
+        return False, tr(f"无法比较: 请求 {requested!r}, 读回 {actual!r}",
+                         f"Cannot compare: requested {requested!r}, read back {actual!r}")
     if math.isnan(want) or math.isnan(got):
-        return False, f"请求 {requested!r}, 读回 {actual!r}(NaN 不可比较)"
+        return False, tr(f"请求 {requested!r}, 读回 {actual!r}(NaN 不可比较)",
+                         f"requested {requested!r}, read back {actual!r} (NaN is not comparable)")
     if math.isclose(want, got, rel_tol=rel_tol, abs_tol=0.0):
         return True, ""
     if want == 0.0:
-        return False, f"请求 0, 读回 {got!r}"
+        return False, tr(f"请求 0, 读回 {got!r}", f"requested 0, read back {got!r}")
     ratio = got / want
-    return False, f"请求 {want!r}, 读回 {got!r}(相差 {ratio:.3g} 倍)"
+    return False, tr(f"请求 {want!r}, 读回 {got!r}(相差 {ratio:.3g} 倍)",
+                     f"requested {want!r}, read back {got!r} (off by a factor of {ratio:.3g})")
 
 
 #: 收尾回读的四个量 → ``(Nanonis 方法, 结果字段)``。
@@ -331,18 +342,20 @@ def _read_one(context, method: str, thunk) -> "tuple[float | None, str | None]":
     try:
         rec = thunk(context)
     except Exception as exc:  # noqa: BLE001 — 回读永远不许把调用方炸掉
-        return None, f"{method} 抛异常:{type(exc).__name__}: {exc}"
+        return None, tr(f"{method} 抛异常:{type(exc).__name__}: {exc}",
+                        f"{method} raised {type(exc).__name__}: {exc}")
     err = getattr(rec, "error", None)
     if err:
-        return None, f"{method} 报错:{err}"
+        return None, tr(f"{method} 报错:{err}", f"{method} reported an error: {err}")
     raw = _scalar(getattr(rec, "return_value", None))
     try:
         val = float(raw)  # type: ignore[arg-type]
     except (TypeError, ValueError):
-        return None, (f"{method} 回包读不懂(repr 前 80 字:"
-                      f"{str(getattr(rec, 'return_value', None))[:80]})")
+        _rv = str(getattr(rec, 'return_value', None))[:80]
+        return None, tr(f"{method} 回包读不懂(repr 前 80 字:{_rv})",
+                        f"{method} reply not understood (first 80 chars of repr: {_rv})")
     if math.isnan(val) or math.isinf(val):
-        return None, f"{method} 读回 {val!r}"
+        return None, tr(f"{method} 读回 {val!r}", f"{method} read back {val!r}")
     return val, None
 
 
@@ -394,13 +407,16 @@ def read_junction_state(context) -> dict:
         code = v.get("module_status")
         if not v["verified"]:
             out["unreadable"]["feedback_on"] = (
-                v["error"] or "ZCtrl_OnOffGet 没有可解析的回包")
+                v["error"] or tr("ZCtrl_OnOffGet 没有可解析的回包",
+                                 "ZCtrl_OnOffGet returned no parseable reply"))
     except Exception as exc:  # noqa: BLE001
         out["unreadable"]["feedback_on"] = (
-            f"verify_z_controller 抛异常:{type(exc).__name__}: {exc}")
+            tr(f"verify_z_controller 抛异常:{type(exc).__name__}: {exc}",
+               f"verify_z_controller raised {type(exc).__name__}: {exc}"))
 
     if code is None:
-        out["unreadable"]["z_controller_status"] = "ZCtrl_StatusGet 读不到"
+        out["unreadable"]["z_controller_status"] = tr("ZCtrl_StatusGet 读不到",
+                                                              "ZCtrl_StatusGet could not be read")
     else:
         out["z_controller_status"] = _MODULE_STATUS.get(int(code),
                                                         f"Unknown({code})")

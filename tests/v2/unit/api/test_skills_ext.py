@@ -184,6 +184,36 @@ def test_composite_get_found(client: TestClient) -> None:
                                             "description"}
 
 
+def test_factory_composite_text_follows_the_request_language() -> None:
+    """Factory composites store Chinese text inside their fingerprinted spec; the
+    API translates it on the way out (builtin_composites_i18n), per request."""
+    from mast.i18n import LanguageMiddleware
+    from mast.skills.composite.builtin_composites_i18n import EN_BY_ZH
+
+    app = FastAPI()
+    app.state.ctx = AppContext()
+    app.include_router(router, prefix="/api")
+    app.add_middleware(LanguageMiddleware)
+    c = TestClient(app)
+
+    zh_rows = c.get("/api/composites", headers={"X-MAST-Lang": "zh"}).json()["composites"]
+    factory = [r for r in zh_rows if r["description"] in EN_BY_ZH]
+    if not factory:
+        pytest.skip("no unmodified factory composite in the seeded store")
+    row = factory[0]
+    en_rows = c.get("/api/composites", headers={"X-MAST-Lang": "en"}).json()["composites"]
+    en_desc = {r["name"]: r["description"] for r in en_rows}[row["name"]]
+    assert en_desc == EN_BY_ZH[row["description"]]
+
+    zh_spec = c.get(f"/api/composites/{row['name']}",
+                    headers={"X-MAST-Lang": "zh"}).json()["spec"]
+    en_spec = c.get(f"/api/composites/{row['name']}",
+                    headers={"X-MAST-Lang": "en"}).json()["spec"]
+    assert zh_spec["description"] == row["description"]
+    assert en_spec["description"] == en_desc
+    assert en_spec["nodes"] and len(en_spec["nodes"]) == len(zh_spec["nodes"])
+
+
 def test_composite_get_unknown(client: TestClient) -> None:
     r = client.get("/api/composites/__no_such_composite__")
     assert r.status_code == 200

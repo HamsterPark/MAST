@@ -36,6 +36,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.skills.base import BaseSkill
 
 #: `AssessTipSharpness` 能返回的**全部** verdict。调用方必须对每一个都表态。
@@ -68,25 +69,33 @@ class AssessTipSharpness(BaseSkill):
             version="1.0.0",
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
-            description=(
+            description=tr(
                 "针尖有多锐，从一张已保存的 .sxm 上量：最陡台阶边缘的 10-90 上升宽度（锐针尖几个 px "
                 "就能分开一个台阶；钝针或双针会把它抹开），外加正/反扫不稳定度与 FFT 锐度。只读。"
                 "画面里没有清晰台阶时 edge_resolution_nm 为 null —— 那表示「这张图判不出来」，"
-                "**不是**「锐」。"
+                "**不是**「锐」。",
+                "How sharp the tip is, measured from a saved .sxm: the 10-90 rise width of the "
+                "steepest step edge (a sharp tip separates a step within a few px; a blunt or "
+                "double tip smears it), plus forward/backward scan instability and FFT sharpness. "
+                "Read-only. When the frame has no clear step, edge_resolution_nm is null -- that "
+                "means \"this image cannot be judged\", **not** \"sharp\".",
             ),
             parameters=[
                 ParameterSpec(
                     name="scan_path", type="str",
-                    description="要分析的 .sxm 文件路径。",
+                    description=tr("要分析的 .sxm 文件路径。", "Path of the .sxm file to analyse."),
                     required=True),
                 ParameterSpec(
                     name="channel", type="str",
-                    description="形貌通道（标准是 'Z'）。",
+                    description=tr("形貌通道（标准是 'Z'）。", "Topography channel (normally 'Z')."),
                     required=False, default="Z"),
                 ParameterSpec(
                     name="sharp_edge_nm", type="float", unit="nm",
-                    description="边缘宽度到这个值或更小，就算针尖锐。留空则只报数、不下结论 —— "
-                                "合适的阈值取决于像素尺寸和表面。",
+                    description=tr("边缘宽度到这个值或更小，就算针尖锐。留空则只报数、不下结论 —— "
+                                   "合适的阈值取决于像素尺寸和表面。",
+                                   "Edge width at or below this value counts as a sharp tip. Left empty, "
+                                   "only the number is reported with no verdict -- a suitable "
+                                   "threshold depends on the pixel size and the surface."),
                     required=False, min_value=0.01, max_value=100.0),
             ],
             estimated_duration_s=3.0,
@@ -102,7 +111,7 @@ class AssessTipSharpness(BaseSkill):
 
         if not Path(scan_path).exists():
             return SkillResult(skill_name="AssessTipSharpness", success=False,
-                               error=f"文件不存在: {scan_path}")
+                               error=tr(f"文件不存在: {scan_path}", f"File does not exist: {scan_path}"))
         try:
             import numpy as np
 
@@ -116,13 +125,13 @@ class AssessTipSharpness(BaseSkill):
             )
         except ImportError as exc:
             return SkillResult(skill_name="AssessTipSharpness", success=False,
-                               error=f"缺依赖: {exc}")
+                               error=tr(f"缺依赖: {exc}", f"Missing dependency: {exc}"))
 
         try:
             scan = read_sxm(scan_path)
         except Exception as exc:  # noqa: BLE001
             return SkillResult(skill_name="AssessTipSharpness", success=False,
-                               error=f".sxm 读取失败: {exc}")
+                               error=tr(f".sxm 读取失败: {exc}", f"Failed to read .sxm: {exc}"))
 
         # 使用 sxm_oriented_frames 统一几何归位，再比较正反扫。
         # 反扫原始数组沿快轴镜像，直接比较会把坐标差异当成不稳定，
@@ -135,12 +144,13 @@ class AssessTipSharpness(BaseSkill):
             if first is None:
                 return SkillResult(
                     skill_name="AssessTipSharpness", success=False,
-                    error=f"文件里没有可用通道(要的是 {channel_name!r})")
+                    error=tr(f"文件里没有可用通道(要的是 {channel_name!r})",
+                             f"No usable channel in the file (wanted {channel_name!r})"))
             oriented = sxm_oriented_frames(scan, first)
         fwd, bwd = oriented.get("forward"), oriented.get("backward")
         if fwd is None:
             return SkillResult(skill_name="AssessTipSharpness", success=False,
-                               error="通道里没有正扫/反扫数据")
+                               error=tr("通道里没有正扫/反扫数据", "No forward/backward scan data in the channel"))
 
         arr = np.asarray(fwd, dtype=np.float64)
         bwd_arr = (np.asarray(bwd, dtype=np.float64)
@@ -155,9 +165,23 @@ class AssessTipSharpness(BaseSkill):
         except Exception:  # noqa: BLE001
             nm_per_px = None
 
-        # 复用 vision 层判据，但在此入口使用适合当前图像尺度的预处理。
-        # 不能让另一条判据链中的幅度早退条件隐式筛掉此处需要分析的细微结构。
-        # 前置有效性由 mast.vision.frame_validity 共用，避免多个入口各自判断而产生分歧。
+        # 判据函数直接用 vision 层那几个(单源),但**预处理自己做**。
+        #
+        # 不走 ``assess_tip_classical`` 是因为它开头有一道
+        # ``if h.std() < 1e-9: return 全零`` 的守卫,单位是米 —— 而 Au(111) 的单
+        # 原子台阶只有 236 pm,一帧漂亮的贵金属台阶图去趋势之后 std 就在 1-2e-10,
+        # 正好落在那道守卫下面。也就是说:**修针最该用它的那种图,它恰好全部早退**,
+        # 报回来 fft_sharpness=0 / edge=None,读起来像「这张图没东西」。
+        #
+        # 不去改那个阈值,是因为它同时喂着其他判据链,改动归一化会影响它们。
+        # 这里只是不共用它的预处理。
+        # 「这一帧能不能判」是**三家共用的一份判据**
+        # (mast.vision.frame_validity)：AssessClusterRoundness / FindFlatRegion
+        # 这类判据在死平的帧上也可能照判不误。所以把它抽出去，
+        # 不是各自打补丁：同一个判断有第二份实现，迟早各自漂移。
+        #
+        # judge_frame 内部用的就是本文件原来用的那个 _detrend（行中值 + 平面
+        # 拟合 + float32），所以本技能的行为字节级不变。
         frame = judge_frame(arr)
         if not frame.usable:
             return SkillResult(
@@ -189,11 +213,14 @@ class AssessTipSharpness(BaseSkill):
         if edge_nm is None:
             # 平坦帧上量「边缘宽度」是在量噪声 —— 判不了就说判不了。
             data["verdict"] = "no_step"
-            summary = ("这张图里没有清晰台阶,判不了针尖锐利度 —— "
-                       "换一块有台阶的地方再扫一张。")
+            summary = tr("这张图里没有清晰台阶,判不了针尖锐利度 —— "
+                         "换一块有台阶的地方再扫一张。",
+                         "No clear step in this image, so tip sharpness cannot be judged -- "
+                         "scan another image somewhere with a step.")
         elif thr is None:
             data["verdict"] = "measured"
-            summary = f"台阶边缘 10-90 宽度 {edge_nm:.2f} nm（未给判定阈值）"
+            summary = tr(f"台阶边缘 10-90 宽度 {edge_nm:.2f} nm（未给判定阈值）",
+                         f"Step edge 10-90 width {edge_nm:.2f} nm (no verdict threshold given)")
         else:
             # 判定阈值必须处于当前采样能够分辨的尺度。
             # 10–90 宽度阈值低于两个采样点时，判别主要反映像素栅格，不能据此验收针尖。
@@ -203,19 +230,27 @@ class AssessTipSharpness(BaseSkill):
                 data["verdict"] = "unresolved"
                 data["sharp_edge_nm"] = float(thr)
                 data["sampling_floor_nm"] = floor_nm
-                summary = (
+                summary = tr(
                     f"判不了(不是不合格):阈值 {float(thr):.2f} nm 比这张图的采样"
                     f"极限 {floor_nm:.2f} nm 还小({nm_per_px:.3f} nm/px × 2)。"
                     f"量到的 {edge_nm:.2f} nm 只反映像素大小。"
                     f"把验收图扫细到 **≤ {float(thr) / 2:.3f} nm/px**"
-                    f"(同视野加像素,或缩小视野)再判。")
+                    f"(同视野加像素,或缩小视野)再判。",
+                    f"Cannot judge (this is not a failure): the threshold {float(thr):.2f} nm is "
+                    f"below this image's sampling limit {floor_nm:.2f} nm ({nm_per_px:.3f} nm/px x 2). "
+                    f"The measured {edge_nm:.2f} nm only reflects the pixel size. "
+                    f"Rescan the acceptance image finer, to **<= {float(thr) / 2:.3f} nm/px** "
+                    f"(more pixels on the same field of view, or a smaller field), then judge.")
             else:
                 sharp = float(edge_nm) <= float(thr)
                 data["verdict"] = "sharp" if sharp else "blunt"
                 data["sharp_edge_nm"] = float(thr)
-                summary = (f"台阶边缘 {edge_nm:.2f} nm "
-                           f"{'≤' if sharp else '>'} 阈值 {float(thr):.2f} nm — "
-                           f"{'够尖' if sharp else '还不够尖'}")
+                summary = tr(f"台阶边缘 {edge_nm:.2f} nm "
+                             f"{'≤' if sharp else '>'} 阈值 {float(thr):.2f} nm — "
+                             f"{'够尖' if sharp else '还不够尖'}",
+                             f"Step edge {edge_nm:.2f} nm "
+                             f"{'<=' if sharp else '>'} threshold {float(thr):.2f} nm — "
+                             f"{'sharp enough' if sharp else 'not sharp enough'}")
 
         return SkillResult(skill_name="AssessTipSharpness", success=True,
                            data=data, summary=summary)

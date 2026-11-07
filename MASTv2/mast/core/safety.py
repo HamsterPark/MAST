@@ -15,6 +15,7 @@ from mast.core.types import (
     SafetyLevel,
     SkillMetadata,
 )
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ _GLOBAL_CHECKS: list[tuple[str, str, str, str]] = [
 ]
 
 
-# ── Physical-plausibility floor (#118 deepening) ────────────────────────────
+# ── Physical-plausibility floor ────────────────────────────
 # A HARD, rig-INDEPENDENT ceiling on the magnitude of a physical quantity —
 # distinct from the admin-tunable SafetyLimits envelope. An admin may widen
 # setpoint_max_a, but a tunnelling current of 1.5 A is not "out of the configured
@@ -77,19 +78,23 @@ _FLOAT_SLACK = 1e-9
 _PHYSICAL_ABSURD: list[tuple[str, str, float, str]] = [
     # Tunnelling-current setpoint / current. Real STM: ~1 fA … 100 µA. ≥ 1 mA at a
     # tunnel junction is impossible (1.5 A is ~1e10× a 100 pA setpoint).
-    ("setpoint", "a", 1e-3, "STM 隧道电流约 1 fA–100 µA(典型 1 pA–100 nA)"),
-    ("current", "a", 1e-3, "STM 隧道电流约 1 fA–100 µA(典型 1 pA–100 nA)"),
+    ("setpoint", "a", 1e-3, tr("STM 隧道电流约 1 fA–100 µA(典型 1 pA–100 nA)",
+                               "STM tunnelling current is about 1 fA-100 µA "
+                               "(typically 1 pA-100 nA)")),
+    ("current", "a", 1e-3, tr("STM 隧道电流约 1 fA–100 µA(典型 1 pA–100 nA)",
+                              "STM tunnelling current is about 1 fA-100 µA "
+                              "(typically 1 pA-100 nA)")),
     # Bias / sweep / pulse voltages. STM bias is a ±10 V-class quantity; the
     # admin ±10 V envelope already handles ordinary over-range, so the physical
     # floor here is deliberately generous (≥ 10 kV) — it only catches a truly
     # insane hallucination (e.g. 1e6 V) and never a merely-unusual high-bias rig.
-    ("bias_v", "v", 1e4, "STM 偏压约 ±10 V 量级"),
-    ("start_v", "v", 1e4, "STM 偏压约 ±10 V 量级"),
-    ("end_v", "v", 1e4, "STM 偏压约 ±10 V 量级"),
-    ("lower_v", "v", 1e4, "STM 偏压约 ±10 V 量级"),
-    ("upper_v", "v", 1e4, "STM 偏压约 ±10 V 量级"),
-    ("pulse_v", "v", 1e4, "STM 偏压约 ±10 V 量级"),
-    ("lift_v", "v", 1e4, "STM 偏压约 ±10 V 量级"),
+    ("bias_v", "v", 1e4, tr("STM 偏压约 ±10 V 量级", "STM bias is on the order of ±10 V")),
+    ("start_v", "v", 1e4, tr("STM 偏压约 ±10 V 量级", "STM bias is on the order of ±10 V")),
+    ("end_v", "v", 1e4, tr("STM 偏压约 ±10 V 量级", "STM bias is on the order of ±10 V")),
+    ("lower_v", "v", 1e4, tr("STM 偏压约 ±10 V 量级", "STM bias is on the order of ±10 V")),
+    ("upper_v", "v", 1e4, tr("STM 偏压约 ±10 V 量级", "STM bias is on the order of ±10 V")),
+    ("pulse_v", "v", 1e4, tr("STM 偏压约 ±10 V 量级", "STM bias is on the order of ±10 V")),
+    ("lift_v", "v", 1e4, tr("STM 偏压约 ±10 V 量级", "STM bias is on the order of ±10 V")),
     # Z-controller gains. The P gain is a LENGTH (metres) and the I gain a SPEED
     # (m/s): a piezo's ENTIRE range is ~µm, so a P gain of 3 is not "aggressive
     # tuning", it is three METRES — an exponent that fell off in transit. That
@@ -99,8 +104,12 @@ _PHYSICAL_ABSURD: list[tuple[str, str, float, str]] = [
     # layer rejects "wrong for this rig", this one rejects "not a length at all".
     # Unit matching here is EXACT (see below), so the dimensionless p_gain/i_gain
     # of the Kelvin loop, the generic PI controllers and the PLL are untouched.
-    ("p_gain", "m", 1e-3, "Z 控制器 P 增益是长度,典型 1e-13–1e-9 m(压电总程仅 ~µm)"),
-    ("i_gain", "m/s", 1.0, "Z 控制器 I 增益是速度,典型 1e-9–1e-5 m/s"),
+    ("p_gain", "m", 1e-3, tr("Z 控制器 P 增益是长度,典型 1e-13–1e-9 m(压电总程仅 ~µm)",
+                             "The Z controller P gain is a length, typically 1e-13-1e-9 m "
+                             "(the piezo's whole range is only ~µm)")),
+    ("i_gain", "m/s", 1.0, tr("Z 控制器 I 增益是速度,典型 1e-9–1e-5 m/s",
+                              "The Z controller I gain is a speed, typically "
+                              "1e-9-1e-5 m/s")),
 ]
 
 
@@ -133,13 +142,21 @@ def physically_absurd_violations(meta: SkillMetadata, params: dict) -> list[str]
         unit_l = (spec.unit or "").lower()
         for pat, unit_pat, ceiling, hint in _PHYSICAL_ABSURD:
             if pat in name_l and unit_pat == unit_l and abs(value) >= ceiling:
-                violations.append(
+                violations.append(tr(
                     f"物理荒谬值: '{name}' = {value} {spec.unit or ''} 在物理上不可能"
                     f"({hint})。这不是越界,是量级丢了——请把值写成**带 SI 前缀的"
                     f"字符串**(100 pA→'100p'、1 nA→'1n'、3 pm→'3p';50 mV 这类接近 1 的"
                     f"量写 '0.05' 即可)。切勿重试相同数值,也不要改用 '1e-10' 这种"
-                    f"指数写法——量级极小的参数会直接拒绝它。"
-                )
+                    f"指数写法——量级极小的参数会直接拒绝它。",
+                    f"Physically absurd value: '{name}' = {value} {spec.unit or ''} is "
+                    f"physically impossible ({hint}). This is not out of range, the "
+                    f"magnitude was lost - write the value as a **string with an SI "
+                    f"prefix** (100 pA -> '100p', 1 nA -> '1n', 3 pm -> '3p'; a quantity "
+                    f"close to 1, such as 50 mV, can simply be written '0.05'). Do not "
+                    f"retry the same number, and do not switch to exponent notation such "
+                    f"as '1e-10' - parameters with a very small magnitude reject it "
+                    f"outright."
+                ))
                 break
     return violations
 
@@ -194,12 +211,18 @@ def implausible_reading_notes(readings: "dict[str, tuple[float, str]]") -> list[
         unit_l = (unit or "").lower()
         for pat, unit_pat, ceiling, hint in _PHYSICAL_ABSURD:
             if pat in name_l and unit_pat == unit_l and abs(value) >= ceiling:
-                notes.append(
+                notes.append(tr(
                     f"⚠ 读回值 '{name}' = {value!r} {unit or ''} 在物理上不可能"
                     f"({hint})。这个读数**不是浮点精度误差**,它比典型值大若干个"
                     f"数量级 —— 硬件里现在很可能真的是一个错误的量级。"
-                    f"不要据此判定「数值正常」,先在 Nanonis 面板上人工核对。"
-                )
+                    f"不要据此判定「数值正常」,先在 Nanonis 面板上人工核对。",
+                    f"⚠ Read-back value '{name}' = {value!r} {unit or ''} is physically "
+                    f"impossible ({hint}). This reading is **not float rounding error**; it "
+                    f"is several orders of magnitude above the typical value - the hardware "
+                    f"very likely really holds a wrong magnitude. Do not conclude from it "
+                    f"that \"the value is normal\"; check it by hand on the Nanonis panel "
+                    f"first."
+                ))
                 break
     return notes
 
@@ -301,7 +324,7 @@ def is_calibration_change(skill_name: str, params: dict | None) -> bool:
     1 kV at the junction, silently defeating the ±10 V bound. These are rare,
     deliberate rig-setup operations that must never run autonomously (they are
     CONFIRM for the manual/HITL pane, but CONFIRM ≡ auto on the agent path, so
-    the agent path needs an explicit gate — 审查)."""
+    the agent path needs an explicit gate."""
     return skill_name in ("SetBiasCalibration", "SetCurrentCalibration")
 
 
@@ -589,14 +612,23 @@ def mode_refusal(
 
     if mode is OperatingMode.SAFE:
         if pulse or shaping:
-            what = "电脉冲" if pulse else "机械修针"
-            return (
+            what = (tr("电脉冲", "electrical pulse") if pulse
+                    else tr("机械修针", "mechanical tip conditioning"))
+            return tr(
                 f"safe_mode_tip_processing_blocked: 当前是 SAFE 模式，"
                 f"'{tool_name}' 含{what}（能力标签 {sorted(caps)}）—— 拒绝执行。"
                 "SAFE 的契约是「当前针尖视为良好、专注实验、不修针」，"
                 "包一层组合技能、换一个入口都不会改变这一点。"
                 "请直接用当前针尖继续实验，或换一个不动针尖的做法；"
-                "确实需要修针时请用户切换模式。不要重试针尖处理。"
+                "确实需要修针时请用户切换模式。不要重试针尖处理。",
+                f"safe_mode_tip_processing_blocked: the current mode is SAFE, and "
+                f"'{tool_name}' involves {what} (capability tags {sorted(caps)}) - refused. "
+                "SAFE's contract is \"the current tip is considered good, focus on the "
+                "experiment, no tip conditioning\"; wrapping the call in a composite skill "
+                "or using a different entry point does not change that. Continue the "
+                "experiment with the current tip, or use an approach that does not touch "
+                "the tip; if tip conditioning is really needed, ask the user to switch "
+                "modes. Do not retry the tip processing."
             )
         return None
 
@@ -607,10 +639,14 @@ def mode_refusal(
             logger.warning("mode gate depth check failed for %s — allowing", tool_name)
             return None
         if viol:
-            return (
+            return tr(
                 "semi_mode_shallow_only: 半自动模式仅允许浅层机械修针。"
                 + "；".join(viol)
-                + "。请减小下压深度后重试。"
+                + "。请减小下压深度后重试。",
+                "semi_mode_shallow_only: semi-automatic mode only allows shallow "
+                "mechanical tip conditioning. "
+                + "; ".join(viol)
+                + ". Reduce the plunge depth and retry."
             )
     return None
 
@@ -691,8 +727,10 @@ def _get_effective_checks() -> list[tuple[str, str, str, str]]:
 #: `skills/builtins/instrument_limits.py` 开头那句 "An agent that can widen its
 #: own limits has, in the strict sense, no limits." 同样管着程序自己。
 _INSTRUMENT_CLAMPS: tuple[tuple[str, str], ...] = (
-    # 设定点上限必须受前放满量程限制。
-    # 不可到达的设定点会使反馈持续推进 Z，不能允许配置保留这种无效目标。
+    # 设定点上限 vs 前放满量程。出厂 100 nA，而实际前放量程可能只有 ±10 nA ——
+    # 设定点高于量程时电流**恒小于**设定点，反馈环永远拿不到目标值，于是一路把
+    # Z 推向样品直到撞针。出厂默认在这类配置上留了一条完整的撞针路径，而且
+    # 什么都不会报（按仪器事实收紧）。
     ("setpoint_max_a", "preamp_full_scale_a"),
 )
 
@@ -761,10 +799,12 @@ def clamp_to_instrument_facts(
             )
             continue
         updates[field] = fact
-        notes.append(
+        notes.append(tr(
             f"{field}: {current:.6g} → {fact:.6g}"
-            f"（依据 instrument_profile.{profile_key}，只收紧）"
-        )
+            f"（依据 instrument_profile.{profile_key}，只收紧）",
+            f"{field}: {current:.6g} -> {fact:.6g}"
+            f" (based on instrument_profile.{profile_key}; tighten only)"
+        ))
     if not updates:
         return limits, ()
     return limits.model_copy(update=updates), tuple(notes)
@@ -792,7 +832,7 @@ def report_instrument_clamps() -> "tuple[str, ...]":
 
         diag_record(
             "note", subject="safety_envelope_instrument_clamp",
-            reason="；".join(notes),
+            reason=tr("；", "; ").join(notes),
             clamps=list(notes),
             # 对账那条是 False（只报告）。这条是 True —— 包络真的变了。
             auto_applied=True,
@@ -814,7 +854,7 @@ def _merge_overrides(limits: SafetyLimits) -> SafetyLimits:
     SafetyGuard construction (that would silently disable the executor), so we
     fall back to the built-in limits. But the failure is logged at WARNING —
     the old ``except (ImportError, Exception): pass`` swallowed every override
-    error silently, hiding a broken admin config (/ #114).
+    error silently, hiding a broken admin config.
     """
     try:
         from mast.admin.override_store import ConfigOverrideRegistry
@@ -1024,7 +1064,7 @@ def check_state_preconditions(
     """Hardware-state preconditions -> violation messages (empty = all met).
 
     Delegates to :mod:`mast.core.preconditions`, which has been the DECLARED
-    single source of the precondition vocabulary since -- but was not
+    single source of the precondition vocabulary -- but was not
     the only one. Three hand-maintained chains existed and all three had drifted:
 
       * this one, the only one that knew ``withdrawn``;

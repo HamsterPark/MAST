@@ -11,6 +11,7 @@ import logging
 import time
 from typing import Any
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -36,25 +37,26 @@ def _age_note(updated_at: Any) -> dict[str, Any]:
         ts = float(updated_at)
     except (TypeError, ValueError):
         return {"updated_at": None, "age_s": None,
-                "age_note": "**这条标定没有时间戳** —— 无法判断它是什么时候做的。"}
+                "age_note": tr("**这条标定没有时间戳** —— 无法判断它是什么时候做的。", "**This calibration has no timestamp** - there is no way to tell when it was made.")}
     if ts <= 0:
         return {"updated_at": None, "age_s": None,
-                "age_note": "**这条标定没有时间戳** —— 无法判断它是什么时候做的。"}
+                "age_note": tr("**这条标定没有时间戳** —— 无法判断它是什么时候做的。", "**This calibration has no timestamp** - there is no way to tell when it was made.")}
     age = max(0.0, time.time() - ts)
     days = age / 86400.0
     if days >= 1.0:
-        human = f"{days:.1f} 天前"
+        human = tr(f"{days:.1f} 天前", f"{days:.1f} days ago")
     elif age >= 3600:
-        human = f"{age / 3600.0:.1f} 小时前"
+        human = tr(f"{age / 3600.0:.1f} 小时前", f"{age / 3600.0:.1f} hours ago")
     else:
-        human = f"{age / 60.0:.0f} 分钟前"
+        human = tr(f"{age / 60.0:.0f} 分钟前", f"{age / 60.0:.0f} minutes ago")
     return {
         "updated_at": ts,
         "age_s": age,
         "age_note": (
-            f"标定于 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(ts))}"
-            f"({human})。"
-            + ("**换过样品/托架之后这条就失效了** —— 倾斜响应是样品与托架的属性。"
+            tr(f"标定于 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(ts))}"
+            f"({human})。",
+            f"Calibrated at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(ts))} ({human}).")
+            + (tr("**换过样品/托架之后这条就失效了** —— 倾斜响应是样品与托架的属性。", "**This calibration is void after the sample/holder is changed** - the tilt response is a property of the sample and holder.")
                if days >= 1.0 else "")
         ),
     }
@@ -68,14 +70,16 @@ def _cond_note(cond: Any) -> str:
     try:
         c = float(cond)
     except (TypeError, ValueError):
-        return ("条件数读不到 —— **这不等于标定良好**,是这一项答不了。")
-    verdict = ("形状健全" if c <= _COND_REFUSE_ABOVE
-               else f"**形状可疑**(超过拒绝写入线 {_COND_REFUSE_ABOVE:g})")
+        return (tr("条件数读不到 —— **这不等于标定良好**,是这一项答不了。", "The condition number cannot be read - **this does not mean well calibrated**, this item simply cannot answer."))
+    verdict = (tr("形状健全", "shape is sound") if c <= _COND_REFUSE_ABOVE
+               else tr(f"**形状可疑**(超过拒绝写入线 {_COND_REFUSE_ABOVE:g})", f"**shape is suspect** (exceeds the write-refusal line {_COND_REFUSE_ABOVE:g})"))
     return (
-        f"条件数 {c:.4g} —— {verdict}。"
+        tr(f"条件数 {c:.4g} —— {verdict}。"
         "⚠️ **条件数只管形状,不管方向**:它说的是两个轴的响应有没有几乎共线,"
-        "**对符号与求逆一无所知**。即使条件数接近 1，符号或逆变换错误仍会导致调平发散。"
-        "**别把一个好看的条件数读成「标定良好」。**"
+        "**对符号与求逆一无所知**。曾出现条件数很漂亮(接近 1)而 "
+        "AutoTilt 仍然发散,根因是用了 M 而不是 −M⁻¹。"
+        "**别把一个好看的条件数读成「标定良好」。**",
+        f"Condition number {c:.4g} - {verdict}. WARNING: **the condition number only covers shape, not direction**: it says whether the responses of the two axes are nearly collinear, and **knows nothing about sign or inversion**. A condition number close to 1 (very pretty) has been seen with AutoTilt still diverging, the root cause being the use of M rather than −M⁻¹. **Do not read a nice-looking condition number as 'well calibrated'.**")
     )
 
 
@@ -85,15 +89,16 @@ def _tilt_block() -> dict[str, Any]:
         from mast.core.instrument_profile import get_tilt_calibration
         cal = get_tilt_calibration()
     except Exception as exc:  # noqa: BLE001 — 只读窗口不许自己炸
-        return {"available": False, "why": f"读不到仪器档案: {exc}"}
+        return {"available": False, "why": tr(f"读不到仪器档案: {exc}", f"Cannot read the instrument profile: {exc}")}
     if cal is None:
         return {
             "available": False,
             # ⚠️ 「没标定过」是一个**结论**,不是「读失败」。两者必须分开 ——
             # 合成一句会让「该去标定」和「该去查为什么读不到」变成同一件事。
-            "why": ("**从未标定过倾斜响应**(不是读取失败)。"
+            "why": (tr("**从未标定过倾斜响应**(不是读取失败)。"
                     "AutoTilt 因此一律跳过 —— 它绝不带着猜来的符号去动硬件。"
-                    "要标定:运行 TiltCalibrate。"),
+                    "要标定:运行 TiltCalibrate。",
+                    "**The tilt response has never been calibrated** (not a read failure). AutoTilt is therefore always skipped - it never moves the hardware with a guessed sign. To calibrate: run TiltCalibrate.")),
         }
     out: dict[str, Any] = {"available": True, "why": "", "g": cal.get("g"),
                            "cond": cal.get("cond")}
@@ -106,10 +111,11 @@ def _tilt_block() -> dict[str, Any]:
     #
     # **修好之后旧的理由会静静变成假话,而它比没有理由更危险:下一个人会信它。**
     out["convention_note"] = (
-        "存的是 **G = −M⁻¹**(按行的 2×2),其中 M = ∂斜率/∂倾斜。"
+        tr("存的是 **G = −M⁻¹**(按行的 2×2),其中 M = ∂斜率/∂倾斜。"
         "**直接用**:要抵消测到的斜率 s,施加 `Δtilt = G·s` —— 不要再求逆、不要再取负。"
-        "(08-10 那次发散正是「存的是 M、需要的是 −M⁻¹」;修的是存储端,"
-        "而这句说明直到 08-11 才跟上。)"
+        "(曾有一次发散正是「存的是 M、需要的是 −M⁻¹」;修的是存储端,"
+        "而这句说明是事后才跟上的。)",
+        "What is stored is **G = −M⁻¹** (row-wise 2x2), where M = ∂slope/∂tilt. **Use it directly**: to cancel a measured slope s, apply `Δtilt = G·s` - do not invert again and do not negate again. (One past divergence was exactly 'M stored, −M⁻¹ needed'; the fix was on the storage side, and this note only caught up afterwards.)")
     )
     return out
 
@@ -120,10 +126,10 @@ def _didv_block() -> dict[str, Any]:
         from mast.core.instrument_profile import get_calibration
         cal = get_calibration() or {}
     except Exception as exc:  # noqa: BLE001
-        return {"available": False, "why": f"读不到仪器档案: {exc}"}
+        return {"available": False, "why": tr(f"读不到仪器档案: {exc}", f"Cannot read the instrument profile: {exc}")}
     if not cal.get("didv_at_contact_v"):
         return {"available": False,
-                "why": "**从未学到过接触点 dI/dV**(不是读取失败)。一次成功进针会写入它。"}
+                "why": tr("**从未学到过接触点 dI/dV**(不是读取失败)。一次成功进针会写入它。", "**The contact-point dI/dV has never been learned** (not a read failure). A successful engage writes it.")}
     out: dict[str, Any] = {
         "available": True, "why": "",
         "didv_at_contact_v": cal.get("didv_at_contact_v"),
@@ -134,7 +140,7 @@ def _didv_block() -> dict[str, Any]:
     }
     out.update(_age_note(cal.get("didv_cal_updated_at")))
     out["condition_note"] = (
-        "这个值**绑定在它被测出来的那个偏压/设定点上** —— 换了条件就不可比。"
+        tr("这个值**绑定在它被测出来的那个偏压/设定点上** —— 换了条件就不可比。", "This value is **bound to the bias/setpoint at which it was measured** - it is not comparable once the conditions change.")
     )
     return out
 
@@ -154,20 +160,21 @@ def _qplus_block() -> dict[str, Any]:
         nominal_f0 = get_config("qplus_f0_hz", None)
         nominal_q = get_config("qplus_q", None)
     except Exception as exc:  # noqa: BLE001
-        return {"available": False, "why": f"读不到仪器档案: {exc}"}
+        return {"available": False, "why": tr(f"读不到仪器档案: {exc}", f"Cannot read the instrument profile: {exc}")}
     if f0 is None and q is None:
         return {
             "available": False,
-            "why": ("**从未实测过 qPlus 共振**(不是读取失败)。"
-                    "运行 AcquirePLLFreqSweep 会写入它。"),
+            "why": (tr("**从未实测过 qPlus 共振**(不是读取失败)。"
+                    "运行 AcquirePLLFreqSweep 会写入它。",
+                    "**The qPlus resonance has never been measured** (not a read failure). Running AcquirePLLFreqSweep writes it.")),
             "nominal_f0_hz": nominal_f0, "nominal_q": nominal_q,
-            "nominal_note": "上面两个是**铭牌/标称**值,跟着针尖走,不是这一支的实测。",
+            "nominal_note": tr("上面两个是**铭牌/标称**值,跟着针尖走,不是这一支的实测。", "The two above are **nameplate/nominal** values that follow the tip, not measurements of this one."),
         }
     out: dict[str, Any] = {
         "available": True, "why": "",
         "f0_measured_hz": f0, "q_measured": q,
         "nominal_f0_hz": nominal_f0, "nominal_q": nominal_q,
-        "nominal_note": "标称值跟着针尖走;实测值**换针即失效**。两者不可互相替代。",
+        "nominal_note": tr("标称值跟着针尖走;实测值**换针即失效**。两者不可互相替代。", "Nominal values follow the tip; measured values are **void after a tip change**. The two cannot substitute for each other."),
     }
     out.update(_age_note(ts))
     try:
@@ -178,8 +185,9 @@ def _qplus_block() -> dict[str, Any]:
             tau = float(q) / (3.141592653589793 * float(f0))
             out["ring_down_tau_s"] = tau
             out["ring_down_note"] = (
-                f"τ = Q/(π·f₀) ≈ {tau:.3g} s。**别据此写一个固定等待时长** —— "
-                "Q 在本机跨 5e3~2e5(τ 0.06~2.5 s),要等就等**振幅回到基线**(带超时)。"
+                tr(f"τ = Q/(π·f₀) ≈ {tau:.3g} s。**别据此写一个固定等待时长** —— "
+                "Q 随针尖状态变化很大(τ 可差一个数量级以上),要等就等**振幅回到基线**(带超时)。",
+                f"τ = Q/(π·f₀) ≈ {tau:.3g} s. **Do not hard-code a fixed wait based on this** - Q varies widely with the tip state (τ can differ by more than an order of magnitude); if you must wait, wait for **the amplitude to return to baseline** (with a timeout).")
             )
     except Exception:  # noqa: BLE001
         pass
@@ -196,7 +204,7 @@ class ReadCalibrations(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读取仪器档案里的标定值:①倾斜响应矩阵 G(AutoTilt 依赖它)"
+                tr("读取仪器档案里的标定值:①倾斜响应矩阵 G(AutoTilt 依赖它)"
                 "②接触点 dI/dV ③qPlus 实测共振 f₀/Q。"
                 "每一项都带**年龄**与**适用边界**。**纯读,不动任何硬件。**\n"
                 "\n"
@@ -204,13 +212,14 @@ class ReadCalibrations(BaseSkill):
                 "「从未标定过」还是「读不到档案」,这两件事的处置完全不同。\n"
                 "\n"
                 "⚠️ **条件数只管形状不管方向**:一个好看的条件数**不等于**标定可用 "
-                "；仍需验证符号、逆变换和适用范围。"
+                "(曾见 cond≈1.1 而 AutoTilt 仍发散,根因是符号/求逆)。",
+                "Read the calibration values in the instrument profile: (1) the tilt response matrix G (AutoTilt depends on it), (2) the contact-point dI/dV, (3) the measured qPlus resonance f₀/Q. Every item carries its **age** and **applicability bounds**. **Pure read, moves no hardware.**\n\nWARNING: **when blocked by 'not calibrated', call this tool first** - it tells you whether it is 'never calibrated' or 'profile unreadable'; the two call for entirely different handling.\n\nWARNING: **the condition number only covers shape, not direction**: a nice-looking condition number does **not** mean the calibration is usable (seen once: cond≈1.1 and AutoTilt still diverged, the root cause being sign/inversion).")
             ),
             parameters=[
                 ParameterSpec(
                     name="which",
                     type="str",
-                    description=("只看某一项:tilt / didv / qplus。留空返回全部。"),
+                    description=(tr("只看某一项:tilt / didv / qplus。留空返回全部。", "Look at only one item: tilt / didv / qplus. Empty returns all.")),
                     required=False,
                     default="",
                 ),
@@ -230,20 +239,20 @@ class ReadCalibrations(BaseSkill):
             try:
                 data[key] = blocks[key]()
             except Exception as exc:  # noqa: BLE001 — 一项读不到不影响其余
-                data[key] = {"available": False, "why": f"读取失败: {exc}"}
+                data[key] = {"available": False, "why": tr(f"读取失败: {exc}", f"Read failed: {exc}")}
 
         have = [k for k in wanted if (data.get(k) or {}).get("available")]
         missing = [k for k in wanted if k not in have]
         if not have:
-            summary = ("这些标定**一个都没有**:" + "、".join(missing)
-                       + "(已确认读到档案,不是读取失败 —— 逐项 why 里写了原因)。")
+            summary = (tr("这些标定**一个都没有**:", "**None** of these calibrations exist:") + "、".join(missing)
+                       + tr("(已确认读到档案,不是读取失败 —— 逐项 why 里写了原因)。", "(confirmed that the profile was read, not a read failure - the reason for each item is in its why)."))
         else:
-            summary = "已标定:" + "、".join(have)
+            summary = tr("已标定:", "Calibrated:") + "、".join(have)
             if missing:
-                summary += ";**未标定**:" + "、".join(missing)
+                summary += tr(";**未标定**:", "; **not calibrated**:") + "、".join(missing)
             tilt = data.get("tilt") or {}
             if tilt.get("available"):
-                summary += f"。倾斜:{tilt.get('age_note') or ''}"
+                summary += tr(f"。倾斜:{tilt.get('age_note') or ''}", f". Tilt: {tilt.get('age_note') or ''}")
         data["read_at"] = time.time()
         return SkillResult(skill_name="ReadCalibrations", success=True,
                            data=data, summary=summary)

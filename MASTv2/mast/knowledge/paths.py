@@ -8,14 +8,14 @@
 在这之前 ``ingest.py`` / ``libraries.py`` / ``literature_index.py`` / ``fetch.py`` /
 ``fetch_board.py`` **各带一份私有的 ``_find_repo_root()``**，五份实现四种写法（有的
 判 frozen，有的不判；有的 ``parents[3]``，有的走目录探测循环）。同类分家已经咬过一次：
-里 paper_writing / paper_review 各自的 repo-walk 在打包版落到不存在的
+paper_writing / paper_review 各自的 repo-walk 在打包版落到不存在的
 安装目录，结果「草稿目录找不到」「实验 DB 缺失」。收敛到这里，加 env 覆盖。
 
 两条纪律
 --------
 
-1. **每个函数懒解析。** 绝不在 import 时把路径冻结成模块常量 —— 冻结正是 #137 的
-   成因（也是 ``documents/paths.py`` 与 ``core/experiment_paths.py`` 的同一条规矩）。
+1. **每个函数懒解析。** 绝不在 import 时把路径冻结成模块常量 —— 冻结正是打包版路径
+   落空的成因（也是 ``documents/paths.py`` 与 ``core/experiment_paths.py`` 的同一条规矩）。
    测试或启动器晚一步改 env 仍然生效。
 2. **默认解析出的实际路径保持兼容。** 移动已存在的索引或注册表路径可能让用户
    无法找到自己的库。各目录的默认布局如下：

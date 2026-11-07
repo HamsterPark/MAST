@@ -24,6 +24,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from mast.i18n import tr
 
 ENV_STATE_DIR = "MAST_GALLERY_DIR"
 STATE_DIRNAME = "_gallery"
@@ -163,7 +164,7 @@ def atomic_write_bytes(path: Path | str, data: bytes, *, tolerate_locked: bool =
         pass
     if tolerate_locked:
         return False
-    raise PermissionError(f"{p} 一直被占用，替换失败（已重试 {len(_REPLACE_RETRY_S)} 次）")
+    raise PermissionError(tr(f"{p} 一直被占用，替换失败（已重试 {len(_REPLACE_RETRY_S)} 次）", f"{p} stayed locked; replace failed (retried {len(_REPLACE_RETRY_S)} times)"))
 
 
 def atomic_write_text(path: Path | str, text: str, *, encoding: str = "utf-8",

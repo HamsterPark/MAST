@@ -47,6 +47,15 @@
   --mast-ag-sup: #475569; --mast-ag-rd: #4f46e5;  --mast-ag-lit: #2563eb; --mast-ag-xd: #16a34a;
   --mast-ag-ic: #0d9488;  --mast-ag-dp: #7c3aed;  --mast-ag-pw: #d97706; --mast-ag-pr: #e11d48;
 
+  /* 实时图的多通道配色（components/live/）。固定顺序、按通道首次出现的先后分配，
+     不按排名、不循环。顺序本身是色盲安全的来源：dataviz 校验器在 MAST 的两种底色
+     （#f4f6f9 / #0a0e13）上逐对验过（相邻 CVD ΔE ≥ 8.4，正常视觉 ≥ 19.3）。
+     --mast-accent 验不过（浅色太灰、深色太亮），所以它只当单条曲线的强调色。
+     不含红/绿：会和 auto/danger 状态色混。浅色下 2–5 号对底色不到 3:1，所以每张
+     图都带文字图例和数值读数（不靠颜色认通道）。 */
+  --mast-series-1: #2a78d6; --mast-series-2: #eb6834; --mast-series-3: #1baf7a;
+  --mast-series-4: #eda100; --mast-series-5: #e87ba4; --mast-series-6: #6250d6;
+
   --mast-topbar: linear-gradient(180deg, #ffffff, #eef1f6);
   --mast-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 
@@ -85,6 +94,9 @@ html.dark {
 
   --mast-ag-sup: #94a3b8; --mast-ag-rd: #818cf8;  --mast-ag-lit: #60a5fa; --mast-ag-xd: #4ade80;
   --mast-ag-ic: #2dd4bf;  --mast-ag-dp: #a78bfa;  --mast-ag-pw: #fbbf24; --mast-ag-pr: #fb7185;
+
+  --mast-series-1: #3987e5; --mast-series-2: #d95926; --mast-series-3: #199e70;
+  --mast-series-4: #c98500; --mast-series-5: #d55181; --mast-series-6: #9085e9;
 
   --mast-topbar: linear-gradient(180deg, #171e28, #10151d);
   --mast-shadow: none;

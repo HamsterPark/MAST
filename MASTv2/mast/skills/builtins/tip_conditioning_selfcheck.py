@@ -14,6 +14,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.skills.base import BaseSkill
 
 logger = logging.getLogger(__name__)
@@ -46,11 +47,17 @@ class TipConditioningSelfCheck(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description=(
+            description=tr(
                 "针尖整形工作流的只读预检：它要用的技能在这个 build 里是不是真的都注册了、Tip Shaper "
                 "模块是不是在跑、针尖有没有登记（未登记的针尖会把脉冲压到保守默认值）、"
                 "有没有实验可供读取扫描地图、以及 Z 噪声本底是不是小到让 50 pm 的台阶判据还有意义。"
-                "什么都不碰。"
+                "什么都不碰。",
+                "Read-only pre-flight for the tip-shaping workflow: whether every skill it needs is "
+                "actually registered in this build, whether the Tip Shaper module is running, whether "
+                "the tip is registered (an unregistered tip clamps pulses to conservative defaults), "
+                "whether an experiment is available to read the scan map, and whether the Z noise "
+                "floor is small enough for the 50 pm step criterion to mean anything. "
+                "Touches nothing.",
             ),
             parameters=[],
             estimated_duration_s=3.0,
@@ -77,18 +84,23 @@ class TipConditioningSelfCheck(BaseSkill):
         registry = getattr(context, "_registry", None)
         installed = registered_skill_names(registry)
         missing = [n for n in REQUIRED_SKILLS if n not in installed]
-        add("技能齐全", not missing,
-            f"全部就位（本机注册 {len(installed)} 个）" if not missing
-            else f"缺 {len(missing)} 个: {', '.join(missing)}",
+        add(tr("技能齐全", "Skills complete"), not missing,
+            tr(f"全部就位（本机注册 {len(installed)} 个）",
+               f"All present ({len(installed)} registered on this machine)") if not missing
+            else tr(f"缺 {len(missing)} 个: {', '.join(missing)}",
+                    f"{len(missing)} missing: {', '.join(missing)}"),
             blocking=True)
 
         # ── 2. Tip Shaper 模块 ─────────────────────────────────────────
         rec = context.safe_call("TipShaper_PropsGet")
         calls.append(rec)
         shaper_ok = not getattr(rec, "error", "")
-        add("Tip Shaper 模块", shaper_ok,
-            "在跑" if shaper_ok else f"读不到: {getattr(rec, 'error', '')}"
-                                    "（Nanonis 里把 Tip Shaper 模块打开）",
+        add(tr("Tip Shaper 模块", "Tip Shaper module"), shaper_ok,
+            tr("在跑", "running") if shaper_ok else tr(
+                f"读不到: {getattr(rec, 'error', '')}"
+                "（Nanonis 里把 Tip Shaper 模块打开）",
+                f"unreadable: {getattr(rec, 'error', '')} "
+                "(open the Tip Shaper module in Nanonis)"),
             blocking=True)
 
         # ── 3. 针尖登记与脉冲包络 ──────────────────────────────────────
@@ -101,9 +113,12 @@ class TipConditioningSelfCheck(BaseSkill):
             plan = resolve_conditioning(("pulse_v",), {"pulse_v": wf.pulse_v})
             allowed = bool(getattr(plan, "ok", False))
             if facts is None:
-                add("针尖已登记", False,
-                    f"未登记 —— 安全包络退到保守通用档，流程默认的 "
-                    f"{wf.pulse_v:g} V 大修脉冲会被拒。先 register_tip。",
+                add(tr("针尖已登记", "Tip registered"), False,
+                    tr(f"未登记 —— 安全包络退到保守通用档，流程默认的 "
+                       f"{wf.pulse_v:g} V 大修脉冲会被拒。先 register_tip。",
+                       f"Not registered -- the safety envelope falls back to the conservative "
+                       f"generic tier, so the workflow's default {wf.pulse_v:g} V conditioning "
+                       f"pulse will be refused. Run register_tip first."),
                     blocking=True)
             else:
                 # a qPlus sensor's registered constants are facts no Nanonis readback
@@ -115,31 +130,42 @@ class TipConditioningSelfCheck(BaseSkill):
                     val = facts.get(key)
                     if isinstance(val, (int, float)) and not isinstance(val, bool):
                         extras.append(f"{label}={val:g}{unit}")
-                add("针尖已登记", True,
-                    f"{tip_name or '未命名'}（{facts.get('material') or '?'}/"
-                    f"{facts.get('form') or '?'}）"
-                    + (f"，登记常数 {'、'.join(extras)}" if extras else ""))
-                add(f"{wf.pulse_v:g} V 脉冲在包络内", allowed,
-                    "允许" if allowed
-                    else "；".join(getattr(plan, "refusals", []) or ["被包络拒绝"]),
+                add(tr("针尖已登记", "Tip registered"), True,
+                    tr(f"{tip_name or '未命名'}（{facts.get('material') or '?'}/"
+                       f"{facts.get('form') or '?'}）",
+                       f"{tip_name or 'unnamed'} ({facts.get('material') or '?'}/"
+                       f"{facts.get('form') or '?'})")
+                    + (tr(f"，登记常数 {'、'.join(extras)}",
+                          f", registered constants {', '.join(extras)}") if extras else ""))
+                add(tr(f"{wf.pulse_v:g} V 脉冲在包络内", f"{wf.pulse_v:g} V pulse within envelope"),
+                    allowed,
+                    tr("允许", "allowed") if allowed
+                    else tr("；", "; ").join(
+                        getattr(plan, "refusals", []) or [tr("被包络拒绝", "refused by envelope")]),
                     blocking=True)
         except Exception as exc:  # noqa: BLE001
-            add("针尖包络", None, f"查不了（{exc}）")
+            add(tr("针尖包络", "Tip envelope"), None, tr(f"查不了（{exc}）", f"cannot check ({exc})"))
 
         # ── 4. 扫描地图 ────────────────────────────────────────────────
         try:
             from mast.core.map_scope import analysis_config, load_markers
             markers, epoch, known = load_markers()
             cfg = analysis_config(getattr(context, "state", None))
-            add("扫描地图可读", known,
-                f"代次 {epoch}，{len(markers)} 个标记" if known
-                else "读不到（没有活动实验？）—— 换点时无法确认落点是否干净",
+            add(tr("扫描地图可读", "Scan map readable"), known,
+                tr(f"代次 {epoch}，{len(markers)} 个标记",
+                   f"epoch {epoch}, {len(markers)} markers") if known
+                else tr("读不到（没有活动实验？）—— 换点时无法确认落点是否干净",
+                        "unreadable (no active experiment?) -- cannot confirm a new site is "
+                        "clean when moving"),
                 blocking=True)
-            add("避让半径", True,
-                f"脉冲 {cfg.pulse_r_m * 1e9:.0f} nm / "
-                f"扎针 {cfg.tip_shape_r_m * 1e9:.0f} nm")
+            add(tr("避让半径", "Avoidance radius"), True,
+                tr(f"脉冲 {cfg.pulse_r_m * 1e9:.0f} nm / "
+                   f"扎针 {cfg.tip_shape_r_m * 1e9:.0f} nm",
+                   f"pulse {cfg.pulse_r_m * 1e9:.0f} nm / "
+                   f"poke {cfg.tip_shape_r_m * 1e9:.0f} nm"))
         except Exception as exc:  # noqa: BLE001
-            add("扫描地图可读", None, f"查不了（{exc}）")
+            add(tr("扫描地图可读", "Scan map readable"), None,
+                tr(f"查不了（{exc}）", f"cannot check ({exc})"))
 
         # ── 5. Z 噪声底 vs 临界步进 ────────────────────────────────────
         # 50 pm 一级的临界浅扎，落在噪声里就是随机游走。
@@ -148,17 +174,24 @@ class TipConditioningSelfCheck(BaseSkill):
             floor = ip.get_config("z_noise_floor_m", None)
             step_m = wf.critical_step_pm * 1e-12
             if floor is None:
-                add("Z 噪声底", None,
-                    f"未标定（每次从数据现估）。临界浅扎每级 "
-                    f"{wf.critical_step_pm:.0f} pm，真机上先量一下噪声底再跑。")
+                add(tr("Z 噪声底", "Z noise floor"), None,
+                    tr(f"未标定（每次从数据现估）。临界浅扎每级 "
+                       f"{wf.critical_step_pm:.0f} pm，真机上先量一下噪声底再跑。",
+                       f"Not calibrated (estimated from data each time). Each critical shallow "
+                       f"poke step is {wf.critical_step_pm:.0f} pm; measure the noise floor on "
+                       f"the real instrument before running."))
             else:
                 ratio = step_m / float(floor) if float(floor) > 0 else float("inf")
-                add("临界步进可分辨", ratio >= 3.0,
-                    f"步进 {wf.critical_step_pm:.0f} pm / 噪声底 "
-                    f"{float(floor) * 1e12:.0f} pm = {ratio:.1f}×"
-                    + ("" if ratio >= 3.0 else " —— 太接近噪声，临界搜索会变成随机游走"))
+                add(tr("临界步进可分辨", "Critical step resolvable"), ratio >= 3.0,
+                    tr(f"步进 {wf.critical_step_pm:.0f} pm / 噪声底 "
+                       f"{float(floor) * 1e12:.0f} pm = {ratio:.1f}×",
+                       f"step {wf.critical_step_pm:.0f} pm / noise floor "
+                       f"{float(floor) * 1e12:.0f} pm = {ratio:.1f}x")
+                    + ("" if ratio >= 3.0 else tr(
+                        " —— 太接近噪声，临界搜索会变成随机游走",
+                        " -- too close to the noise; the critical search becomes a random walk")))
         except Exception as exc:  # noqa: BLE001
-            add("Z 噪声底", None, f"查不了（{exc}）")
+            add(tr("Z 噪声底", "Z noise floor"), None, tr(f"查不了（{exc}）", f"cannot check ({exc})"))
 
         # ── 6. 运行模式 ────────────────────────────────────────────────
         try:
@@ -166,21 +199,26 @@ class TipConditioningSelfCheck(BaseSkill):
             from mast.core.types import OperatingMode
             mode = current_operating_mode()
             if mode == OperatingMode.SAFE:
-                add("操作模式", False,
-                    "SAFE —— 修针类操作被整类硬拦，流程跑不了", blocking=True)
+                add(tr("操作模式", "Operating mode"), False,
+                    tr("SAFE —— 修针类操作被整类硬拦，流程跑不了",
+                       "SAFE -- tip conditioning operations are blocked as a class; the workflow cannot run"),
+                    blocking=True)
             elif mode == OperatingMode.SEMI:
-                add("操作模式", True,
-                    "SEMI —— 每一发电脉冲都会单独等人确认（这是该模式的本意）")
+                add(tr("操作模式", "Operating mode"), True,
+                    tr("SEMI —— 每一发电脉冲都会单独等人确认（这是该模式的本意）",
+                       "SEMI -- every electrical pulse waits for individual confirmation (this is the mode's intent)"))
             else:
-                add("操作模式", True, "AUTO —— 一次批准跑完整条流程")
+                add(tr("操作模式", "Operating mode"), True,
+                    tr("AUTO —— 一次批准跑完整条流程", "AUTO -- one approval runs the whole workflow"))
         except Exception:  # noqa: BLE001
             pass          # 读不到模式不是问题，门控自己会说话
 
         ready = not blockers
-        lines = [("✅ 可以开工" if ready else "❌ 还不能开工")]
+        lines = [(tr("✅ 可以开工", "✅ Ready to start") if ready
+                  else tr("❌ 还不能开工", "❌ Not ready to start"))]
         for c in checks:
             mark = {True: "✅", False: "❌", None: "⚠"}[c["ok"]]
-            lines.append(f"{mark} {c['check']}：{c['detail']}")
+            lines.append(tr(f"{mark} {c['check']}：{c['detail']}", f"{mark} {c['check']}: {c['detail']}"))
         return SkillResult(
             skill_name="TipConditioningSelfCheck",
             success=True,          # 体检本身成功了；结论在 data.ready 里

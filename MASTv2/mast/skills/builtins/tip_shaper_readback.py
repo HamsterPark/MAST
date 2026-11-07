@@ -39,6 +39,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.io import z_trace
+from mast.i18n import tr
 from mast.skills.base import BaseSkill
 from mast.skills.builtins._tip_policy import (
     resolved_lift_height_m,
@@ -97,9 +98,12 @@ _INDENT_VERDICT = {
 }
 
 _INDENT_ADVICE = {
-    "no_change": "没扎上 — 增大向下扎的深度(更负的 tip_lift_m)后重试。",
-    "cluster": "扎上了,表面已形成一个 cluster。",
-    "tip_changed_or_pit": "针尖状态改变(或扎出一个坑)。",
+    "no_change": tr("没扎上 — 增大向下扎的深度(更负的 tip_lift_m)后重试。",
+                    "Did not bite -- increase the plunge depth (more negative tip_lift_m) and retry."),
+    "cluster": tr("扎上了,表面已形成一个 cluster。",
+                  "Bit in; a cluster has formed on the surface."),
+    "tip_changed_or_pit": tr("针尖状态改变(或扎出一个坑)。",
+                             "The tip state changed (or a pit was dug)."),
 }
 
 
@@ -156,92 +160,130 @@ class TipShapeWithReadback(BaseSkill):
             # AUTO (2026-06-11): fine-Z ramp + bias pulse (same as TipShape) —
             # bounded by Nanonis, not the open-loop coarse stepper. Autonomous.
             safety_level=SafetyLevel.AUTO,
-            description=(
+            description=tr(
                 "运行硬件 tip shaper，**同时**在流程进行中连续采集电流+Z，"
                 "以捕捉针尖顶端发生变化时两路通道各自怎么跳"
-                "（用的是 TipShaper_Start wait=0，所以轮询与动作是重叠进行的）。"
+                "（用的是 TipShaper_Start wait=0，所以轮询与动作是重叠进行的）。",
+                "Run the hardware tip shaper while **simultaneously** streaming current + Z "
+                "during the procedure, to capture how each channel jumps when the tip apex "
+                "changes (uses TipShaper_Start wait=0, so polling and the action overlap).",
             ),
             parameters=[
                 # ── shaper params (identical to TipShape) ──
                 ParameterSpec(name="switch_off_delay_s", type="float", unit="s",
-                              description="关闭 controller 之前对 Z 做平均的时长",
+                              description=tr("关闭 controller 之前对 Z 做平均的时长",
+                                            "Duration over which Z is averaged before the controller is switched off"),
                               required=False, default=0.1, min_value=0.0),
                 ParameterSpec(name="change_bias", type="bool",
-                              description=(
+                              description=tr(
                                   "在第一段 Z ramp 之前，把偏压跳变到 bias_v。"
                                   "**默认关闭**（2026-08-11）：workflow 层本来就拒绝这条路 —— "
                                   "TipShaper 只能**一步**改完偏压，而一步跳变"
                                   "本身就是一记冲击"
                                   "（_tip_phases.py）。请先自己把偏压设好（用带 slew rate "
-                                  "的 SetBias），再在这一项关闭的情况下扎针。"),
+                                  "的 SetBias），再在这一项关闭的情况下扎针。",
+                                  "Step the bias to bias_v before the first Z ramp. "
+                                  "**Off by default** (2026-08-11): the workflow layer already refuses "
+                                  "this route -- TipShaper can only change the bias in **one** step, "
+                                  "and a one-step jump is itself a shock "
+                                  "(_tip_phases.py). Set the bias yourself first (SetBias with a "
+                                  "slew rate), then poke with this option off."),
                               required=False, default=False),
                 ParameterSpec(name="bias_v", type="float", unit="V",
-                              description=("第一段 Z ramp 之前的偏压（当 change_bias 开启时）。"
-                                           "**省略**它则跟随**当前**的成像偏压 —— 也就是用户的"
-                                           "参数组（2026-08-10）。没有 3 V 兜底：偏压若读不到，"
-                                           "这个技能直接拒绝执行。"),
+                              description=tr("第一段 Z ramp 之前的偏压（当 change_bias 开启时）。"
+                                             "**省略**它则跟随**当前**的成像偏压 —— 也就是用户的"
+                                             "参数组（2026-08-10）。没有 3 V 兜底：偏压若读不到，"
+                                             "这个技能直接拒绝执行。",
+                                             "Bias before the first Z ramp (when change_bias is on). "
+                                             "**Omit** it to follow the **current** imaging bias -- "
+                                             "i.e. the user's parameter set (2026-08-10). There is no "
+                                             "3 V fallback: if the bias cannot be read, this skill "
+                                             "refuses to run."),
                               required=False, min_value=-10.0, max_value=10.0),
                 ParameterSpec(name="tip_lift_m", type="float", unit="m",
-                              description="第一段 Z ramp（相对量），单位**米**。常用 ±2n，上限 ±100n（±100 nm）。",
+                              description=tr("第一段 Z ramp（相对量），单位**米**。常用 ±2n，上限 ±100n（±100 nm）。",
+                                            "First Z ramp (relative), in **metres**. Typically ±2n, limit ±100n (±100 nm)."),
                               required=False, default=0.0, min_value=-1e-7, max_value=1e-7),
                 ParameterSpec(name="lift_time_1_s", type="float", unit="s",
-                              description="第一段 Z ramp 的时长",
+                              description=tr("第一段 Z ramp 的时长", "Duration of the first Z ramp"),
                               required=False, default=0.1, min_value=0.0),
                 ParameterSpec(name="bias_lift_v", type="float", unit="V",
-                              description=("在第一段 Z ramp**刚结束之后**施加的偏压。"
-                                           "⚠️ 与 bias_v 不同，这一项是**无条件**施加的 —— "
-                                           "change_bias **不能**把它解除（厂商原文：'Bias (V) … "
-                                           "if Change Bias is True' 对比 'Bias Lift (V) … applied "
-                                           "just after the first Z ramping'）。**省略**它则跟随 "
-                                           "bias_v，也就是当前的成像偏压。没有 3 V 兜底。"),
+                              description=tr("在第一段 Z ramp**刚结束之后**施加的偏压。"
+                                             "⚠️ 与 bias_v 不同，这一项是**无条件**施加的 —— "
+                                             "change_bias **不能**把它解除（厂商原文：'Bias (V) … "
+                                             "if Change Bias is True' 对比 'Bias Lift (V) … applied "
+                                             "just after the first Z ramping'）。**省略**它则跟随 "
+                                             "bias_v，也就是当前的成像偏压。没有 3 V 兜底。",
+                                             "Bias applied **just after** the first Z ramp. "
+                                             "WARNING: unlike bias_v, this is applied **unconditionally** -- "
+                                             "change_bias **cannot** disable it (vendor wording: 'Bias (V) … "
+                                             "if Change Bias is True' versus 'Bias Lift (V) … applied "
+                                             "just after the first Z ramping'). **Omit** it to follow "
+                                             "bias_v, i.e. the current imaging bias. There is no 3 V fallback."),
                               required=False, min_value=-10.0, max_value=10.0),
                 ParameterSpec(name="bias_settling_s", type="float", unit="s",
-                              description="施加偏压值之后的等待时长",
+                              description=tr("施加偏压值之后的等待时长", "Wait time after the bias is applied"),
                               required=False, default=0.1, min_value=0.0),
                 ParameterSpec(name="lift_height_m", type="float", unit="m",
-                              description=("第二段 Z ramp 的高度（也就是**退回来**的那一段），单位米。"
-                                           "**省略**它则默认取 -tip_lift_m —— 扎进去 x，"
-                                           "就拉回来 x，这是每个 composite 早已在用的"
-                                           "规则。常用 1n..5e-9，上限 ±100n（±100 nm）。"),
+                              description=tr("第二段 Z ramp 的高度（也就是**退回来**的那一段），单位米。"
+                                             "**省略**它则默认取 -tip_lift_m —— 扎进去 x，"
+                                             "就拉回来 x，这是每个 composite 早已在用的"
+                                             "规则。常用 1n..5e-9，上限 ±100n（±100 nm）。",
+                                             "Height of the second Z ramp (the part that **pulls back**), "
+                                             "in metres. **Omit** it to default to -tip_lift_m -- poke in "
+                                             "by x, pull back by x, the rule every composite already uses. "
+                                             "Typically 1n..5e-9, limit ±100n (±100 nm)."),
                               required=False, min_value=-1e-7, max_value=1e-7),
                 ParameterSpec(name="lift_time_2_s", type="float", unit="s",
-                              description="第二段 Z ramp 的时长",
+                              description=tr("第二段 Z ramp 的时长", "Duration of the second Z ramp"),
                               required=False, default=0.1, min_value=0.0),
                 ParameterSpec(name="end_wait_s", type="float", unit="s",
-                              description="恢复初始偏压之后的等待时长",
+                              description=tr("恢复初始偏压之后的等待时长", "Wait time after the initial bias is restored"),
                               required=False, default=0.1, min_value=0.0),
                 ParameterSpec(name="restore_feedback", type="bool",
-                              description="结束时恢复 Z-controller 状态",
+                              description=tr("结束时恢复 Z-controller 状态", "Restore the Z-controller state at the end"),
                               required=False, default=True),
                 ParameterSpec(name="timeout_ms", type="int", unit="ms",
-                              description="shaper 的超时（-1 = 永远等待）",
+                              description=tr("shaper 的超时（-1 = 永远等待）", "Shaper timeout (-1 = wait forever)"),
                               required=False, default=-1, min_value=-1),
                 # ── readback params ──
                 ParameterSpec(name="poll_hz", type="float", unit="Hz",
-                              description="目标逐帧轮询速率（每帧各采一次电流+Z；"
-                                          "每通道有效速率 ≈ poll_hz，受 RTT 限制、~1 kHz 封顶）",
+                              description=tr("目标逐帧轮询速率（每帧各采一次电流+Z；"
+                                             "每通道有效速率 ≈ poll_hz，受 RTT 限制、~1 kHz 封顶）",
+                                             "Target per-frame polling rate (one current + Z sample per "
+                                             "frame; effective rate per channel ~ poll_hz, limited by "
+                                             "RTT, capped at ~1 kHz)"),
                               required=False, default=2000.0, min_value=10.0, max_value=8000.0),
                 ParameterSpec(name="pre_roll_s", type="float", unit="s",
-                              description="shaper 启动**之前**采集的基线",
+                              description=tr("shaper 启动**之前**采集的基线",
+                                            "Baseline captured **before** the shaper starts"),
                               required=False, default=0.05, min_value=0.0, max_value=5.0),
                 ParameterSpec(name="post_roll_s", type="float", unit="s",
-                              description="在估计的 shaper 结束时刻**之后**继续采集",
+                              description=tr("在估计的 shaper 结束时刻**之后**继续采集",
+                                            "Keep capturing **after** the estimated shaper end time"),
                               required=False, default=0.1, min_value=0.0, max_value=5.0),
                 ParameterSpec(name="max_capture_s", type="float", unit="s",
-                              description="整个采集窗口的硬上限（安全考虑）",
+                              description=tr("整个采集窗口的硬上限（安全考虑）",
+                                            "Hard cap on the whole capture window (safety)"),
                               required=False, default=5.0, min_value=0.1, max_value=30.0),
                 ParameterSpec(name="jump_k", type="float",
-                              description="跳变灵敏度：|Δ| > median+k·σ_robust 即标记",
+                              description=tr("跳变灵敏度：|Δ| > median+k·σ_robust 即标记",
+                                            "Jump sensitivity: flag when |Δ| > median+k·σ_robust"),
                               required=False, default=5.0, min_value=1.0, max_value=50.0),
                 # constant-current three-step indent verdict (z3 vs z1)
                 ParameterSpec(name="indent_tol_nm", type="float", unit="nm",
-                              description="判定「扎入」用的 z3−z1 死区（nm）；"
-                                          "tol = max(此值, indent_tol_k·σ(baseline))。"
-                                          "默认 0.02 nm：低于原子团簇的尺度"
-                                          "（~0.1–0.3 nm），高于 z 噪声。",
+                              description=tr("判定「扎入」用的 z3−z1 死区（nm）；"
+                                             "tol = max(此值, indent_tol_k·σ(baseline))。"
+                                             "默认 0.02 nm：低于原子团簇的尺度"
+                                             "（~0.1–0.3 nm），高于 z 噪声。",
+                                             "Dead band (nm) on z3−z1 for judging an indent; "
+                                             "tol = max(this value, indent_tol_k·σ(baseline)). "
+                                             "Default 0.02 nm: below the scale of an atomic cluster "
+                                             "(~0.1-0.3 nm), above the z noise."),
                               required=False, default=0.02, min_value=0.0, max_value=100.0),
                 ParameterSpec(name="indent_tol_k", type="float",
-                              description="若 indent_tol_nm=0，则 tol = z1 基线的 k·σ",
+                              description=tr("若 indent_tol_nm=0，则 tol = z1 基线的 k·σ",
+                                            "If indent_tol_nm=0, tol = k·σ of the z1 baseline"),
                               required=False, default=4.0, min_value=1.0, max_value=50.0),
             ],
             estimated_duration_s=12.0,
@@ -263,9 +305,12 @@ class TipShapeWithReadback(BaseSkill):
                 # 在结上打一个没人要求过的 3 V。
                 return SkillResult(
                     skill_name="TipShapeWithReadback", success=False,
-                    error=(f"读不到当前偏压({why}),而 bias_v 没有显式给出 —— "
-                           "拒绝用写死的 3 V 代替。要么先修好偏压读取,"
-                           "要么显式传 bias_v。"),
+                    error=tr(f"读不到当前偏压({why}),而 bias_v 没有显式给出 —— "
+                             "拒绝用写死的 3 V 代替。要么先修好偏压读取,"
+                             "要么显式传 bias_v。",
+                             f"Cannot read the current bias ({why}), and bias_v was not given "
+                             "explicitly -- refusing to substitute a hard-coded 3 V. Either fix "
+                             "the bias readback first, or pass bias_v explicitly."),
                     nanonis_calls=calls)
         # bias_v 与 bias_lift_v 的施加条件不同，change_bias=False 不会自动关闭 bias lift。
         # 两个字段都需使用明确参数或当前成像偏压，不能由 schema 默认值提前填入固定高偏压。
@@ -310,8 +355,8 @@ class TipShapeWithReadback(BaseSkill):
         timeout_ms = params.get("timeout_ms", -1)
 
         # 扎针留下的是**永久痕迹**,所以「在哪扎的」和「扎没扎上」一样是结果的一部分
-        # —— ``_tip_xy`` 的模块 docstring 逐字点了「tip forming」的名,而这个技能
-        # 一直没接上,只有电脉冲那一路接了(同形状漏一处的老毛病)。在开火**之前**
+        # —— ``_tip_xy`` 的模块 docstring 列出了「tip forming」,而这个技能
+        # 此前没接上,只有电脉冲那一路接了。在开火**之前**
         # 读:扎针会改造表面,坐标要的是它真正发生的地方,不是 ≤1 s 前的缓存值。
         # 尽力而为,读不到就什么都不报(回退到快照并标 ``pos_src``)。
         spot = tip_xy_fields(context)
@@ -427,14 +472,16 @@ class TipShapeWithReadback(BaseSkill):
 
         # one-line summary for the instrument chat (full traces stay in data)
         _ind = data.get("indent", {})
-        _cn = {"no_change": "没扎上", "cluster": "扎上了(cluster)",
-               "tip_changed_or_pit": "针尖改变/坑",
-               "insufficient_data": "数据不足"}.get(
+        _cn = {"no_change": tr("没扎上", "did not bite"),
+               "cluster": tr("扎上了(cluster)", "bit in (cluster)"),
+               "tip_changed_or_pit": tr("针尖改变/坑", "tip changed / pit"),
+               "insufficient_data": tr("数据不足", "insufficient data")}.get(
             _ind.get("verdict", ""), _ind.get("verdict", ""))
         # 摘要是**唯一**穿过工具边界的东西,所以指针必须写在这里 —— 写进 data
         # 而不写进摘要,agent 就还是只看得到那一行判定。
-        summary = (f"针尖整形: {_cn} (Δz={_ind.get('delta_m', 0.0) * 1e9:+.2f} nm) — "
-                   f"{_ind.get('advice', '')}" + trace_ref(saved))
+        summary = (tr(f"针尖整形: {_cn} (Δz={_ind.get('delta_m', 0.0) * 1e9:+.2f} nm) — ",
+                      f"Tip shaping: {_cn} (Δz={_ind.get('delta_m', 0.0) * 1e9:+.2f} nm) — ")
+                   + f"{_ind.get('advice', '')}" + trace_ref(saved))
         return SkillResult(skill_name="TipShapeWithReadback", success=True,
                            data=data, nanonis_calls=calls, summary=summary)
 

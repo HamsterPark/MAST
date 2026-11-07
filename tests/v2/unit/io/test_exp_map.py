@@ -193,11 +193,20 @@ def test_render_populated_no_crash():
     assert fig.axes[0].get_xlabel() == "X (nm)"
 
 
-def test_render_rotated_footprint_no_crash():
-    m = M.MapMarker(kind="scan", x_m=0.0, y_m=0.0, w_m=1e-7, h_m=1e-7,
-                    angle_deg=30.0)
+def test_render_rotated_footprint_turns_clockwise():
+    """正 SCAN_ANGLE = 顺时针:+30° 的扫描框足迹必须顺时针转。
+
+    matplotlib 的 ``Rectangle(angle)`` 是逆时针,所以 ``_add_footprint`` 传 ``-angle``。
+    判据与实现无关:取最右的角(max x)——顺时针转下它落在上半(y>0),逆时针则落在下半。
+    (只验「不崩」的断言,画反了也绿,所以这里验方向。)"""
+    from matplotlib.patches import Rectangle
+    m = M.MapMarker(kind="scan", x_m=0.0, y_m=0.0, w_m=1e-7, h_m=1e-7, angle_deg=30.0)
     fig = M.render_map_figure([m])
-    assert fig is not None
+    rects = [p for p in fig.axes[0].patches
+             if isinstance(p, Rectangle) and abs(p.get_width() - 100.0) < 1e-6]
+    assert rects, "没找到 100 nm 的足迹矩形"
+    rightmost = max(rects[0].get_corners(), key=lambda c: c[0])   # 已含 angle + 绕心
+    assert rightmost[1] > 1.0, f"最右角落在下半({rightmost[1]:.1f} nm) ⇒ 足迹画成了逆时针"
 
 
 def test_save_map_png(tmp_path, monkeypatch):

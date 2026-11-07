@@ -285,7 +285,7 @@ def search(request: Request, body: SearchRequest) -> SearchResponse:
         # Big-library search; optionally filter to a library's member pointer-set
         # (mirrors literature_panel.search_big_library_html: over-fetch + filter).
         # Compare on the CANONICAL work_id BOTH sides: members are stored bare
-        # (#125 canonical normalisation) while search results carry the URL form
+        # (canonical normalisation) while search results carry the URL form
         # from metadata.parquet — a raw `in` would miss every hit otherwise.
         member_set = None
         if body.library_id:
@@ -310,7 +310,8 @@ def search(request: Request, body: SearchRequest) -> SearchResponse:
         rows = rows[:k]
 
         # degraded when the semantic index fell back to keyword matching
-        degraded = bool(rows and rows[0].get("degraded"))
+        degraded = bool(rows and rows[0].get("degraded")) or (
+            not rows and not literature_index.index_available())
         hits = [
             SearchHit(
                 work_id=str(r.get("work_id", "") or ""),

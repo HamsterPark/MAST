@@ -5,11 +5,10 @@ Thin agent-layer wrapper around :mod:`mast.core.instrument_profile` (the data +
 render layer). Kept separate so the skill layer can depend on the data module
 without pulling in langchain / the agent stack.
 
-Unlike :class:`ExperimentPrefsMiddleware` (#147, which no-ops on an empty
+Unlike :class:`ExperimentPrefsMiddleware` (which no-ops on an empty
 holder), this ALWAYS injects a block: the *mechanism* knowledge (退针分级 Z 自检
 防撞针; 进针可用 dI/dV 判距离) is a safety-relevant instrument fact the agent
-should always have when reasoning about 进/退针 — the operator's co-design ask
-"辅以适当的上下文注入，使得 AI 对仪器有深入了解".
+should always have when reasoning about 进/退针.
 """
 
 from __future__ import annotations

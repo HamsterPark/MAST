@@ -1,25 +1,26 @@
 // ════════════════════════════════════════════════════════════════════════════
-// useStickyTab — 记住一个栏目上次停在哪个子页。
+// useStickyTab: remembers which sub-page a section was last on.
 //
-// 纯逻辑在 `lib/stickyTab.ts`（读时校验那一条是要害）；这里只剩 React 绑定。
+// The pure logic is in `lib/stickyTab.ts` (validation on read is the key part); only the React
+// binding lives here.
 // ════════════════════════════════════════════════════════════════════════════
 
 import { useCallback, useState } from "react";
 import { readStickyTab, writeStickyTab } from "@/lib/stickyTab";
 
 /**
- * `useState` 的替身，值会跨导航活下来。
+ * A stand-in for `useState` whose value survives navigation.
  *
- * @param page   存储键（`mast.subtab.<page>`）。嵌套的子页用点分层，
- *               例如 `"agents"` 与 `"agents.chat.mode"` —— 让键长得像它在
- *               界面里的位置，下一个人打开 devtools 才认得出哪个是哪个。
- * @param valid  这个栏目**当前**认得的全部 id。它就是 tab 列表本身，
- *               别另抄一份 —— 抄的那份会和 tab 列表漂开，而漂开的症状是
- *               「某个子页记不住」，一个没人会去查存储键的症状。
- * @param fallback 没有记忆 / 记忆已过期时用哪个。
+ * @param page   Storage key (`mast.subtab.<page>`). Nested sub-pages use dotted levels, e.g.
+ *               `"agents"` and `"agents.chat.mode"`, so a key looks like its place in the UI and
+ *               is recognisable in devtools.
+ * @param valid  Every id this section **currently** knows. It is the tab list itself; do not keep
+ *               a second copy, which would drift from the tab list and show up as "some sub-page
+ *               is not remembered", a symptom nobody checks storage keys for.
+ * @param fallback Used when nothing is remembered or the remembered id is stale.
  *
- * 初值走惰性 `useState(fn)`：读 localStorage 是同步 I/O，写成
- * `useState(readStickyTab(...))` 会在**每一次渲染**都读一遍。
+ * The initial value uses lazy `useState(fn)`: reading localStorage is synchronous I/O, and
+ * `useState(readStickyTab(...))` would read it on **every render**.
  */
 export function useStickyTab<T extends string>(
   page: string,

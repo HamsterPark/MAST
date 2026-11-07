@@ -1,8 +1,11 @@
-// 系列页（旧版兼容格式 series.js 的 renderSeriesView，与 context.js 的 ctxSeries）。
+// Series page.
 //
-// 头部可改名、评级、标签、备注、删除（点两次确认，成员自己的单条标记不动）；系列里有
-// 谱时，把全部成员的位置按时间编号画在系列前后的两张帧上，可以把整个系列系于某张帧，
-// 勾「同时写到每一条谱」就逐条系定。下面是成员列表（同一套筛选条与大图）。
+// The header lets you rename the series and edit its rating, tags and note, or delete it
+// (two clicks to confirm; the members' own item marks are untouched). When the series holds
+// spectra, the positions of all members are drawn, numbered by time, on the frames before and
+// after the series; the whole series can be anchored to a frame, and ticking "also write to
+// every spectrum" anchors each spectrum individually. Below is the member list (same filter bar
+// and lightbox).
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -19,6 +22,7 @@ import { ListView } from "./ListView";
 import { H1, Sub } from "./ListHeads";
 import { SMALL_BTN } from "./bits";
 import { SeriesFigureActions } from "./figures/SeriesFigureActions";
+import { tr } from "@/lib/i18n";
 
 function SeriesHead({ sid, s, mem }: { sid: string; s: Series; mem: GalleryItem[] }) {
   const setSeries = useMarksStore((st) => st.setSeries);
@@ -63,7 +67,7 @@ function SeriesHead({ sid, s, mem }: { sid: string; s: Series; mem: GalleryItem[
   return (
     <div>
       <Link to={{ search: `?${viewSearch({ v: "marked" })}` }} className="text-sm text-mast-accent hover:underline">
-        ← 已标记
+        {tr("← 已标记", "← Marked")}
       </Link>
       {a && (
         <>
@@ -75,17 +79,23 @@ function SeriesHead({ sid, s, mem }: { sid: string; s: Series; mem: GalleryItem[
       )}
       <H1>▤ {s.name}</H1>
       <Sub>
-        {mem.length} 个（{c.f ? `帧 ${c.f} ` : ""}
-        {c.s ? `谱 ${c.s} ` : ""}
-        {c.g ? `网格 ${c.g}` : ""}）
-        {a && b ? ` · ${num(a)} → ${num(b)} · ${fmtT(a.t)} → ${fmtT(b.mt || b.t1 || b.t)}` : ""} · 系列号 {sid}
-        {missing > 0 && <span className="text-mast-danger"> · {missing} 个成员不在图库里</span>}
+        {tr(`${mem.length} 个`, `${mem.length} items`)} (
+        {c.f ? tr(`帧 ${c.f} `, `frames ${c.f} `) : ""}
+        {c.s ? tr(`谱 ${c.s} `, `spectra ${c.s} `) : ""}
+        {c.g ? tr(`网格 ${c.g}`, `grids ${c.g}`) : ""})
+        {a && b ? ` · ${num(a)} → ${num(b)} · ${fmtT(a.t)} → ${fmtT(b.mt || b.t1 || b.t)}` : ""} · {tr("系列号", "series id")} {sid}
+        {missing > 0 && (
+          <span className="text-mast-danger">
+            {" "}
+            · {tr(`${missing} 个成员不在图库里`, `${missing} members are not in the gallery`)}
+          </span>
+        )}
       </Sub>
       <div className="my-1.5 mb-2.5 flex flex-wrap items-center gap-x-2.5 gap-y-2">
         <input
           value={name}
           size={44}
-          title="系列名，改完回车或点别处保存"
+          title={tr("系列名，改完回车或点别处保存", "Series name; press Enter or click elsewhere to save")}
           onChange={(e) => setName(e.target.value)}
           onBlur={() => save({ name: name.trim() || s.name })}
           onKeyDown={(e) => {
@@ -122,7 +132,7 @@ function SeriesHead({ sid, s, mem }: { sid: string; s: Series; mem: GalleryItem[
         </span>
         <textarea
           value={note}
-          placeholder="系列备注"
+          placeholder={tr("系列备注", "Series note")}
           onChange={(e) => {
             setNote(e.target.value);
             if (noteTimer.current) clearTimeout(noteTimer.current);
@@ -143,12 +153,14 @@ function SeriesHead({ sid, s, mem }: { sid: string; s: Series; mem: GalleryItem[
             nav({ search: `?${viewSearch({ v: "marked" })}` });
           }}
         >
-          {armed ? "再点一次确认删除（成员的单条标记不动）" : "删除系列"}
+          {armed
+            ? tr("再点一次确认删除（成员的单条标记不动）", "Click again to confirm deletion (the members' own marks are kept)")
+            : tr("删除系列", "Delete series")}
         </button>
       </div>
       {s.anchor && (
         <Sub>
-          ⌖ 位置系于 {shortFn(s.anchor.fn)}（{s.anchor.desc}）
+          ⌖ {tr("位置系于", "Position anchored to")} {shortFn(s.anchor.fn)} ({s.anchor.desc})
         </Sub>
       )}
     </div>
@@ -192,13 +204,13 @@ function SeriesContext({ sid, s, mem, model }: { sid: string; s: Series; mem: Ga
         frame={f}
         t0={t0}
         t1={t1}
-        noun="系列"
+        noun={tr("系列", "series")}
         pts={pts}
         poly={null}
         anchoredId={s.anchor?.id}
         onStep={onStep}
         onAnchor={onAnchor}
-        posText={() => ` · ${pts.filter(inside).length}/${pts.length} 条在视野内`}
+        posText={() => tr(` · ${pts.filter(inside).length}/${pts.length} 条在视野内`, ` · ${pts.filter(inside).length}/${pts.length} in view`)}
       />
     );
   };
@@ -206,9 +218,11 @@ function SeriesContext({ sid, s, mem, model }: { sid: string; s: Series; mem: Ga
   return (
     <div className="mb-2.5 mt-1.5 rounded-[3px] border border-mast-border bg-mast-panel px-3 py-2.5 text-mast-text">
       <div className="text-[12.5px]">
-        <b className="font-semibold">系列里 {sp.length} 条谱的位置</b>（按时间编号 1…{sp.length}；{fmtTs(t0)}–{fmtTs(t1)}）{" "}
+        <b className="font-semibold">{tr(`系列里 ${sp.length} 条谱的位置`, `Positions of the ${sp.length} spectra in the series`)}</b>{" "}
+        {tr(`（按时间编号 1…${sp.length}；${fmtTs(t0)}–${fmtTs(t1)}）`, `(numbered 1…${sp.length} by time; ${fmtTs(t0)}–${fmtTs(t1)})`)}{" "}
         <label className="text-mast-muted">
-          <input type="checkbox" checked={each} onChange={(e) => setEach(e.target.checked)} /> 系定时同时写到每一条谱
+          <input type="checkbox" checked={each} onChange={(e) => setEach(e.target.checked)} />{" "}
+          {tr("系定时同时写到每一条谱", "Also write the anchor to every spectrum")}
         </label>
       </div>
       <div className="mt-2 grid max-w-[1000px] grid-cols-2 gap-3.5 max-[760px]:grid-cols-1">
@@ -221,8 +235,9 @@ function SeriesContext({ sid, s, mem, model }: { sid: string; s: Series; mem: Ga
 
 export function SeriesView({ sid, model }: { sid: string; model: GalleryModel }) {
   const s = useMarksStore((st) => st.doc.series[sid]);
-  // 按成员 id 的**内容** memo：改系列名、备注、评级都会换一个新的 series 对象，
-  // 若成员表跟着换引用，下面的卡片网格就回到前 150 张、滚动位置丢失。
+  // Memoised on the *content* of the member ids: renaming the series or editing its note or
+  // rating yields a new series object; if the member list changed reference with it, the card
+  // grid below would drop back to the first 150 cards and lose its scroll position.
   const idsKey = s ? s.ids.join("\n") : "";
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const mem = useMemo(() => seriesMembers(s, model.items), [idsKey, model.items]);
@@ -231,9 +246,9 @@ export function SeriesView({ sid, model }: { sid: string; model: GalleryModel })
     return (
       <div>
         <Link to={{ search: `?${viewSearch({ v: "marked" })}` }} className="text-sm text-mast-accent hover:underline">
-          ← 已标记
+          {tr("← 已标记", "← Marked")}
         </Link>
-        <H1>这个系列不存在或已删除</H1>
+        <H1>{tr("这个系列不存在或已删除", "This series does not exist or was deleted")}</H1>
       </div>
     );
   }

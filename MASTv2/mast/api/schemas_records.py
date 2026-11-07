@@ -58,13 +58,11 @@ class ActionSummary(BaseModel):
     duration_s: float = 0.0
     context: Optional[str] = None
     approval_source: Optional[str] = None
-    # What the skill actually RETURNED and produced. These columns were written
-    # as empty for the whole 2026-07-27 session ( — the result
-    # dict was discarded, so every action read `"data": {}`, indistinguishable
-    # from a skill that returned nothing). They are populated now, but this
-    # schema still flattened them away, so the record was fixed in the database
-    # and unchanged in the UI — the half of the fix an operator can actually
-    # see. `data` is capped by the route: an action's payload can be a whole
+    # What the skill actually RETURNED and produced. If the result dict were
+    # discarded, every action would read `"data": {}`, indistinguishable
+    # from a skill that returned nothing; and a schema that flattened these
+    # fields away would leave the UI unchanged even when the database is right.
+    # `data` is capped by the route: an action's payload can be a whole
     # spectrum, and a timeline of those would be megabytes.
     data: dict[str, Any] = Field(default_factory=dict)
     artifact_path: Optional[str] = None
@@ -128,8 +126,6 @@ class FeedbackEntry(BaseModel):
 
 class TipInService(BaseModel):
     """一次实验期间在役的针尖 —— **展示层聚合，不是第二个真源**。
-
-    「针尖记录等是不是也应该在实验记录中?」
 
     针尖是仪器域的东西（与实验 / 样品**并列**，不是它们的下级 —— 一根针会跨很多次
     实验，一次实验也可能换好几根），所以 ``tips`` 表原地不动。这里只是把「这段时间

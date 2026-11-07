@@ -1,6 +1,6 @@
 """The ONE DashScope key resolver for the knowledge layer.
 
-(): ``literature_index`` and ``ingest`` each carried
+``literature_index`` and ``ingest`` each used to carry
 their own copy of a key loader that resolved ``api key/dashscope.env`` off the
 INDEX root. That root is deliberately the executable's directory in a frozen
 build (that is where the 205 MB index ships), but the key is not there: the Inno

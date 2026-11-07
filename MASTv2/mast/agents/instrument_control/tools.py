@@ -83,11 +83,15 @@ def build_instrument_skill_tools(
 
     三道门的并集只算一次，定义在 :mod:`mast.skills.tool_face` —— 在此之前它在本文件
     和 ``webui/agents_api.py`` 里被各算了一遍，而漏改任何一处都不报错。
+
+    第四道门（站点画像）要按技能**类**分类，所以这里把手里的 ``registry`` 显式交给
+    ``compute``，不靠全局绑定：一次性 CLI 不走 ``CoreRuntime.setup``，没人替它绑，靠
+    绑定的写法在那条路上 STM 画像会把光学站的技能当工具交给 agent。
     """
     from mast.skills import tool_face
 
     all_names = tool_face.names_from_registry(registry)
-    skip_info = tool_face.compute(all_names)
+    skip_info = tool_face.compute(all_names, registry=registry)
     skip = skip_info.names
     tools = []
     for meta in registry.list_skills():
@@ -140,14 +144,15 @@ def expected_wrap_fingerprint(registry) -> tuple[str, list[str]]:
 
     门的并集必须与 :func:`build_instrument_skill_tools` **逐字同源**（两处都调
     ``tool_face.compute``）—— 只给装配加一道门而忘了这里，探针会把「已生效」永远
-    报成「没跟上」。这正是把并集搬进 ``tool_face`` 的原因。
+    报成「没跟上」。这正是把并集搬进 ``tool_face`` 的原因。``registry=`` 也一样要两边
+    都显式传（站点画像门靠它分类），只传一边，探针会在站点画像下永远说「没跟上」。
     """
     from mast.skills import tool_face
     from mast.skills.overlay.provenance import (
         OVERLAY_NAMESPACE, fingerprint, registry_triples,
     )
 
-    skip = tool_face.compute(tool_face.names_from_registry(registry)).names
+    skip = tool_face.compute(tool_face.names_from_registry(registry), registry=registry).names
     triples = [t for t in registry_triples(registry) if t[0] not in skip]
     return (fingerprint(triples),
             sorted(n for n, mod, _v in triples if OVERLAY_NAMESPACE in mod))
@@ -234,7 +239,7 @@ def _handoff_description(target: str) -> str:
 
     Both used to describe the handoff as available "when you've completed your
     phase" / "for newly-acquired results", with nothing tying "completed" to the
-    operator's actual request. (2026-07-27): asked for 5 STS
+    operator's actual request. Observed once: asked for 5 STS
     points, the agent handed off to data_processing right away. The prompt's rule
     lives in instrument_control/prompts.py 「交接时机」; these two strings must say
     the same thing, because a tool description that reads "hand newly-acquired

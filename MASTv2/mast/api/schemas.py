@@ -15,7 +15,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-# Re-export the core hardware-safety model verbatim so the API and the core
+# Re-export the core hardware-safety model unchanged so the API and the core
 # share ONE definition (no parallel copy that could drift). SafetyLimits already
 # lives in mast.config as a BaseModel — it IS a valid response_model as-is.
 from mast.config import SafetyLimits as SafetyLimits  # noqa: F401  (re-export)
@@ -35,6 +35,14 @@ class HealthResponse(BaseModel):
     skill_registry_wired: bool = False
     settings_store_wired: bool = False
     experiment_storage_wired: bool = False
+    # Station profile the running process IS ("stm" | "optical"; mast.station): the one
+    # it started under, so the UI variant always matches the subsystems that are
+    # running. `station_profile_source` says where the configured value comes from
+    # (env = MAST_STATION_PROFILE pins it and the settings page cannot change it);
+    # `station_restart_pending` = the setting was changed after start (restart needed).
+    station_profile: Literal["stm", "optical"] = "stm"
+    station_profile_source: Literal["env", "settings", "default"] = "default"
+    station_restart_pending: bool = False
 
 
 class ModelInfo(BaseModel):
@@ -85,6 +93,16 @@ class SettingsResponse(BaseModel):
     autonomy_mode: Optional[str] = None  # "safe" | "semi" | "auto"
     orchestrator_recursion_limit: Optional[int] = None  # run-task super-step budget (default 250)
     orchestrator_auto_background: Optional[bool] = None  # auto-detach a paired literature survey; default OFF
+    # Legacy feature set (built-in agent chat, Agents, query assistant, multi-day conduct,
+    # memory, vision models, wishlist feedback). Default OFF; vision models load at
+    # service start, so a change needs a restart. No admin PIN.
+    legacy_features_enabled: Optional[bool] = False
+    # Station profile (optical station, docs/v2/design/optical_station_witec.md D1):
+    # "stm" | "optical"; unset = "stm". This is what is STORED; the profile the
+    # running process IS (the one it started under) is GET /api/health
+    # `station_profile`. Part of the effect is decided at service start, so a change
+    # needs a restart.
+    station_profile: Optional[str] = None
     # LangGraph 退出的两个切换面（2026-08-26/27）。都是 DEFAULT OFF / live-read /
     # fail-safe OFF：设置缺失或读不出来一律走旧路径。放在 HTTP 面上而不是只留一个
     # 配置文件，是因为真机在别处 —— 翻开关不该需要先 SSH 上去。
@@ -123,7 +141,7 @@ class SettingsResponse(BaseModel):
     conduct: Optional[dict[str, float]] = None
     hardware_modules: Optional[dict[str, bool]] = None  # optional/licensed Nanonis modules; all default OFF
     advanced_capabilities: Optional[dict[str, bool]] = None  # powers that step around a protection; all default OFF
-    experiment_defaults: Optional[dict[str, Any]] = None  # operator's preferred default scan/spectroscopy params 
+    experiment_defaults: Optional[dict[str, Any]] = None  # operator's preferred default scan/spectroscopy params
     instrument_profile: Optional[dict[str, Any]] = None  # per-rig retract/dI-dV config + learned calibration
     coarse_drive: Optional[dict[str, Any]] = None  # operator-declared coarse-stepper drive ceiling (admin-PIN guarded)
     scan_policy: Optional[dict[str, Any]] = None  # 按尺度分层的扫描参数表 {"tiers": [...]}
@@ -149,6 +167,7 @@ class SettingsResponse(BaseModel):
     ingest_copy_mode: Optional[str] = None            # "copy" | "hardlink"
     env_csv_enabled: Optional[bool] = None            # 环境读数同时写 CSV;默认开
     conv_export_enabled: Optional[bool] = None        # 对话增量导出;默认开
+    satellite_hub_enabled: Optional[bool] = None      # 卫星通道总开关;默认开(live-read)
 
 
 class HardwareModuleState(BaseModel):
@@ -243,7 +262,7 @@ class ExperimentSummary(BaseModel):
     #: The experiment's CURRENT sample (newest active, else newest). The panel
     #: had nothing but the experiment UUID to show and rendered "441ebe7c-2a7",
     #: which the operator could not even identify as an experiment / sample /
-    #: conversation id .
+    #: conversation id.
     sample_name: Optional[str] = None
     sample_id: Optional[str] = None
 

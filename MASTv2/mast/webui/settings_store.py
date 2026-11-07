@@ -27,6 +27,12 @@ logger = logging.getLogger(__name__)
 
 # Whitelist of persistable UI settings (anything else passed in is dropped).
 KNOWN_KEYS: frozenset[str] = frozenset({
+    "legacy_features_enabled",  # bool; show/enable the legacy surface (built-in agent
+                            #   chat, Agents, query assistant, multi-day conduct,
+                            #   memory, vision models, wishlist feedback). DEFAULT OFF.
+                            #   No admin PIN. The vision models are loaded (or not)
+                            #   once at service start, so changing this needs a
+                            #   service restart to take effect there.
     "compaction_model",         # compaction summarizer model id; blank = follow current agent model
     "tool_refine_enabled",       # bool; per-turn tool-return refine (before_model); default on
     "tool_packs_enabled",        # bool; IC 工具按需加载(核心40个+按需取包); default on
@@ -171,8 +177,8 @@ KNOWN_KEYS: frozenset[str] = frozenset({
                             #   for the autonomous agent path (safe=no tip work +
                             #   belief, semi=pulses→HITL + shallow shaping, auto=all)
     "experiment_defaults",  # dict; operator's preferred default scan/spectroscopy
-                            #   parameters (扫描尺寸/速度/线数/setpoint/bias + notes,
-                            #   #147). Live-read holder like vision_thresholds: the
+                            #   parameters (扫描尺寸/速度/线数/setpoint/bias + notes).
+                            #   Live-read holder like vision_thresholds: the
                             #   agents._shared.experiment_prefs middleware injects
                             #   them into IC / experiment_design as PREFERRED
                             #   defaults (hints, not bounds — SafetyLimits still
@@ -254,6 +260,24 @@ KNOWN_KEYS: frozenset[str] = frozenset({
                             #   (实验级按天轮转 + 当前样品级)，供 Excel/Origin 直接打开
     "conv_export_enabled",  # bool (default True); 对话增量导出成 jsonl+md。
                             #   这是唯一能保住被 8000 行上限裁掉的历史的地方
+    # ── TERS 卫星通道 (2026-10-19, docs/v2/design/ters_satellite_integration.md §5) ──
+    "satellite_hub_enabled",  # bool (default True); 卫星通道 /ws/satellite/v1 的总开关。
+                            #   关掉：枢纽 1 s 内断开已连的卫星（关闭码 4403），新连接回
+                            #   403；卫星侧的死人开关在 deadman_s 内停下枢纽发起的运动与
+                            #   采集。读者：mast.satellite.hub.SatelliteHub.hub_enabled()
+                            #   （端点认证与监视线程，live-read，约 1 s 生效，不用重启）。
+                            #   缺席 = 开：没有卫星配置时这条通道本来就进不来（要令牌）。
+    # ── 站点画像 (2026-11-03, docs/v2/design/optical_station_witec.md D1) ───────
+    "station_profile",      # "stm" | "optical"; 缺席 = "stm"（现有所有机器的行为）。
+                            #   光学站画像下：不连 Nanonis、不起它的线程、关串口自动探测、
+                            #   工具面只留光学与通用技能、简报/observe/首页换成光学内容。
+                            #   读者：mast.station（环境变量 MAST_STATION_PROFILE 优先）。
+                            #   **在 admin_pin.GUARDED_KEYS 里** —— 选错的后果在下次启动才显现
+                            #   （STM 站变光学：不拨 Nanonis；反过来：串口自动探测恢复），
+                            #   HTTP 写入口没有 PIN 一律拒绝（fail-closed）。
+                            #   部分后果在**服务启动时**决定（起不起线程），所以改了要
+                            #   重启服务才完全生效 —— 写入路由用 _READ_ONCE_AT_STARTUP
+                            #   把这句话带回给界面。取值非法一律按 "stm" 处理并记 WARNING。
     # ── 墓碑：三个删掉的键（2026-08-10）────────────────────────────────
     #
     # ── 2026-08-24 删除：knowledge_mode（auto | simple | normal | expert）──
@@ -399,6 +423,19 @@ def settings_store_for_runtime() -> "SettingsStore":
         return _auto_store
 
 
+def legacy_features_enabled() -> bool:
+    """Whether the legacy feature set is enabled (default False).
+
+    Reads the process store (see :func:`settings_store_for_runtime`). Any read
+    failure counts as disabled. Gates that load heavy resources (vision models)
+    evaluate this once at service start; changing the setting needs a restart.
+    """
+    try:
+        return bool(settings_store_for_runtime().get("legacy_features_enabled"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def reset_process_store() -> None:
     """Forget both the published and the auto-built store (tests)."""
     global _process_store, _auto_store, _auto_store_dir
@@ -494,7 +531,7 @@ class SettingsStore:
         # thinking level (Anthropic / MiniMax tunable budget). Applied AFTER
         # model_alias (use() doesn't touch the budget). Without this the
         # operator's chosen thinking level was silently dropped on every restart
-        # — config.llm reverted to the default max budget.
+        # — config.llm reverted to the default max budget (observed).
         tl = s.get("thinking")
         if tl:
             try:
@@ -548,5 +585,5 @@ class SettingsStore:
 
 
 __all__ = ["SettingsStore", "KNOWN_KEYS", "default_config_dir",
-           "NANONIS_KEY_TO_ATTR", "settings_store_for_runtime",
+           "NANONIS_KEY_TO_ATTR", "settings_store_for_runtime", "legacy_features_enabled",
            "set_process_store", "reset_process_store"]

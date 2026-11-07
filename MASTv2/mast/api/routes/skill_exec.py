@@ -36,6 +36,7 @@
 from __future__ import annotations
 
 import logging
+from mast.i18n import tr
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -68,6 +69,13 @@ class SkillExecuteResponse(BaseModel):
     nanonis_calls: int = 0
     degraded: bool = False        # 没有活的连接池/状态/注册表
     missing: list[str] = Field(default_factory=list)
+    refused_by: str = Field(
+        "", description=(
+            "门口就被拒、技能没有执行时的来源（direct_exec.DirectRun.refused_by 原样透出）："
+            "si_parse（参数的 SI 字符串还原失败）/ sample_gate（没选样品）/ busy（仪器令牌被别人"
+            "持有）；needs_human_node = 组合技能跑到需要人决定的节点停住（前面的步可能已执行）。"
+            "技能真执行了（成败看 success）为空串。注意：ExecutionContext.run 里面的拒绝（中止闩、"
+            "运行模式、硬闸、参数校验）目前没有结构化来源，也是空串 —— 原因看 error。"))
 
 
 def _execution_context(ctx: Any):
@@ -95,10 +103,14 @@ def execute_skill(name: str, request: Request,
     if ec is None:
         return SkillExecuteResponse(ok=False, degraded=True, skill=name,
                                     missing=missing,
-                                    error=f"ExecutionContext 不可用,缺少: {missing}")
+                                    error=tr(f"ExecutionContext 不可用,缺少: {missing}", f"ExecutionContext unavailable, missing: {missing}"))
     actor = _actor(request)
     # ``ExecutionContext.run`` 收的是**技能名**,注册表查找、安全闸门、仪器仲裁
     # 都在它里面 —— direct_exec 不自己查、不自己拼,就是为了不出现第二条执行路径。
+    #
+    # record_wait_s=0:这个回执里没有 ``recorded``,入账一刻都不等(后台写入器照写)。
+    # 入账同步写、实验库被锁时,回执会卡很久,而技能早就跑完了 —— 例如
+    # StopAutoApproach 当场停住了进针,调用方却要等入账结束才知道。
     run = direct_exec.run_and_record(
         ec, name, params,
         runtime=direct_exec.live_runtime(ctx),
@@ -106,6 +118,7 @@ def execute_skill(name: str, request: Request,
         thread_id=None,
         context=(f"ext:{actor}" if actor else OWNER),
         approval_source=(direct_exec.APPROVAL_LLM if actor else direct_exec.APPROVAL_AUTO),
+        record_wait_s=0.0,
     )
     if run.error and not run.success:
         logger.info("skill-exec %s failed: %s", name, run.error[:200])
@@ -118,4 +131,5 @@ def execute_skill(name: str, request: Request,
         summary=run.summary,
         elapsed_s=run.elapsed_s,
         nanonis_calls=run.nanonis_calls,
+        refused_by=run.refused_by or "",
     )

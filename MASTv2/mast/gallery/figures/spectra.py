@@ -15,17 +15,18 @@ import time
 import numpy as np
 
 from mast.gallery.figures import common as C
+from mast.i18n import tr
 
 ROBUST = 1.4826
 
 
 def dshort(dname: str) -> str:
     """图上用的 dI/dV 短名。"""
-    return "dI/dV（LI %s）" % dname.split()[-1] if "LI Demod" in dname else "dI/dV（数值求导）"
+    return tr("dI/dV（LI %s）", "dI/dV (LI %s)") % dname.split()[-1] if "LI Demod" in dname else tr("dI/dV（数值求导）", "dI/dV (numerical derivative)")
 
 
 def nice(x: float, fallback: float = 1.0) -> float:
-    """1-2-5 序列里对数距离最近的值。``x`` 不是正的有限数 ⇒ ``fallback``（原版会抛）。"""
+    """1-2-5 序列里对数距离最近的值。``x`` 不是正的有限数 ⇒ ``fallback``。"""
     x = float(x)
     if not (math.isfinite(x) and x > 0):
         return fallback
@@ -75,7 +76,7 @@ def load_spectrum(it: dict, cache: dict | None = None) -> dict:
     if cache is not None and key in cache:
         return cache[key]
     if it.get("ex"):
-        raise C.JobError("不是偏压谱（%s）" % it["ex"])
+        raise C.JobError(tr("不是偏压谱（%s）", "Not a bias spectrum (%s)") % it["ex"])
     from mast.io.nanonis_files import read_dat
 
     res = read_dat(it["p"])
@@ -83,7 +84,7 @@ def load_spectrum(it: dict, cache: dict | None = None) -> dict:
     cols = res.get("columns") or {}
     names = list(cols)
     if not names:
-        raise C.JobError("谱文件里没有数据列")
+        raise C.JobError(tr("谱文件里没有数据列", "The spectrum file has no data columns"))
     vname = (_first(names, "Bias calc (V)", "Bias (V)")
              or next((c for c in names if c.lower().startswith("bias")), names[0]))
     V = np.asarray(cols[vname], dtype=np.float64)
@@ -100,7 +101,7 @@ def load_spectrum(it: dict, cache: dict | None = None) -> dict:
     if If is None:
         If, I = fb("Current (A)", 1e12)
     if If is None:
-        raise C.JobError("谱里没有电流列")
+        raise C.JobError(tr("谱里没有电流列", "The spectrum has no current column"))
     ref = C.deriv_by_volts(V, If)
     best = None
     if str(h.get("Lock-in>Lock-in status", "ON")).strip().upper() != "OFF":
@@ -119,7 +120,7 @@ def load_spectrum(it: dict, cache: dict | None = None) -> dict:
         Df, D, dunit = best[2], best[3], "fA"
         dname = "dI/dV · %s" % best[1].replace(" [AVG] (A)", "").replace(" (A)", "")
     else:
-        Df, D, dunit, dname = C.deriv_by_volts(V, If), C.deriv_by_volts(V, I), "pA/V", "dI/dV · 电流数值求导"
+        Df, D, dunit, dname = C.deriv_by_volts(V, If), C.deriv_by_volts(V, I), "pA/V", tr("dI/dV · 电流数值求导", "dI/dV · numerical derivative of current")
     sweeps = h.get("Bias Spectroscopy>Number of sweeps") or it.get("sw") or "?"
     out = dict(id=key, V=V, If=If, I=I, Df=Df, D=D, dunit=dunit, dname=dname,
                li_r=float(best[0]) if best else None,
@@ -154,7 +155,7 @@ def stm_panel(ax, f: dict | None, pts, labels, rings, t_ref, head: str = "", cac
     """帧 + 谱位置（青点）+ 标注站位（黄圈）+ 标题。"""
     ax.set_facecolor("#17151a")
     if f is None:
-        ax.text(0.5, 0.5, "之前没有 STM", ha="center", va="center", color="#dddddd",
+        ax.text(0.5, 0.5, tr("之前没有 STM", "No earlier STM"), ha="center", va="center", color="#dddddd",
                 transform=ax.transAxes, fontproperties=C.fp(10))
         ax.set_xticks([])
         ax.set_yticks([])
@@ -194,9 +195,10 @@ def stm_panel(ax, f: dict | None, pts, labels, rings, t_ref, head: str = "", cac
     ax.set_xticks([])
     ax.set_yticks([])
     t = f.get("t")
-    ax.set_title("%s%s/%s · %s · %s · %s · %g×%g nm\n%s 开扫，比谱早 %s 存盘" % (
+    ax.set_title(tr("%s%s/%s · %s · %s · %s · %g×%g nm\n%s 开扫，比谱早 %s 存盘",
+                    "%s%s/%s · %s · %s · %s · %g×%g nm\nscan started %s, saved %s before the spectrum") % (
         head, C.dir_short(f["d"]), C.num4(f["fn"]), C.fmt_bias(f.get("b")), C.fmt_cur(f.get("sp")),
-        ("转角 %g°" % float(f["ang"])) if f.get("ang") else "0°",
+        (tr("转角 %g°", "angle %g°") % float(f["ang"])) if f.get("ang") else "0°",
         float(f.get("w") or 0.0), float(f.get("hn") or f.get("w") or 0.0),
         time.strftime("%m-%d %H:%M", time.localtime(t)) if t else "?",
         C.dur((t_ref or 0) - (f.get("mt") or 0))),

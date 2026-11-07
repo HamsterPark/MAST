@@ -32,9 +32,9 @@ import {
   draftKey,
 } from "@/components/builder/builderSpec";
 import { fuzzyScoreFields } from "@/lib/fuzzy";
+import { getLang, tr } from "@/lib/i18n";
 
-// 技能构建器 — composite skill builder (full parity rebuild of the old Gradio
-// 技能构建器 tab / builder-ui.jsx).
+// Composite skill builder.
 //
 // Document format = backend CompositeSpec JSON. Reproduces: skill palette
 // (catalog search/facets/favorites/staging) · structured node-tree canvas
@@ -42,26 +42,24 @@ import { fuzzyScoreFields } from "@/lib/fuzzy";
 // · read-only DAG preview (CompositeDag) · design-time validate · open stored
 // composite · version history + restore · clone-as-blueprint · local drafts.
 //
-// API SURFACE NOTE: the typed /api seam exposes only list/get/versions/validate/
-// clone/restore (mast/api/routes/skills_ext.py). There is NO save/create/update/
-// delete endpoint, and none of the old /builder/* routes (generate/share/
-// favorites/personas/diff) were ported to /api. So PUBLISH / 另存为 / 折叠 / AI 生成
-// / 分享 are FLAGGED as unavailable here (the controls explain why), and edits
-// persist only as LOCAL DRAFTS (localStorage, per-browser). Clone (server) is the
-// supported way to fork an existing composite into a new blueprint.
+// API surface: open / validate / publish / save (new version) / delete / clone /
+// restore all go through /api/composites (versioned via _history, with optimistic
+// concurrency). AI generation (NL -> spec) and sharing are not exposed here.
+// Edits can also be kept as local drafts (localStorage, per-browser). Clone
+// (server) is the supported way to fork an existing composite into a new blueprint.
 
 const ADD_KINDS: { kind: NodeKind; label: string }[] = [
-  { kind: "if", label: "⑂ if 分支" },
-  { kind: "loop", label: "↻ loop 循环" },
-  { kind: "try", label: "⛨ try/finally（清理必跑）" },
-  { kind: "break", label: "⤓ break 跳出循环" },
-  { kind: "continue", label: "⥁ continue 下一轮" },
-  { kind: "succeed", label: "✓ succeed 提前成功" },
-  { kind: "fail", label: "✗ fail 提前失败" },
-  { kind: "llm", label: "🤖 llm 决策（受限路由/结构化输出）" },
-  { kind: "human", label: "✋ human 人工决策（暂停等用户）" },
-  { kind: "agent", label: "🤝 agent 委托（文献/分析/写作）" },
-  { kind: "set", label: "≔ set 变量" },
+  { kind: "if", label: tr("⑂ if 分支", "⑂ if branch") },
+  { kind: "loop", label: tr("↻ loop 循环", "↻ loop") },
+  { kind: "try", label: tr("⛨ try/finally（清理必跑）", "⛨ try/finally (cleanup always runs)") },
+  { kind: "break", label: tr("⤓ break 跳出循环", "⤓ break (exit loop)") },
+  { kind: "continue", label: tr("⥁ continue 下一轮", "⥁ continue (next iteration)") },
+  { kind: "succeed", label: tr("✓ succeed 提前成功", "✓ succeed (finish early as success)") },
+  { kind: "fail", label: tr("✗ fail 提前失败", "✗ fail (finish early as failure)") },
+  { kind: "llm", label: tr("🤖 llm 决策（受限路由/结构化输出）", "🤖 llm decision (constrained routing / structured output)") },
+  { kind: "human", label: tr("✋ human 人工决策（暂停等用户）", "✋ human decision (pause for the operator)") },
+  { kind: "agent", label: tr("🤝 agent 委托（文献/分析/写作）", "🤝 agent delegate (literature / analysis / writing)") },
+  { kind: "set", label: tr("≔ set 变量", "≔ set variable") },
 ];
 
 const FAV_KEY = "mast_builder_favorites";
@@ -80,7 +78,7 @@ export default function BuilderPage() {
   const { toast, node: toastNode } = useToast();
 
   // ── catalog (builder palette index — richer than /api/skills/catalog: carries
-  //    zh / category / level / tags, exactly the fields the old Palette searched) ──
+  //    zh / category / level / tags) ──
   const catalogQ = useQuery({
     queryKey: ["builder", "catalog"],
     queryFn: async () => {
@@ -112,7 +110,7 @@ export default function BuilderPage() {
   const [staging, setStaging] = useState<string[]>([]);
   const [favorites, setFavorites] = useState<string[]>(loadFavs);
 
-  // ── fullscreen ── (ITEM 9a) the dense node-tree builder needs room; toggle an
+  // ── fullscreen ── the dense node-tree builder needs room; toggle an
   //    in-app fixed inset-0 overlay (no Fullscreen API → keeps app chrome/toasts,
   //    and never freezes if the browser denies the request). Esc exits.
   const [fullscreen, setFullscreen] = useState(false);
@@ -231,7 +229,7 @@ export default function BuilderPage() {
     setMenu({ addr, index: hit.index + 1 });
   }, []);
 
-  // ── favorites (local-only; old /builder/favorites not in /api) ──
+  // ── favorites (local-only; no /api endpoint) ──
   const toggleFav = useCallback((name: string) => {
     setFavorites((f) => {
       const next = f.includes(name) ? f.filter((x) => x !== name) : [...f, name];
@@ -251,7 +249,7 @@ export default function BuilderPage() {
         const { data, error } = await api.GET("/api/composites/{name}", { params: { path: { name } } });
         if (error) throw error;
         if (!data?.found || !data.spec) {
-          toast(`未找到工作流：${name}`, "err");
+          toast(tr(`未找到工作流：${name}`, `Workflow not found: ${name}`), "err");
           return;
         }
         const s = { ...emptySpec(name), ...(data.spec as Spec) };
@@ -263,7 +261,7 @@ export default function BuilderPage() {
         setSelId(null);
         setWfOpen(false);
       } catch (e) {
-        toast(`打开失败：${e instanceof Error ? e.message : e}`, "err");
+        toast(tr(`打开失败：${e instanceof Error ? e.message : e}`, `Open failed: ${e instanceof Error ? e.message : e}`), "err");
       }
     },
     [toast],
@@ -285,7 +283,13 @@ export default function BuilderPage() {
     if (draftTimer.current) clearTimeout(draftTimer.current);
     writeDraft(s, baseVersion, staging);
     setDrafts(listDrafts());
-    toast(`已存为本地草稿${s.name ? `「${s.name}」` : "（未命名）"}——仅本机、未注册为技能。`, "ok");
+    toast(
+      tr(
+        `已存为本地草稿${s.name ? `「${s.name}」` : "（未命名）"}——仅本机、未注册为技能。`,
+        `Saved as local draft${s.name ? ` "${s.name}"` : " (untitled)"} — this machine only, not registered as a skill.`,
+      ),
+      "ok",
+    );
   }, [baseVersion, staging, toast]);
 
   const openDraft = useCallback(
@@ -298,7 +302,13 @@ export default function BuilderPage() {
       setReport(null);
       setSelId(null);
       setDfOpen(false);
-      toast(`已载入本地草稿${d.name && d.name !== "__new__" ? `「${d.name}」` : "（未命名）"}。`, "ok");
+      toast(
+        tr(
+          `已载入本地草稿${d.name && d.name !== "__new__" ? `「${d.name}」` : "（未命名）"}。`,
+          `Loaded local draft${d.name && d.name !== "__new__" ? ` "${d.name}"` : " (untitled)"}.`,
+        ),
+        "ok",
+      );
     },
     [toast],
   );
@@ -306,13 +316,13 @@ export default function BuilderPage() {
   const clearCurrentDraft = useCallback(() => {
     const s = specRef.current;
     const hasContent = (s.nodes && s.nodes.length) || s.name;
-    if (hasContent && !window.confirm("清空当前画布并删除其本地草稿？（已发布的技能版本不受影响）")) return;
+    if (hasContent && !window.confirm(tr("清空当前画布并删除其本地草稿？（已发布的技能版本不受影响）", "Clear the current canvas and delete its local draft? (Published skill versions are not affected.)"))) return;
     if (draftTimer.current) clearTimeout(draftTimer.current);
     removeDraft(draftKey(s.name));
     removeDraft(draftKey(""));
     newWorkflow();
     setDrafts(listDrafts());
-    toast("已清空当前草稿。", "ok");
+    toast(tr("已清空当前草稿。", "Current draft cleared."), "ok");
   }, [newWorkflow, toast]);
 
   // ── validate (server) ──
@@ -328,30 +338,30 @@ export default function BuilderPage() {
     },
     onSuccess: (d) => {
       setReport(d as ValReport);
-      if ((d as ValReport & { degraded?: boolean }).degraded) toast("校验后端不可用（degraded）", "err");
-      else toast(d?.ok ? "校验通过 ✓" : "校验未通过，详见右栏", d?.ok ? "ok" : "err");
+      if ((d as ValReport & { degraded?: boolean }).degraded) toast(tr("校验后端不可用（degraded）", "Validation backend unavailable (degraded)"), "err");
+      else toast(d?.ok ? tr("校验通过 ✓", "Validation passed ✓") : tr("校验未通过，详见右栏", "Validation failed; see the right panel"), d?.ok ? "ok" : "err");
     },
-    onError: (e) => toast(e instanceof Error ? e.message : "校验失败", "err"),
+    onError: (e) => toast(e instanceof Error ? e.message : tr("校验失败", "Validation failed"), "err"),
   });
 
   // ── restore (server) ──
   const restoreMut = useMutation({
     mutationFn: async (version: number) => {
       const name = specRef.current.name;
-      if (!name) throw new Error("当前工作流未命名/未发布，无法回滚");
+      if (!name) throw new Error(tr("当前工作流未命名/未发布，无法回滚", "The current workflow is unnamed / unpublished and cannot be rolled back"));
       const { data, error } = await api.POST("/api/composites/{name}/restore/{version}", {
         params: { path: { name, version } },
       });
       if (error) throw error;
-      if (!data?.ok) throw new Error(data?.error || "回滚失败");
+      if (!data?.ok) throw new Error(data?.error || tr("回滚失败", "Rollback failed"));
       return data;
     },
     onSuccess: (d, version) => {
-      toast(d?.message || `已回滚到 v${version}`, "ok");
+      toast(d?.message || tr(`已回滚到 v${version}`, `Rolled back to v${version}`), "ok");
       qc.invalidateQueries({ queryKey: ["composites"] });
       if (specRef.current.name) openWorkflow(specRef.current.name);
     },
-    onError: (e) => toast(e instanceof Error ? e.message : "回滚失败", "err"),
+    onError: (e) => toast(e instanceof Error ? e.message : tr("回滚失败", "Rollback failed"), "err"),
   });
 
   // ── clone (server) ──
@@ -361,14 +371,14 @@ export default function BuilderPage() {
   const cloneMut = useMutation({
     mutationFn: async () => {
       const src = specRef.current.name;
-      if (!src || !baseVersion) throw new Error("先打开一个已发布的工作流再克隆");
-      if (!cloneName.trim()) throw new Error("请填写新技能名称");
+      if (!src || !baseVersion) throw new Error(tr("先打开一个已发布的工作流再克隆", "Open a published workflow before cloning"));
+      if (!cloneName.trim()) throw new Error(tr("请填写新技能名称", "Enter a name for the new skill"));
       const { data, error } = await api.POST("/api/composites/{name}/clone", {
         params: { path: { name: src } },
         body: { new_name: cloneName.trim(), author: cloneAuthor.trim() },
       });
       if (error) throw error;
-      if (!data?.ok) throw new Error(data?.error || "克隆失败");
+      if (!data?.ok) throw new Error(data?.error || tr("克隆失败", "Clone failed"));
       return data;
     },
     onSuccess: (d) => {
@@ -376,10 +386,10 @@ export default function BuilderPage() {
       setCloneName("");
       setCloneAuthor("");
       qc.invalidateQueries({ queryKey: ["composites"] });
-      toast(d?.message || "已克隆", "ok");
+      toast(d?.message || tr("已克隆", "Cloned"), "ok");
       if (d?.name) openWorkflow(d.name);
     },
-    onError: (e) => toast(e instanceof Error ? e.message : "克隆失败", "err"),
+    onError: (e) => toast(e instanceof Error ? e.message : tr("克隆失败", "Clone failed"), "err"),
   });
 
   // ── publish / save (server) — POST /api/composites (new) or PUT (update) ──
@@ -390,7 +400,7 @@ export default function BuilderPage() {
   const publishMut = useMutation({
     mutationFn: async () => {
       const s = specRef.current;
-      if (!s.name?.trim()) throw new Error("请先填写工作流名称再发布");
+      if (!s.name?.trim()) throw new Error(tr("请先填写工作流名称再发布", "Enter a workflow name before publishing"));
       if (baseVersion > 0) {
         const { data, error } = await api.PUT("/api/composites/{name}", {
           params: { path: { name: s.name } },
@@ -398,7 +408,7 @@ export default function BuilderPage() {
         });
         if (error) throw error;
         const d = data as WriteResp;
-        if (!d?.ok) throw new Error(d?.error || (d?.version_conflict ? `版本冲突（服务器为 v${d?.stored_version}），请重新打开后再保存` : "保存失败"));
+        if (!d?.ok) throw new Error(d?.error || (d?.version_conflict ? tr(`版本冲突（服务器为 v${d?.stored_version}），请重新打开后再保存`, `Version conflict (server has v${d?.stored_version}); reopen the workflow and save again`) : tr("保存失败", "Save failed")));
         return d;
       }
       const { data, error } = await api.POST("/api/composites", {
@@ -406,38 +416,38 @@ export default function BuilderPage() {
       });
       if (error) throw error;
       const d = data as WriteResp;
-      if (!d?.ok) throw new Error(d?.error || (d?.already_exists ? "同名复合技能已存在（请改名，或打开它后用「保存」更新）" : "发布失败"));
+      if (!d?.ok) throw new Error(d?.error || (d?.already_exists ? tr("同名复合技能已存在（请改名，或打开它后用「保存」更新）", "A composite skill with this name already exists (rename it, or open it and use Save to update)") : tr("发布失败", "Publish failed")));
       return d;
     },
     onSuccess: (d) => {
-      toast(d?.message || `已${baseVersion > 0 ? "保存" : "发布"} v${d?.version ?? ""}`, "ok");
+      toast(d?.message || (baseVersion > 0 ? tr(`已保存 v${d?.version ?? ""}`, `Saved v${d?.version ?? ""}`) : tr(`已发布 v${d?.version ?? ""}`, `Published v${d?.version ?? ""}`)), "ok");
       setDirty(false);
       if (d?.version) setBaseVersion(d.version);
       qc.invalidateQueries({ queryKey: ["composites"] });
     },
-    onError: (e) => toast(e instanceof Error ? e.message : "发布失败", "err"),
+    onError: (e) => toast(e instanceof Error ? e.message : tr("发布失败", "Publish failed"), "err"),
   });
 
   // ── delete (server) — DELETE /api/composites/{name} (history retained) ──
   const deleteMut = useMutation({
     mutationFn: async () => {
       const name = specRef.current.name;
-      if (!name || baseVersion === 0) throw new Error("仅可删除已发布的工作流");
+      if (!name || baseVersion === 0) throw new Error(tr("仅可删除已发布的工作流", "Only published workflows can be deleted"));
       const { data, error } = await api.DELETE("/api/composites/{name}", { params: { path: { name } } });
       if (error) throw error;
       const d = data as WriteResp;
-      if (!d?.ok) throw new Error(d?.error || "删除失败");
+      if (!d?.ok) throw new Error(d?.error || tr("删除失败", "Delete failed"));
       return d;
     },
     onSuccess: (d) => {
-      toast(d?.message || "已删除（历史快照保留）", "ok");
+      toast(d?.message || tr("已删除（历史快照保留）", "Deleted (history snapshots kept)"), "ok");
       qc.invalidateQueries({ queryKey: ["composites"] });
       setSpecRaw(emptySpec(""));
       setBaseVersion(0);
       setDirty(false);
       setSelId(null);
     },
-    onError: (e) => toast(e instanceof Error ? e.message : "删除失败", "err"),
+    onError: (e) => toast(e instanceof Error ? e.message : tr("删除失败", "Delete failed"), "err"),
   });
 
   // dropdown open states + outside-click
@@ -454,7 +464,7 @@ export default function BuilderPage() {
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
-  // CN/EN fuzzy search across name + description(中文) + tags; ranked by score.
+  // CN/EN fuzzy search across name + description + tags; ranked by score.
   const wfFiltered = useMemo(() => {
     const q = wfQ.trim();
     if (!q) return workflows;
@@ -469,26 +479,37 @@ export default function BuilderPage() {
   }, [workflows, wfQ]);
 
   return (
-    <Section title="技能构建器">
+    <Section title={tr("技能构建器", "Skill builder")}>
       {toastNode}
 
-      {/* note: save/publish/delete now wired; only AI 生成 / 分享 stay live-only */}
+      {/* save / publish / delete are wired; only AI generation and sharing are not exposed */}
       <Card className="mb-3 border-mast-border">
         <p className="text-xs text-mast-muted">
-          支持：<b>打开 / 校验 / 发布 / 保存（新版本）/ 删除 / 克隆 / 回滚</b>（全部经 <code>/api/composites</code>，
-          带 <code>_history</code> 版本与乐观并发）。仅 <b>AI 生成（NL→spec）/ 分享到实验室</b> 仍为
-          live-only（需在线模型 / 云推送），未在此暴露。编辑可随时存为<b>本地草稿</b>（仅本机浏览器）。
+          {getLang() === "zh" ? (
+            <>
+              支持：<b>打开 / 校验 / 发布 / 保存（新版本）/ 删除 / 克隆 / 回滚</b>（全部经 <code>/api/composites</code>，
+              带 <code>_history</code> 版本与乐观并发）。仅 <b>AI 生成（NL→spec）/ 分享到实验室</b> 仍为
+              live-only（需在线模型 / 云推送），未在此暴露。编辑可随时存为<b>本地草稿</b>（仅本机浏览器）。
+            </>
+          ) : (
+            <>
+              Supported: <b>open / validate / publish / save (new version) / delete / clone / roll back</b> (all via{" "}
+              <code>/api/composites</code>, with <code>_history</code> versions and optimistic concurrency). Only{" "}
+              <b>AI generation (NL→spec) / sharing to the lab</b> are not exposed here (they need an online model /
+              cloud push). Edits can be kept at any time as a <b>local draft</b> (this browser only).
+            </>
+          )}
         </p>
       </Card>
 
       {/* topbar */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <span className="font-semibold text-mast-text">⛏ 工作流</span>
+        <span className="font-semibold text-mast-text">{tr("⛏ 工作流", "⛏ Workflow")}</span>
 
         {/* open workflow picker */}
         <div className="relative" ref={wfBox}>
           <Button onClick={() => { setWfOpen((o) => !o); setWfQ(""); }}>
-            打开工作流 ▾{workflows.length ? <span className="ml-1 text-mast-muted">{workflows.length}</span> : null}
+            {tr("打开工作流", "Open workflow")} ▾{workflows.length ? <span className="ml-1 text-mast-muted">{workflows.length}</span> : null}
           </Button>
           {wfOpen && (
             <div className="absolute z-30 mt-1 w-72 rounded-md border border-mast-border bg-mast-panel p-1 shadow-xl">
@@ -496,7 +517,10 @@ export default function BuilderPage() {
                 autoFocus
                 value={wfQ}
                 onChange={(e) => setWfQ(e.target.value)}
-                placeholder={`搜索 ${workflows.length} 个工作流（中/英/模糊，匹配名称+描述+标签）…`}
+                placeholder={tr(
+                  `搜索 ${workflows.length} 个工作流（中/英/模糊，匹配名称+描述+标签）…`,
+                  `Search ${workflows.length} workflows (fuzzy; matches name + description + tags)…`,
+                )}
                 className="mb-1 w-full rounded border border-mast-border bg-mast-bg px-2 py-1 text-sm outline-none focus:border-mast-accent"
               />
               <div className="max-h-72 overflow-auto">
@@ -519,7 +543,7 @@ export default function BuilderPage() {
                     </div>
                   ))
                 ) : (
-                  <div className="px-2 py-1 text-xs text-mast-muted">无匹配工作流</div>
+                  <div className="px-2 py-1 text-xs text-mast-muted">{tr("无匹配工作流", "No matching workflows")}</div>
                 )}
               </div>
             </div>
@@ -529,7 +553,7 @@ export default function BuilderPage() {
         {/* drafts picker */}
         <div className="relative" ref={dfBox}>
           <Button onClick={() => { setDfOpen((o) => !o); setDrafts(listDrafts()); }}>
-            草稿 ▾{drafts.length ? <span className="ml-1 text-mast-muted">{drafts.length}</span> : null}
+            {tr("草稿", "Drafts")} ▾{drafts.length ? <span className="ml-1 text-mast-muted">{drafts.length}</span> : null}
           </Button>
           {dfOpen && (
             <div className="absolute z-30 mt-1 w-72 rounded-md border border-mast-border bg-mast-panel p-1 shadow-xl">
@@ -537,13 +561,13 @@ export default function BuilderPage() {
                 {drafts.length ? (
                   drafts.map((d) => (
                     <div key={d.key} className="flex items-center gap-1 rounded px-2 py-1 text-sm hover:bg-mast-bg">
-                      <span className="flex-1 cursor-pointer truncate" onClick={() => openDraft(d)} title="载入此草稿">
-                        {d.name === "__new__" ? "（未命名草稿）" : d.name}
-                        <span className="ml-1 text-xs text-mast-muted">{d.nodes} 节点</span>
+                      <span className="flex-1 cursor-pointer truncate" onClick={() => openDraft(d)} title={tr("载入此草稿", "Load this draft")}>
+                        {d.name === "__new__" ? tr("（未命名草稿）", "(untitled draft)") : d.name}
+                        <span className="ml-1 text-xs text-mast-muted">{tr(`${d.nodes} 节点`, `${d.nodes} nodes`)}</span>
                       </span>
                       <span
                         className="cursor-pointer text-mast-muted hover:text-mast-danger"
-                        title="删除此草稿"
+                        title={tr("删除此草稿", "Delete this draft")}
                         onClick={() => {
                           removeDraft(d.key);
                           setDrafts(listDrafts());
@@ -554,64 +578,64 @@ export default function BuilderPage() {
                     </div>
                   ))
                 ) : (
-                  <div className="px-2 py-1 text-xs text-mast-muted">无本地草稿</div>
+                  <div className="px-2 py-1 text-xs text-mast-muted">{tr("无本地草稿", "No local drafts")}</div>
                 )}
               </div>
             </div>
           )}
         </div>
 
-        <Button onClick={newWorkflow}>新建</Button>
-        <Button onClick={clearCurrentDraft}>清空草稿</Button>
+        <Button onClick={newWorkflow}>{tr("新建", "New")}</Button>
+        <Button onClick={clearCurrentDraft}>{tr("清空草稿", "Clear draft")}</Button>
 
-        <span className="font-mono text-sm text-mast-accent">{spec.name || "（未命名）"}</span>
-        {baseVersion ? <Badge>v{baseVersion}</Badge> : <Badge tone="WARN">未发布</Badge>}
-        {dirty && <span title="有未保存改动" className="h-2 w-2 rounded-full bg-mast-warn" />}
+        <span className="font-mono text-sm text-mast-accent">{spec.name || tr("（未命名）", "(untitled)")}</span>
+        {baseVersion ? <Badge>v{baseVersion}</Badge> : <Badge tone="WARN">{tr("未发布", "Unpublished")}</Badge>}
+        {dirty && <span title={tr("有未保存改动", "Unsaved changes")} className="h-2 w-2 rounded-full bg-mast-warn" />}
 
         <span className="flex-1" />
 
         <Button variant="default" disabled={validateMut.isPending} onClick={() => validateMut.mutate()}>
-          {validateMut.isPending ? "校验中…" : "校验"}
+          {validateMut.isPending ? tr("校验中…", "Validating…") : tr("校验", "Validate")}
         </Button>
         <Button
           variant="primary"
           disabled={publishMut.isPending || !spec.name?.trim()}
           onClick={() => publishMut.mutate()}
         >
-          {publishMut.isPending ? "发布中…" : baseVersion > 0 ? "💾 保存（新版本）" : "🚀 发布为技能"}
+          {publishMut.isPending ? tr("发布中…", "Publishing…") : baseVersion > 0 ? tr("💾 保存（新版本）", "💾 Save (new version)") : tr("🚀 发布为技能", "🚀 Publish as skill")}
         </Button>
         <Button
           variant="default"
           disabled={!baseVersion}
           onClick={() => {
-            setCloneName(spec.name ? `${spec.name}_副本` : "");
+            setCloneName(spec.name ? `${spec.name}${tr("_副本", "_copy")}` : "");
             setCloneAuthor("");
             setCloneOpen(true);
           }}
         >
-          克隆为新技能
+          {tr("克隆为新技能", "Clone as new skill")}
         </Button>
         {baseVersion > 0 && (
           <Button
             variant="danger"
             disabled={deleteMut.isPending}
             onClick={() => {
-              if (window.confirm(`删除复合技能「${spec.name}」？（历史快照保留）`)) deleteMut.mutate();
+              if (window.confirm(tr(`删除复合技能「${spec.name}」？（历史快照保留）`, `Delete composite skill "${spec.name}"? (History snapshots are kept.)`))) deleteMut.mutate();
             }}
           >
-            删除
+            {tr("删除", "Delete")}
           </Button>
         )}
-        <Button variant="default" onClick={saveDraft}>💾 保存草稿</Button>
+        <Button variant="default" onClick={saveDraft}>{tr("💾 保存草稿", "💾 Save draft")}</Button>
         <Button variant="default" onClick={() => setFullscreen((f) => !f)}>
-          {fullscreen ? "🗗 退出全屏" : "⛶ 全屏"}
+          {fullscreen ? tr("🗗 退出全屏", "🗗 Exit fullscreen") : tr("⛶ 全屏", "⛶ Fullscreen")}
         </Button>
       </div>
 
       {/* degraded / loading notes */}
       {catalogQ.isError && <ErrorNote error={catalogQ.error} />}
-      {catalogQ.data?.degraded && <DegradedNote what="技能目录" />}
-      {compositesQ.data?.degraded && <DegradedNote what="复合技能列表" />}
+      {catalogQ.data?.degraded && <DegradedNote what={tr("技能目录", "skill catalog")} />}
+      {compositesQ.data?.degraded && <DegradedNote what={tr("复合技能列表", "composite skill list")} />}
 
       {/* main 3-pane layout — wrapped so it can fill the viewport in fullscreen.
           In fullscreen: fixed inset-0 overlay, panes grow to fill height. */}
@@ -623,17 +647,17 @@ export default function BuilderPage() {
       >
         {fullscreen && (
           <div className="flex shrink-0 items-center gap-2">
-            <span className="font-semibold text-mast-text">⛏ 技能构建器 · 全屏</span>
-            <span className="font-mono text-sm text-mast-accent">{spec.name || "（未命名）"}</span>
-            {baseVersion ? <Badge>v{baseVersion}</Badge> : <Badge tone="WARN">未发布</Badge>}
-            {dirty && <span title="有未保存改动" className="h-2 w-2 rounded-full bg-mast-warn" />}
+            <span className="font-semibold text-mast-text">{tr("⛏ 技能构建器 · 全屏", "⛏ Skill builder · fullscreen")}</span>
+            <span className="font-mono text-sm text-mast-accent">{spec.name || tr("（未命名）", "(untitled)")}</span>
+            {baseVersion ? <Badge>v{baseVersion}</Badge> : <Badge tone="WARN">{tr("未发布", "Unpublished")}</Badge>}
+            {dirty && <span title={tr("有未保存改动", "Unsaved changes")} className="h-2 w-2 rounded-full bg-mast-warn" />}
             <span className="flex-1" />
             <Button variant="default" disabled={validateMut.isPending} onClick={() => validateMut.mutate()}>
-              {validateMut.isPending ? "校验中…" : "校验"}
+              {validateMut.isPending ? tr("校验中…", "Validating…") : tr("校验", "Validate")}
             </Button>
-            <Button variant="default" onClick={saveDraft}>💾 保存草稿</Button>
+            <Button variant="default" onClick={saveDraft}>{tr("💾 保存草稿", "💾 Save draft")}</Button>
             <Button variant="primary" onClick={() => setFullscreen(false)}>
-              🗗 退出全屏（Esc）
+              {tr("🗗 退出全屏（Esc）", "🗗 Exit fullscreen (Esc)")}
             </Button>
           </div>
         )}
@@ -691,24 +715,24 @@ export default function BuilderPage() {
       {/* DAG preview + version history below */}
       <div className="mt-3 grid gap-3 lg:grid-cols-2">
         <Card>
-          <h4 className="mb-2 text-sm font-medium text-mast-text">控制流 DAG（只读预览）</h4>
+          <h4 className="mb-2 text-sm font-medium text-mast-text">{tr("控制流 DAG（只读预览）", "Control-flow DAG (read-only preview)")}</h4>
           <CompositeDag spec={spec} />
         </Card>
         <Card>
-          <h4 className="mb-2 text-sm font-medium text-mast-text">版本历史</h4>
+          <h4 className="mb-2 text-sm font-medium text-mast-text">{tr("版本历史", "Version history")}</h4>
           {!versions.length ? (
             <p className="text-sm text-mast-muted">
-              {baseVersion ? "暂无版本历史" : "打开一个已发布的工作流后显示其版本历史。"}
+              {baseVersion ? tr("暂无版本历史", "No version history yet") : tr("打开一个已发布的工作流后显示其版本历史。", "Open a published workflow to see its version history.")}
             </p>
           ) : (
             <div className="overflow-auto rounded border border-mast-border">
               <table className="w-full text-xs">
                 <thead className="bg-mast-bg text-mast-muted">
                   <tr>
-                    <th className="px-2 py-1.5 text-left">版本</th>
-                    <th className="px-2 py-1.5 text-left">保存时间</th>
-                    <th className="px-2 py-1.5 text-left">节点数</th>
-                    <th className="px-2 py-1.5 text-left">操作</th>
+                    <th className="px-2 py-1.5 text-left">{tr("版本", "Version")}</th>
+                    <th className="px-2 py-1.5 text-left">{tr("保存时间", "Saved at")}</th>
+                    <th className="px-2 py-1.5 text-left">{tr("节点数", "Nodes")}</th>
+                    <th className="px-2 py-1.5 text-left">{tr("操作", "Actions")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -723,7 +747,7 @@ export default function BuilderPage() {
                           onClick={() => restoreMut.mutate(v.version)}
                           className="rounded border border-mast-border px-2 py-0.5 text-xs text-mast-accent hover:bg-mast-accent/10 disabled:opacity-50"
                         >
-                          回滚到此
+                          {tr("回滚到此", "Roll back to this")}
                         </button>
                       </td>
                     </tr>
@@ -736,20 +760,20 @@ export default function BuilderPage() {
       </div>
 
       {/* add-node menu modal */}
-      <Modal open={!!menu} onClose={() => setMenu(null)} title="添加节点">
+      <Modal open={!!menu} onClose={() => setMenu(null)} title={tr("添加节点", "Add node")}>
         {menu && (
           <div className="space-y-1">
             <p className="text-xs text-mast-muted">
-              添加到{" "}
+              {tr("添加到", "Add to")}{" "}
               {menu.addr.containerId
                 ? `${menu.addr.containerId}.${menu.addr.slot}`
                 : menu.index != null
-                  ? "（插入到所选之后）"
-                  : "末尾"}
+                  ? tr("（插入到所选之后）", "(insert after the selected node)")
+                  : tr("末尾", "the end")}
             </p>
             {!!staging.length && (
               <div>
-                <div className="px-1 py-1 text-xs text-mast-muted">🧺 候选技能</div>
+                <div className="px-1 py-1 text-xs text-mast-muted">{tr("🧺 候选技能", "🧺 Staged skills")}</div>
                 {staging.map((s) => (
                   <button
                     key={s}
@@ -763,7 +787,7 @@ export default function BuilderPage() {
             )}
             {!!favorites.length && (
               <div>
-                <div className="px-1 py-1 text-xs text-mast-muted">★ 收藏技能</div>
+                <div className="px-1 py-1 text-xs text-mast-muted">{tr("★ 收藏技能", "★ Favorite skills")}</div>
                 {favorites.slice(0, 8).map((s) => (
                   <button
                     key={s}
@@ -785,26 +809,26 @@ export default function BuilderPage() {
                 {k.label}
               </button>
             ))}
-            <p className="px-1 pt-1 text-xs text-mast-muted">（更多技能：在左侧搜索后双击添加，或先 🧺 存入候选）</p>
+            <p className="px-1 pt-1 text-xs text-mast-muted">{tr("（更多技能：在左侧搜索后双击添加，或先 🧺 存入候选）", "(More skills: search on the left and double-click to add, or stage them with 🧺 first)")}</p>
           </div>
         )}
       </Modal>
 
       {/* clone modal */}
-      <Modal open={cloneOpen} onClose={() => setCloneOpen(false)} title={`克隆为新复合技能（源：${spec.name}）`}>
+      <Modal open={cloneOpen} onClose={() => setCloneOpen(false)} title={tr(`克隆为新复合技能（源：${spec.name}）`, `Clone as new composite skill (source: ${spec.name})`)}>
         <div className="space-y-3">
           <label className="block text-sm">
-            <span className="text-mast-muted">新技能名称</span>
+            <span className="text-mast-muted">{tr("新技能名称", "New skill name")}</span>
             <input
               value={cloneName}
               onChange={(e) => setCloneName(e.target.value)}
               placeholder="MyNewWorkflow"
               className="mt-1 w-full rounded-md border border-mast-border bg-mast-bg px-2.5 py-1.5 text-sm outline-none focus:border-mast-accent"
             />
-            <span className="text-xs text-mast-muted/80">将作为新蓝本（v1），可在“打开工作流”中选择并继续编辑</span>
+            <span className="text-xs text-mast-muted/80">{tr("将作为新蓝本（v1），可在“打开工作流”中选择并继续编辑", "Becomes a new blueprint (v1); pick it under “Open workflow” to keep editing")}</span>
           </label>
           <label className="block text-sm">
-            <span className="text-mast-muted">作者（可选）</span>
+            <span className="text-mast-muted">{tr("作者（可选）", "Author (optional)")}</span>
             <input
               value={cloneAuthor}
               onChange={(e) => setCloneAuthor(e.target.value)}
@@ -812,9 +836,9 @@ export default function BuilderPage() {
             />
           </label>
           <div className="flex justify-end gap-2 pt-1">
-            <Button variant="ghost" onClick={() => setCloneOpen(false)}>取消</Button>
+            <Button variant="ghost" onClick={() => setCloneOpen(false)}>{tr("取消", "Cancel")}</Button>
             <Button variant="primary" disabled={cloneMut.isPending} onClick={() => cloneMut.mutate()}>
-              {cloneMut.isPending ? "克隆中…" : "克隆"}
+              {cloneMut.isPending ? tr("克隆中…", "Cloning…") : tr("克隆", "Clone")}
             </Button>
           </div>
         </div>
@@ -846,7 +870,7 @@ export default function BuilderPage() {
             </table>
           )}
           {hover.card.extra && (hover.card.extra as any).when_use ? (
-            <div className="mt-1 text-xs text-mast-muted">适用：{String((hover.card.extra as any).when_use)}</div>
+            <div className="mt-1 text-xs text-mast-muted">{tr("适用：", "Use when: ")}{String((hover.card.extra as any).when_use)}</div>
           ) : null}
         </div>
       )}

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import { api } from "@/api/client";
+import { tr } from "@/lib/i18n";
 import { useWsEvent } from "@/hooks/useWsEvents";
 import { ChatBubbles, type ChatMsg } from "@/components/chat/ChatBubbles";
 import {
@@ -18,18 +19,22 @@ import {
 } from "@/lib/narration";
 
 // ════════════════════════════════════════════════════════════════════════
-//  旁白（narration）—— 长任务跑的时候，持续说给用户听。
+//  Narration: running commentary for the user while a long task executes.
 //
-//  长任务跑的时候，中间 agent 只会返回一个最终结果，中途没有任何反馈会让人
-//  没有安全感。这条道就是那个答案：要打一发脉冲了、扫到 50% 了、
-//  这块地方不行换个地方。
+//  A long task (e.g. tip forging) only returns a final result from the agent,
+//  which leaves the user without feedback. This lane fills the gap with short
+//  statements such as "about to fire a pulse", "scan at 50%", "this spot is no
+//  good, moving elsewhere".
 //
-//  它**刻意长得跟助手气泡完全不一样**：没有 agent 头像、没有左侧色条、字号更小、
-//  带一个「旁白」小标签。把它画成助手说的话会让用户以为 agent 在自言自语 ——
-//  而它其实是系统在解说，agent 一个字都看不见（后端 mast/chat/narration.py）。
+//  It deliberately looks different from an assistant bubble: no agent avatar,
+//  no left colour bar, smaller type, and a small "Narration" tag. Drawing it as
+//  assistant speech would suggest the agent is talking to itself, but the
+//  narration is system commentary the agent never sees (backend
+//  mast/chat/narration.py).
 //
-//  排序规则是纯函数（src/lib/narration.ts + test/narration.test.ts）：
-//  一个埋在 JSX 里的 filter 出了错的样子是「旁白偶尔排在奇怪的位置」，没人会查。
+//  Ordering is a pure function (src/lib/narration.ts + test/narration.test.ts):
+//  a filter buried in JSX fails as "narration occasionally lands in an odd place",
+//  which nobody would investigate.
 // ════════════════════════════════════════════════════════════════════════
 
 function NarrationCard({
@@ -53,16 +58,16 @@ function NarrationCard({
       >
         <div className="flex items-baseline gap-2">
           <span className="shrink-0 rounded-mast-badge bg-mast-code-bg px-1.5 py-0.5 text-[10px] text-mast-faint">
-            旁白
+            {tr("旁白", "Narration")}
           </span>
-          {/* 事件**发生**的时刻（不是说出来的时刻）。
-              用处不是计时，是**让顺序可核**：一条排在前面的旁白如果时间更晚，
-              那就是排序错了 —— 在此之前那种错只能靠「感觉有点乱」被发现。
-              取不到就整个不渲染（`fmtClock` 返回空串），**不显示 1970**。 */}
+          {/* Time the event HAPPENED (not when it was announced). It makes the
+              ordering checkable: an earlier-placed card with a later time means
+              the sort is wrong. Not rendered when unavailable (`fmtClock` returns
+              an empty string), so 1970 is never shown. */}
           {clock && (
             <span
               className="shrink-0 font-mono text-[10px] tabular-nums text-mast-faint"
-              title="这件事发生的时刻"
+              title={tr("这件事发生的时刻", "When this happened")}
             >
               {clock}
             </span>
@@ -81,8 +86,8 @@ function NarrationCard({
           />
         )}
         {src && imgFailed && (
-          // 「取不到图」不是「没有图」。说清楚是哪一种，别画一个白框。
-          <p className="mt-1 text-[11px] text-mast-faint">这一帧的画面取不到了。</p>
+          // "Image unavailable" is not "no image": say which, instead of an empty box.
+          <p className="mt-1 text-[11px] text-mast-faint">{tr("这一帧的画面取不到了。", "The image for this frame is no longer available.")}</p>
         )}
       </div>
     </div>
@@ -90,8 +95,8 @@ function NarrationCard({
 }
 
 /**
- * 转录 + 旁白的合并视图。`show=false` 时**完全等于**原来的 `<ChatBubbles>`，
- * 一个请求都不发 —— 「关掉」得是真的关掉，不是只把它藏起来。
+ * Merged view of transcript + narration. With `show=false` it is exactly the plain
+ * `<ChatBubbles>` and issues no request: "off" really is off, not merely hidden.
  */
 export function NarrationLane({
   messages,
@@ -104,18 +109,18 @@ export function NarrationLane({
   pending?: boolean;
   show: boolean;
 }) {
-  // 条目与游标**存在模块级 memo 里**,不是组件状态(2026-08-17)。
-  //
-  // 要求:「切换标签页再回来的时候旁白就没有了。」切走 = 组件卸载 =
-  // useState/useRef 一起丢;而回来时 react-query 又先把上一次**增量**请求的
-  // 缓存喂回来(只有最后两条),游标随即跳到末尾,前面几百条再也补不回来。
-  // 见 lib/narration 里 recallNarration 的说明。
+  // Items and cursor live in a module-level memo, not in component state.
+  // Switching tabs unmounts the component and would drop useState/useRef; on
+  // return react-query first replays the cached INCREMENTAL response (only the
+  // last two items), the cursor jumps to the end and the earlier hundreds can
+  // never be refetched. See recallNarration in lib/narration.
   const [items, setItems] = useState<NarrationItem[]>(
     () => recallNarration<NarrationItem>(conversationId).items);
   const cursor = useRef(recallNarration(conversationId).cursor);
 
-  // 换会话 = 换一条转录：游标和已有条目都要切到那条会话自己的账上,
-  // 否则新会话的前几条会被当成「已读」而永远不显示。
+  // A new conversation is a new transcript: switch the cursor and items to that
+  // conversation's own record, otherwise its first items would count as already
+  // read and never be shown.
   useEffect(() => {
     const memo = recallNarration<NarrationItem>(conversationId);
     cursor.current = memo.cursor;
@@ -126,7 +131,8 @@ export function NarrationLane({
   const q = useQuery({
     queryKey: ["chat", "narration", conversationId],
     enabled,
-    // 轮询是兜底：WS 断了（企业代理剥 Upgrade 头）旁白也得继续出现，只是慢几秒。
+    // Polling is the fallback: if the WebSocket is down (e.g. a proxy strips the
+    // Upgrade header) narration still appears, a few seconds later.
     refetchInterval: 4000,
     queryFn: async () => {
       const { data, error } = await api.GET("/api/chat/narration", {
@@ -150,14 +156,17 @@ export function NarrationLane({
         return next;
       });
     } else {
-      // 空批次也要记 —— 游标可能前进了(``latest_seq`` 跳过了非旁白行)。
+      // Remember empty batches too: the cursor may have advanced (`latest_seq`
+      // skips non-narration rows).
       rememberNarration(conversationId, items, cursor.current);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q.data, conversationId]);
 
-  // 实时推送：事件只带指针（会话 + seq），正文走上面那条已鉴权的读端点。
-  // 总线只回放最后 100 条，一次长任务几百条旁白，正文放上去会把别的全挤掉。
+  // Live push: the event carries only a pointer (conversation + seq); the body is
+  // read through the authenticated endpoint above. The bus replays only the last
+  // 100 events and a long task emits hundreds of narration items, so putting the
+  // body on the bus would crowd out everything else.
   useWsEvent(
     "chat_narration",
     (event) => {
@@ -173,8 +182,9 @@ export function NarrationLane({
   }
 
   const lanes = mergeNarration(messages, items);
-  // 连续的消息交给 ChatBubbles 整段渲染（它负责气泡样式与滚动到底），
-  // 旁白卡片插在段之间。**不重画气泡** —— 那会变成第二份渲染实现。
+  // Consecutive messages are rendered by ChatBubbles as one segment (it owns the
+  // bubble style and scroll-to-bottom); narration cards go between segments.
+  // Bubbles are not redrawn here, which would create a second render path.
   const blocks: Array<{ msgs: ChatMsg[]; after: NarrationItem[] }> = [];
   let current: { msgs: ChatMsg[]; after: NarrationItem[] } = { msgs: [], after: [] };
   for (const lane of lanes) {
@@ -199,8 +209,8 @@ export function NarrationLane({
               messages={block.msgs}
               pending={pending && i === blocks.length - 1}
               autoScroll={i === blocks.length - 1}
-              // 分段渲染，但「每一轮从哪儿开始」必须按**整份**转录算 ——
-              // 见 ChatBubbles 里 allMessages 的自述。
+              // Rendered in segments, but where each turn starts must be computed
+              // from the WHOLE transcript; see allMessages in ChatBubbles.
               allMessages={messages}
             />
           )}

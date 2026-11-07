@@ -21,6 +21,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -73,22 +74,24 @@ class FindFlatRegion(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "在一张 .sxm 扫描图的形貌通道上滑窗,返回去平面之后 RMS 粗糙度"
-                "最低的那一块窗。返回的是窗中心坐标,单位米(仪器坐标系)。"
+                tr("在一张 .sxm 扫描图的形貌通道上滑窗,返回去平面之后 RMS 粗糙度"
+                "最低的那一块窗。返回的是窗中心坐标,单位米(仪器坐标系)。", "Slide a window over the topography channel of an .sxm scan and return the window with the lowest "
+"plane-subtracted RMS roughness. Returns the window centre coordinates in metres (instrument frame).")
             ),
             parameters=[
                 ParameterSpec(
                     name="scan_path",
                     type="str",
-                    description="要分析的 .sxm 扫描文件路径。",
+                    description=tr("要分析的 .sxm 扫描文件路径。", "Path of the .sxm scan file to analyse."),
                     required=True,
                 ),
                 ParameterSpec(
                     name="window_fraction",
                     type="float",
                     description=(
-                        "搜索窗的边长,以整幅扫描范围的**比例**表示。0.2 = 20%"
-                        "(例如 100 nm 的图里开一个 20 nm 的窗)。常用 0.1–0.3。"
+                        tr("搜索窗的边长,以整幅扫描范围的**比例**表示。0.2 = 20%"
+                        "(例如 100 nm 的图里开一个 20 nm 的窗)。常用 0.1–0.3。", "Side length of the search window, as a **fraction** of the whole scan range. 0.2 = 20% "
+"(e.g. a 20 nm window in a 100 nm image). Typically 0.1-0.3.")
                     ),
                     required=False,
                     default=0.2,
@@ -99,8 +102,9 @@ class FindFlatRegion(BaseSkill):
                     name="stride_fraction",
                     type="float",
                     description=(
-                        "相邻两次落窗之间的步长,以窗边长的比例表示。0.5 = 相邻"
-                        "两个窗重叠 50%(推荐)。更小 = 搜得更密。"
+                        tr("相邻两次落窗之间的步长,以窗边长的比例表示。0.5 = 相邻"
+                        "两个窗重叠 50%(推荐)。更小 = 搜得更密。", "Step between consecutive windows, as a fraction of the window side. 0.5 = adjacent "
+"windows overlap by 50% (recommended). Smaller = denser search.")
                     ),
                     required=False,
                     default=0.5,
@@ -123,9 +127,11 @@ class FindFlatRegion(BaseSkill):
                     name="count",
                     type="int",
                     description=(
-                        "要交出几块互不重叠的平区。1(缺省)与历史行为**逐字一致**:"
+                        tr("要交出几块互不重叠的平区。1(缺省)与历史行为**逐字一致**:"
                         "只报打分最好的那一个窗。>1 时额外返回一个 `sites` 列表,"
-                        "从好到差排序,彼此至少相隔 `min_site_spacing_m`。"
+                        "从好到差排序,彼此至少相隔 `min_site_spacing_m`。", "How many non-overlapping flat regions to return. 1 (default) is **identical, to the letter** to the historical behaviour: "
+"only the best-scoring window is reported. For >1 an extra `sites` list is returned, "
+"sorted best to worst, at least `min_site_spacing_m` apart.")
                     ),
                     required=False,
                     default=1,
@@ -144,10 +150,13 @@ class FindFlatRegion(BaseSkill):
                     type="float",
                     unit="m",
                     description=(
-                        "交出的这些落点之间的最小中心距。只在 count > 1 时用得上。"
+                        tr("交出的这些落点之间的最小中心距。只在 count > 1 时用得上。"
                         "省略则退回窗的边长(也就是窗与窗不重叠)。"
                         "**要在这些落点上扎针**的调用方,应当传两倍于自己修针避让"
-                        "半径的值 —— 这些落点之间不能互相污染。"
+                        "半径的值 —— 这些落点之间不能互相污染。", "Minimum centre-to-centre distance between the returned sites. Only used when count > 1. "
+"If omitted, falls back to the window side (i.e. windows do not overlap). "
+"Callers that will **poke the tip at these sites** should pass twice their own tip-conditioning "
+"avoidance radius -- the sites must not contaminate each other.")
                     ),
                     required=False,
                     min_value=1e-10,
@@ -157,8 +166,9 @@ class FindFlatRegion(BaseSkill):
                     name="channel",
                     type="str",
                     description=(
-                        "要用的形貌通道名('Z' 是标准选择)。"
-                        "文件里没有这个通道时,退回第一个可用通道。"
+                        tr("要用的形貌通道名('Z' 是标准选择)。"
+                        "文件里没有这个通道时,退回第一个可用通道。", "Name of the topography channel to use ('Z' is the standard choice). "
+"If the file does not have it, falls back to the first available channel.")
                     ),
                     required=False,
                     default="Z",
@@ -167,10 +177,13 @@ class FindFlatRegion(BaseSkill):
                     name="exclude_used_spots",
                     type="str",
                     description=(
-                        "可选:分号分隔的一串**已经用过的** (x,y) 坐标,都是米量 —— "
+                        tr("可选:分号分隔的一串**已经用过的** (x,y) 坐标,都是米量 —— "
                         "每个值都可以带 SI 前缀:'100n,-50n;1.2u,0'。"
                         "窗中心落在其中任何一个的 `min_separation_m` 之内的一律跳过,"
-                        "这样重试时就不会再挑中同一个点。"
+                        "这样重试时就不会再挑中同一个点。", "Optional: a semicolon-separated list of (x,y) coordinates **already used**, in metres -- "
+"each value may carry an SI prefix: '100n,-50n;1.2u,0'. "
+"Any window whose centre lies within `min_separation_m` of one of them is skipped, "
+"so a retry does not pick the same spot again.")
                     ),
                     required=False,
                     default="",
@@ -179,8 +192,9 @@ class FindFlatRegion(BaseSkill):
                     name="min_separation_m",
                     type="float",
                     description=(
-                        "与被排除的那些点之间的最小距离,单位**米**。"
-                        "缺省 = 窗的边长(与用过的坑不重叠)。"
+                        tr("与被排除的那些点之间的最小距离,单位**米**。"
+                        "缺省 = 窗的边长(与用过的坑不重叠)。", "Minimum distance to the excluded points, in **metres**. "
+"Default = the window side (no overlap with used craters).")
                     ),
                     unit="m",
                     required=False,
@@ -192,11 +206,15 @@ class FindFlatRegion(BaseSkill):
                     name="min_window_m",
                     type="float",
                     description=(
-                        "窗的最小**物理**边长,单位**米**。光靠 window_fraction "
+                        tr("窗的最小**物理**边长,单位**米**。光靠 window_fraction "
                         "表达不了「至少要有 50 nm 的平坦表面」—— 50 nm 帧的 0.2 "
                         "是 10 nm,根本不满足那个要求。Auto-tilt 要 >= 50 nm"
                         "(最好 100 nm)。帧本身就比这个还小时,本技能**直接失败**,"
-                        "而不是悄悄把窗缩小。"
+                        "而不是悄悄把窗缩小。", "Minimum **physical** window side, in **metres**. window_fraction alone "
+"cannot express \"at least 50 nm of flat surface\" -- 0.2 of a 50 nm frame "
+"is 10 nm, which does not meet that requirement. Auto-tilt needs >= 50 nm "
+"(preferably 100 nm). When the frame itself is smaller than this, this skill **fails outright** "
+"rather than quietly shrinking the window.")
                     ),
                     unit="m",
                     required=False,
@@ -209,7 +227,15 @@ class FindFlatRegion(BaseSkill):
                     type="float",
                     unit="m",
                     description=(
-                        "可用平区的局部残差上限。即使最平窗口也超过上限，本技能仍失败并说明没有可用平区；argmin 存在不代表满足验收条件。留空使用 25 pm 的工程工作点，使用前应按样品与判据验证；覆盖默认值时记录理由。"
+                        tr("「配得上叫可用平区」的局部残差上限。最平的一块也超过它时,"
+                        "本技能**失败并说「这里没有」**,而不是把最不烂的那个交出去 —— "
+                        "argmin 永远存在,所以不设这条线就等于永远不会放弃。"
+                        "留空 = 25 pm(工程工作点,介于干净台面与吸附物/台阶的残差之间)。"
+                        "只在**样品或判据确实不同**时覆写,而且要写下理由。", "Upper limit of the local residual for \"deserves to be called a usable flat region\". When even the flattest window exceeds it, "
+"this skill **fails and says \"there is none here\"** instead of handing over the least bad one -- "
+"an argmin always exists, so without this line it would never give up. "
+"Empty = 25 pm (an engineering working point, between the residuals of a clean terrace and those of adsorbates / steps). "
+"Override only when the **sample or criterion really differs**, and write down the reason.")
                     ),
                     required=False,
                     min_value=0.0,
@@ -219,10 +245,13 @@ class FindFlatRegion(BaseSkill):
                     name="same_terrace",
                     type="bool",
                     description=(
-                        "要求整个窗都落在**同一个**原子台面上。"
+                        tr("要求整个窗都落在**同一个**原子台面上。"
                         "只看最小 RMS 的话,可能挑中一个跨台阶、两半各自平坦的窗 —— "
                         "那对倾斜测量毫无用处,因为倾斜测量的要害正是「台面**就是**"
-                        "晶面」。默认关(向后兼容)。"
+                        "晶面」。默认关(向后兼容)。", "Require the whole window to lie on the **same** atomic terrace. "
+"With minimum RMS alone, a window straddling a step with both halves individually flat can be picked -- "
+"useless for a tilt measurement, whose whole point is that \"the terrace **is** "
+"the crystal plane\". Off by default (backward compatible).")
                     ),
                     required=False,
                     default=False,
@@ -266,11 +295,13 @@ class FindFlatRegion(BaseSkill):
             return SkillResult(
                 skill_name="FindFlatRegion", success=False,
                 error=(
-                    "exclude_used_spots 里有解析不了的坐标: "
+                    tr("exclude_used_spots 里有解析不了的坐标: ", "Unparseable coordinates in exclude_used_spots: ")
                     + "; ".join(bad_excl[:5])
-                    + "。每一项写成 `x,y`,分号分隔,数值可带 SI 前缀"
+                    + tr("。每一项写成 `x,y`,分号分隔,数值可带 SI 前缀"
                     "(如 '100n,-50n;1.2u,0')。**没有把这些点排除掉就选点是危险的**"
-                    "—— 它们正是你要避开的位置。"
+                    "—— 它们正是你要避开的位置。", ". Write each item as `x,y`, semicolon separated, values may carry an SI prefix "
+"(e.g. '100n,-50n;1.2u,0'). **Picking a site without excluding these points is dangerous** "
+"-- they are exactly the places you want to avoid.")
                 ),
             )
 
@@ -382,8 +413,9 @@ class FindFlatRegion(BaseSkill):
                 return SkillResult(
                     skill_name="FindFlatRegion", success=False,
                     error=(
-                        f"帧本身只有 {frame_short_m * 1e9:.1f} nm,小于要求的最小"
-                        f"窗口 {min_window_m * 1e9:.1f} nm —— 换一张更大的图再找。"),
+                        tr(f"帧本身只有 {frame_short_m * 1e9:.1f} nm,小于要求的最小"
+                        f"窗口 {min_window_m * 1e9:.1f} nm —— 换一张更大的图再找。", f"The frame itself is only {frame_short_m * 1e9:.1f} nm, smaller than the required minimum "
+f"window {min_window_m * 1e9:.1f} nm -- find again on a larger image.")),
                     data={"frame_short_m": frame_short_m,
                           "min_window_m": min_window_m},
                 )
@@ -414,7 +446,7 @@ class FindFlatRegion(BaseSkill):
                 if layer_labels is not None and len(np.unique(layer_labels)) < 2:
                     layer_labels = None      # 单层 = 整帧同一台面,约束自动满足
             except Exception as exc:  # noqa: BLE001
-                terrace_note = f"同层约束不可用(分割失败: {exc}),已按无约束搜索"
+                terrace_note = tr(f"同层约束不可用(分割失败: {exc}),已按无约束搜索", f"Same-terrace constraint unavailable (segmentation failed: {exc}); searched without the constraint")
                 logger.info("FindFlatRegion: %s", terrace_note)
                 layer_labels = None
 
@@ -526,13 +558,17 @@ class FindFlatRegion(BaseSkill):
                 ok2 = [d2 for d2 in smaller_cross
                        if d2["same_terrace_frac"] >= _SAME_TERRACE_FRAC]
                 if ok2:
-                    hint = (f"{windows_cross_terrace} 个窗因跨台阶被排除,"
+                    hint = (tr(f"{windows_cross_terrace} 个窗因跨台阶被排除,"
                             f"但**换小一档就装得下**:"
                             f"{ok2[0]['side_m'] * 1e9:.0f} nm 的窗能落在单个台面里。"
-                            f"用 min_window_m={ok2[0]['side_m']:.3e} 重试。")
+                            f"用 min_window_m={ok2[0]['side_m']:.3e} 重试。", f"{windows_cross_terrace} window(s) were excluded for straddling a step, "
+f"but **one size smaller would fit**: "
+f"a {ok2[0]['side_m'] * 1e9:.0f} nm window fits within a single terrace. "
+f"Retry with min_window_m={ok2[0]['side_m']:.3e}."))
                 else:
-                    hint = (f"{windows_cross_terrace} 个窗因跨台阶被排除 —— "
-                        "这块区域的台面比要求的窗口还窄,换一处更大的平台。")
+                    hint = (tr(f"{windows_cross_terrace} 个窗因跨台阶被排除 —— "
+                        "这块区域的台面比要求的窗口还窄,换一处更大的平台。", f"{windows_cross_terrace} window(s) were excluded for straddling a step -- "
+"the terraces in this region are narrower than the requested window; try a larger plateau elsewhere."))
             return SkillResult(
                 skill_name="FindFlatRegion", success=False,
                 error=(
@@ -550,8 +586,15 @@ class FindFlatRegion(BaseSkill):
                 },
             )
 
-        # argmin 仅说明相对最平，不能证明达到绝对验收条件。
-        # 最优窗口仍超标时必须报告没有可用区域，不能把它交给后续流程当作平坦表面。
+        # ── 绝对线:argmin **不是**「有没有」的答案 ────────────────────────
+        #
+        # 一个区域找不到时应换地方找,没必要一定在一个地方找到。
+        # 本技能若一直返回 argmin,而 argmin 永远存在,就从来不会说「这里没有」。
+        #
+        # 台阶密集的大视野帧上这条会同时错两次:交出的窗残差偏大,而同尺寸
+        # 全帧最平的窗更小(排序就错了),**且连那个最平的窗也可能过不了可用线**。
+        # 同一张图上 `AnalyzeFrameTilt` 可能已经报了 `tilt_valid=false / step_dense`,
+        # 而这块不合格的窗照样被交出去当「表面」送进 AutoTilt。
         if best["rms"] > usable_rms_m:
             # 若当前视野内没有满足条件的窗口，可建议重新选择区域或调整视野。
             # 建议不代表缩小视野后必然通过，仍须满足相同的局部残差与几何约束。
@@ -572,19 +615,23 @@ class FindFlatRegion(BaseSkill):
             ok_smaller = [(s, r) for s, r in smaller if r <= usable_rms_m]
             if ok_smaller:
                 s, r = ok_smaller[0]
-                tail = (f"但**换小一档就有**:{s * 1e9:.0f} nm 的窗在这张图上能到 "
+                tail = (tr(f"但**换小一档就有**:{s * 1e9:.0f} nm 的窗在这张图上能到 "
                         f"{r * 1e12:.1f} pm。用 min_window_m={s:.3e} 重试,"
-                        f"比换地方便宜。(该提示未套 same_terrace/排除点,是线索不是承诺。)")
+                        f"比换地方便宜。(该提示未套 same_terrace/排除点,是线索不是承诺。)", f"But **one size smaller works**: a {s * 1e9:.0f} nm window reaches "
+f"{r * 1e12:.1f} pm on this image. Retry with min_window_m={s:.3e}, "
+f"cheaper than moving. (This hint does not apply same_terrace / excluded points; it is a lead, not a promise.)"))
             else:
-                tail = ("而且**缩小窗口也没用**"
-                        + (f"(试到 {smaller[-1][0] * 1e9:.0f} nm 仍有 "
-                           f"{smaller[-1][1] * 1e12:.1f} pm)" if smaller else "")
-                        + " —— 这一片确实该换地方。")
+                tail = (tr("而且**缩小窗口也没用**", "and **shrinking the window does not help**")
+                        + (tr(f"(试到 {smaller[-1][0] * 1e9:.0f} nm 仍有 "
+                           f"{smaller[-1][1] * 1e12:.1f} pm)", f" (tried down to {smaller[-1][0] * 1e9:.0f} nm and still {smaller[-1][1] * 1e12:.1f} pm)") if smaller else "")
+                        + tr(" —— 这一片确实该换地方。", " -- this area really should be abandoned."))
             return SkillResult(
                 skill_name="FindFlatRegion", success=False,
-                error=(f"这张图里没有可用的 {(w_m / nx) * win_px * 1e9:.0f} nm 平区:"
+                error=(tr(f"这张图里没有可用的 {(w_m / nx) * win_px * 1e9:.0f} nm 平区:"
                        f"最平的一块局部残差 {best['rms'] * 1e12:.1f} pm,"
-                       f"超过可用线 {usable_rms_m * 1e12:.0f} pm。{tail}"),
+                       f"超过可用线 {usable_rms_m * 1e12:.0f} pm。{tail}", f"No usable {(w_m / nx) * win_px * 1e9:.0f} nm flat region in this image: "
+f"the flattest window has a local residual of {best['rms'] * 1e12:.1f} pm, "
+f"above the usable line of {usable_rms_m * 1e12:.0f} pm. {tail}")),
                 data={
                     # 机器可读 no_usable_region 表示已完成搜索但没有合格区域，
                     # 与无法分析的失败分开，允许调用方选择换区重扫或处理未知条件。
@@ -634,10 +681,13 @@ class FindFlatRegion(BaseSkill):
             data["rms_ratio_to_frame"] = best["rms"] / frame_rms_m
         if win_px < 24:
             data["scale_caveat"] = (
-                f"窗口只有 {win_px} 像素（{window_side_m * 1e9:.1f} nm）。"
+                tr(f"窗口只有 {win_px} 像素（{window_side_m * 1e9:.1f} nm）。"
                 f"**这个尺度上的残差不能与更大尺度比较，也不保证你去那里扫会看到同样的平整度** —— "
                 f"小窗口在任何图上都挑得到看着平的一块（选择偏倚）。"
-                f"要一块真的能用的平区，把 window_fraction 调大或改用 min_window_m 指定物理尺寸。"
+                f"要一块真的能用的平区，把 window_fraction 调大或改用 min_window_m 指定物理尺寸。", f"The window is only {win_px} pixels ({window_side_m * 1e9:.1f} nm). "
+f"**The residual at this scale cannot be compared with larger scales, and there is no guarantee that scanning there will show the same flatness** -- "
+f"a small window can find a flat-looking patch on any image (selection bias). "
+f"For a flat region that is genuinely usable, increase window_fraction or specify the physical size with min_window_m.")
             )
         # ── count > 1:再交出 N 个互不重叠的平区(2026-08-14)──────────────
         #
@@ -670,9 +720,11 @@ class FindFlatRegion(BaseSkill):
             data["sites_min_separation_m"] = sep
             if len(sites) < want_count:
                 data["sites_note"] = (
-                    f"要 {want_count} 个,这张图上只找到 {len(sites)} 个互相间隔 "
+                    tr(f"要 {want_count} 个,这张图上只找到 {len(sites)} 个互相间隔 "
                     f"≥ {sep * 1e9:.0f} nm 的可用平区 —— **这不是失败**,"
-                    "是这一片能给的就这么多。用完了换一块地方再扫一张。")
+                    "是这一片能给的就这么多。用完了换一块地方再扫一张。", f"Asked for {want_count}, found only {len(sites)} usable flat region(s) spaced at least "
+f"{sep * 1e9:.0f} nm apart -- **this is not a failure**: "
+"that is all this area can give. When used up, move elsewhere and scan another image."))
         return SkillResult(skill_name="FindFlatRegion", success=True, data=data)
 
     @staticmethod

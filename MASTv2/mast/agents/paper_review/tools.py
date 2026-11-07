@@ -212,8 +212,8 @@ def load_draft(doc_id: str = "current") -> str:
 
 # Rubric checklists. These are the criteria the reviewing agent reasons over;
 # the tool returns the REAL section text framed against the rubric so the LLM
-# evaluates the actual manuscript, never a canned verdict. (审查
-# finding [16]: the old stubs returned hardcoded, draft-independent "issues".)
+# evaluates the actual manuscript, never a canned verdict. (The earlier stubs returned hardcoded,
+# draft-independent "issues".)
 _METHODOLOGY_RUBRIC = (
     "1. Are all sample preparation parameters stated (substrate, anneal/deposition "
     "temperatures, pressure, dosing)?\n"
@@ -443,7 +443,7 @@ def save_review(target_doc_id: str, verdict: str, report_markdown: str,
                 ) -> "ArtifactToolReturn | str":
     """Persist the final ReviewReport to disk. MUST be called after writing
     the report — a review that only exists in the conversation is lost to the
-    operator and to future review rounds ("评审记录也应该保存").
+    operator and to future review rounds.
 
     Args:
         target_doc_id:   The doc_id of the REPORT/DRAFT you reviewed — take it

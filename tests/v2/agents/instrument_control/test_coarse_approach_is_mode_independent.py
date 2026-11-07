@@ -106,7 +106,20 @@ def test_the_ui_says_what_the_backend_does():
 
     # Only the tooltip STRINGS, not the file: a comment quoting the old text
     # (which is exactly what this file's post-mortem does) is not a lie in the UI.
-    titles = [ln for ln in top_bar.splitlines() if ln.strip().startswith("title:")]
+    # A tooltip may be a bilingual `title: tr(\n  zh,\n  en,\n)` spanning lines; take
+    # the whole call so both language variants are checked.
+    lines = top_bar.splitlines()
+    titles = []
+    for i, ln in enumerate(lines):
+        if not ln.strip().startswith("title:"):
+            continue
+        block = ln
+        if ln.strip() == "title: tr(":
+            j = i + 1
+            while j < len(lines) and lines[j].strip() != "),":
+                block += "\n" + lines[j]
+                j += 1
+        titles.append(block)
     assert len(titles) == 3, f"expected 3 mode tooltips, found {len(titles)}"
     for t in titles:
         assert "COARSE_NOTE" in t, (

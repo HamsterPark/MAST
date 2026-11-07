@@ -39,6 +39,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -57,25 +58,29 @@ class MeasureFrameDrift(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "量一批**同一个扫描框**的 .sxm 之间的横向漂移：亚像素相位相关，"
+                tr("量一批**同一个扫描框**的 .sxm 之间的横向漂移：亚像素相位相关，"
                 "输出米制位移与置信度，并把上下扫交替带来的回程差与净漂移分开。"
-                "量不出来时明说量不出来 —— 不把它折叠成「没有漂移」。"
+                "量不出来时明说量不出来 —— 不把它折叠成「没有漂移」。", "Measure the lateral drift between a batch of .sxm files of the **same scan frame**: sub-pixel phase correlation, "
+"giving metric displacements and confidence, and separating the retrace offset caused by alternating up/down scans from the net drift. "
+"When it cannot be measured it says so -- it does not fold that into \"no drift\".")
             ),
             parameters=[
                 ParameterSpec(
                     name="scan_paths", type="str",
-                    description=("按时间先后排好的 .sxm 路径，逗号或换行分隔，至少两个。"),
+                    description=(tr("按时间先后排好的 .sxm 路径，逗号或换行分隔，至少两个。", "Paths of the .sxm files in time order, comma or newline separated, at least two.")),
                     required=True),
                 ParameterSpec(
                     name="channel", type="str",
-                    description="形貌通道名，默认 Z。",
+                    description=tr("形貌通道名，默认 Z。", "Topography channel name, default Z."),
                     required=False, default="Z"),
                 ParameterSpec(
                     name="min_confidence", type="float",
                     description=(
-                        "归一化互相关的下限，低于它就不给这一对的位移。"
+                        tr("归一化互相关的下限，低于它就不给这一对的位移。"
                         "默认 0.25 —— 它是一道**结构**门（两帧有没有共同特征），"
-                        "不是标定出来的质量阈值。"),
+                        "不是标定出来的质量阈值。", "Lower limit of the normalised cross-correlation; below it the displacement of that pair is not given. "
+"Default 0.25 -- it is a **structural** gate (do the two frames share features at all), "
+"not a calibrated quality threshold.")),
                     required=False, default=0.25,
                     min_value=0.0, max_value=1.0),
             ],
@@ -96,7 +101,7 @@ class MeasureFrameDrift(BaseSkill):
         min_conf = float(params.get("min_confidence", 0.25))
         if len(paths) < 2:
             return SkillResult(skill_name=_NAME, success=False,
-                               error="至少要两个 scan_paths 才谈得上帧间漂移")
+                               error=tr("至少要两个 scan_paths 才谈得上帧间漂移", "At least two scan_paths are needed to talk about frame-to-frame drift"))
 
         frames, rejected = [], []
         for p in paths:
@@ -111,9 +116,9 @@ class MeasureFrameDrift(BaseSkill):
             # 要修的是两件不同的事。
             return SkillResult(
                 skill_name=_NAME, success=False,
-                error=("能读进来的帧不足两个（%d 个被拒）：%s"
+                error=(tr("能读进来的帧不足两个（%d 个被拒）：%s", "Fewer than two frames could be read (%d rejected): %s")
                        % (len(rejected),
-                          "；".join(r["reason"] for r in rejected[:3]))),
+                          tr("；", "; ").join(r["reason"] for r in rejected[:3]))),
                 data={"rejected": rejected})
 
         pairs, dy_seq = [], []
@@ -124,9 +129,11 @@ class MeasureFrameDrift(BaseSkill):
             if not same_frame:
                 pairs.append({"pair": "%s -> %s" % (a.name, b.name),
                               "ok": False, "reason": "different_frame",
-                              "note": ("两帧的扫描框不同（%.2f nm vs %.2f nm）——"
+                              "note": (tr("两帧的扫描框不同（%.2f nm vs %.2f nm）——"
                                        "它们之间的位移里混着「框被挪了多少」，"
-                                       "那不是漂移。" % (a.width_nm or 0,
+                                       "那不是漂移。", "The two frames have different scan frames (%.2f nm vs %.2f nm) -- "
+"the displacement between them is mixed with \"how far the frame was moved\", "
+"which is not drift.") % (a.width_nm or 0,
                                                         b.width_nm or 0))})
                 dy_seq.append(None)
                 continue
@@ -162,8 +169,9 @@ class MeasureFrameDrift(BaseSkill):
             data["verdict"] = "undetermined"
             return SkillResult(
                 skill_name=_NAME, success=True, data=data,
-                summary=("%d 对帧一对都没量出位移 —— 逐对原因在 pairs 里。"
-                         "**这不等于没有漂移**：量不出来和位移为零是两件事。"
+                summary=(tr("%d 对帧一对都没量出位移 —— 逐对原因在 pairs 里。"
+                         "**这不等于没有漂移**：量不出来和位移为零是两件事。", "%d pair(s) of frames yielded no displacement at all -- the per-pair reasons are in pairs. "
+"**This does not mean there is no drift**: being unable to measure and zero displacement are two different things.")
                          % len(pairs)))
 
         data["verdict"] = "measured"
@@ -180,9 +188,11 @@ class MeasureFrameDrift(BaseSkill):
         # features — the sample — moved from the earlier frame to the later one
         data["feature_dx_median_nm"] = round(-data["dx_median_nm"], 4)
         data["feature_dy_median_nm"] = round(data["dy_median_nm"], 4)
-        data["convention"] = ("feature_dx_nm / feature_dy_nm：特征（样品）在扫描系里从前一帧到"
+        data["convention"] = (tr("feature_dx_nm / feature_dy_nm：特征（样品）在扫描系里从前一帧到"
                               "后一帧挪了多远，x 向右、y 向上为正；dx_nm / dy_nm 是配准位移"
-                              "（数组轴，行向下），保留给老调用方。补偿漂移要抵消的是 feature 那一对。")
+                              "（数组轴，行向下），保留给老调用方。补偿漂移要抵消的是 feature 那一对。", "feature_dx_nm / feature_dy_nm: how far the feature (sample) moved in the scan frame from the previous frame to "
+"the next, x positive to the right, y positive up; dx_nm / dy_nm are the registration displacement "
+"(array axes, rows downward), kept for old callers. What drift compensation must cancel is the feature pair."))
         # 各对读数既要检查幅值散布，也要检查符号一致性。
         # 单看四分位距可能遗漏方向相反的估计；任一检查不通过都应告警。
         if len(dys) >= 3:
@@ -193,18 +203,25 @@ class MeasureFrameDrift(BaseSkill):
             data["dy_sign_agreement"] = round(same_sign, 3)
             if iqr > 1.5 * max(abs(med), 0.05) or same_sign < 0.7:
                 data["consistency_warning"] = (
-                    "各对帧给出的 Δy 彼此对不上（四分位距 %.2f nm、中位 %.2f nm、"
+                    tr("各对帧给出的 Δy 彼此对不上（四分位距 %.2f nm、中位 %.2f nm、"
                     "只有 %.0f%% 的对与中位同号）—— 这时中位数不代表漂移，"
                     "它只是一堆不一致读数的中间值。多半是这批帧上没有可配准的"
                     "非周期特征（同一个台面 + 会动的吸附物 + 针尖在变）。"
                     "**这种情况下改从晶格量漂移**：MeasureLatticeCell 用上下扫的 a₂ "
-                    "应变，在同一批帧上是稳的。"
+                    "应变，在同一批帧上是稳的。", "The delta-y values from the pairs of frames do not agree with each other (interquartile range %.2f nm, median %.2f nm, "
+"only %.0f%% of pairs have the same sign as the median) -- the median then does not represent drift, "
+"it is just the middle of a set of inconsistent readings. Most likely this batch has no registrable "
+"non-periodic feature (the same terrace + moving adsorbates + a changing tip). "
+"**In that case measure drift from the lattice instead**: MeasureLatticeCell uses the a2 "
+"strain of the up/down scans, which is stable on the same batch.")
                     % (iqr, med, 100 * same_sign))
         if not alt:
             data["hysteresis_note"] = (
-                "这一批帧的扫描方向没有交替，所以回程差与净漂移**分不开** —— "
+                tr("这一批帧的扫描方向没有交替，所以回程差与净漂移**分不开** —— "
                 "``hysteresis_nm`` 这一栏在这种情况下只是位移的中位幅值。"
-                "要分开就让扫描方向一上一下交替（Nanonis 的 SCAN_DIR）。")
+                "要分开就让扫描方向一上一下交替（Nanonis 的 SCAN_DIR）。", "The scan directions of this batch do not alternate, so the retrace offset and the net drift **cannot be separated** -- "
+"the ``hysteresis_nm`` column is then just the median magnitude of the displacement. "
+"To separate them, alternate the scan direction up and down (Nanonis SCAN_DIR)."))
         # 每小时多少：只在拿得到帧间隔时给。
         times = [f.line_time_s * 2.0 * f.forward.shape[0] for f in frames
                  if f.line_time_s]
@@ -219,24 +236,24 @@ class MeasureFrameDrift(BaseSkill):
 
 def _summary(data: dict) -> str:
     if data.get("verdict") != "measured":
-        return "没量出任何一对帧的位移。"
+        return tr("没量出任何一对帧的位移。", "No pair of frames yielded a displacement.")
     h = data.get("hysteresis") or {}
-    s = ("%d/%d 对帧量出了位移；x 中位 %+.3f nm、y 中位 %+.3f nm"
+    s = (tr("%d/%d 对帧量出了位移；x 中位 %+.3f nm、y 中位 %+.3f nm", "%d/%d pair(s) of frames yielded a displacement; x median %+.3f nm, y median %+.3f nm")
          % (data["n_measured"], data["n_pairs"],
             data["dx_median_nm"], data["dy_median_nm"]))
     if data.get("alternating_scan_dir"):
-        s += ("。上下扫交替：回程差中位 %.3f nm/帧，扣掉它之后净漂移 %.3f nm/帧"
+        s += (tr("。上下扫交替：回程差中位 %.3f nm/帧，扣掉它之后净漂移 %.3f nm/帧", ". Up/down scans alternate: retrace offset median %.3f nm/frame, net drift after subtracting it %.3f nm/frame")
               % (h.get("hysteresis_nm") or 0.0,
                  h.get("net_drift_per_frame_nm") or 0.0))
         if data.get("net_drift_nm_per_h") is not None:
-            s += "（%.2f nm/h）" % data["net_drift_nm_per_h"]
+            s += tr("（%.2f nm/h）", " (%.2f nm/h)") % data["net_drift_nm_per_h"]
     else:
-        s += "。扫描方向没有交替，回程差与净漂移分不开"
+        s += tr("。扫描方向没有交替，回程差与净漂移分不开", ". The scan directions do not alternate, so retrace offset and net drift cannot be separated")
     if h.get("n_unmeasured"):
-        s += "；另有 %d 对没量出来（不计入平均）" % h["n_unmeasured"]
-    s += "。"
+        s += tr("；另有 %d 对没量出来（不计入平均）", "; another %d pair(s) could not be measured (not counted in the average)") % h["n_unmeasured"]
+    s += tr("。", ".")
     if data.get("consistency_warning"):
-        s += " ⚠️ 各对之间对不上 —— 这个中位数不该当漂移读，见 consistency_warning。"
+        s += tr(" ⚠️ 各对之间对不上 —— 这个中位数不该当漂移读，见 consistency_warning。", " ⚠️ The pairs do not agree -- do not read this median as drift, see consistency_warning.")
     return s
 
 

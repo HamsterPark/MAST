@@ -1,6 +1,6 @@
 """The shared-artifact registry — DERIVED from what the agents' tools actually do.
 
-Why this module exists (, and the 2026-07-11 scout audit):
+Why this module exists:
 
 The old model was a hand-written one-to-one ``{agent: artifact}`` table in the
 API layer. It was wrong in every way a model can be wrong:
@@ -90,8 +90,8 @@ class Artifact:
     #: Set for artifacts written by the system rather than by any agent.
     system_written: bool = False
     #: This class arrives in BULK — one ordinary run produces tens to hundreds.
-    #: A list that flattens it buries every other artifact ("制品
-    #: 区域就应该分目录，否则看起来太乱了"). Consumers group by class and start
+    #: A list that flattens it buries every other artifact (a flat artifact
+    #: area becomes unreadable). Consumers group by class and start
     #: a high-volume group collapsed; how to render it is still the UI's call,
     #: but WHICH classes flood is a fact about the artifact, so it lives here.
     high_volume: bool = False
@@ -665,7 +665,7 @@ def list_existing() -> list[dict]:
     # markdown is the thing an operator can OPEN — and without it the 实验方案
     # class had no enumerator at all, so it was reported as "not produced yet"
     # forever, including right after create_plan had just written one
-    #. Plans that are already documents come from the store above.
+    # Plans that are already documents come from the store above.
     # Same per-FILE rule as the drafts/reviews walk above: a plan that HAS been
     # migrated carries legacy_stem="plan_<id>" and is listed by the store; one
     # that has not is listed from here. Gating on "does the class have any
@@ -704,7 +704,7 @@ def plans_dir() -> Path:
 
 # ── Per-CLASS production status ──────────────────────────────────────────────
 #
-# (2026-07-27): every one of the artifact classes sat at
+# Failure mode: every one of the artifact classes could sit at
 # 待产出 forever. Two independent causes, and this function addresses the second.
 #
 #   1. The UI compared per-FILE ids ("draft:Au111_v001") against CLASS ids

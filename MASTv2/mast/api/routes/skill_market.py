@@ -24,7 +24,7 @@ THIN RELAY ONLY（房规）
 * 重建被调度了但失败 —— 存下来了，没生效；
 * 根本没有活的 runtime（独立 API 模式）—— 存下来了，下次启动才生效。
 
-三条路径都不报错。所以写响应统一带 ``rebuild_note``（人话，UI 逐字显示）、
+三条路径都不报错。所以写响应统一带 ``rebuild_note``（人话，UI 原样显示）、
 ``agent_path_pending``、``fingerprint_matches``（三态）。
 
 订阅不是安全机制
@@ -39,6 +39,7 @@ THIN RELAY ONLY（房规）
 from __future__ import annotations
 
 import logging
+from mast.i18n import tr
 import time
 
 from fastapi import APIRouter, Query, Request
@@ -135,7 +136,7 @@ def _refresh(request: Request, reason: str) -> dict:
     out = {"note": "", "pending": None}
     rt = _runtime(request)
     if rt is None:
-        out["note"] = "（没有活的运行时 —— 已存盘，下次启动生效）"
+        out["note"] = tr("（没有活的运行时 —— 已存盘，下次启动生效）", "(no live runtime; saved to disk, takes effect on next start)")
         out["pending"] = True
         return out
     try:
@@ -144,14 +145,14 @@ def _refresh(request: Request, reason: str) -> dict:
         outcome = refresh_after_skill_change(f"subscription: {reason}")
         out["pending"] = outcome.agent_path_pending
         if outcome.orchestrator == ORCH_PENDING_QUEUED:
-            out["note"] = "（任务运行中：已排队，当前任务结束后自动生效）"
+            out["note"] = tr("（任务运行中：已排队，当前任务结束后自动生效）", "(a task is running: queued, takes effect automatically when the current task ends)")
         elif outcome.agent_path_pending:
-            out["note"] = f"（agent 侧尚未跟上：{outcome.describe()}）"
+            out["note"] = tr(f"（agent 侧尚未跟上：{outcome.describe()}）", f"(agent side has not caught up yet: {outcome.describe()})")
         else:
-            out["note"] = "（agent 工具表已重建）"
+            out["note"] = tr("（agent 工具表已重建）", "(agent tool table rebuilt)")
     except Exception as exc:  # noqa: BLE001
         logger.warning("订阅变更后刷新失败：%s", exc, exc_info=True)
-        out["note"] = f"（刷新失败：{exc} —— 重启才保险）"
+        out["note"] = tr(f"（刷新失败：{exc} —— 重启才保险）", f"(refresh failed: {exc}; a restart is the safe option)")
         out["pending"] = True
     return out
 
@@ -186,7 +187,7 @@ def _apply(request: Request, mutate, *, reason: str) -> dict:
     fp = _fingerprints(_registry(request))
     return {
         **res,
-        "rebuild_note": ("已保存" + (refreshed["note"] or "")),
+        "rebuild_note": (tr("已保存", "Saved") + (refreshed["note"] or "")),
         "agent_path_pending": refreshed["pending"],
         "fingerprint_matches": fp.get("fingerprint_matches"),
     }
@@ -224,7 +225,7 @@ def market_catalog(
 
     if _registry(request) is None:
         return MarketCatalogResponse(page=page, degraded=True,
-                                     reason="没有活的技能注册表（独立 API 模式）")
+                                     reason=tr("没有活的技能注册表（独立 API 模式）", "No live skill registry (standalone API mode)"))
     try:
         idx = filter_index(_catalog_index(request), q=q, category=category, tag=tag,
                            source=source, safety=safety, level=level, domain=domain)
@@ -254,7 +255,7 @@ def market_catalog(
                 source=str(e.get("source") or "other"),
                 source_zh=str(e.get("source_zh") or ""),
                 tags=list(e.get("tags") or []),
-                domain=str(e.get("domain") or "其他"),
+                domain=str(e.get("domain") or tr("其他", "Other")),
                 subscribed=_is_sub(name),
                 mandatory=name in sub.MANDATORY_SKILLS,
                 pending_rec_id=pending_by_skill.get(name, ""),
@@ -321,8 +322,8 @@ def write_subscription(request: Request,
     if not market:
         return SubscriptionWriteResponse(
             ok=False, degraded=True,
-            reason="没有活的技能注册表 —— 不知道市场全集就不能定制订阅"
-                   "（否则第一次定制会把没列出来的全部退订）")
+            reason=tr("没有活的技能注册表 —— 不知道市场全集就不能定制订阅"
+                   "（否则第一次定制会把没列出来的全部退订）", "No live skill registry: customising the subscription is not possible without knowing the full market (otherwise the first customisation would unsubscribe everything not listed)"))
 
     # 注册表不认识的名字：照收（技能集合是动态的），但要说。
     unknown = sorted({*body.subscribe, *body.unsubscribe} - market)
@@ -355,8 +356,8 @@ def write_subscription(request: Request,
     res = _apply(request, _mutate, reason="ui")
     note = res.get("rebuild_note", "")
     if res.get("skipped_mandatory"):
-        note += ("；未退订必装技能 " + "、".join(res["skipped_mandatory"])
-                 + "（它们保证工具面上永远有「停下来 / 退针」可用）")
+        note += (tr("；未退订必装技能 ", "; mandatory skills not unsubscribed: ") + tr("、", ", ").join(res["skipped_mandatory"])
+                 + tr("（它们保证工具面上永远有「停下来 / 退针」可用）", "(they guarantee that \"stop / withdraw\" is always available on the tool surface)"))
     return SubscriptionWriteResponse(
         ok=bool(res.get("ok", True)), reason=str(res.get("reason") or ""),
         customised=bool(res.get("customised")),
@@ -543,12 +544,12 @@ def import_subscription(request: Request, body: ImportRequest) -> ImportResponse
 
     man = body.manifest if isinstance(body.manifest, dict) else {}
     if str(man.get("kind") or "") != "mast-skill-subscription":
-        return ImportResponse(ok=False, reason="这不是一份订阅列表（kind 不对）")
+        return ImportResponse(ok=False, reason=tr("这不是一份订阅列表（kind 不对）", "This is not a subscription list (wrong kind)"))
     raw_entries = man.get("entries")
     if not isinstance(raw_entries, list):
-        return ImportResponse(ok=False, reason="manifest 里没有 entries 列表")
+        return ImportResponse(ok=False, reason=tr("manifest 里没有 entries 列表", "The manifest has no entries list"))
     if body.mode not in ("replace", "merge"):
-        return ImportResponse(ok=False, reason=f"未知的 mode：{body.mode}")
+        return ImportResponse(ok=False, reason=tr(f"未知的 mode：{body.mode}", f"Unknown mode: {body.mode}"))
 
     parsed: list[dict] = [e for e in raw_entries if isinstance(e, dict) and e.get("name")]
     report = ImportReport()
@@ -576,7 +577,7 @@ def import_subscription(request: Request, body: ImportRequest) -> ImportResponse
     market = _market_names(request)
     if not market:
         return ImportResponse(ok=False, degraded=True,
-                              reason="没有活的技能注册表 —— 无法比对这份清单")
+                              reason=tr("没有活的技能注册表 —— 无法比对这份清单", "No live skill registry: cannot compare this list"))
     wanted: list[str] = []
     for e in parsed:
         name = str(e.get("name"))
@@ -630,10 +631,10 @@ def _lab_server() -> tuple[str, str, str]:
         url = read_server_url(root)
         token = _read_token(root)
     except Exception as exc:  # noqa: BLE001
-        return "", "", f"读取实验室服务器配置失败：{exc}"
+        return "", "", tr(f"读取实验室服务器配置失败：{exc}", f"Failed to read the lab server config: {exc}")
     if not url or not token:
-        return "", "", ("未配置实验室服务器（server_url / token）—— "
-                        "在启动器的推送设置里配置后重试")
+        return "", "", (tr("未配置实验室服务器（server_url / token）—— "
+                        "在启动器的推送设置里配置后重试", "Lab server not configured (server_url / token): configure it in the launcher push settings and retry"))
     tls = _require_https(url)
     if tls:
         return "", "", tls
@@ -662,7 +663,7 @@ def publish_subscription(request: Request,
                              "client_version": str(getattr(mast, "__version__", ""))},
                        timeout=30)
     except Exception as exc:  # noqa: BLE001
-        return LabPublishResponse(ok=False, reason=f"发布失败：{exc}")
+        return LabPublishResponse(ok=False, reason=tr(f"发布失败：{exc}", f"Publish failed: {exc}"))
     if r.status_code != 200:
         # 服务端的拒绝理由原样带回来 —— 「代码不随单走」那条红线的报文就在里面，
         # 压成一句「发布失败」会让人下次还这么发。
@@ -671,7 +672,7 @@ def publish_subscription(request: Request,
             detail = str(r.json().get("detail") or "")
         except Exception:  # noqa: BLE001
             detail = r.text[:200]
-        return LabPublishResponse(ok=False, reason=f"服务器拒绝（{r.status_code}）：{detail}")
+        return LabPublishResponse(ok=False, reason=tr(f"服务器拒绝（{r.status_code}）：{detail}", f"Server refused ({r.status_code}): {detail}"))
     data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
     return LabPublishResponse(ok=True, id=str(data.get("id") or ""),
                               status=str(data.get("status") or ""),
@@ -690,10 +691,10 @@ def lab_index() -> LabIndexResponse:
                       headers={"Authorization": f"Bearer {token}"}, timeout=20)
         if r.status_code != 200:
             return LabIndexResponse(degraded=True,
-                                    reason=f"服务器返回 {r.status_code}")
+                                    reason=tr(f"服务器返回 {r.status_code}", f"Server returned {r.status_code}"))
         rows = r.json().get("subscriptions") or []
     except Exception as exc:  # noqa: BLE001
-        return LabIndexResponse(degraded=True, reason=f"读取失败：{exc}")
+        return LabIndexResponse(degraded=True, reason=tr(f"读取失败：{exc}", f"Read failed: {exc}"))
     return LabIndexResponse(subscriptions=[LabIndexEntry(**{
         k: v for k, v in row.items() if k in LabIndexEntry.model_fields
     }) for row in rows if isinstance(row, dict)])
@@ -716,12 +717,12 @@ def lab_fetch(sub_id: str) -> LabFetchResponse:
         r = httpx.get(f"{url}/subscriptions/download/{sub_id}",
                       headers={"Authorization": f"Bearer {token}"}, timeout=20)
         if r.status_code != 200:
-            return LabFetchResponse(reason=f"服务器返回 {r.status_code}")
+            return LabFetchResponse(reason=tr(f"服务器返回 {r.status_code}", f"Server returned {r.status_code}"))
         raw = r.json()
     except Exception as exc:  # noqa: BLE001
-        return LabFetchResponse(reason=f"读取失败：{exc}")
+        return LabFetchResponse(reason=tr(f"读取失败：{exc}", f"Read failed: {exc}"))
     if not isinstance(raw, dict) or raw.get("kind") != "mast-skill-subscription":
-        return LabFetchResponse(reason="取回的不是一份订阅列表")
+        return LabFetchResponse(reason=tr("取回的不是一份订阅列表", "What was fetched is not a subscription list"))
     return LabFetchResponse(
         ok=True,
         manifest=SubscriptionManifest(**{k: v for k, v in raw.items()
@@ -731,8 +732,8 @@ def lab_fetch(sub_id: str) -> LabFetchResponse:
 def _missing_hint(source: str) -> str:
     """这个名字在本机没有 —— 告诉他下一步该干什么，而不是只说「没有」。"""
     return {
-        "user_composite": "对方的用户组合技能，但 manifest 里没有内嵌 spec —— 请他重新导出",
-        "overlay": "来自技能覆盖层：需要先在本机装上对应的覆盖条目或签名技能包",
-        "custom": "来自用户自建 .py：代码不随订阅单走，需要单独获取并显式启用",
-        "agent_tool": "来自某个 agent 的工具桥接：本机该 agent 版本可能没有它",
-    }.get(source, "本机注册表里没有这个技能")
+        "user_composite": tr("对方的用户组合技能，但 manifest 里没有内嵌 spec —— 请他重新导出", "The other party's user composite skill, but the manifest has no embedded spec; ask them to export again"),
+        "overlay": tr("来自技能覆盖层：需要先在本机装上对应的覆盖条目或签名技能包", "From the skill overlay: the matching overlay entry or signed skill pack must be installed on this machine first"),
+        "custom": tr("来自用户自建 .py：代码不随订阅单走，需要单独获取并显式启用", "From a user-written .py: code does not travel with the subscription list; obtain it separately and enable it explicitly"),
+        "agent_tool": tr("来自某个 agent 的工具桥接：本机该 agent 版本可能没有它", "From an agent's tool bridge: this machine's version of that agent may not have it"),
+    }.get(source, tr("本机注册表里没有这个技能", "This skill is not in the local registry"))

@@ -23,6 +23,14 @@
   "zh": "采集 STS 谱",
   "description_zh": "在针尖当前位置采集一条扫描隧道谱,沿用当前锁相与偏压扫频设置。"
  },
+ "AcquireSignalPoint": {
+  "zh": "采集单点信号",
+  "description_zh": "在当前光学位置读取隧道电流和/或指定信号槽并软件平均;只读,不移动、不触发。"
+ },
+ "AcquireSpectrum": {
+  "zh": "采集光谱",
+  "description_zh": "采一条光谱:曝光前后各读一次 STM 状态并采样隧道电流,帧数据与完整元数据存进当前样品的实验文件夹,并推送实时曲线;修针或进针进行中拒绝开始。"
+ },
  "AcquireZSpectr": {
   "zh": "采集 Z 谱",
   "description_zh": "在针尖当前位置采集一条 Z 谱。"
@@ -78,6 +86,18 @@
  "BiasPulse": {
   "zh": "偏压脉冲",
   "description_zh": "以硬件定时产生一个偏压脉冲。"
+ },
+ "CameraSnapshot": {
+  "zh": "相机快照",
+  "description_zh": "存一帧：原始数组（.npy）、PNG 与元数据（曝光、增益、ROI、时间、光斑质心/FWHM、当时的光学轴位置），进当前实验文件夹；没选样品时留在 artifacts/camera/。"
+ },
+ "CameraStartLive": {
+  "zh": "相机开始直播",
+  "description_zh": "对光相机开始连续采集（软件触发），后台只保留最新一帧；画面在光学台页的相机面板里看。"
+ },
+ "CameraStopLive": {
+  "zh": "相机停止直播",
+  "description_zh": "对光相机停止连续采集，相机仍连着。"
  },
  "CaptureSignalBuffer": {
   "zh": "采集信号缓冲",
@@ -143,6 +163,10 @@
   "zh": "配置扫描",
   "description_zh": "配置扫描帧:中心、尺寸、角度和采集通道;默认还会按 line_time_s 推算并设置扫描速度(线速度=宽度/线时间),传 set_scan_speed=False 可保持当前速度不变。"
  },
+ "ConfigureSpectrometer": {
+  "zh": "设置光谱仪采集参数",
+  "description_zh": "设置 CCD 的曝光、帧数、ADC、快门模式、外触发、输出信号、时间戳、ROI 与保存文件名;只改给了的项,超出本机限值直接拒绝,采集中不能改。"
+ },
  "ConfigureZSpectr": {
   "zh": "配置 Z 谱",
   "description_zh": "配置 Z 谱:Z 偏移、扫描距离和点数。"
@@ -150,6 +174,10 @@
  "ConfigureZSpectrTiming": {
   "zh": "配置 Z 谱时序",
   "description_zh": "配置 Z 谱的时序参数。"
+ },
+ "ConnectCamera": {
+  "zh": "连接对光相机",
+  "description_zh": "打开对光相机（Thorlabs Zelux）。MAST 启动时不碰相机，只有这一步才打开；ThorImageCAM 开着时会失败并点名，MAST 不会替人关它。不取仪器令牌。"
  },
  "ContinuousImaging_Auto": {
   "zh": "全自动成像",
@@ -166,6 +194,14 @@
  "DeconvolveTip_RL": {
   "zh": "针尖反卷积(RL)",
   "description_zh": "用 Richardson-Lucy 反卷积去除针尖展宽,支持带阻尼的高斯点扩散函数。"
+ },
+ "DelayLineGetDelay": {
+  "zh": "读光学延时",
+  "description_zh": "读取当前泵浦-探测光学延时(ps)与可达延时范围。"
+ },
+ "DelayLineMoveTo": {
+  "zh": "设置光学延时",
+  "description_zh": "把泵浦-探测延时线移到目标光学延时(ps)。"
  },
  "DemoScanAndSTS": {
   "zh": "演示扫描加STS",
@@ -186,6 +222,14 @@
  "DetectAtoms_FCN": {
   "zh": "FCN原子检测",
   "description_zh": "用全卷积网络检测STM图像中的原子位置,回退到局部极大值检测。"
+ },
+ "DisconnectCamera": {
+  "zh": "断开对光相机",
+  "description_zh": "断开并彻底释放对光相机（停直播、关句柄、关 SDK），之后 ThorImageCAM 可以重新打开它。急停/中止闩挂着时同样被拒：先请操作员清闩，或优雅关停 MAST。"
+ },
+ "DisconnectOpticalDevice": {
+  "zh": "断开光学设备",
+  "description_zh": "先停止再断开 MAST 与一台本机光学设备的连接,让厂家软件可以重新打开它。"
  },
  "EmergencyRetract": {
   "zh": "紧急退针",
@@ -255,6 +299,10 @@
   "zh": "读偏压标定",
   "description_zh": "读取偏压标定系数和偏移量。"
  },
+ "GetCameraStatus": {
+  "zh": "读相机状态",
+  "description_zh": "只读：对光相机的状态、曝光/增益/ROI、帧率，以及最新一帧的光斑质心、FWHM、最大值与饱和比例。"
+ },
  "GetCurrent": {
   "zh": "读电流",
   "description_zh": "读取隧道电流。"
@@ -318,6 +366,10 @@
  "GetMotorStepCounter": {
   "zh": "读马达步数计数",
   "description_zh": "读取X/Y/Z轴步数计数,可选读后清零(仅Attocube ANC150)。"
+ },
+ "GetOpticalStageStatus": {
+  "zh": "读光学台状态",
+  "description_zh": "读取一台本机光学台各轴的位置、运动与到位状态,以及驱动能报的速度、伺服、找零标志或状态位;默认不为了读状态去打开设备。"
  },
  "GetPLLAddOnOff": {
   "zh": "读PLL叠加开关",
@@ -387,6 +439,10 @@
   "zh": "读网格实验配置",
   "description_zh": "读取网格实验配置:可用实验、选定实验、外部VI、测前延时与保存通道。"
  },
+ "GetPicomotorSteps": {
+  "zh": "读 Picomotor 步数",
+  "description_zh": "读取 Picomotor 各轴的累计步数(卫星记账,开环,不是位置反馈)。"
+ },
  "GetPiezoHVAInfo": {
   "zh": "读HVA增益信息",
   "description_zh": "读取AUX/X/Y/Z各轴的HVA高压放大器增益读数及其启用状态。"
@@ -414,6 +470,10 @@
  "GetPointShootProps": {
   "zh": "读Point&Shoot配置",
   "description_zh": "读取Point & Shoot配置:自动续测、文件名前缀、外部VI路径、测前延时。"
+ },
+ "GetPolarizerAngle": {
+  "zh": "读偏振角",
+  "description_zh": "读取偏振片当前角度、是否在转、是否已回零以及软限位。"
  },
  "GetRTFreq": {
   "zh": "读RT频率",
@@ -475,6 +535,10 @@
   "zh": "读取SafeTip状态",
   "description_zh": "读取当前 SafeTip 针尖保护的启用状态。"
  },
+ "GetSatelliteDeviceStatus": {
+  "zh": "读卫星设备状态",
+  "description_zh": "读一台卫星设备当前的状态；只读，不需要仪器令牌。"
+ },
  "GetScanBuffer": {
   "zh": "读取扫描缓冲",
   "description_zh": "读取当前扫描缓冲设置:通道、像素数和行数。"
@@ -510,6 +574,10 @@
  "GetSignalsAddRT": {
   "zh": "读取附加RT信号",
   "description_zh": "读取可用附加 RT 信号列表,以及当前分配给 Internal 23 和 Internal 24 的信号名。"
+ },
+ "GetSpectrometerStatus": {
+  "zh": "读光谱仪状态",
+  "description_zh": "读取拉曼 CCD 光谱仪的状态(是否在采集、曝光与帧数、光栅、中心波长、出口、触发、温度),以及本机限值与激发线波长。"
  },
  "GetTipLift": {
   "zh": "读取针尖抬起量",
@@ -575,13 +643,41 @@
   "zh": "网格STS采集",
   "description_zh": "在 NxN 网格上采集扫描隧道谱:移动到每个点并采集一条谱。"
  },
+ "HomeOpticalStage": {
+  "zh": "光学台回参考/置零",
+  "description_zh": "给一条光学台轴回参考或置零:PI 走到参考开关、泽攸台去找编码器零位(都会移动),PDXC2 只把当前位置记为 0(不移动);当前坐标会丢。"
+ },
+ "HomePolarizer": {
+  "zh": "偏振片回零",
+  "description_zh": "让偏振片旋转台回零,上电后必须先回零(最长约 36 s)。"
+ },
+ "IdentifySatelliteDevice": {
+  "zh": "识别卫星设备",
+  "description_zh": "让一台卫星设备的面板灯闪几下，确认台面上是哪一台；不动轴。"
+ },
  "IdentifyTopology_CARP": {
   "zh": "分子拓扑识别",
   "description_zh": "用 Detectron2 实例分割识别分子拓扑结构,需要已训练模型。"
  },
+ "LaserFocusMap": {
+  "zh": "激光聚焦图",
+  "description_zh": "以谱带强度、光信号或电流为目标,对一或两条光学对准轴做栅格扫描,找到最佳点并核实优于起点。"
+ },
  "LevelLines_Median": {
   "zh": "逐行中值平整",
   "description_zh": "逐行平整图像,按每行做中值减除或多项式拟合去趋势。"
+ },
+ "ListNanonisMotorGroups": {
+  "zh": "列出 Nanonis 电机组",
+  "description_zh": "列出 Nanonis 电机组配置:STM 粗动组号、各光学组(反射镜、Beam Deflection、透镜)的轴、单次上限、针尖要求与驱动值,以及当前驱动读回。"
+ },
+ "ListOpticalDevices": {
+  "zh": "列出光学设备",
+  "description_zh": "列出光学平台上的设备:id、类型、各轴的行程限位与角色、连接状态,以及泵浦-探测延时线的绑定。"
+ },
+ "ListSatellites": {
+  "zh": "列出卫星",
+  "description_zh": "列出枢纽看到的卫星节点及其设备、链路状态与对时,并标出光学设备清单里用到它们的条目;没有枢纽时如实报告,不等于没有卫星。"
  },
  "LoadLayout": {
   "zh": "加载布局",
@@ -619,9 +715,37 @@
   "zh": "移动到XY",
   "description_zh": "用 Follow Me 模式将针尖移动到指定的 XY 位置。"
  },
+ "MoveXYZStage": {
+  "zh": "移动 XYZ 台",
+  "description_zh": "移动卫星上的 XYZ 平移台(mm),两边都有软限位与单次步长上限,越界或步子太大直接拒绝。"
+ },
+ "NanonisMotorGroupMove": {
+  "zh": "光学电机组走步",
+  "description_zh": "让一个光学用途的 Nanonis 电机组沿一轴走步;STM 粗动组一律拒绝,驱动读回与配置不符不走步,默认要求先退针。"
+ },
  "OpenPatternExperiment": {
   "zh": "打开网格实验",
   "description_zh": "打开所选网格实验,配置或启动实验前必须先执行。"
+ },
+ "OpticalStageGetPos": {
+  "zh": "读光学台位置",
+  "description_zh": "读取一条光学台轴的当前位置(原生单位)。"
+ },
+ "OpticalStageMove": {
+  "zh": "移动光学台",
+  "description_zh": "把一条光学台轴移到指定位置(原生单位)或相对移动,超出软行程限位在运动前直接拒绝。"
+ },
+ "OpticalStageScan": {
+  "zh": "光学台扫描",
+  "description_zh": "用光栅方式扫一或两条光学台轴,每点取 Nanonis 信号平均,存 CSV 与预览图,并推送实时图。"
+ },
+ "OpticalStageServo": {
+  "zh": "光学台伺服开关",
+  "description_zh": "打开或关闭一条本机光学台轴的闭环伺服并读回核对,目前只有 PI 控制器支持。"
+ },
+ "OpticalStageWiggle": {
+  "zh": "光学台抖动自检",
+  "description_zh": "让一条光学台轴走一小步再走回来,报告动没动、方向与实测/指令比,用于装机核对。"
  },
  "OptimizeResolution_BO": {
   "zh": "贝叶斯分辨率优化",
@@ -651,6 +775,22 @@
   "zh": "暂停网格实验",
   "description_zh": "暂停或恢复正在运行的网格实验。"
  },
+ "PicomotorAbort": {
+  "zh": "Picomotor 立即停",
+  "description_zh": "Picomotor 所有轴立即停、不减速；不需要仪器令牌。卫星驱动不支持时改发普通停止。"
+ },
+ "PicomotorJog": {
+  "zh": "Picomotor 走步",
+  "description_zh": "让 Picomotor 某一轴走指定步数(带符号),超过单次上限或越出累计软限位直接拒绝。"
+ },
+ "PicomotorMoveAbs": {
+  "zh": "Picomotor 走到计数",
+  "description_zh": "让 Picomotor 某一轴走到指定的累计计数（相对上次清零）；超过单次上限或越出累计软限位直接拒绝。"
+ },
+ "PicomotorSetZero": {
+  "zh": "Picomotor 计数清零",
+  "description_zh": "把 Picomotor 某一轴的当前位置记作 0 步，不动电机。"
+ },
  "PreScanCheck": {
   "zh": "扫描前预检",
   "description_zh": "用单线快速预扫检查针尖质量,返回针尖就绪状态和相似度分数。"
@@ -662,6 +802,18 @@
  "PredictStructure_ASD": {
   "zh": "结构预测(AttU-Net)",
   "description_zh": "用 Attention U-Net 从 STM 图像预测分子结构,需训练好的模型。"
+ },
+ "PumpProbeScan": {
+  "zh": "泵浦探测延时扫描",
+  "description_zh": "把延时线从起点扫到终点,每点取隧道电流和/或锁相信号平均,存 CSV 与预览图,并推送实时曲线。"
+ },
+ "PumpProbeSpectral": {
+  "zh": "泵浦探测光谱",
+  "description_zh": "延迟线逐点步进,每点取一帧谱,得到谱–延迟曲线;默认由 Nanonis 数字线触发相机逐帧读出,结束时对账帧数与触发数。"
+ },
+ "ReadPmt": {
+  "zh": "读 PMT",
+  "description_zh": "读取卫星上 PMT 的计数,可指定积分时间。"
  },
  "RunGridExperiment": {
   "zh": "运行网格谱实验",
@@ -695,6 +847,10 @@
   "zh": "U-Net 区域分割",
   "description_zh": "用 U-Net 把 STM 图像分割为干净/分子/缺陷区域,无模型时退回阈值分割。"
  },
+ "SetAotfWavelength": {
+  "zh": "设置 AOTF 波长",
+  "description_zh": "设置卫星上 AOTF 某通道的波长或射频频率与幅度;驱动未就绪时报 not_supported。"
+ },
  "SetBias": {
   "zh": "设置偏压",
   "description_zh": "设置偏压电压,大幅变化时可用 slew_rate_v_per_s 渐变升压。"
@@ -710,6 +866,18 @@
  "SetBiasRange": {
   "zh": "设置偏压量程",
   "description_zh": "按索引选择偏压量程。"
+ },
+ "SetCameraExposure": {
+  "zh": "设相机曝光",
+  "description_zh": "设对光相机的曝光时间（µs），超出相机报告的范围就拒绝；返回读回值。"
+ },
+ "SetCameraGain": {
+  "zh": "设相机增益",
+  "description_zh": "设对光相机的增益（dB），超出相机报告的范围就拒绝；返回读回值。"
+ },
+ "SetCameraROI": {
+  "zh": "设相机 ROI",
+  "description_zh": "设对光相机的感兴趣区域（传感器像素）与合并；彩色传感器要偶数、不合并。直播中会先停、改完接着播。"
  },
  "SetCurrentCalibration": {
   "zh": "设置电流校准",
@@ -754,6 +922,10 @@
  "SetMotorFreqAmp": {
   "zh": "设置马达频率幅值",
   "description_zh": "设置粗定位用马达的频率与幅值。"
+ },
+ "SetOpticalStageVelocity": {
+  "zh": "设置光学台速度",
+  "description_zh": "设置一条本机光学台轴之后各次移动的闭环速度并读回核对,超过配置上限直接拒绝;PDXC2 不支持。"
  },
  "SetPLLAmpCtrlBandwidth": {
   "zh": "设置 PLL 幅值控制带宽",
@@ -811,6 +983,14 @@
   "zh": "设置线图案",
   "description_zh": "设置线图案参数:点数与两个端点。"
  },
+ "SetPicomotorAccel": {
+  "zh": "设 Picomotor 加速度",
+  "description_zh": "设 Picomotor 某一轴的加速度（步/秒²，1–200000），下一次走步起生效。"
+ },
+ "SetPicomotorVelocity": {
+  "zh": "设 Picomotor 步速",
+  "description_zh": "设 Picomotor 某一轴的步速（步/秒，1–2000），下一次走步起生效。"
+ },
  "SetPiezoHysteresisOnOff": {
   "zh": "开关压电迟滞补偿",
   "description_zh": "在压电配置中启用或关闭迟滞补偿。"
@@ -831,6 +1011,10 @@
   "zh": "设置压电倾斜",
   "description_zh": "设置压电 X、Y 轴的倾斜校正角度。"
  },
+ "SetPmtHighVoltage": {
+  "zh": "设置 PMT 高压",
+  "description_zh": "设置卫星上 PMT 的高压(0 = 关闭);带高压时见光会损坏 PMT,需人工批准。"
+ },
  "SetPointShootExperiment": {
   "zh": "设置点射实验",
   "description_zh": "在 Follow-Me 模式下选择 Point & Shoot 要运行的实验。"
@@ -838,6 +1022,14 @@
  "SetPointShootOnOff": {
   "zh": "开关点射",
   "description_zh": "在 Follow-Me 模式下启用或关闭 Point & Shoot。"
+ },
+ "SetPolarizerAngle": {
+  "zh": "设置偏振角",
+  "description_zh": "把偏振片转到指定角度或相对转动,越过软限位直接拒绝;未回零时拒绝,先回零。"
+ },
+ "SetPolarizerVelocity": {
+  "zh": "设偏振片转速",
+  "description_zh": "设偏振片旋转台的最大速度和加速度，下一次转动起生效；超出驱动上限由卫星拒绝。"
  },
  "SetRTFreq": {
   "zh": "设置 RT 频率",
@@ -882,6 +1074,18 @@
  "SetSetpoint": {
   "zh": "设置设定点",
   "description_zh": "设置 Z 反馈的隧道电流设定点。"
+ },
+ "SetSpectrometerCenter": {
+  "zh": "设置中心波长",
+  "description_zh": "设置光谱仪的中心波长(nm),超出本机可设范围直接拒绝。"
+ },
+ "SetSpectrometerExitPort": {
+  "zh": "切换光谱仪出口",
+  "description_zh": "把光谱仪出口切到 front(CCD)或 side(PMT)。"
+ },
+ "SetSpectrometerGrating": {
+  "zh": "切换光栅",
+  "description_zh": "把光谱仪转塔切到指定光栅(用全名),转动需 10–30 s,采集中不能切。"
  },
  "SetSwitchOffDelay": {
   "zh": "设置关断延时",
@@ -943,6 +1147,10 @@
   "zh": "急停马达",
   "description_zh": "紧急停止所有马达运动。"
  },
+ "StopOpticalStage": {
+  "zh": "急停光学台",
+  "description_zh": "立即停止光学台的运动;不指定设备就停所有已连接的光学设备,不需要仪器令牌。"
+ },
  "StopPLLFreqSwp": {
   "zh": "停止 PLL 扫频",
   "description_zh": "停止 PLL 频率扫描模块中的扫频。"
@@ -951,9 +1159,21 @@
   "zh": "停止偏压谱",
   "description_zh": "停止当前的偏压谱(STS)测量。"
  },
+ "StopSatelliteDevice": {
+  "zh": "停止卫星设备（单台）",
+  "description_zh": "停一台卫星设备（手动面板卡片上的停止）；给轴号时只停开环台的那一个轴。不需要仪器令牌，人工接管中照样能停。"
+ },
+ "StopSatelliteDevices": {
+  "zh": "停止卫星设备",
+  "description_zh": "停止某一颗或全部卫星上的所有设备(光谱仪、偏振台、XYZ 台、Picomotor 等),不需要仪器令牌。"
+ },
  "StopScan": {
   "zh": "停止扫描",
   "description_zh": "停止当前正在进行的扫描。"
+ },
+ "StopSpectrometer": {
+  "zh": "停止光谱采集",
+  "description_zh": "立即停止光谱仪的采集,不需要仪器令牌,中止之后也能用。"
  },
  "StopZSpectr": {
   "zh": "停止 Z 谱",
@@ -970,6 +1190,42 @@
  "SurveySurface_TileScan": {
   "zh": "拼接巡扫",
   "description_zh": "以 NxN 拼接帧巡扫一块方形表面区域获取全局概览,每帧生成一个 .sxm 文件;在放大细节前使用,需针尖已逼近且稳定,可选对各帧评质并推荐最佳帧。"
+ },
+ "TERSBiasSeries": {
+  "zh": "偏压序列",
+  "description_zh": "同一位置按偏压列表逐点取 TERS 谱,每个偏压安全换压并等 Z 蠕变后判稳再曝光,结束时放回原偏压与设定点。"
+ },
+ "TERSGridMap": {
+  "zh": "网格 TERS 成像",
+  "description_zh": "在网格上逐像素移针、判稳、守卫式曝光,构建谱带强度图;定期回参考点取参考谱,发现针尖变了就停下。"
+ },
+ "TERSLineProfile": {
+  "zh": "线扫 TERS",
+  "description_zh": "沿一条线等距取点,逐点移针、判稳、守卫式曝光,得到谱带强度随位置的曲线。"
+ },
+ "TERSNearFarPair": {
+  "zh": "近场远场对照",
+  "description_zh": "同一位置交替取近场(隧穿)谱与远场谱,按谱带给出对比度,并用首尾两次近场谱判断针尖是否变了。"
+ },
+ "TERSPointSpectrum": {
+  "zh": "单点 TERS 谱",
+  "description_zh": "在当前或指定位置、偏压与电流下取一条或多条 TERS 谱,每条先判稳,曝光期间监视电流与反馈,谱与元数据归档进当前样品。"
+ },
+ "TERSPolarizationSeries": {
+  "zh": "偏振序列",
+  "description_zh": "针尖不动,把偏振片单向转到一组角度,每个角度判稳后取谱,并拟合谱带强度随角度的变化。"
+ },
+ "TERSSetpointSeries": {
+  "zh": "设定点序列",
+  "description_zh": "固定偏压、反馈闭合,按设定点电流序列改变针尖高度,每个电流判稳后取一条谱并记录 Z。"
+ },
+ "TERSTimeSeries": {
+  "zh": "光谱时间序列",
+  "description_zh": "针尖不动,连续采多帧谱并同步记录电流与 Z,逐帧谱带强度实时推送,可在信号衰减时自动停。"
+ },
+ "TERSTriggeredMap": {
+  "zh": "触发式 TERS 成像",
+  "description_zh": "网格同网格 TERS 成像,但每个像素由 Nanonis 数字线脉冲触发相机曝光,结束时对账帧数、帧号与触发间隔,对不上就标无效。"
  },
  "TipPulse": {
   "zh": "针尖脉冲",

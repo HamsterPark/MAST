@@ -56,8 +56,8 @@ def _content_sha256(p: Path) -> str:
 
     PyInstaller re-zips ``base_library.zip`` with fresh member timestamps every
     build, so its raw sha256 differs even when the CONTENT is identical — which
-    made EVERY code delta drag in base_library.zip and force a restart (feature B,
-    审查). For a ``.zip`` we hash the sorted (member-name,
+    made EVERY code delta drag in base_library.zip and force a restart (feature B).
+    For a ``.zip`` we hash the sorted (member-name,
     member-bytes) instead of the container bytes, so a timestamp-only rebuild
     compares EQUAL and is left out of the delta. Non-zip files use the raw sha256.
     """

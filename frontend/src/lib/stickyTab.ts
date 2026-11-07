@@ -1,39 +1,44 @@
 // ════════════════════════════════════════════════════════════════════════════
-// stickyTab — 「离开再回来，还停在刚才那一页吗」的**纯**部分。
+// stickyTab — the **pure** part of "after leaving and coming back, am I still on
+// the same sub-page".
 //
-// 「从代理对话离开再回来，希望还是代理对话栏目」。
+// The cause is the route element: it is rendered by AppLayout's <Outlet/>, and
+// **each return to a section is a fresh mount**, so `useState(default)` resets
+// the sub-page every time. ChatPage had a hand-written localStorage read/write
+// for this. It was right — and six other pages had none.
 //
-// 症结在一句注释里早就写明白过（`pages/ChatPage.tsx`，）:路由元素由
-// AppLayout 的 <Outlet/> 渲染，**每次回到这个栏目都是一次全新挂载**，所以
-// `useState(默认值)` 每次都把子页复位。ChatPage 当时手写了一份 localStorage
-// 读写。它是对的 —— 而另外六页一份都没有。
+// This file exists not to "save a few lines" but for the **validation on read**:
+// a stored id can go stale (a sub-page is renamed, merged or deleted), and a page
+// rendering with an unrecognised id gets either a blank area or a tab strip with
+// no sub-page highlighted. That looks not like "stale configuration" but like
+// "this page is broken". Copying it six times would leave six people to remember
+// the validation.
 //
-// 这个文件存在的理由不是「省几行」，是那个**读时校验**:存进去的 id 会过期
-// （子页改名、合并、删掉），而一个页面拿着不认识的 id 去渲染，得到的是一片空白
-// 或者一个所有子页都不高亮的 tab 条。那不像「配置过期」，像「这一页坏了」。
-// 抄六份就是把这条校验交给六个人各记一次。
-//
-// 无 React import ⇒ node --test 直接跑（`frontend/test/stickyTab.test.ts`）。
+// No React import ⇒ runs directly under node --test
+// (`frontend/test/stickyTab.test.ts`).
 // ════════════════════════════════════════════════════════════════════════════
 
-/** 存储键的统一前缀。改它会让所有人的记忆一次性失效 —— 那也是唯一的迁移方式。 */
+/** Common prefix of the storage keys. Changing it invalidates everyone's remembered tabs at once — which is also the only migration path. */
 export const STICKY_TAB_PREFIX = "mast.subtab.";
 
-/** `page` → 完整的 localStorage 键。 */
+/** `page` → the full localStorage key. */
 export function stickyTabKey(page: string): string {
   return `${STICKY_TAB_PREFIX}${page}`;
 }
 
 /**
- * 读回来的值能不能用。
+ * Whether a value read back is usable.
  *
- * **不认识就退回默认值**，而不是原样返回。存进去的 id 会过期：子页被改名、
- * 被合并进别的栏目、干脆删掉（#34 就要合并五组大标签）。一个页面拿着不认识的
- * id 去渲染，得到的是一片空白，或者一条所有段都不高亮的 tab 条 —— 而用户
- * 看到的不是「我的偏好过期了」，是「这一页坏了」，报上来的也会是后面那句。
+ * **An unrecognised value falls back to the default** rather than being returned
+ * as is. Stored ids go stale: sub-pages get renamed, merged into other sections,
+ * or deleted outright. A page rendering with an unrecognised id gets a blank area
+ * or a tab strip with no segment highlighted — and what the user sees is not "my
+ * preference expired" but "this page is broken", which is also what would get
+ * reported.
  *
- * `fallback` 不在 `valid` 里时仍然原样返回：调用方给的默认值是它自己的事，
- * 在这里悄悄改掉它只会让「默认值写错了」变成一个查不到的问题。
+ * A `fallback` that is not in `valid` is still returned unchanged: the default is
+ * the caller's own business, and silently altering it here would turn "the
+ * default is wrong" into a problem that is hard to trace.
  */
 export function pickValidTab<T extends string>(
   stored: string | null | undefined,
@@ -45,10 +50,11 @@ export function pickValidTab<T extends string>(
 }
 
 /**
- * 读一个记住的子页。storage 不可用（隐私模式、被禁用）时**不抛**，退默认值。
+ * Read a remembered sub-page. When storage is unavailable (private mode,
+ * disabled) it **does not throw** and falls back to the default.
  *
- * 一个记不住偏好的浏览器仍然要能用这个软件 —— 这条和「UI 绝不冻结」是同一条
- * 纪律的两个面。
+ * A browser that cannot remember preferences must still be able to use the
+ * software.
  */
 export function readStickyTab<T extends string>(
   page: string,
@@ -62,7 +68,7 @@ export function readStickyTab<T extends string>(
   }
 }
 
-/** 记住一个子页。失败就算了 —— 这一次的选择在本次会话里照样生效。 */
+/** Remember a sub-page. Failure is ignored — the selection still works for this session. */
 export function writeStickyTab(page: string, id: string): void {
   try {
     localStorage.setItem(stickyTabKey(page), id);

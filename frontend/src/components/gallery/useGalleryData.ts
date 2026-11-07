@@ -1,8 +1,11 @@
-// 数据图库的服务端数据：索引 / 构建状态 / 配置（react-query），以及从索引派生的模型。
+// Server data of the data gallery: index / build status / config (react-query) and the model
+// derived from the index.
 //
-// 索引一次拉全（设计 D9：几千条、gzip 后几百 KB），之后筛选、目录汇总、前后帧查找都在
-// 浏览器里做——切筛选不该有网络往返。索引只在构建完成时失效重拉（GalleryApp 盯着
-// status 的 running → 非 running 边沿），平时 staleTime 无穷大。
+// The whole index is fetched at once (a few thousand entries, a few hundred KB gzipped); after
+// that, filtering, directory summaries and neighbour-frame lookup all run in the browser, so
+// changing a filter needs no network round trip. The index is invalidated and re-fetched only
+// when a build completes (GalleryApp watches the running -> not-running edge of status);
+// otherwise staleTime is infinite.
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -38,7 +41,7 @@ export function useGalleryStatus() {
       if (error) throw error;
       return data;
     },
-    // 构建在跑时 1.5 s 一次看进度，否则 15 s 一次（别的标签页、CLI 也可能在构建）。
+    // Poll every 1.5 s while a build runs, otherwise every 15 s (another tab or the CLI may be building).
     refetchInterval: (q) => (q.state.data?.running ? 1500 : 15000),
   });
 }
@@ -55,10 +58,10 @@ export function useGalleryConfig() {
 }
 
 export interface GalleryModel {
-  /** 按 (目录, 开始时刻, 文件名) 排好的全部条目——原版 data.js 的顺序。 */
+  /** All items ordered by (directory, start time, filename). */
   items: GalleryItem[];
   byId: Map<string, GalleryItem>;
-  /** 参与前后帧查找的帧（有保存时刻、非重复保存，按保存时刻升序）。 */
+  /** Frames used for neighbour lookup (have a save time, not duplicate saves), ascending by save time. */
   frames: GalleryItem[];
   lastBatch: string;
   generated: string;
@@ -103,7 +106,7 @@ export function buildModel(data: {
   };
 }
 
-/** 索引查询 + 派生模型（模型只在索引数据换了时重算）。 */
+/** Index query + derived model (the model is recomputed only when the index data changes). */
 export function useGalleryModel() {
   const q = useGalleryIndex();
   const model = useMemo(() => (q.data ? buildModel(q.data) : null), [q.data]);

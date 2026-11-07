@@ -18,6 +18,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from mast.i18n import tr
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,7 +28,7 @@ def analysis_config(state: Any = None, *, safety: Any = None,
     """本机的 ``AnalysisConfig`` —— 由仪器 profile + 安全上限 + 实时扫描框拼出。
 
     避让半径、进针是否伤表面、选点策略全部来自 ``instrument_profile``:同一个物理
-    量只有一个来源,否则 agent 看到的地图和用户看到的会各自漂移。
+    量只有一个来源,否则 agent 看到的地图和界面上的地图会各自漂移。
 
     永不抛异常:任何一步失败,调用方仍拿到一份用 spec 默认值拼出的可用配置。
     """
@@ -109,7 +111,7 @@ def analysis_config(state: Any = None, *, safety: Any = None,
         approach_damages=ip.approach_damages_surface(),
         strategy=ip.get_scan_path_strategy(),
         # 间距因子过去从没被传过 —— AnalysisConfig 的默认 1.2 就是「尽可能挨着
-        # 排」，而用户要的是更分散。环宽跟着走：只拉开环上的点距而不拉
+        # 排」，不够分散。环宽跟着走：只拉开环上的点距而不拉
         # 开环间距，只会把「挨着排」从一个方向换到另一个方向。
         point_spacing_factor=_spacing(),
         ring_width_factor=_spacing(),
@@ -264,7 +266,7 @@ def crash_memory_markers() -> "tuple[list, int]":
             kind="crash",          # 与落库那条显式分支同一个 kind —— 避让半径
             x_m=float(x),          # 因此走的是同一个 DAMAGE_KINDS["crash"]。
             y_m=float(y),
-            label="撞针(本进程记忆)",
+            label=tr("撞针(本进程记忆)", "Tip crash (this process's memory)"),
             status="failed",
             source="live",         # 未持久化,和实时框/针尖一样
             meta={"crash_count": int(n), "from": "tip_crash_tracker"},

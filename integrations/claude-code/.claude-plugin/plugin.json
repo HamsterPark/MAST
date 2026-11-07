@@ -1,11 +1,11 @@
 {
   "name": "mast",
-  "version": "0.1.0",
-  "description": "Drive a MAST-controlled scanning tunneling microscope (Nanonis) from Claude Code: briefing, skill search, jobs with polling, raw data download, notes, operator requests and handover, over MAST's external agent API. Standard-library MCP server, no packages to install.",
+  "version": "7.0.1",
+  "description": "Drive a MAST-controlled instrument station (a scanning tunneling microscope on Nanonis, or an optical Raman / SHG station) from Claude Code: briefing, skill search, jobs with polling, raw data download, notes, operator requests and handover, over MAST's external agent API. Standard-library MCP server, no packages to install.",
   "author": {
     "name": "Yuanhao Lyu"
   },
-  "repository": "https://github.com/HamsterPark/MAST-public",
+  "repository": "https://github.com/HamsterPark/MAST",
   "license": "MIT",
   "keywords": [
     "stm",
@@ -20,7 +20,7 @@
     "python": {
       "type": "file",
       "title": "Python interpreter",
-      "description": "Python 3.10+ for the MCP server; no additional packages required. The public source package does not bundle Python. Use an installed interpreter, or MASTv2/pyruntime/python.exe from an existing full installation. On Windows use an explicit interpreter path.",
+      "description": "Python that runs the MCP server (3.10 or newer, no packages needed). Recommended: MAST's bundled runtime, MASTv2/pyruntime/python.exe inside the MAST installation folder, or any installed Python 3.10+. On Windows avoid plain 'python' if it opens the Microsoft Store.",
       "default": "python"
     },
     "mast_url": {
@@ -38,7 +38,7 @@
     "mast_password": {
       "type": "string",
       "title": "MAST password (LAN mode)",
-      "description": "HTTP Basic password for MAST LAN access. Marked sensitive and stored by the client; storage protection depends on platform. Leave empty for a local MAST service.",
+      "description": "HTTP Basic password of MAST's LAN access. Stored in secure storage. Leave empty for a MAST on this machine.",
       "sensitive": true
     },
     "verify_tls": {

@@ -1,10 +1,9 @@
-// `**强调**` — the only markup the backend's operator-facing copy uses.
+// `**emphasis**`: the only markup the backend's operator-facing copy uses.
 //
 // The instrument-init catalog (mast/core/instrument_init.py) writes its warnings
-// with markdown emphasis: 「**运行时有兜底**：退针分级进行…」. The page rendered
-// that text raw, so the operator read literal asterisks in the middle of the one
-// sentence that stops a tip being driven into the sample. called the
-// page「不专业」and this is a large part of why.
+// with markdown emphasis, e.g. "**runtime fallback exists**: staged withdraw …".
+// Rendered raw, the literal asterisks appeared in the middle of the sentence that
+// guards against driving the tip into the sample, so they are parsed out here.
 //
 // A full markdown renderer is the wrong tool: react-markdown emits block
 // elements with their own spacing, and these strings sit inline inside a label.

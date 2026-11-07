@@ -53,6 +53,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from mast.i18n import tr
 
 __all__ = ["Abortability", "INTERRUPTED_BY", "interrupted_by", "describe",
            "SOFT_STOP_CAVEAT", "soft_stop_sends_hardware_verbs"]
@@ -94,11 +95,11 @@ def interrupted_by(verb: str) -> str | None:
 # 动词**。只有紧急停止会下发。这个常量是那句话的单一真源 —— 它同时被
 # `/chat/abort` 的回包和技能说明消费，改了要一起改，而不是各写各的。
 SOFT_STOP_CAVEAT = (
-    "停止信号已送达：仪器写命令即刻被拒（只放行读取与停止/退针类动作），正在轮询的"
+    tr("停止信号已送达：仪器写命令即刻被拒（只放行读取与停止/退针类动作），正在轮询的"
     "等待循环会在下一次 poll 退出。**但软停不会替你下发任何硬件停止动词** —— 已经"
     "发出、正阻塞在主 socket 上的那一条固件动作（如 Motor_StartMove 的当前一段、正在"
     "进行的一次 BiasSpectr 扫）要靠 Motor_StopMove / BiasSpectr_Stop 这类动词从急停"
-    "socket 上打断，而今天只有**紧急停止**会发它们。需要立刻让针停下，请用紧急停止。"
+    "socket 上打断，而今天只有**紧急停止**会发它们。需要立刻让针停下，请用紧急停止。", "Stop signal delivered: instrument write commands are refused immediately (only reads and stop/withdraw actions pass), and polling wait loops exit at the next poll. **But a soft stop does not send any hardware stop verb for you**: a firmware action already issued and blocking on the main socket (such as the current segment of Motor_StartMove, or a BiasSpectr sweep in progress) can only be interrupted from the emergency socket by verbs such as Motor_StopMove / BiasSpectr_Stop, and today only the **emergency stop** sends them. If you need the tip to stop right now, use the emergency stop.")
 )
 
 
@@ -114,13 +115,13 @@ def soft_stop_sends_hardware_verbs() -> bool:
 
 _KIND_TEXT = {
     Abortability.POLLED: (
-        "**可中止**：这个动作自己在查停止事件，你按下停止后它在下一次 poll 就退出。"),
+        tr("**可中止**：这个动作自己在查停止事件，你按下停止后它在下一次 poll 就退出。", "**Abortable**: this action checks the stop event itself and exits at the next poll after you press stop.")),
     Abortability.BETWEEN_STEPS: (
-        "**只能在步与步之间中止**：动作被切成小步，停止在当前这一步跑完后生效 —— "
-        "所以延迟等于一步的时长，不是零。"),
+        tr("**只能在步与步之间中止**：动作被切成小步，停止在当前这一步跑完后生效 —— "
+        "所以延迟等于一步的时长，不是零。", "**Abortable only between steps**: the action is cut into small steps and a stop takes effect when the current step finishes, so the delay is one step long, not zero.")),
     Abortability.BLOCKING_HELD: (
-        "⚠️ **一旦发出，软停打断不了它**：调用线程会整个停在这条固件调用里，"
-        "它没有检查点，自己查不了停止事件。"),
+        tr("⚠️ **一旦发出，软停打断不了它**：调用线程会整个停在这条固件调用里，"
+        "它没有检查点，自己查不了停止事件。", "WARNING: **once issued, a soft stop cannot interrupt it**: the calling thread blocks entirely inside this firmware call, which has no checkpoint and cannot check the stop event itself.")),
 }
 
 
@@ -134,8 +135,8 @@ def describe(kind: Abortability, *, verb: str | None = None) -> str:
         return text
     stop_verb = interrupted_by(verb) if verb else None
     if stop_verb:
-        text += (f"\n\n它**不是不可逆的**：`{stop_verb}` 能从急停 socket 上把它打断。"
-                 "但软停不会替你发那个动词 —— 今天只有**紧急停止**会发。")
+        text += (tr(f"\n\n它**不是不可逆的**：`{stop_verb}` 能从急停 socket 上把它打断。"
+                 "但软停不会替你发那个动词 —— 今天只有**紧急停止**会发。", f"\n\nIt is **not irreversible**: `{stop_verb}` can interrupt it from the emergency socket. But a soft stop does not send that verb for you; today only the **emergency stop** does."))
     else:
-        text += "\n\n仓里没有登记能打断它的停止动词，请当作发出即跑完来规划。"
+        text += tr("\n\n仓里没有登记能打断它的停止动词，请当作发出即跑完来规划。", "\n\nNo stop verb that can interrupt it is registered in the repo; plan as if it runs to completion once issued.")
     return text

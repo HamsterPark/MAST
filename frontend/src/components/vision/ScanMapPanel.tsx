@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { tr } from "@/lib/i18n";
 import { api } from "@/api/client";
 import { Card, Spinner, ErrorNote, DegradedNote, EmptyNote } from "@/components/ui";
 import { ScanMapCanvas, ScanMapLegend } from "@/components/vision/ScanMapCanvas";
@@ -12,12 +13,11 @@ import {
   nextAnalysisDelayMs,
 } from "@/lib/scanMapView";
 
-// The scan map, everywhere it appears. Two pages embed it (视觉页 and the chat
-// page's vision buffer) and used to keep private copies of the queries and the
-// stat card — which is how the chat page ended up drawing the map WITHOUT the
-// analysis overlay, so the same surface showed keep-out zones on one page and
-// not the other. One component, one set of queries (TanStack dedupes them by
-// key), one set of layer switches out of the shared store.
+// The scan map, everywhere it appears. Two pages embed it (the vision page and
+// the chat page's vision buffer); sharing one component keeps them in step —
+// private copies of the queries once left one page without the analysis overlay.
+// One component, one set of queries (TanStack dedupes them by key), one set of
+// layer switches out of the shared store.
 
 /** GET /api/scan-map — the live map, 3 s poll. */
 export function useScanMap() {
@@ -56,10 +56,9 @@ export function useMapAnalysis() {
 /**
  * Keep the analysis overlays honest without polling for them.
  *
- * These layers used to appear only after someone pressed 「运行分析」, so leaving
- * them switched on would show keep-out discs and a recommendation computed
- * before the last hour of work — worse than showing nothing, because it looks
- * current. This refetches when the map poll shows the record actually changed
+ * Analysis layers that only refresh on a manual "run analysis" press would show
+ * keep-out discs and a recommendation computed before the latest work — worse
+ * than showing nothing, because it looks current. This refetches when the map poll shows the record actually changed
  * (a marker recorded, a coarse move, a route published or advanced), throttled
  * so a burst of markers collapses into one analysis, plus a slow floor for the
  * inputs that produce no marker at all (the live scan size feeds frame_size_m).
@@ -103,9 +102,9 @@ export function ScanMapPanel({
 }: {
   /** Tighter layout for an embedded view (no per-layer hint text). */
   compact?: boolean;
-  /** Optional importer row, rendered above the map (视觉页 only). */
+  /** Optional importer row, rendered above the map (vision page only). */
   importer?: ReactNode;
-  /** Optional analysis panel, given the shared query state (视觉页 only). */
+  /** Optional analysis panel, given the shared query state (vision page only). */
   analysisPanel?: (a: {
     analysis: ReturnType<typeof useMapAnalysis>["data"];
     onAnalyze: () => void;
@@ -130,7 +129,7 @@ export function ScanMapPanel({
       {importer && <div className="mb-3">{importer}</div>}
       {q.isPending && <Spinner />}
       {q.isError && <ErrorNote error={q.error} />}
-      {map && map.degraded && <DegradedNote what="扫描地图" />}
+      {map && map.degraded && <DegradedNote what={tr("扫描地图", "scan map")} />}
       {map && !map.degraded && (
         <div className="space-y-3">
           <ScanMapControls compact={compact} />
@@ -138,30 +137,34 @@ export function ScanMapPanel({
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-mast-muted">
             {layers.plan && planned.length > 0 && (
               <span>
-                计划{map.plan_title ? ` · ${map.plan_title}` : ""} · 剩 {planned.length} 步
+                {tr("计划", "Plan")}
+                {map.plan_title ? ` · ${map.plan_title}` : ""} ·{" "}
+                {tr(`剩 ${planned.length} 步`, `${planned.length} steps left`)}
               </span>
             )}
             {layers.upcoming && upcoming.length > 0 && (
-              <span>候选序列 · 接下来 {upcoming.length} 个位置</span>
+              <span>
+                {tr(
+                  `候选序列 · 接下来 ${upcoming.length} 个位置`,
+                  `Candidate sequence · next ${upcoming.length} positions`,
+                )}
+              </span>
             )}
-            {analysisQ.isFetching && <span>分析中…</span>}
-            {analysisQ.isError && <span className="text-mast-warn">分析失败（图层暂用上次结果）</span>}
+            {analysisQ.isFetching && <span>{tr("分析中…", "Analyzing…")}</span>}
+            {analysisQ.isError && <span className="text-mast-warn">
+                {tr("分析失败（图层暂用上次结果）", "Analysis failed (layers keep the last result)")}
+              </span>}
           </div>
           <div className="flex flex-wrap items-start gap-4">
             {/* flex-1 gives the canvas a width from the LAYOUT rather than from
                 its own content, which is what makes measuring it safe; the
                 min-w keeps it from being squeezed to nothing next to the stats
-                card, and wraps below it instead .
-                
-                `basis-full` on wide screens is 「扫描地图占网页面积
-                太小」, reported after #56 had already made the canvas responsive.
-                The canvas WAS filling its box; the box was the problem — three
-                items shared one flex row, so the map got
-                `container − stats(~250) − analysis(≤420) − gaps`, i.e. about
-                700 px less than the page had. Giving the map the whole row and
-                letting the two cards wrap underneath costs nothing (they are
-                short) and hands those 700 px to the only thing on the row that
-                is spatial. */}
+                card, and wraps below it instead.
+
+                `basis-full` on wide screens gives the map the whole row: with
+                three items sharing one flex row the map got
+                `container − stats(~250) − analysis(≤420) − gaps`, about 700 px
+                less than the page had. The two short cards wrap underneath. */}
             <div className="min-w-[320px] flex-1 lg:basis-full">
               <ScanMapCanvas
                 map={map}
@@ -171,16 +174,16 @@ export function ScanMapPanel({
               />
             </div>
             <Card className="min-w-[220px] flex-1 space-y-2 text-sm">
-              <StatRow label="样品" value={map.sample_label || "—"} />
+              <StatRow label={tr("样品", "Sample")} value={map.sample_label || "—"} />
               <StatRow
-                label="扫描框"
+                label={tr("扫描框", "Scan frame")}
                 value={map.frame ? fmtSize(map.frame.width_m, map.frame.height_m) : "—"}
                 mono
               />
-              <StatRow label="针尖 X" value={fmtNm(map.tip_xyz?.x_m)} mono />
-              <StatRow label="针尖 Y" value={fmtNm(map.tip_xyz?.y_m)} mono />
-              <StatRow label="针尖 Z" value={fmtNm(map.tip_xyz?.z_m)} mono />
-              <StatRow label="标记数" value={String(map.marker_count)} mono />
+              <StatRow label={tr("针尖 X", "Tip X")} value={fmtNm(map.tip_xyz?.x_m)} mono />
+              <StatRow label={tr("针尖 Y", "Tip Y")} value={fmtNm(map.tip_xyz?.y_m)} mono />
+              <StatRow label={tr("针尖 Z", "Tip Z")} value={fmtNm(map.tip_xyz?.z_m)} mono />
+              <StatRow label={tr("标记数", "Markers")} value={String(map.marker_count)} mono />
             </Card>
             {analysisPanel?.({
               analysis: analysisQ.data,
@@ -191,7 +194,7 @@ export function ScanMapPanel({
             })}
           </div>
           {map.markers && map.markers.length === 0 && (
-            <EmptyNote label="尚无定位操作记录（开始实验后会逐步标在图上）。" />
+            <EmptyNote label={tr("尚无定位操作记录（开始实验后会逐步标在图上）。", "No positioning actions recorded yet (they appear on the map as the experiment proceeds).")} />
           )}
         </div>
       )}

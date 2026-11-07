@@ -25,7 +25,7 @@
 对话不在拦截范围内
 ------------------
 
-用户明确要求只拦产数据的操作：跟 agent 讨论「这个实验该怎么做」发生在建样品
+只拦产数据的操作：跟 agent 讨论「这个实验该怎么做」发生在建样品
 之前，拦掉它会造成鸡生蛋。没有样品时开的对话归实验级，选了样品之后开的归样品级
 —— 这个分级在 ``api/routes/agents.py`` 里已经自动成立（``sample_id`` 为 NULL
 即实验级），本模块不参与。
@@ -34,6 +34,8 @@
 from __future__ import annotations
 
 from typing import Any
+
+from mast.i18n import tr
 
 #: 无论如何都放行的技能名。这些是"补救"动作：它们存在的意义就是在出事时
 #: 立刻能跑。⊇ instrument_lock.BYPASS_NAMES。
@@ -111,23 +113,41 @@ def sample_gate_message(skill_name: str, *, has_experiment: bool) -> str:
     否则它会陷进重试循环而不是去问用户。
     """
     if not has_experiment:
-        return (
+        return tr(
             f"[sample_gate] no_active_experiment: 当前没有进行中的实验，"
             f"'{skill_name}' 未执行——扫描/谱学产生的数据必须归属到一个实验和样品，"
             f"否则以后没人能定位这条记录测的是什么。\n"
             f"出路：(1) 调用 start_experiment(\"实验名\") 开一个实验，再 "
             f"start_sample(\"样品名\")；(2) 请用户在右栏「实验 → 样品」里选择。\n"
             f"Do NOT retry this call unchanged — 在实验和样品选定前它会以完全"
-            f"相同的方式失败。"
+            f"相同的方式失败。",
+            f"[sample_gate] no_active_experiment: there is no experiment in progress, so "
+            f"'{skill_name}' was not executed. Data produced by scans/spectroscopy must "
+            f"belong to an experiment and a sample, otherwise nobody can later tell what "
+            f"the record measured.\n"
+            f"Ways out: (1) call start_experiment(\"experiment name\") to open an "
+            f"experiment, then start_sample(\"sample name\"); (2) ask the user to pick one "
+            f"under \"Experiment > Sample\" in the right-hand panel.\n"
+            f"Do NOT retry this call unchanged: it will fail in exactly the same way until "
+            f"an experiment and a sample are selected."
         )
-    return (
+    return tr(
         f"[sample_gate] no_active_sample: 当前没有选定样品，'{skill_name}' 未执行"
         f"——扫描/谱学产生的数据必须归属到一个样品，否则以后没人能定位这条记录"
         f"属于哪块样品。\n"
         f"出路：(1) 调用 start_sample(\"样品名\") 新建一个样品；"
         f"(2) 请用户在右栏「实验 → 样品」里选一个已有样品；"
         f"(3) 若不确定用哪个样品，先问用户——不要重试本次调用。\n"
-        f"Do NOT retry this call unchanged — 在样品选定前它会以完全相同的方式失败。"
+        f"Do NOT retry this call unchanged — 在样品选定前它会以完全相同的方式失败。",
+        f"[sample_gate] no_active_sample: no sample is selected, so '{skill_name}' was not "
+        f"executed. Data produced by scans/spectroscopy must belong to a sample, otherwise "
+        f"nobody can later tell which sample the record belongs to.\n"
+        f"Ways out: (1) call start_sample(\"sample name\") to create a sample; "
+        f"(2) ask the user to pick an existing sample under \"Experiment > Sample\" in the "
+        f"right-hand panel; (3) if unsure which sample to use, ask the user first - do not "
+        f"retry this call.\n"
+        f"Do NOT retry this call unchanged: it will fail in exactly the same way until a "
+        f"sample is selected."
     )
 
 

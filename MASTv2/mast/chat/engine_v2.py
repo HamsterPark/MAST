@@ -157,11 +157,11 @@ class ConversationEngineV2:
         assistant 声部）。
 
         ⚠️ 还要排除「**此刻正在跑**」：一个在飞的回合的历史末尾同样是用户消息，
-        把它报成「中断了」会在每次刷新时吓人一跳。
+        把它报成「中断了」会在每次刷新时产生误报。
 
         ⚠️ ``is_active`` 收的是 **thread_id，不是 conversation_id**（两个引擎一致）。
-        第一版直接把 conversation_id 传了进去 —— 永远返回 False，于是**在飞的回合
-        每次刷新都被报成「中断了」**，而单元测试当场抓到。两个 id 在同一个函数里
+        传入 conversation_id 会让它永远返回 False，于是**在飞的回合
+        每次刷新都被报成「中断了」**。两个 id 在同一个函数里
         并存时，「哪个是哪个」不能靠名字长得像来判断。
         """
         from langchain_core.messages import HumanMessage
@@ -337,7 +337,7 @@ class ConversationEngineV2:
             loop = self._loop_for(agent_id)
 
             # 历史 + 这一轮的问题。**先把问题落库**：回合中途崩掉时，用户问了
-            # 什么必须还在 —— 而不是「他记得自己问过，系统里没有」。
+            # 什么必须还在 —— 否则用户记得问过而系统里没有记录。
             history = rows_to_messages(self._messages.load_working_set(conversation_id))
 
             # ★ 上一轮**没写完**就补一句（2026-08-27 实测补上）。
@@ -488,8 +488,8 @@ def _system_note(text: str):
     """给用户看的一句话（限流停住、出错、拒绝）。
 
     ⚠️ 必须是 ``AIMessage`` 而不是 ``SystemMessage``。``render_history`` 只渲染
-    Human / AI / Tool 三类，``SystemMessage`` **被整条丢掉** —— 第一版用了它，
-    于是「用来让异常结局可见的那条说明，自己是不可见的」，三条测试当场变红。
+    Human / AI / Tool 三类，``SystemMessage`` **被整条丢掉**，那样用来让异常结局可见的
+    说明自己就不可见了。
     这条 notice 是系统对用户说话，assistant 声部本来就是对的。
 
     （对照：``compaction`` 的摘要用 ``SystemMessage`` 是**刻意**的——那段不是说给

@@ -39,21 +39,77 @@ from mast.core.scan_policy import (
     get_tier_for_size,
     wait_budget_s,
 )
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
-# 只有无法读取有效扫描宽度时才使用 DEFAULT_LINE_TIME_S。
-# 常规预扫描依据 scan_policy 档位表选择速度，避免用单线预算代替整帧工作点。
-# Scan_BufferSet 保持现有行数；帧时还取决于行数，不能从帧高推断。
+#: 只在**连扫描宽度都不知道**时才用得上的每线时间。原本是 ``plan()`` 里的裸
+#: 字面量 ``line_time = 0.1``,后来成了本技能的出厂默认 —— 而那是错的,见下。
+#:
+#: ═══════════════════════════════════════════════════════════════════════
+#: 0.1 s 当初是对的 —— **对一条线**
+#: ═══════════════════════════════════════════════════════════════════════
+#:
+#: 算一下:
+#:
+#: 逐位对得上:256 行 × 0.1024 s(Nanonis 把 0.1 量化成 0.1024)× 2 = 52.4 s,
+#: 针尖横向速度 = 50 nm / 0.1024 s = **488 nm/s**。而档位表给 50 nm 的是
+#: 1.0 s/线 = **50 nm/s** —— **差 10 倍**,快的那一条正在刮针。
+#:
+#: 而本类的自述写着「Performs a **single-line** scan」。一条线 × 0.1 s
+#: = 0.2 s,那是一个完全合理的「快速看一眼」。**但它从不设线数**
+#: (``Scan_BufferSet(ch, 0, 0)`` 后两位恒 0 = 保持现值),所以实际扫的是上一次
+#: 留下的行数。**一个为「一条线」定的速度,被拿去扫 256 行的光栅接触。**
+#: 即注释描述了一件没发生的事。
+#:
+#: ── 为什么改成查档位表,而不是换一个更大的常数 ──────────────────────
+#:
+#: 因为**预扫描不该比它要预测的那次扫描更快**。它回答的问题是「用这根针去扫,
+#: 图会不会好」——而 488 nm/s 下的针尖表现与 50 nm/s 下的针尖表现**不是同一件
+#: 事**。用前者去预测后者,是「证据回答的不是被问的那个问题」的又一例。
+#: 档位表(``scan_policy._FACTORY_TIERS``,用户可改)已经是「这个尺度该多慢」
+#: 的单一真源,所以这里**查表,不发明数字**。
+#:
+#: 保留这个常数只为一个退化情形:宽度读不出来(不是数、≤0)。那时既没有尺寸也
+#: 就没有档,只能退回它 —— 而那种输入本来就走不到硬件。
 DEFAULT_LINE_TIME_S = 0.1
 
 
 def resolve_line_time_s(width_m: "object", explicit: "object" = None) -> float:
-    """解析预扫描每线时间的唯一入口。
-    
-    优先级为调用方显式值、按宽度查询档位表、DEFAULT_LINE_TIME_S。
-    ParameterSpec 不得为 line_time_s 注入默认值，否则 schema 会把未传入的键变成显式值，
-    使按宽度查询的分支不可达。相关测试需要覆盖 schema、coerce、plan 的完整入口。
+    """这一次预扫描该用多快的每线时间。**唯一入口。**
+
+    优先级:调用方显式给的 > 按宽度查档位表 > ``DEFAULT_LINE_TIME_S``。
+
+    「显式优先」与 ``scan_at_params`` / ``scan_resolver`` 同一个惯例:用户明确
+    给出的值永远压过任何表。但**默认不再是一个常数** —— 见上面那段。
+
+    ═══════════════════════════════════════════════════════════════════════
+    ⚠️ 这一层的前提:``line_time_s`` 的 ParameterSpec **不许有 default**
+    ═══════════════════════════════════════════════════════════════════════
+
+    若 ParameterSpec 带 default,针尖速度会恒为兜底值 **488 nm/s**(而不是档位表的值)。
+    代码、档位表、参数类型、SetScanSpeed 逐项都没问题,而结果恒是兜底值。
+    机制是:
+
+        ParameterSpec(name="line_time_s", ..., default=DEFAULT_LINE_TIME_S)
+          → skill_adapter._schema_from_metadata 把它写进 pydantic 模型
+          → 模型不传这个键时,**pydantic 替它填 0.1**
+          → 到这里 explicit = 0.1(不是 None)
+          → 「显式优先」分支命中 → **查表那一行永远到不了**
+
+    也就是说:**「没传」被那个 default 变成了「传了 0.1」**,而这一层区分的正是
+    这两者。同一形状本仓记过两次(``reducer_changes_default``:给 NotRequired 加
+    reducer 把缺省从 absent 变成零值;``scan_at_params``:「``None`` = 不下发那个
+    键……**不能改成传 None**」)。
+
+    **要推翻(即重新给它一个 default)需要回答**:那个 default 与档位表在同一个
+    尺度上不一致时,谁说了算?没有答案就不要加 —— 一个「谁都说了算」的字段,
+    最终由**它有没有被填**决定,而那件事调用方看不见。
+
+    直接调 ``plan({...})`` 的单元测试抓不到它,因为手搭的 dict 里没有
+    这个键 —— **绕过了填默认值那一层**。教训:
+    **测试必须从生产入口进**。现在
+    ``test_prescan_line_time_from_tier.py`` 里有一条走 schema→coerce→plan 的。
     """
     val = _num(explicit, None)
     if val is not None and val > 0:
@@ -77,7 +133,13 @@ def resolve_line_time_s(width_m: "object", explicit: "object" = None) -> float:
 #: 猜小了就是超时,猜大了只是晚一点发现卡住。两种错的代价不对称。
 _BLIND_LINES = 512
 
-# 等待常数仅为下限，最终预算根据扫描几何推导。
+#: v1 抄来的那个 15 s。**它现在只是下限,不再是预算本身。**
+#:
+#: 原文是 ``plan()`` 里的 ``timeout_ms: 15000``,注释写着「same as v1
+#: wait_scan_complete(timeout_s=15)」—— 一个从 v1 抄过来的常量,**不是从这一步的
+#: 几何算出来的**。曾出现 ``[PreScanCheck] failed: Pre-scan
+#: timed out`` 就是它:forge 刚把分辨率设成 256 ⇒ 256 × 0.1 s × 2 = 51.2 s,
+#: 超预算 3.4 倍。
 _V1_FLOOR_S = 15.0
 
 # 默认等待预算使用保守几何估算；有上下文时读取真实行数，提高估算精度。
@@ -89,16 +151,20 @@ DEFAULT_WAIT_TIMEOUT_S = wait_budget_s(
 _INCONCLUSIVE: dict = {"correlation": None, "legacy_cosine": None,
                        "unusable_reason": None}
 
-#: 缓冲回落**为什么不出数**(2026-08-14,修复项)。
+#: 缓冲回落**为什么不出数**。
 #:
 #: 这句话是**单一真源** —— 实现和钉住它的测试读同一个常量,免得哪天代码改了
 #: 而测试里那句复制的中文还在,看着像在守护、其实守护的是一句旧话。
 #: 完整论证在 ``_evaluate_line_quality`` 里那段 (a)(b)(c) 注释,那段一个字没删。
 _BUFFER_NOT_COMPARABLE = (
-    "判不了：缓冲路径相似度与 .sxm 路径不可比,且缓冲内容未必是本帧"
-    "，无法确认可比性，因此不作判定。"
+    tr("判不了：缓冲路径相似度与 .sxm 路径不可比,且缓冲内容未必是本帧"
+    "—— 判不了。"
     "**这是弃权,不是「针尖不合格」**:下一步是去 .sxm 里取这一帧 / 换个地方"
-    "重新量,**不是修针**。")
+    "重新量,**不是修针**。",
+       "Buffer-path similarity is not comparable with the .sxm path, and the buffer content is not "
+       "necessarily this frame: cannot decide. "
+       "**This is an abstention, not 'the tip is bad'**: the next step is to "
+       "fetch this frame from the .sxm / measure again at another place, **not to repair the tip**."))
 
 
 def _num(value, fallback: float) -> float:
@@ -126,14 +192,14 @@ class PreScanCheck(CompositeSkillGraph):
     ``Scan_BufferSet(ch, 0, 0)``(后两位 = pixels/lines,恒 0 = 保持现值),
     所以行数继承自**上一次扫描**。调用方设过 256 行,这里就是 256 行整帧。
 
-    ── 这段自述以前是假的(2026-08-12 改)──────────────────────────────
-    原文逐字写着「Performs a **single-line** scan」/「Quick single-line
+    ── 这段自述曾经是假的 ──────────────────────────────
+    原文写着「Performs a **single-line** scan」/「Quick single-line
     pre-scan」。**它从来没扫过一条线。** 那句话描述的是一个「同时还会设线数」
-    的版本,而那一半从来不存在 —— 与本仓另外几条「描述了没发生的事」的注释
-    同一个形状。
+    的版本,而那一半从来不存在。
 
     代价不是判错,是**刮针**:0.1 s/线是照着「一条线 0.2 s」定的速度,拿去扫
-    256 行就是 488 nm/s 的光栅接触,足以刮伤针尖。现在每线时间查档位表
+    256 行就是 488 nm/s 的光栅接触(50 nm 的图
+    50 s 扫完,针尖会被刮坏)。现在每线时间查档位表
     (见 ``resolve_line_time_s``),50 nm ⇒ 1.0 s/线 ⇒ 50 nm/s。
 
     Reference: DeepSPM pre-scan check pattern.
@@ -148,26 +214,35 @@ class PreScanCheck(CompositeSkillGraph):
             # 预扫描可能继承整帧行数，不能描述为单线动作。
             # 判决依赖保存的 .sxm；缓冲回落无法确认可比性时返回 tip_ready=None。
             description=(
-                "预扫：按正扫/反扫的重合度判针尖好坏。它扫的是**一整帧**，用当前的"
+                tr("预扫：按正扫/反扫的重合度判针尖好坏。它扫的是**一整帧**，用当前的"
                 "线数（它自己从不设线数）—— 默认档速度下一帧 50 nm 就是 256 行、"
                 "~8.5 min。**不便宜，也不是只扫一条线。**"
                 "返回 tip_ready（True/False/None）+ similarity。判定**只**来自"
                 "存盘的 .sxm 帧：帧存不下来或找不到时会回落到实时缓冲区，而那份"
                 "**不可比**、甚至可能装的根本不是这一帧，所以它返回 "
-                "tip_ready=None（判不了）并给出理由。**判不了的意思是重测 / 换点位 —— 它不是「针尖坏了」，不要去打脉冲。**"
+                "tip_ready=None（判不了）并给出理由。**判不了的意思是重测 / 换点位 —— 它不是「针尖坏了」，不要去打脉冲。**",
+                   "Pre-scan: judge the tip by the agreement of the forward and backward scans. It "
+                   "scans **a whole frame**, with the current line count (it never sets the line "
+                   "count itself): at the default tier speed a 50 nm frame is 256 lines, ~8.5 min. "
+                   "**It is not cheap, and it is not just one line.** Returns tip_ready "
+                   "(True/False/None) + similarity. The verdict comes **only** from the saved .sxm "
+                   "frame: when the frame cannot be saved or found it falls back to the live buffer, "
+                   "which is **not comparable** and may not even hold this frame, so it returns "
+                   "tip_ready=None (cannot decide) with a reason. **'Cannot decide' means measure "
+                   "again / change the position: it is not 'the tip is bad', do not fire pulses.**")
             ),
             parameters=[
                 ParameterSpec(
                     name="center_x_m",
                     type="float",
-                    description="扫描中心 X",
+                    description=tr("扫描中心 X", "Scan centre X"),
                     unit="m",
                     required=True,
                 ),
                 ParameterSpec(
                     name="center_y_m",
                     type="float",
-                    description="扫描中心 Y",
+                    description=tr("扫描中心 Y", "Scan centre Y"),
                     unit="m",
                     required=True,
                 ),
@@ -175,9 +250,12 @@ class PreScanCheck(CompositeSkillGraph):
                     name="width_m",
                     type="float",
                     description=(
-                        "扫描宽度，单位是 METERS（SI），**不是纳米** —— 应当与"
+                        tr("扫描宽度，单位是 METERS（SI），**不是纳米** —— 应当与"
                         "你打算扫的正式图一致。换算：100 nm → 100n，50 nm → "
-                        "50n。写成裸的 100（=100 m）就是单位写错了。"
+                        "50n。写成裸的 100（=100 m）就是单位写错了。",
+                           "Scan width, in METERS (SI), **not nanometres**: it should match the real "
+                           "image you intend to scan. Conversion: 100 nm -> 100n, 50 nm -> 50n. "
+                           "Writing a bare 100 (= 100 m) is a unit error.")
                     ),
                     unit="m",
                     required=True,
@@ -187,7 +265,8 @@ class PreScanCheck(CompositeSkillGraph):
                 ParameterSpec(
                     name="quality_threshold",
                     type="float",
-                    description="判 tip_ready 所需的最低正/反扫相似度",
+                    description=tr("判 tip_ready 所需的最低正/反扫相似度",
+                                   "Minimum forward/backward similarity needed to judge tip_ready"),
                     required=False,
                     default=0.8,
                     min_value=0.0,
@@ -197,11 +276,17 @@ class PreScanCheck(CompositeSkillGraph):
                     name="pixels",
                     type="int",
                     description=(
-                        "**这一次**预扫的行数（也是每行像素数）。**留空**则继承"
+                        tr("**这一次**预扫的行数（也是每行像素数）。**留空**则继承"
                         "上一次扫描留下的分辨率 —— 那是历史行为。想让预扫"
                         "**便宜**时才传它：耗时 = 行数 × line_time × 2，所以这是"
                         "**唯一**能缩短它的旋钮（把帧改小**不能** —— 那只是让"
-                        "针尖温和一些）。"
+                        "针尖温和一些）。",
+                           "Number of lines of **this** pre-scan (also the pixels per line). If "
+                           "**empty**, inherits the resolution left by the previous scan: that is "
+                           "the historical behaviour. Pass it only when you want the pre-scan to be "
+                           "**cheap**: duration = lines x line_time x 2, so this is the **only** "
+                           "knob that shortens it (making the frame smaller does **not**: that only "
+                           "makes the tip gentler).")
                     ),
                     unit="px",
                     required=False,
@@ -214,10 +299,14 @@ class PreScanCheck(CompositeSkillGraph):
                     name="line_time_s",
                     type="float",
                     description=(
-                        "每条扫描线多少秒。**除非现场明确给出过一个值，否则留空** —— "
+                        tr("每条扫描线多少秒。**除非现场明确给出过一个值，否则留空** —— "
                         "留空时由这个扫描尺寸对应的扫描策略档决定"
                         "（50 nm → highres 档）。这个数就是针尖的横向速度："
-                        "width / line_time。**太快会刮针尖。**"
+                        "width / line_time。**太快会刮针尖。**",
+                           "Seconds per scan line. **Leave empty unless the field has explicitly "
+                           "given a value**: when empty, the scan-policy tier for this scan size "
+                           "decides (50 nm -> highres tier). This number is the lateral speed of the "
+                           "tip: width / line_time. **Too fast will scrape the tip.**")
                     ),
                     unit="s",
                     required=False,
@@ -229,17 +318,23 @@ class PreScanCheck(CompositeSkillGraph):
                     name="wait_timeout_s",
                     type="float",
                     description=(
-                        "等预扫结束的上限。**留空**：这时的预算按扫描缓冲区里"
+                        tr("等预扫结束的上限。**留空**：这时的预算按扫描缓冲区里"
                         "**实际的**行数 × **实际用的**线时间推出来（这个技能**不**设"
                         "行数 —— 它的耗时由上一次扫描留下的分辨率决定）。"
                         "**你传进来的值是 FLOOR（下限），不是上限。** "
-                        "只有用户点了名才传它。"
+                        "只有用户点了名才传它。",
+                           "Upper limit of the wait for the pre-scan to finish. If **empty**, the "
+                           "budget is derived from the **actual** number of lines in the scan buffer "
+                           "x the **actual** line time used (this skill does **not** set the line "
+                           "count: its duration is determined by the resolution left by the previous "
+                           "scan). **The value you pass is a FLOOR (lower bound), not an upper "
+                           "limit.** Pass it only when the user named it.")
                     ),
                     unit="s",
                     required=False,
                     # ⚠️ **绝不能给 default** —— 与 line_time_s 同一个理由。
                     #
-                    # 这条的描述逐字写着「Omit it: the budget is then derived」,
+                    # 这条的描述写着「Omit it: the budget is then derived」,
                     # 而 `default=DEFAULT_WAIT_TIMEOUT_S` 让「omit」**不可能发生**:
                     # pydantic 每次都替调用方填上 163.12,于是旧实现里那句
                     # `if params.get("wait_timeout_s") is None:` **永远为假**,
@@ -249,8 +344,7 @@ class PreScanCheck(CompositeSkillGraph):
                     # 从落地起就被这个 default 架空了 —— 而它自己的描述在告诉每
                     # 一个读它的人「omit 就会派生」。**一句描述了一件没发生的事
                     # 的话,会守住一个不该守的设计,而且没人会去核它。**
-                    # (与本仓其它几条「描述了没发生的事」的注释同形,
-                    #  包括本文件类自述里那条「single-line scan」。)
+                    # (同类问题见本文件类自述里那条「single-line scan」。)
                     min_value=1.0,
                     max_value=3600.0,
                 ),
@@ -265,7 +359,29 @@ class PreScanCheck(CompositeSkillGraph):
 
     def _derived_timeout_s(self, context, line_time: float,
                            lines_override: "int | None" = None) -> float:
-        """按实际行数及每线时间推导等待预算；行数不可读时使用公开默认的保守估算。"""
+        """按**这一步真的会扫多少行**估等待预算。读不到行数就退回出厂常数。
+
+        ## 为什么非派生不可(曾出现「Pre-scan timed out」)
+
+        这个技能**自己不设线数** —— 它的 ``ConfigureScan`` 走
+        ``Scan_BufferSet(ch, 0, 0)``,后两位恒 0 = 保持现值。所以它扫几行由
+        **上一次扫描**决定。而预算是一个从 v1 抄来的 15 s 常数。
+        forge 刚把分辨率设成 256 ⇒ 256 × 0.1 s × 2 = 51.2 s,**超预算 3.4 倍**。
+
+        「限额的计价单位由别处决定就必须派生」—— 同一条教训
+        (例如:档位表 512×1.0=1024 s vs 180 s 预算、私聊 recursion_limit)。
+
+        ## 为什么是「读回行数」而不是「自己设行数」
+
+        两条都行,选了前者:**设行数会改变每一个调用方的硬件行为**(预扫描会把
+        用户的分辨率改掉,而它自称只是「快速看一眼」)。读回来只多一次
+        ``Scan_BufferGet``,不写任何东西,而且它同时让「我要扫多少行」这件事
+        **第一次有了答案** —— 一个不知道自己要扫几行的技能,本来就无法为自己估预算。
+
+        **要推翻(即改成自己设行数)需要回答**:预扫描该不该拥有分辨率?
+        如果该,那它就不再是「继承现场」的快速检查,而是一次完整的配置 ——
+        那时 `ScanAt` 才是更合适的入口。
+        """
         # 调用方指定了分辨率 ⇒ **我们自己会设它**,那就别再去读继承来的行数:
         # 读回来的是**上一次**扫描的,而这一次马上要改掉。用错的分母算出来的预算
         # 会在两个方向上都错(设得更小 ⇒ 预算过大、卡住晚发现;设得更大 ⇒ 预算
@@ -343,8 +459,29 @@ class PreScanCheck(CompositeSkillGraph):
                     "center_x_m": cx,
                     "center_y_m": cy,
                     "width_m": width,
-                    # 验证使用方图，以便正反扫判据保留二维形貌信息。
-                    # 帧时由行数与每线时间决定；仅缩小高度不会减少本流程保留的扫描行数。
+                    # ⭐ **方图,不是细长条。** verify 不应设计成细条。
+                    #
+                    # 验证判据是「**扫图**可见正负扫描线基本重合」—— 看的是
+                    # 一张图。而这里原来是 `height = width × 0.05`(50 nm × 2.5 nm),
+                    # 256 条线挤在 2.5 nm 里、行距 9.8 pm ⇒ **把同一条线量了 256 遍**,
+                    # 那不是一张图:这些图看不出任何
+                    # 信息,强行解读只会得到错误结论。
+                    #
+                    # ## 改成方图是**免费**的 —— 那条「窄条更快」的理由从没成立过
+                    #
+                    # 帧时 = **行数 × 每线时间 × 2**,**高度不进这个式子**。而本技能
+                    # **从不设行数**(`Scan_BufferSet(ch,0,0)`,后两位恒 0 = 保持现值),
+                    # 所以细条和方图**花的时间一模一样**(256 行 × 0.1 s × 2 = 51.2 s)。
+                    # 细条没有换来任何速度,只换掉了图。旧注释里「窄条能更快走完」
+                    # 这句话在这份实现下是假的 —— 它描述的是一个**同时会设行数**的
+                    # 版本,而那一半从来没有存在过。
+                    #
+                    # ## 顺带对齐了一个一直错位的口径
+                    #
+                    # 0.80 那个阈值**全部是在方图上
+                    # 标定的**;若 verify 在细条上取数,就是同一个名字、两种图。
+                    # (细条是否真的让相关性失真,拿现有数据判不了 —— 裁方图只能改
+                    #  行数、改不了 9.8 pm 的行距。改成方图之后这个问题不再需要回答。)
                     "height_m": width,
                 },
                 optional=False,
@@ -510,8 +647,33 @@ class PreScanCheck(CompositeSkillGraph):
 
     @staticmethod
     def _restore_frame(context, before) -> None:
-        """恢复之前读到的扫描框；无法读取原值时保持现状。
-        先解开 error/raw/body 信封，再兼容扁平序列，不能把 body 当成单个坐标。"""
+        """把扫描框放回 ``before`` 记下的样子。``None`` = 没读到,什么都不做。
+
+        **不猜**:读不到原框时保持现状,比放回一个编出来的框安全。
+
+        ═══════════════════════════════════════════════════════════════════
+        ⚠️ 回包是 ``(error, raw_bytes, body)`` 三段信封 —— 这条修复曾经
+           **从来没在真机上生效过**
+        ═══════════════════════════════════════════════════════════════════
+
+        6.2.12 加这条时,按「一串可能裹着 1-元组的数」来解 ``before``:
+
+            vals = [v[0] if isinstance(v, (tuple, list)) and v else v
+                    for v in before]
+
+        而 ``safe_call("Scan_FrameGet").return_value`` 真正的形状是
+        ``('', b'…', [cx, cy, w, h, angle])``。上面那句作用在它身上:
+        ``''`` 原样、``b'…'`` 原样、``[cx…]`` 被取成 **cx 一个数** ⇒
+        ``len(nums) == 1 < 4`` ⇒ 静默 return,**一次都没还原过**。
+
+        曾复现:100 nm 的框跑完预扫描后留在 20 nm。
+        而单元测试全绿 —— 因为测试替身给的是**真机永远不会发的扁平形状**。
+        (数值数组字段在真机上回来是一串 1-元组,而替身给裸数字;这一次
+        的变体是:**替身连信封都没有**。)
+
+        所以现在**先剥信封**(与 ``GetScanFrame`` 取 ``parsed[2]`` 同一口径),
+        剥不动再按扁平序列试 —— 两种都接,而测试两种都必须覆盖。
+        """
         if before is None:
             return
         try:
@@ -619,20 +781,28 @@ class PreScanCheck(CompositeSkillGraph):
             data[VERIFIED_STATE_KEY] = {"scan_running": False}
             done = executor.progress.partial_data.get("scan_lines_done")
             total = executor.progress.partial_data.get("scan_lines_total")
-            where = (f" ({done}/{total} 行)"
+            where = (tr(f" ({done}/{total} 行)", f" ({done}/{total} lines)")
                      if done is not None and total else "")
             # 等待和采集失败必须由失败原因解释，不能用计划参数描述结果。
             if executor.progress.partial_data.get("wait_never_started"):
                 return self.fail(
-                    f"预扫描**从未开始**{where} —— `StartScan` 成功返回了,但在"
+                    tr(f"预扫描**从未开始**{where} —— `StartScan` 成功返回了,但在"
                     f"整个开扫宽限期里一次都没看到扫描在跑,缓冲区也是空的。"
                     f"这**不是**「被谁停了」:没有人需要去查 Stop 记录。"
                     f"该查的是发起时序(仪器是否还在处理上一条设置)。",
+                       f"The pre-scan **never started**{where}: `StartScan` returned successfully, "
+                       "but during the whole start grace period the scan was never seen running, and "
+                       "the buffer was empty too. This is **not** 'someone stopped it': nobody needs "
+                       "to look through the Stop records. What to check is the start timing (whether "
+                       "the instrument was still processing the previous setting)."),
                     **data,
                 )
             return self.fail(
-                f"预扫描中途停止{where} —— 这条线没扫完,测不出针尖状态。"
+                tr(f"预扫描中途停止{where} —— 这条线没扫完,测不出针尖状态。"
                 f"不是超时:去查是谁停的(用户 Stop / Nanonis 自停 / 安全停机)。",
+                   f"Pre-scan stopped midway{where}: this line was not finished, so the tip state "
+                   "cannot be measured. Not a timeout: find out who stopped it (user Stop / Nanonis "
+                   "stopped by itself / safety stop)."),
                 **data,
             )
 
@@ -682,8 +852,12 @@ class PreScanCheck(CompositeSkillGraph):
                 quality = dict(quality)
                 quality["correlation"] = None
                 quality.setdefault("abstain_reason", (
-                    f"正反扫一致性算出来不是有限数({similarity!r}),判不了针尖好坏。"
-                    "**这是弃权,不是「针尖不合格」** —— 下一步是重新量,不是修针。"))
+                    tr(f"正反扫一致性算出来不是有限数({similarity!r}),判不了针尖好坏。"
+                    "**这是弃权,不是「针尖不合格」** —— 下一步是重新量,不是修针。",
+                       "The forward/backward consistency came out as a non-finite number "
+                       f"({similarity!r}), so the tip cannot be judged good or bad. **This is an "
+                       "abstention, not 'the tip is bad'**: the next step is to measure again, not "
+                       "to repair the tip.")))
                 quality.setdefault("unusable_reason", quality["abstain_reason"])
                 similarity = None
 
@@ -752,7 +926,7 @@ class PreScanCheck(CompositeSkillGraph):
         读文件用的是既有的单一入口 :func:`mast.io.nanonis_files.read_sxm` +
         :func:`~mast.io.nanonis_files.sxm_oriented_frames` —— 后者负责把反扫的
         镜像和 ``:SCAN_DIR: up`` 的行序归位,**不在这里再写一份**(那个函数的注释
-        记着:从前有三种私人拼写,而缺席的那一份正好是用户看到的那条路)。
+        记着:从前有三种私人拼写,而缺席的那一份正好是用户使用的那条路)。
 
         ## 「这是不是我这一帧」有两个独立答案
 
@@ -803,7 +977,7 @@ class PreScanCheck(CompositeSkillGraph):
 
         # ⚠️ 用**返回的** fwd/bwd:裁到已扫行发生在 _frame_gate 里面。
         fwd, bwd, gate = self._frame_gate(fwd, bwd, source=f"sxm:{path}",
-                                          noun="这一帧")
+                                          noun=tr("这一帧", "this frame"))
         if gate is not None:
             return gate
 
@@ -859,10 +1033,14 @@ class PreScanCheck(CompositeSkillGraph):
         min_rows = 1 if was_1d else 2
         if n_rows < min_rows:
             reason = (
-                f"{noun}只有 {n_rows}/{rows_total} 行是扫完整的 —— "
+                tr(f"{noun}只有 {n_rows}/{rows_total} 行是扫完整的 —— "
                 "这一帧还没有可比较的区域。**这是弃权,不是「针尖不合格」**:"
                 "没扫完的图测不出针尖状态,下一步是把图扫完 / 换个地方重新量,"
-                "**不是修针**。")
+                "**不是修针**。",
+                   f"Only {n_rows}/{rows_total} rows of {noun} were completely scanned: there is no "
+                   "comparable region in this frame yet. **This is an abstention, not 'the tip is "
+                   "bad'**: an unfinished image cannot measure the tip state; the next step is to "
+                   "finish the image / measure again at another place, **not to repair the tip**."))
             return af, ab, {"correlation": None, "legacy_cosine": None,
                             "unusable_reason": reason, "abstain_reason": reason,
                             "rows_total": rows_total, "rows_acquired": n_rows,
@@ -876,13 +1054,15 @@ class PreScanCheck(CompositeSkillGraph):
             fwd, bwd = af, ab
 
         verdicts = {}
-        for label, side in (("正扫", fwd), ("反扫", bwd)):
+        for label, side in ((tr("正扫", "Forward scan"), fwd), (tr("反扫", "Backward scan"), bwd)):
             verdict = judge_frame(side)
             if not verdict.usable:
                 return af, ab, {
                     "correlation": None, "legacy_cosine": None,
-                    "unusable_reason": (f"{label}{noun}是死平的,正反扫一致性"
-                                        f"无从谈起 —— {verdict.reason}"),
+                    "unusable_reason": (tr(f"{label}{noun}是死平的,正反扫一致性"
+                                        f"无从谈起 —— {verdict.reason}",
+                                           f"{label} of {noun} is dead flat, so forward/backward "
+                                           f"consistency is meaningless: {verdict.reason}")),
                     "source": source}
             verdicts[label] = verdict
 
@@ -894,11 +1074,18 @@ class PreScanCheck(CompositeSkillGraph):
         corrugation = min(float(v.corrugation_rms_m) for v in verdicts.values())
         if corrugation < _DEFAULT_MIN_CORRUGATION_M:
             reason = (
-                f"去趋势起伏只有 {corrugation * 1e12:.1f} pm,低于下限 "
+                tr(f"去趋势起伏只有 {corrugation * 1e12:.1f} pm,低于下限 "
                 f"{_DEFAULT_MIN_CORRUGATION_M * 1e12:.1f} pm —— 没有形貌就没有可相关"
                 "的信号,这一帧上的正反扫一致性不代表针尖好坏。"
                 "**这是弃权,不是「针尖不合格」**:平坦干净的区域正常就长这样。"
-                "下一步是**换个有形貌的地方重新量**,不是修针。(下限尚未标定。)")
+                "下一步是**换个有形貌的地方重新量**,不是修针。(下限尚未标定。)",
+                   f"The detrended corrugation is only {corrugation * 1e12:.1f} pm, below the lower "
+                   f"limit {_DEFAULT_MIN_CORRUGATION_M * 1e12:.1f} pm: without topography there is no "
+                   "correlatable signal, so the forward/backward consistency on this frame says "
+                   "nothing about whether the tip is good. **This is an abstention, not 'the tip is "
+                   "bad'**: a flat clean area normally looks like this. The next step is to "
+                   "**measure again at a place with topography**, not to repair the tip. (The lower "
+                   "limit is not calibrated yet.)"))
             return af, ab, {
                 "correlation": None, "legacy_cosine": None,
                 "unusable_reason": reason,
@@ -934,22 +1121,32 @@ class PreScanCheck(CompositeSkillGraph):
             # 不同数据缺失原因分别报告，使下一步处置有依据。
             if rec_fwd.error or rec_bwd.error:
                 return dict(_INCONCLUSIVE, source="buffer", read_failure=(
-                    f"Scan_FrameDataGrab 报错(正扫: {rec_fwd.error or '正常'};"
-                    f"反扫: {rec_bwd.error or '正常'})—— 通信/模块问题,不是针尖问题"))
+                    tr(f"Scan_FrameDataGrab 报错(正扫: {rec_fwd.error or '正常'};"
+                    f"反扫: {rec_bwd.error or '正常'})—— 通信/模块问题,不是针尖问题",
+                       f"Scan_FrameDataGrab reported an error (forward: {rec_fwd.error or 'ok'}; "
+                       f"backward: {rec_bwd.error or 'ok'}): a communication/module problem, not a "
+                       "tip problem")))
 
             fwd = self._extract_1d(rec_fwd.return_value)
             bwd = self._extract_1d(rec_bwd.return_value)
 
             if fwd is None or bwd is None:
                 return dict(_INCONCLUSIVE, source="buffer", read_failure=(
-                    "Scan_FrameDataGrab 回包解析不出数组"
+                    tr("Scan_FrameDataGrab 回包解析不出数组"
                     f"(正扫 {'读不懂' if fwd is None else '正常'}、"
                     f"反扫 {'读不懂' if bwd is None else '正常'})—— "
-                    "回包形状与预期不符,不是针尖问题"))
+                    "回包形状与预期不符,不是针尖问题",
+                       "The Scan_FrameDataGrab reply could not be parsed into an array (forward "
+                       f"{'unreadable' if fwd is None else 'ok'}, backward "
+                       f"{'unreadable' if bwd is None else 'ok'}): the reply shape does not match "
+                       "expectations, not a tip problem")))
             if len(fwd) == 0 or len(bwd) == 0:
                 return dict(_INCONCLUSIVE, source="buffer", read_failure=(
-                    f"实时缓冲区里是空的(正扫 {len(fwd)} 点、反扫 {len(bwd)} 点)"
-                    " —— 缓冲区未必装着刚存盘的那一帧;这一帧的数据要去 .sxm 里取"))
+                    tr(f"实时缓冲区里是空的(正扫 {len(fwd)} 点、反扫 {len(bwd)} 点)"
+                    " —— 缓冲区未必装着刚存盘的那一帧;这一帧的数据要去 .sxm 里取",
+                       f"The live buffer is empty (forward {len(fwd)} points, backward {len(bwd)} "
+                       "points): the buffer does not necessarily hold the frame just saved; the data "
+                       "of this frame has to be fetched from the .sxm")))
 
             # Trim to same length
             n = min(len(fwd), len(bwd))
@@ -961,7 +1158,7 @@ class PreScanCheck(CompositeSkillGraph):
             # 仍复用 _frame_gate 检查完整行、死平和起伏，以返回更具体的无法判定原因。
             # 恢复数值判据前必须确认数据来源、维度和取向，并独立标定。
             _cropped_fwd, _cropped_bwd, gate = self._frame_gate(
-                fwd, bwd, source="buffer", noun="这条线")
+                fwd, bwd, source="buffer", noun=tr("这条线", "this line"))
             if gate is not None:
                 return gate
 
@@ -973,7 +1170,9 @@ class PreScanCheck(CompositeSkillGraph):
         except Exception as exc:  # noqa: BLE001
             logger.debug("PreScanCheck 线质量评估异常(按判不了处理)", exc_info=True)
             return dict(_INCONCLUSIVE, source="buffer",
-                        read_failure=f"读取路径抛异常:{type(exc).__name__}: {exc}")
+                        read_failure=tr(f"读取路径抛异常:{type(exc).__name__}: {exc}",
+                                        f"Exception raised on the read path: {type(exc).__name__}: "
+                                        f"{exc}"))
 
     @staticmethod
     def _extract_1d(parsed) -> np.ndarray | None:

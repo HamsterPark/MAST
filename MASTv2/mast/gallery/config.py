@@ -16,6 +16,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from mast.i18n import tr
 from mast.gallery import paths as _paths
 
 logger = logging.getLogger(__name__)
@@ -92,15 +93,15 @@ def validate_name(name: str) -> str | None:
     根名会成为 ``thumbs/<根名>/`` 目录名与 URL 的一段，所以除了 D4 的字符集，还要避开
     Windows 保留设备名与结尾的点（Windows 会悄悄吃掉结尾的点）。"""
     if not name:
-        return "根名为空"
+        return tr("根名为空", "Root name is empty")
     if name[0] in "_.":
-        return f"根名「{name}」不能以 _ 或 . 开头"
+        return tr(f"根名「{name}」不能以 _ 或 . 开头", f"Root name '{name}' cannot start with _ or .")
     if name.endswith("."):
-        return f"根名「{name}」不能以 . 结尾"
+        return tr(f"根名「{name}」不能以 . 结尾", f"Root name '{name}' cannot end with .")
     if not _NAME_OK.match(name):
-        return f"根名「{name}」只能含字母、数字、_ . - 与中文"
+        return tr(f"根名「{name}」只能含字母、数字、_ . - 与中文", f"Root name '{name}' may only contain letters, digits, _ . - and Chinese characters")
     if name.lower() in _WIN_RESERVED:
-        return f"根名「{name}」是 Windows 保留名"
+        return tr(f"根名「{name}」是 Windows 保留名", f"Root name '{name}' is a reserved Windows name")
     return None
 
 
@@ -147,26 +148,26 @@ def normalise_roots(inputs: list[dict]) -> tuple[list[RootSpec], list[str]]:
 
     for i, r in enumerate(inputs, 1):
         if not isinstance(r, dict):
-            errors.append(f"第 {i} 个数据根格式不对")
+            errors.append(tr(f"第 {i} 个数据根格式不对", f"Data root #{i} has an invalid format"))
             continue
         raw_path = str(r.get("path") or "").strip()
         if not raw_path:
-            errors.append(f"第 {i} 个数据根没有填路径")
+            errors.append(tr(f"第 {i} 个数据根没有填路径", f"Data root #{i} has no path"))
             continue
         ap = os.path.abspath(os.path.expanduser(raw_path))
         if not os.path.isdir(ap):
-            errors.append(f"不是已存在的目录：{raw_path}")
+            errors.append(tr(f"不是已存在的目录：{raw_path}", f"Not an existing directory: {raw_path}"))
             continue
         key = _norm(ap)
         if state_key and _within(key, state_key):
-            errors.append(f"数据根不能放在图库状态目录里：{raw_path}")
+            errors.append(tr(f"数据根不能放在图库状态目录里：{raw_path}", f"A data root cannot be inside the gallery state directory: {raw_path}"))
             continue
         clash = next(((k, n) for k, n in used if k == key or _within(key, k) or _within(k, key)), None)
         if clash is not None:
             if clash[0] == key:
-                errors.append(f"数据根重复：{raw_path}")
+                errors.append(tr(f"数据根重复：{raw_path}", f"Duplicate data root: {raw_path}"))
             else:
-                errors.append(f"数据根不能互相嵌套：{raw_path} 与根「{clash[1]}」")
+                errors.append(tr(f"数据根不能互相嵌套：{raw_path} 与根「{clash[1]}」", f"Data roots cannot be nested: {raw_path} and root '{clash[1]}'"))
             continue
         name = str(r.get("name") or "").strip()
         if name:
@@ -175,7 +176,7 @@ def normalise_roots(inputs: list[dict]) -> tuple[list[RootSpec], list[str]]:
                 errors.append(why)
                 continue
             if name.casefold() in taken:
-                errors.append(f"根名重复：{name}")
+                errors.append(tr(f"根名重复：{name}", f"Duplicate root name: {name}"))
                 continue
         else:
             base = derive_name(ap)
@@ -233,21 +234,24 @@ def suggest_roots(lay: _paths.Layout | None = None) -> list[tuple[str, str]]:
             if (_YMD8.match(p.name) and _YM6.match(p.parent.name)
                     and _Y4.match(p.parent.parent.name)):
                 add(p.parent.parent.parent,
-                    f"Nanonis 数据树的根（会话目录 {p} 上溯三级）")
-            add(p, "Nanonis 会话目录（本次运行里记录过）")
+                    tr(f"Nanonis 数据树的根（会话目录 {p} 上溯三级）",
+                       f"Root of the Nanonis data tree (three levels above session directory {p})"))
+            add(p, tr("Nanonis 会话目录（本次运行里记录过）", "Nanonis session directory (recorded during this run)"))
     except Exception:  # noqa: BLE001 — 建议是锦上添花
         pass
     try:
         from mast._runtime_paths import project_root
 
-        add(project_root() / "working-sessions", "MAST 扫描技能的默认落盘目录")
+        add(project_root() / "working-sessions",
+                tr("MAST 扫描技能的默认落盘目录", "Default save directory of the MAST scan skills"))
     except Exception:  # noqa: BLE001
         pass
     try:
         from mast.core.experiment_paths import experiment_root
 
         add(experiment_root(),
-            "实验根（自动拷贝进实验文件夹的副本；与原文件同时加入时会折叠成一条）")
+            tr("实验根（自动拷贝进实验文件夹的副本；与原文件同时加入时会折叠成一条）",
+               "Experiment root (copies automatically placed in experiment folders; added together with the originals they fold into one entry)"))
     except Exception:  # noqa: BLE001
         pass
     return out

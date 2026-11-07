@@ -1,22 +1,24 @@
 // ════════════════════════════════════════════════════════════════════════════
-// useTranscriptRefresh — 「别人写进来的消息，这一页看得见吗」
+// useTranscriptRefresh: does this page see messages written by someone else?
 //
-// 已知问题：智能体代理对话不会自动刷新。根因是消息历史只在**本浏览器
-// 自己发完一条**之后才失效一次（SSE 流结束 → invalidateQueries），别的来源写进去
-// 的东西这一页永远看不到：另一台机器、同一台的另一个标签页、后台运行的 agent、
-// 别人替这个 agent 插的话。
+// The message history was only invalidated once after **this browser** finished sending a message
+// (SSE stream ends -> invalidateQueries), so anything written from another source never appeared:
+// another machine, another tab of the same machine, a background agent run, or a message injected
+// on the agent's behalf.
 //
-// 形状照抄仓里已经做对的那一处（`components/agents/RunTaskPanel.tsx` L109-135）：
-// **事件只推游标，正文走已鉴权的读端点**。三条护栏一条都不能少 ——
+// The shape follows the working precedent in `components/agents/RunTaskPanel.tsx`: **events only
+// advance a cursor, and the body is read from the authenticated read endpoint**. All three
+// guards are required:
 //
-//   1. 会话过滤：别的会话的事件不能刷我这一页；
-//   2. 自流不刷：本浏览器正在流的时候不抢，流结束时它自己会失效一次；
-//   3. 去重：一串事件合并成一次刷新，不是一次事件一个请求。
+//   1. Conversation filter: events of other conversations must not refresh this page;
+//   2. No refresh while streaming: while this browser is streaming, do not interfere, because the
+//      stream invalidates once when it ends;
+//   3. De-duplication: a burst of events collapses into one refresh, not one request per event.
 //
-// 为什么同时还看 `updated_at` 而不是只信 WS：WS 断线时（Tailscale 隧道抖动、
-// 服务重启）推送就没了，而会话列表那条 6 s 轮询**本来就在跑**——拿它已经取回来的
-// 一个字符串当游标，兜底是免费的。这不是「两套机制」，是同一条规则的两个信号源：
-// 「有个比我手上更新的游标出现了 ⇒ 去读一次」。
+// Why `updated_at` is watched as well as the WebSocket: when the WS drops (tunnel flaps, service
+// restart) pushes stop, while the 6 s conversation-list poll is running anyway. Using a string it
+// already fetched as the cursor makes the fallback free. These are not two mechanisms but two
+// signal sources for one rule: when a cursor newer than the one in hand appears, read once.
 // ════════════════════════════════════════════════════════════════════════════
 
 import { useEffect, useRef } from "react";
@@ -28,39 +30,41 @@ import {
   type TranscriptEventData,
 } from "@/lib/transcriptRefresh";
 
-/** 一次刷新请求。调用方自己决定怎么重读（invalidate / refetch / hydrate）。 */
+/** One refresh request. The caller decides how to re-read (invalidate / refetch / hydrate). */
 export type RefreshFn = () => void;
 
 export interface TranscriptRefreshOptions {
-  /** 当前正在看的会话。`null` = 什么都没选，不刷。 */
+  /** The conversation being viewed. `null` = nothing selected, no refresh. */
   conversationId: string | null | undefined;
   /**
-   * 这个会话最近一次变动的戳（`Conversation.updated_at`）。
+   * Stamp of the conversation's most recent change (`Conversation.updated_at`).
    *
-   * 从**已经在轮询**的会话列表里取，不要为它单开一个请求 —— 那样这个兜底就从
-   * 「免费」变成了「每 N 秒一次额外往返」，而它存在的理由正是不额外要钱。
+   * Take it from the conversation list that is **already being polled**; do not add a request for
+   * it, which would turn this free fallback into an extra round trip every N seconds.
    */
   updatedAt?: string | null;
   /**
-   * 本浏览器此刻正在流这个会话吗。真 = 不刷。
+   * Whether this browser is currently streaming this conversation. True = no refresh.
    *
-   * 抢刷的后果不是「多一次请求」：正在流的时候页面显示的是 SSE 的增量快照，
-   * 中途插一次整history 重读会让已经画出来的半句话跳回上一轮的结尾。
+   * A premature refresh costs more than a request: while streaming, the page shows the SSE
+   * incremental snapshot, and re-reading the whole history midway makes the half-drawn sentence
+   * jump back to the end of the previous turn.
    */
   streaming?: boolean;
-  /** 去重之后真正要做的事。 */
+  /** What actually runs after de-duplication. */
   onRefresh: RefreshFn;
-  /** 关掉整条订阅（组件在隐藏的子 tab 里时用）。 */
+  /** Switches the whole subscription off (used when the component sits in a hidden sub-tab). */
   enabled?: boolean;
 }
 
 /**
- * 让一页转录在**别人**写进来的时候也刷新。
+ * Refreshes a transcript page when **someone else** writes into it.
  *
- * 两个信号源，同一条规则：
- * * WS `experiment` 事件，`scope === "private_turn"`（私聊回合写完，
- *   由 `mast.chat.store.publish_private_turn_finished` 发）—— 近实时；
- * * `updatedAt` 变化 —— WS 断了也还在，因为会话列表本来就在轮询。
+ * Two signal sources, one rule:
+ * * the WS `experiment` event with `scope === "private_turn"` (a private-chat turn finished,
+ *   published by `mast.chat.store.publish_private_turn_finished`): near real time;
+ * * a change of `updatedAt`: still works when the WS is down, because the conversation list is
+ *   polled anyway.
  */
 export function useTranscriptRefresh({
   conversationId,
@@ -69,15 +73,17 @@ export function useTranscriptRefresh({
   onRefresh,
   enabled = true,
 }: TranscriptRefreshOptions): void {
-  // handler 存 ref：调用方基本都会传内联箭头，把它放进依赖会让 useWsEvent 每次
-  // 渲染都重订阅，而重订阅会把共享 socket 的引用计数打到 0 再拉起来。
+  // Keep the handler in a ref: callers usually pass an inline arrow, and putting it in the
+  // dependencies would make useWsEvent resubscribe on every render, dropping the shared socket's
+  // reference count to 0 and reopening it.
   const refreshRef = useRef(onRefresh);
   refreshRef.current = onRefresh;
   const streamingRef = useRef(streaming);
   streamingRef.current = streaming;
 
-  // 最近一次「已经据此刷过」的游标。会话一换就清空 —— 不清的话，切到另一个会话
-  // 之后它手里还攥着上一个会话的戳，而两个会话的戳没有可比性。
+  // The cursor of the most recent refresh already performed. Cleared when the conversation
+  // changes: otherwise it would keep the previous conversation's stamp, and stamps of two
+  // conversations are not comparable.
   const seen = useRef<Cursor>(null);
   useEffect(() => {
     seen.current = null;

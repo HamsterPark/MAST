@@ -15,13 +15,20 @@ can turn this on" and believes it.
 
 WHAT IT GATES NOW
 =================
-Exactly two settings keys, and only these:
+The settings keys listed in ``GUARDED_KEYS`` below, and only these. The two the PIN
+was built for:
 
   * ``advanced_capabilities`` — powers that step around a protection (loading a
     script into a slot the allow-list vets, quitting Nanonis, loading a scan config
     MAST cannot read, holding the main TCP connection for a whole scan).
   * ``hardware_modules``      — because switching one ON hands the agent DANGEROUS
     skills: a laser, an RF amplifier, probes that can collide.
+
+Three more joined later, each with its reason in the comment next to its entry:
+``coarse_drive`` (a claim about the hardware nothing can verify),
+``tip_conditioning_overrides`` (can widen the hardware envelope) and
+``station_profile`` (decides at the next start whether this process is an STM
+station or an optical one: whether Nanonis is dialled and which watchdogs run).
 
 Everything else in 设置 (model, voice, appearance, knowledge, vision thresholds)
 stays open. Getting those wrong costs you quality, not safety.
@@ -53,13 +60,14 @@ be a worse failure than the one this guards against.
 
 from __future__ import annotations
 
+from mast.i18n import tr
 import hashlib
 import logging
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# The two settings keys that may only be written with the PIN.
+# The settings keys that may only be written with the PIN.
 GUARDED_KEYS: frozenset[str] = frozenset({
     "advanced_capabilities",
     "hardware_modules",
@@ -84,6 +92,14 @@ GUARDED_KEYS: frozenset[str] = frozenset({
     # **这一条留给用户定夺**(见 docs/v2/design/forge_scan_working_point.md §八):
     # 要摘掉 PIN,把这一行删掉即可,判据是「误改包络的代价 vs 设 PIN 的麻烦」。
     "tip_conditioning_overrides",
+    # 站点画像。它既不授能给 agent，也不是对硬件的
+    # 声明 —— 它决定**下次启动时这个进程是什么**：STM 站误点成 optical ⇒ 不拨号 Nanonis，
+    # 撞针看门狗和电流监控都不起；光学站误点成 stm ⇒ 串口自动探测恢复，往每个空闲串口发
+    # *IDN? 和 Modbus 帧，操作员提示服务和激光撤销监听也不再安装。后果在**下一次启动**才
+    # 显现，所以最该挡在写入口。同一份威胁模型（挡一只人手，不是挡模型），同样 fail-closed：
+    # 没设 PIN 的机器改不了它 —— 新机器第一次要设成 optical，要么先设 PIN，要么用环境变量
+    # MAST_STATION_PROFILE（它压过这个设置，见 mast/station.py）。
+    "station_profile",
 })
 
 
@@ -158,14 +174,20 @@ def set_pin(new_pin: str, current_pin: str | None = None) -> tuple[bool, str]:
 
 
 _REASON_TEXT = {
-    "no_pin_set": ("尚未设置管理 PIN。硬件模块与高级能力的开关必须先设置 PIN 才能改动——"
-                   "把「覆盖已审脚本槽位」这类能力交给 agent，不该发生在还没有人认领管理员的机器上。"),
-    "empty": "请输入管理 PIN。",
-    "wrong": "管理 PIN 不正确。",
-    "unreadable": "无法读取管理 PIN 文件——出于安全，拒绝改动。",
-    "too_short": "PIN 至少 4 位。",
-    "wrong_current": "当前 PIN 不正确。",
-    "io_error": "PIN 写入失败（磁盘/权限）。",
+    "no_pin_set": tr("尚未设置管理 PIN。硬件模块、高级能力、站点画像这类受保护的设置必须先设置 PIN 才能改动——"
+                     "把「覆盖已审脚本槽位」这类能力交给 agent，或者改变这台机器是 STM 站还是光学站，"
+                     "都不该发生在还没有人认领管理员的机器上。",
+                     "No admin PIN is set yet. Protected settings (hardware modules, advanced capabilities, "
+                     "the station profile) can only be changed after a PIN is set - handing a capability "
+                     "such as \"override reviewed script slots\" to an agent, or changing whether this machine "
+                     "is an STM or an optical station, must not happen on a machine nobody has claimed as admin."),
+    "empty": tr("请输入管理 PIN。", "Enter the admin PIN."),
+    "wrong": tr("管理 PIN 不正确。", "The admin PIN is incorrect."),
+    "unreadable": tr("无法读取管理 PIN 文件——出于安全，拒绝改动。",
+                     "Cannot read the admin PIN file - refusing the change for safety."),
+    "too_short": tr("PIN 至少 4 位。", "The PIN needs at least 4 characters."),
+    "wrong_current": tr("当前 PIN 不正确。", "The current PIN is incorrect."),
+    "io_error": tr("PIN 写入失败（磁盘/权限）。", "Failed to write the PIN (disk/permissions)."),
 }
 
 

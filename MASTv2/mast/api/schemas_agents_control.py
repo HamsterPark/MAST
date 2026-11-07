@@ -128,7 +128,7 @@ class HITLGateState(BaseModel):
     #: ``gate_states()`` 从一开始就返回它,但这个 model 没有声明 ⇒ pydantic 默认
     #: ``extra=ignore`` ⇒ 端点静默地把它丢了,而两侧都看不出问题(中间件以为报了,
     #: 前端以为没有)。它必须到得了用户那里,因为「没有弹窗」和「没有事件」从外面
-    #: 看必须不一样 —— 这正是验收这条改动时该问的问题。
+    #: 看必须不一样。
     recorded_not_escalated: int = 0
 
 

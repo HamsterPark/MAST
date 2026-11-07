@@ -8,7 +8,7 @@
 
 ScanAt 把这件事倒过来:**「不填」是默认路径**,策略层
 (:mod:`mast.core.scan_resolver`)按用户的按-尺度参数表把参数补齐。模型只在
-用户**逐字点名过**某个值时才传它,而每个传进来的值都会带上来源记录,显示给
+用户**明确给出**某个值时才传它,而每个传进来的值都会带上来源记录,显示给
 用户 —— 「这个 line_time 标着『用户显式』,但我没说过」是一眼能看出来的。
 
 这不是靠提示词恳求模型别填数字(那条路 2026 年的三模式 assembler 走过,
@@ -33,15 +33,19 @@ from mast.core.types import (
 )
 from mast.skills.composite._base import CompositeSkillGraph
 from mast.skills.composite.graph_executor import CompositeStep
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
-#: 显式覆盖通道:可选、无默认。**每一个的 description 都写死「只有用户逐字
-#: 说过才传」** —— 这是转述与发明之间唯一的契约,配合 trace 做事后审计。
+#: 显式覆盖通道:可选、无默认。**每一个的 description 都写死「只有用户明确
+#: 给出才传」** —— 这是转述与发明之间唯一的契约,配合 trace 做事后审计。
 _EXPLICIT_ONLY = (
-    "**只有现场明确给出过这个值时才传它。** 否则就**留空** —— "
+    tr("**只有现场明确给出过这个值时才传它。** 否则就**留空** —— "
     "由分尺度策略表决定。你在这里传的每一个值都会被记成「用户指定」"
-    "并展示给他看。"
+    "并展示给他看。",
+       "**Pass this only when the field has explicitly given this value.** Otherwise **leave it "
+       "empty**: the scale-adaptive policy table decides. Every value you pass here is recorded as "
+       "'user specified' and shown to the user.")
 )
 
 
@@ -56,21 +60,31 @@ class ScanAt(CompositeSkillGraph):
             category=SkillCategory.COMPOSITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "在某个位置扫一帧。你给的是**扫哪**（中心）和**多大**（尺寸）"
+                tr("在某个位置扫一帧。你给的是**扫哪**（中心）和**多大**（尺寸）"
                 "—— 那才是意图。扫描速度、分辨率、反馈增益和默认 setpoint 由"
                 "用户的分尺度策略表**确定性地**选出；**它们不是你的知识，"
                 "所以不要传**。只有用户自己点了名的那个值，才把对应的可选"
                 "参数传进来。"
                 "**这是成像的首选方式**：一次调用就完成配置、设分辨率、启动、"
-                "等待。**不要**把它拆成 ConfigureScan + SetScanSpeed + StartScan。"
+                "等待。**不要**把它拆成 ConfigureScan + SetScanSpeed + StartScan。",
+                   "Scan one frame at a position. What you give is **where** to scan (centre) and "
+                   "**how large** (size): that is the intent. Scan speed, resolution, feedback gain "
+                   "and the default setpoint are chosen **deterministically** from the user's "
+                   "scale-adaptive policy table; **they are not your knowledge, so do not pass "
+                   "them**. Pass the matching optional parameter only for a value the user named "
+                   "explicitly. **This is the preferred way to image**: one call does the "
+                   "configuration, sets the resolution, starts and waits. **Do not** split it into "
+                   "ConfigureScan + SetScanSpeed + StartScan.")
             ),
             parameters=[
                 ParameterSpec(
                     name="center_x_m",
                     type="float",
                     description=(
-                        "扫描中心 X，单位 METERS（SI），**不是纳米**。"
-                        "换算：100 nm → 100n。"
+                        tr("扫描中心 X，单位 METERS（SI），**不是纳米**。"
+                        "换算：100 nm → 100n。",
+                           "Scan centre X, in METERS (SI), **not nanometres**. Conversion: 100 nm -> "
+                           "100n.")
                     ),
                     unit="m",
                     required=True,
@@ -81,8 +95,10 @@ class ScanAt(CompositeSkillGraph):
                     name="center_y_m",
                     type="float",
                     description=(
-                        "扫描中心 Y，单位 METERS（SI），**不是纳米**。"
-                        "换算：100 nm → 100n。"
+                        tr("扫描中心 Y，单位 METERS（SI），**不是纳米**。"
+                        "换算：100 nm → 100n。",
+                           "Scan centre Y, in METERS (SI), **not nanometres**. Conversion: 100 nm -> "
+                           "100n.")
                     ),
                     unit="m",
                     required=True,
@@ -93,10 +109,14 @@ class ScanAt(CompositeSkillGraph):
                     name="size_m",
                     type="float",
                     description=(
-                        "帧的边长，单位 METERS（SI），**不是纳米**。"
+                        tr("帧的边长，单位 METERS（SI），**不是纳米**。"
                         "换算：100 nm → 100n，50 nm → 50n，1 µm → 1u。"
                         "写成裸的 100（=100 m）就是单位写错了，**会被拒绝**。"
-                        "这个尺寸同时决定用哪一档策略来给速度和分辨率。"
+                        "这个尺寸同时决定用哪一档策略来给速度和分辨率。",
+                           "Frame edge length, in METERS (SI), **not nanometres**. Conversion: 100 "
+                           "nm -> 100n, 50 nm -> 50n, 1 um -> 1u. Writing a bare 100 (= 100 m) is a "
+                           "unit error and **will be refused**. This size also decides which policy "
+                           "tier supplies speed and resolution.")
                     ),
                     unit="m",
                     required=True,
@@ -107,11 +127,15 @@ class ScanAt(CompositeSkillGraph):
                     name="purpose",
                     type="str",
                     description=(
-                        "意图类别，用来挑策略档。"
+                        tr("意图类别，用来挑策略档。"
                         f"'auto'（默认）按尺寸挑。可选档：{tiers}。"
-                        "只有当你**有意**让尺寸与参数不匹配时才点名某一档，"
+                        "只有当你**有意**让尺寸与参数不匹配时才指定某一档，"
                         "比如想在一个小帧上快速粗看一眼"
-                        "（50 nm 尺寸上用 'survey'）。"
+                        "（50 nm 尺寸上用 'survey'）。",
+                           "Intent category, used to pick the policy tier. 'auto' (default) picks by "
+                           f"size. Available tiers: {tiers}. Specify a tier only when you "
+                           "**deliberately** want the size and the parameters to mismatch, for "
+                           "example a quick coarse look at a small frame (using 'survey' at 50 nm).")
                     ),
                     required=False,
                     default=PURPOSE_AUTO,
@@ -121,10 +145,15 @@ class ScanAt(CompositeSkillGraph):
                     name="bias_v",
                     type="float",
                     description=(
-                        "样品偏压，单位 VOLTS。" + _EXPLICIT_ONLY + " "
+                        tr("样品偏压，单位 VOLTS。", "Sample bias, in VOLTS.") + _EXPLICIT_ONLY + tr(" "
                         "**偏压从来不由策略表决定** —— 它选的是你要成像哪些"
                         "电子态，那是一个物理判断，不是帧尺寸的函数。"
-                        "留空 = 保持当前偏压。"
+                        "留空 = 保持当前偏压。",
+                                                               " **Bias is never decided by the policy "
+                                                               "table**: it selects which electronic "
+                                                               "states you image, which is a physical "
+                                                               "judgement, not a function of frame "
+                                                               "size. Empty = keep the current bias.")
                     ),
                     unit="V",
                     required=False,
@@ -135,8 +164,9 @@ class ScanAt(CompositeSkillGraph):
                     name="setpoint_a",
                     type="float",
                     description=(
-                        "隧道电流 setpoint，单位 AMPERES（SI），**不是 pA**。"
-                        "100p = 100 pA。" + _EXPLICIT_ONLY
+                        tr("隧道电流 setpoint，单位 AMPERES（SI），**不是 pA**。"
+                        "100p = 100 pA。",
+                           "Tunnelling current setpoint, in AMPERES (SI), **not pA**. 100p = 100 pA.") + _EXPLICIT_ONLY
                     ),
                     unit="A",
                     required=False,
@@ -146,7 +176,7 @@ class ScanAt(CompositeSkillGraph):
                 ParameterSpec(
                     name="line_time_s",
                     type="float",
-                    description="每条扫描线多少秒。" + _EXPLICIT_ONLY,
+                    description=tr("每条扫描线多少秒。", "Seconds per scan line.") + _EXPLICIT_ONLY,
                     unit="s",
                     required=False,
                     min_value=1e-4,
@@ -156,7 +186,7 @@ class ScanAt(CompositeSkillGraph):
                     name="pixels",
                     type="int",
                     description=(
-                        "每行像素数（方形帧）。" + _EXPLICIT_ONLY
+                        tr("每行像素数（方形帧）。", "Pixels per line (square frame).") + _EXPLICIT_ONLY
                     ),
                     unit="px",
                     required=False,
@@ -167,8 +197,9 @@ class ScanAt(CompositeSkillGraph):
                     name="angle_deg",
                     type="float",
                     description=(
-                        "扫描旋转角，单位度。" + _EXPLICIT_ONLY + " "
-                        "留空 = 保持当前扫描角。"
+                        tr("扫描旋转角，单位度。", "Scan rotation angle, in degrees.") + _EXPLICIT_ONLY + tr(" "
+                        "留空 = 保持当前扫描角。",
+                                                           " Empty = keep the current scan angle.")
                     ),
                     unit="deg",
                     required=False,
@@ -179,8 +210,10 @@ class ScanAt(CompositeSkillGraph):
                     name="channels",
                     type="str",
                     description=(
-                        "要采的通道，逗号分隔。默认 'Z,Current'。"
-                        "只有要**加**通道时才传，比如做 dI/dV 成像时加 lock-in。"
+                        tr("要采的通道，逗号分隔。默认 'Z,Current'。"
+                        "只有要**加**通道时才传，比如做 dI/dV 成像时加 lock-in。",
+                           "Channels to record, comma separated. Default 'Z,Current'. Pass it only "
+                           "to **add** channels, e.g. a lock-in when imaging dI/dV.")
                     ),
                     required=False,
                 ),
@@ -188,9 +221,13 @@ class ScanAt(CompositeSkillGraph):
                     name="wait_timeout_s",
                     type="float",
                     description=(
-                        "等待完成的上限。**留空**则按解析出来的几何自动估"
+                        tr("等待完成的上限。**留空**则按解析出来的几何自动估"
                         "（行数 × line time × 2 个方向 + 30% 余量）—— "
-                        "手填一个短值会把慢扫或高分辨扫描**截断**。"
+                        "手填一个短值会把慢扫或高分辨扫描**截断**。",
+                           "Upper limit of the wait for completion. **Leave empty** to estimate "
+                           "automatically from the resolved geometry (lines x line time x 2 "
+                           "directions + 30% headroom); typing a short value by hand **truncates** "
+                           "slow or high-resolution scans.")
                     ),
                     unit="s",
                     required=False,
@@ -383,12 +420,15 @@ class ScanAt(CompositeSkillGraph):
         if all_good and progress.partial_data.get("wait_stopped_early"):
             done = progress.partial_data.get("scan_lines_done")
             total = progress.partial_data.get("scan_lines_total")
-            where = (f"(扫到 {done}/{total} 行)"
-                     if done is not None and total else "(行数未知)")
+            where = (tr(f"(扫到 {done}/{total} 行)", f"(scanned {done}/{total} lines)")
+                     if done is not None and total else tr("(行数未知)", "(line count unknown)"))
             return False, (
-                f"扫描中途停止{where} —— 这一帧没有扫完,不要当作扫好的图使用。"
+                tr(f"扫描中途停止{where} —— 这一帧没有扫完,不要当作扫好的图使用。"
                 f"可能是用户按了 Stop、Nanonis 自行停止,或安全停机;"
-                f"**不是**超时,调大 timeout 不解决问题。"
+                f"**不是**超时,调大 timeout 不解决问题。",
+                   f"Scan stopped midway{where}: this frame is incomplete, do not use it as a "
+                   "finished image. Possibly the user pressed Stop, Nanonis stopped by itself, or a "
+                   "safety stop happened; it is **not** a timeout, and raising timeout does not help.")
             )
         if all_good and progress.partial_data.get("wait_timed_out"):
             # WHAT THIS MESSAGE MUST CONTAIN (2026-08-05). It used to print the
@@ -405,24 +445,31 @@ class ScanAt(CompositeSkillGraph):
                 "estimated_scan_s")
             bits = []
             if est:
-                bits.append(f"按解析参数估计需要 {est:.0f} s")
+                bits.append(tr(f"按解析参数估计需要 {est:.0f} s",
+                               f"estimated {est:.0f} s from the resolved parameters"))
             budget = pd.get("budget_s")
             if isinstance(budget, (int, float)):
-                bits.append(f"等待预算 {budget:.0f} s")
+                bits.append(tr(f"等待预算 {budget:.0f} s", f"wait budget {budget:.0f} s"))
             waited = pd.get("elapsed_s")
             if isinstance(waited, (int, float)):
-                bits.append(f"实际等了 {waited:.0f} s")
+                bits.append(tr(f"实际等了 {waited:.0f} s", f"actually waited {waited:.0f} s"))
             ext = pd.get("extensions")
             if ext:
-                bits.append(f"其中因扫描仍在推进延长过 {ext} 次")
+                bits.append(tr(f"其中因扫描仍在推进延长过 {ext} 次",
+                               f"extended {ext} times because the scan was still advancing"))
             done, total = pd.get("lines_done"), pd.get("lines_total")
             if done is not None:
-                bits.append(f"放弃时已采 {done}/{total if total else '?'} 行")
+                bits.append(tr(f"放弃时已采 {done}/{total if total else '?'} 行",
+                               f"{done}/{total if total else '?'} lines acquired when giving up"))
             hint = ("(" + ";".join(bits) + ")") if bits else ""
             return False, (
-                f"扫描在等待预算内没有完成{hint} —— 帧不完整,不要当作扫好的图使用。"
+                tr(f"扫描在等待预算内没有完成{hint} —— 帧不完整,不要当作扫好的图使用。"
                 "若「已采行数」几乎等于总行数,那是估计帧时偏小而不是扫描卡住:"
-                "显式传一个更大的 wait_timeout_s 即可。"
+                "显式传一个更大的 wait_timeout_s 即可。",
+                   f"Scan did not finish within the wait budget{hint}: the frame is incomplete, do "
+                   "not use it as a finished image. If 'lines acquired' is almost equal to the "
+                   "total, the frame time was underestimated rather than the scan being stuck: just "
+                   "pass a larger wait_timeout_s explicitly.")
             )
         return super()._decide_outcome(all_good, progress, data)
 

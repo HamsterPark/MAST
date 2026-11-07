@@ -1,0 +1,905 @@
+{
+  "name": "nearest_hit_ties",
+  "description": "Hits whose t differ by no more than 1e-9 mm are a tie, and the component earlier in the list wins. Pairs of 40 mm detectors at 225 degrees with collinear, overlapping surfaces (centres 10 mm apart along the surface) are crossed by one beam each at a single point: the pairs a0..a3 / b0..b3 are listed B then A (L0..L3 must end at b0..b3; without the tolerance the last bit of t made them end at a0..a3), a4/b4 and a5/b5 are listed A then B (a4, a5). L6 meets two detectors at the very same place: s2, the earlier one in the list. L7 meets 'near' (0.01 mm nearer) although 'far' is listed first: a real difference is not a tie.",
+  "layout": {
+    "schema": 1,
+    "id": "ties",
+    "title": "Ties in nearest hit",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las0",
+        "type": "laser",
+        "label": "L0",
+        "x_mm": 10.0,
+        "y_mm": 99.8,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "b0",
+        "type": "detector",
+        "label": "B0",
+        "x_mm": 110.0,
+        "y_mm": 90.0,
+        "angle_deg": 225.0,
+        "aperture_mm": 40.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "a0",
+        "type": "detector",
+        "label": "A0",
+        "x_mm": 100.0,
+        "y_mm": 100.0,
+        "angle_deg": 225.0,
+        "aperture_mm": 40.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 10.0,
+        "y_mm": 208.7,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "b1",
+        "type": "detector",
+        "label": "B1",
+        "x_mm": 110.0,
+        "y_mm": 200.0,
+        "angle_deg": 225.0,
+        "aperture_mm": 40.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "a1",
+        "type": "detector",
+        "label": "A1",
+        "x_mm": 100.0,
+        "y_mm": 210.0,
+        "angle_deg": 225.0,
+        "aperture_mm": 40.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "las2",
+        "type": "laser",
+        "label": "L2",
+        "x_mm": 10.0,
+        "y_mm": 318.9,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "b2",
+        "type": "detector",
+        "label": "B2",
+        "x_mm": 110.0,
+        "y_mm": 310.0,
+        "angle_deg": 225.0,
+        "aperture_mm": 40.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "a2",
+        "type": "detector",
+        "label": "A2",
+        "x_mm": 100.0,
+        "y_mm": 320.0,
+        "angle_deg": 225.0,
+        "aperture_mm": 40.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "las3",
+        "type": "laser",
+        "label": "L3",
+        "x_mm": 10.0,
+        "y_mm": 428.9,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "b3",
+        "type": "detector",
+        "label": "B3",
+        "x_mm": 110.0,
+        "y_mm": 420.0,
+        "angle_deg": 225.0,
+        "aperture_mm": 40.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "a3",
+        "type": "detector",
+        "label": "A3",
+        "x_mm": 100.0,
+        "y_mm": 430.0,
+        "angle_deg": 225.0,
+        "aperture_mm": 40.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "las4",
+        "type": "laser",
+        "label": "L4",
+        "x_mm": 10.0,
+        "y_mm": 538.9,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "a4",
+        "type": "detector",
+        "label": "A4",
+        "x_mm": 100.0,
+        "y_mm": 540.0,
+        "angle_deg": 225.0,
+        "aperture_mm": 40.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "b4",
+        "type": "detector",
+        "label": "B4",
+        "x_mm": 110.0,
+        "y_mm": 530.0,
+        "angle_deg": 225.0,
+        "aperture_mm": 40.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "las5",
+        "type": "laser",
+        "label": "L5",
+        "x_mm": 10.0,
+        "y_mm": 648.9,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "a5",
+        "type": "detector",
+        "label": "A5",
+        "x_mm": 100.0,
+        "y_mm": 650.0,
+        "angle_deg": 225.0,
+        "aperture_mm": 40.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "b5",
+        "type": "detector",
+        "label": "B5",
+        "x_mm": 110.0,
+        "y_mm": 640.0,
+        "angle_deg": 225.0,
+        "aperture_mm": 40.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "las6",
+        "type": "laser",
+        "label": "L6",
+        "x_mm": 10.0,
+        "y_mm": 760.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "s2",
+        "type": "detector",
+        "label": "S2",
+        "x_mm": 400.0,
+        "y_mm": 760.0,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "s1",
+        "type": "detector",
+        "label": "S1",
+        "x_mm": 400.0,
+        "y_mm": 760.0,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "las7",
+        "type": "laser",
+        "label": "L7",
+        "x_mm": 10.0,
+        "y_mm": 820.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "far",
+        "type": "detector",
+        "label": "FAR",
+        "x_mm": 300.01,
+        "y_mm": 820.0,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "near",
+        "type": "detector",
+        "label": "NEAR",
+        "x_mm": 300.0,
+        "y_mm": 820.0,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las0",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 10.0,
+              "y0": 99.8,
+              "x1": 100.2,
+              "y1": 99.8
+            }
+          ],
+          "events": [
+            {
+              "component": "b0",
+              "action": "stop",
+              "x": 100.2,
+              "y": 99.8,
+              "offset_mm": -13.859,
+              "incidence_deg": 45.0,
+              "path_mm": 90.2
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "las1",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 10.0,
+              "y0": 208.7,
+              "x1": 101.3,
+              "y1": 208.7
+            }
+          ],
+          "events": [
+            {
+              "component": "b1",
+              "action": "stop",
+              "x": 101.3,
+              "y": 208.7,
+              "offset_mm": -12.304,
+              "incidence_deg": 45.0,
+              "path_mm": 91.3
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "las2",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 10.0,
+              "y0": 318.9,
+              "x1": 101.1,
+              "y1": 318.9
+            }
+          ],
+          "events": [
+            {
+              "component": "b2",
+              "action": "stop",
+              "x": 101.1,
+              "y": 318.9,
+              "offset_mm": -12.587,
+              "incidence_deg": 45.0,
+              "path_mm": 91.1
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "las3",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 10.0,
+              "y0": 428.9,
+              "x1": 101.1,
+              "y1": 428.9
+            }
+          ],
+          "events": [
+            {
+              "component": "b3",
+              "action": "stop",
+              "x": 101.1,
+              "y": 428.9,
+              "offset_mm": -12.587,
+              "incidence_deg": 45.0,
+              "path_mm": 91.1
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "las4",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 10.0,
+              "y0": 538.9,
+              "x1": 101.1,
+              "y1": 538.9
+            }
+          ],
+          "events": [
+            {
+              "component": "a4",
+              "action": "stop",
+              "x": 101.1,
+              "y": 538.9,
+              "offset_mm": 1.556,
+              "incidence_deg": 45.0,
+              "path_mm": 91.1
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "las5",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 10.0,
+              "y0": 648.9,
+              "x1": 101.1,
+              "y1": 648.9
+            }
+          ],
+          "events": [
+            {
+              "component": "a5",
+              "action": "stop",
+              "x": 101.1,
+              "y": 648.9,
+              "offset_mm": 1.556,
+              "incidence_deg": 45.0,
+              "path_mm": 91.1
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "las6",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 10.0,
+              "y0": 760.0,
+              "x1": 400.0,
+              "y1": 760.0
+            }
+          ],
+          "events": [
+            {
+              "component": "s2",
+              "action": "stop",
+              "x": 400.0,
+              "y": 760.0,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 390.0
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "las7",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 10.0,
+              "y0": 820.0,
+              "x1": 300.0,
+              "y1": 820.0
+            }
+          ],
+          "events": [
+            {
+              "component": "near",
+              "action": "stop",
+              "x": 300.0,
+              "y": 820.0,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 290.0
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ]
+}

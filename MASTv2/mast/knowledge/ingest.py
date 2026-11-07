@@ -147,8 +147,8 @@ class ExtractedText:
 # Delegated to the ONE shared resolver, ``knowledge/paths.py``. The private
 # ``_find_repo_root()`` that used to live here was one of five near-identical
 # copies across ``knowledge/*``; each also froze its answer into a module
-# constant at import time, which is precisely how pointed every
-# data path at a directory that does not exist in the frozen build.
+# constant at import time, which pointed every data path at a directory that
+# does not exist in the frozen build.
 #
 # Resolved per call (env overrides ``MAST_LITERATURE_INDEX_DIR`` /
 # ``MAST_PAPERS_DIR`` / ``MAST_LITERATURE_LIBS_DIR`` are honoured late, so a
@@ -1408,7 +1408,7 @@ def ingest_manual(
     embedder: Optional[Embedder] = None,
     promote: bool = True,
 ) -> IngestResult:
-    """Register a paper from TYPED metadata — NO PDF (#125 '直接管理条目').
+    """Register a paper from TYPED metadata — NO PDF (direct entry management).
 
     The operator hand-enters title + abstract (+ optional doi / authors / year)
     for a paper that is not in OpenAlex and has no PDF at hand. We:

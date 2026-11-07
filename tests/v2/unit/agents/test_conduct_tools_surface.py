@@ -163,6 +163,44 @@ def test_post_op_only_accepts_a_closed_set():
     assert r["ok"] is False
 
 
+def test_compile_from_plan_reaches_the_compiler_with_the_live_plan_store(tmp_path):
+    """此前这两处裸调 ``compile_plan_to_conduct_spec(plan_id)``，而编译器要求显式 plan_store
+    —— ``conduct_compile_from_plan`` 与 ``conduct_create(from_plan_id=…)`` 对每个 agent 都必然失败。"""
+    from mast.planning.plan_store import ExperimentPlan, PlanPhase, PlanStatus, PlanStore
+
+    ps = PlanStore(tmp_path / "plans.db")
+    pid = ps.save(ExperimentPlan(plan_id="", name="编译一下", goal="看台阶",
+                                 phases=[PlanPhase(id="p1", name="survey")]))
+    ps.update_status(pid, PlanStatus.APPROVED)
+
+    wired = {t.name: t for t in make_conduct_tools(
+        "test", context=lambda: {"plan_store": ps, "registry": None})}
+    r = json.loads(wired["conduct_compile_from_plan"].invoke({"plan_id": pid}))
+    assert "plan_store" not in str(r.get("reason", "")), r
+    # 编译器读到了这份方案：它没有 conduct 绑定块 —— 结论是「编不动」，不是「没能编」
+    assert r["ok"] is False and "TEMPLATE_UNRESOLVED" in {e["code"] for e in r["errors"]}, r
+
+    bare = {t.name: t for t in make_conduct_tools("test")}
+    r = json.loads(bare["conduct_compile_from_plan"].invoke({"plan_id": pid}))
+    assert r["ok"] is False and "plan 库没接上" in r["reason"]
+
+
+def test_both_internal_entry_points_hand_the_plan_store_to_the_conduct_tools():
+    """私聊（CoreRuntime 的工具表）与群聊（orchestrator.graph.build）都要把 context 递进去 ——
+    少一处，那条入口上的编译类工具就回到「必然失败」。"""
+    import inspect
+
+    from mast.agents.orchestrator import graph as G
+    from mast.core import runtime as R
+
+    rt_src = inspect.getsource(R.CoreRuntime)
+    assert "make_conduct_tools(agent_id, context=self._conduct_tool_context)" in rt_src
+    assert "conduct_context=self._conduct_tool_context" in rt_src
+    assert "make_conduct_tools(agent_name, context=conduct_context)" in inspect.getsource(G.build)
+    ctx = R.CoreRuntime._conduct_tool_context(type("RT", (), {"_plan_store": "ps", "_registry": "reg"})())
+    assert ctx == {"plan_store": "ps", "registry": "reg"}
+
+
 def test_the_tools_sign_who_they_are():
     """署名必须带 agent 名 —— 审计流要答得出「这一步是谁点的头」。"""
     import inspect

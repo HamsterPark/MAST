@@ -148,6 +148,7 @@ class _RT:
     _record_v1_action = CoreRuntime._record_v1_action
     _record_v2_action = CoreRuntime._record_v2_action
     _note_skill_activity = CoreRuntime._note_skill_activity
+    _direct_record_attribution = CoreRuntime._direct_record_attribution
 
     def __init__(self, storage, v2=None):
         self._storage = storage
@@ -374,6 +375,58 @@ def test_a_busy_instrument_is_refused_not_queued(world):
     assert ("ExtProbeScan", {}) not in RAN
 
 
+# ─────────────────────────────────────────────────────────────────────
+# 7.0.1：跑完一个技能发 SKILL_STEP（电流监测的余辉期只听它）
+# ─────────────────────────────────────────────────────────────────────
+
+class _Bus:
+    def __init__(self):
+        self.steps: list[tuple[str, bool]] = []
+        self.categories: list[str | None] = []
+
+    def publish_skill_step(self, skill, step, success, category=None):
+        self.steps.append((skill, success))
+        self.categories.append(category)
+
+
+@pytest.fixture()
+def bus(monkeypatch):
+    from mast.core import events
+
+    b = _Bus()
+    monkeypatch.setattr(events.EventBus, "get", classmethod(lambda cls: b))
+    return b
+
+
+def test_a_skill_that_ran_publishes_skill_step_success_or_not(world, bus):
+    _run(world, "ExtProbeRead", {})
+    _run(world, "ExtProbeRead", {"fail": True})
+    assert bus.steps == [("ExtProbeRead", True), ("ExtProbeRead", False)]
+    # 2026-11-03：类别跟着事件走 —— 电流监测靠它放过纯读（不 pin、不开余辉期）
+    assert bus.categories == ["read", "read"]
+
+
+def test_a_refusal_at_the_door_publishes_no_skill_step(world, bus):
+    _LOG.current_sample_id = None
+    assert _run(world, "ExtProbeScan", {})[0].refused_by == "sample_gate"
+    assert _run(world, "ExtProbeRead", {"x_m": "five nanometres"})[0].refused_by == "si_parse"
+    assert bus.steps == [], "门口就拒了的技能没跑，余辉期不该因它开始"
+
+
+def test_the_agent_entry_publishes_skill_step_too():
+    """agent 侧的唯一入口 ``wrap_skill`` 同一处修：它的顶层技能直接 ``skill.execute``，从不经过
+    发这个事件的遗留 ``SkillExecutor``。按源码钉住（真跑 wrap_skill 要一整套 agent 运行态）。"""
+    import ast
+    import inspect
+
+    import mast.agents._shared.skill_adapter as sa
+
+    tree = ast.parse(inspect.getsource(sa))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+             and isinstance(n.func, ast.Attribute) and n.func.attr == "publish_skill_step"]
+    assert calls, "wrap_skill 不发 SKILL_STEP：内部 agent 路径上电流监测的余辉期又是死的"
+
+
 def test_the_record_payload_is_a_superset_of_the_agent_paths_payload():
     """``wrap_skill`` 交给 recorder 的键，直调载荷一个都不能少 —— 否则那一列在
     直调路径上永远是空的，而没有任何东西会报错（这个仓库记过不止一次）。"""
@@ -413,7 +466,145 @@ def test_the_old_endpoint_now_records_and_takes_an_optional_actor_header(world):
     body = c.post("/api/skills/ExtProbeRead/execute", json={"params": {}},
                   headers={"X-MAST-Actor": "Night Watch"}).json()
     assert body["success"] is True
+    # 2026-11-03 起这个端点一刻不等入账（record_wait_s=0），记录由后台写入器写 ——
+    # 断言之前先把它冲刷完。
+    from mast.logging.record_writer import flush_default_writer
+
+    assert flush_default_writer(10.0)
     ctxs = [r["context"] for r in world.st.recent_actions(world.eid)]
     assert ctxs == ["ext:night-watch", "技能直调 API"], ctxs
     v2 = {r["agent_id"] for r in world.repos.actions.for_experiment(world.v2eid)}
     assert v2 == {"ext:night-watch", "skill_exec_api"}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 8. 入账不卡回执（实验库被锁时，一次直调的回执可能卡 20 s–3 min）
+# ─────────────────────────────────────────────────────────────────────
+
+import sqlite3 as _sqlite3  # noqa: E402
+import time as _time  # noqa: E402
+
+from mast.logging.record_writer import flush_default_writer as _flush  # noqa: E402
+
+
+class _LockedStorage:
+    """v1 存储外壳：前 ``n_locked`` 次 ``log_action`` 先等 ``delay_s``（模拟 busy timeout），
+    再报 ``database is locked`` —— 与真实服务日志里的失败同一形状。之后照常写真库。"""
+
+    def __init__(self, real, *, n_locked, delay_s):
+        self._real = real
+        self.n_locked = n_locked
+        self.delay_s = delay_s
+        self.attempts = 0
+
+    def log_action(self, rec):
+        self.attempts += 1
+        if self.attempts <= self.n_locked:
+            _time.sleep(self.delay_s)
+            raise _sqlite3.OperationalError("database is locked")
+        return self._real.log_action(rec)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+def test_a_locked_record_store_does_not_hold_the_response(world):
+    world.rt._storage = _LockedStorage(world.st, n_locked=2, delay_s=0.4)
+    t0 = _time.monotonic()
+    run, _ = _run(world, "ExtProbeRead", {}, record_wait_s=0.0)
+    took = _time.monotonic() - t0
+    assert run.success
+    assert took < 0.6, f"回执等了入账 {took:.2f} s —— 被锁的库又一次卡住了回执"
+    assert run.recorded.get("pending") is True and run.recorded.get("v1") is None
+    assert _flush(20.0)
+    v1 = world.st.recent_actions(world.eid)
+    assert [r["skill_name"] for r in v1] == ["ExtProbeRead"], "撞锁之后没有重试写进去"
+    assert world.rt._storage.attempts == 3, "撞锁两次、第三次写进 —— 次数不对说明重试/重复写有问题"
+    assert len(world.repos.actions.for_experiment(world.v2eid)) == 1
+
+
+def test_a_short_wait_on_a_slow_store_reports_pending_not_failed(world):
+    world.rt._storage = _LockedStorage(world.st, n_locked=1, delay_s=0.5)
+    run, _ = _run(world, "ExtProbeRead", {}, record_wait_s=0.1)
+    assert run.recorded.get("pending") is True
+    assert run.recorded.get("v1") is None, "「还没写完」被报成了「没写进去」"
+    assert run.recorded.get("experiment_id") == world.eid
+    assert _flush(20.0)
+    assert len(world.st.recent_actions(world.eid)) == 1
+
+
+def test_the_default_wait_still_returns_the_full_receipt_on_a_healthy_store(world):
+    run, _ = _run(world, "ExtProbeRead", {})
+    assert run.recorded.get("v1") is True and run.recorded.get("v2_action_id")
+    assert "pending" not in run.recorded
+
+
+def test_the_record_belongs_to_the_experiment_and_thread_of_the_call(world):
+    """写入晚于动作时，「当前实验 / 当前会话」可能已经换了 —— 记录要挂在动作发生时的那个上。"""
+    world.rt._storage = _LockedStorage(world.st, n_locked=1, delay_s=0.3)
+    run, _ = _run(world, "ExtProbeRead", {}, record_wait_s=0.0, thread_id=None)
+    assert run.recorded.get("pending") is True
+    # 写入还在退避里：此刻换实验、换会话
+    other = world.st.create_experiment("E2")
+    _LOG.current_experiment_id = other
+    world.rt._active_thread_id = "a-later-chat"
+    assert _flush(20.0)
+    assert [r["skill_name"] for r in world.st.recent_actions(world.eid)] == ["ExtProbeRead"]
+    assert world.st.recent_actions(other) == [], "记录挂到了写入时才切过去的实验上"
+    rows = world.repos.actions.for_experiment(world.v2eid)
+    assert len(rows) == 1 and rows[0]["thread_id"] == "agents-concurrent-chat", rows
+
+
+def test_a_lock_after_the_v2_row_exists_is_not_retried_into_a_duplicate(world, monkeypatch):
+    calls = {"n": 0}
+
+    def locked_succeed(aid, **kw):
+        calls["n"] += 1
+        raise _sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(world.repos.actions, "succeed", locked_succeed)
+    _run(world, "ExtProbeRead", {})
+    assert _flush(20.0)
+    rows = world.repos.actions.for_experiment(world.v2eid)
+    assert len(rows) == 1, f"begin 之后撞锁被重试，写出了 {len(rows)} 行"
+    assert calls["n"] == 1
+
+
+def test_the_activity_stamps_stay_on_the_request_thread(world):
+    """手动操作监视器的活动戳不能跟着入账一起晚到 —— 那几秒的状态变化会被算成人做的。"""
+    names: list[str] = []
+    world.rt._note_skill_activity = lambda: names.append(threading.current_thread().name)
+    world.rt._storage = _LockedStorage(world.st, n_locked=1, delay_s=0.3)
+    me = threading.current_thread().name
+    _run(world, "ExtProbeRead", {}, record_wait_s=0.0)
+    assert names == [me, me], f"起跑戳 + 收尾戳都该在请求线程上，实际 {names}"
+    assert _flush(20.0)
+    assert names == [me, me], f"写入线程又打了一次戳：{names}"
+
+
+class _LiveState:
+    """``InstrumentState`` 的真形状：``snapshot()`` 返回**同一个**活对象，补丁原地改它。"""
+
+    def __init__(self):
+        self.cache = HardwareState(bias_v=0.1)
+
+    def snapshot(self):
+        return self.cache
+
+    def refresh(self):  # pragma: no cover — 直调绝不许调它
+        raise AssertionError("direct-exec 调了 state.refresh()")
+
+
+def test_the_recorded_state_is_frozen_at_call_time(world):
+    """入账推迟到写入线程之后，下一个技能打在活缓存上的补丁不许被记成这一次的状态。"""
+    live = _LiveState()
+    world.ctx.state = live
+    world.rt._storage = _LockedStorage(world.st, n_locked=1, delay_s=0.3)
+    run, _ = _run(world, "ExtProbeRead", {}, record_wait_s=0.0)
+    assert run.recorded.get("pending") is True
+    live.cache.bias_v = 2.0                     # 写入还在退避：此刻有人改了活缓存
+    assert _flush(20.0)
+    rows = world.st.get_actions(world.eid)
+    assert len(rows) == 1
+    assert rows[0].state_after is not None and rows[0].state_after.bias_v == 0.1, (
+        f"记下的是写入时刻的状态 {rows[0].state_after}")

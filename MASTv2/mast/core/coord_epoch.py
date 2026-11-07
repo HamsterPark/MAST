@@ -1,18 +1,38 @@
-"""坐标代次 coord_epoch 的权威查询与核对。
+"""坐标代次(``coord_epoch``)的权威查询与核对 —— 强制点共用的那一份。
 
-横向粗动会改变坐标对应的表面，陈旧计划必须重新规划。
+一次横向 XY 粗动之后,同一个 ``(x_m, y_m)`` 指的是**另一片表面**。地图标记靠
+``map_markers.coord_epoch`` 记住这件事(见 :mod:`mast.io.map_analysis`),但记住
+不等于有人拦:一份在第 3 代排出来的计划,粗动之后照样能被原样执行,每一帧都扫在
+错的地方 —— 而且扫得很成功。这个模块就是被拦的那一下。
 
-代次由 storage.current_epoch 对整个作用域统计 coarse_move，不能在有限的
-get_markers 行窗口中计数。读取失败返回 None；零表示尚未粗动，二者不可合并。
-调用方应分别处理 UNVERIFIABLE 与确知的匹配或陈旧状态。
+设计文档:``docs/v2/design/`` 的 P0 修复设计,修复项 节(文件名按「P0 修复设计」检索;
+通用层注释不写样品名前缀)。
 
-粗动步进为开环，步长随驱动、负载和温度变化。xy_motor_step_m 只作标注，
-本模块不据此换算或重投影跨代次坐标。
+三条约束,都是踩出来的:
+
+**一、代次要查,不要从行窗口里数。** ``storage.current_epoch()`` 是对整个作用域
+COUNT ``kind='coarse_move'``,廉价且权威;而 ``get_markers()`` 只回最新 ``limit``
+行,在那个窗口里数 coarse_move 会**漏报**代次(作用域一长就漏),于是陈旧坐标被
+判成当前。``api/routes/vision.py`` 的 ``_current_epoch_or_derived`` 注释里记着
+后果:前端因此把陈旧标记按全不透明画了出来。
+
+**二、读不到返回 None,不是 0。** 0 是一个**真实答案**(「这个作用域还没粗动
+过」)。把「读不到」折叠进 0,一份盖着第 3 代章的计划会在存储不可用时被判成陈旧
+而整批拒绝 —— 「读不到」不是答案,更不是「出故障」。所以这里有四态而不是两态,
+调用方必须分开处理 :data:`UNVERIFIABLE`。
+
+**三、不换算。** 跨代次坐标换算在本仓**有意不存在**(``io/coarse_map.py`` 的
+「WHY STEPS, NOT METRES」:粗动步进是开环的,步长随驱动幅度、负载、温度漂移,
+同样 100 步在 300 K 能比 4 K 远五倍;``xy_motor_step_m`` 只是标注,没有任何东西
+拿它计算,也没有任何标记会被它重投影)。所以陈旧坐标的处置只有一个:**拒绝,
+让人重新规划**。既不夹紧,也不换算 —— 一个换算出来的坐标看上去和真坐标一模
+一样,而它是编的。
 """
 
 from __future__ import annotations
 
 import logging
+from mast.i18n import tr
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -30,9 +50,9 @@ STATES = (MATCH, STALE, UNVERIFIABLE, UNSTAMPED)
 REFUSAL_CODE = STALE
 
 #: 陈旧时统一的下一步指引。**不提供换算**,只提供重新规划 —— 见模块文档第三条。
-_REPLAN_HINT = ("粗动使旧坐标失效(它们现在指向另一片表面),"
+_REPLAN_HINT = (tr("粗动使旧坐标失效(它们现在指向另一片表面),"
                 "请按当前代次重新规划后再执行。**不做跨代次换算**:"
-                "粗动步进是开环的,换算出来的坐标看上去和真坐标一样,而它是编的。")
+                "粗动步进是开环的,换算出来的坐标看上去和真坐标一样,而它是编的。", "Coarse motion invalidated the old coordinates (they now point at a different part of the surface); re-plan for the current generation before executing. **No cross-generation conversion is done**: coarse steps are open-loop, and a converted coordinate looks just like a real one but is made up."))
 
 
 @dataclass(frozen=True)
@@ -96,7 +116,7 @@ def _as_epoch(value) -> "int | None":
 
 
 def verify(stamped, *, current: "int | None" = None,
-           what: str = "这份产物的坐标") -> EpochVerdict:
+           what: str = tr("这份产物的坐标", "the coordinates of this artifact")) -> EpochVerdict:
     """核对一个盖了章的坐标产物是否还属于当前代次。
 
     ``stamped`` 是产物上的章(计划 JSON 顶层的 ``coord_epoch`` / 技能参数);
@@ -109,22 +129,22 @@ def verify(stamped, *, current: "int | None" = None,
     if plan_epoch is None:
         return EpochVerdict(
             state=UNSTAMPED, stamped=None, current=current,
-            message=(f"{what}没有 coord_epoch 章,无法判断它是不是粗动之前排的 —— "
-                     f"按旧格式放行,但这一次没有代次保护。"))
+            message=(tr(f"{what}没有 coord_epoch 章,无法判断它是不是粗动之前排的 —— "
+                     f"按旧格式放行,但这一次没有代次保护。", f"{what} has no coord_epoch stamp, so it cannot be judged whether it was planned before a coarse move. Let through in the old format, but this time there is no generation protection.")))
 
     now = read_current_epoch() if current is None else _as_epoch(current)
     if now is None:
         return EpochVerdict(
             state=UNVERIFIABLE, stamped=plan_epoch, current=None,
-            message=(f"{what}盖的是第 {plan_epoch} 代,但**当前代次查不到**"
+            message=(tr(f"{what}盖的是第 {plan_epoch} 代,但**当前代次查不到**"
                      f"(没有活动实验 / 记录存储不可用)。查不到不等于陈旧,"
-                     f"也不等于当前 —— 这一次没有代次保护。"))
+                     f"也不等于当前 —— 这一次没有代次保护。", f"{what} is stamped generation {plan_epoch}, but **the current generation cannot be found** (no active experiment / record storage unavailable). Not found does not mean stale, and does not mean current either; this time there is no generation protection.")))
 
     if now != plan_epoch:
         return EpochVerdict(
             state=STALE, stamped=plan_epoch, current=now,
-            message=(f"{what}属于第 {plan_epoch} 代坐标系,当前已是第 {now} 代。"
-                     f"{_REPLAN_HINT}"))
+            message=(tr(f"{what}属于第 {plan_epoch} 代坐标系,当前已是第 {now} 代。"
+                     f"{_REPLAN_HINT}", f"{what} belongs to coordinate-system generation {plan_epoch}, and the current one is {now}. {_REPLAN_HINT}")))
 
     return EpochVerdict(state=MATCH, stamped=plan_epoch, current=now)
 

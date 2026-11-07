@@ -26,6 +26,7 @@ into the core.
 from __future__ import annotations
 
 import base64
+from mast.i18n import tr
 import io
 import logging
 import time
@@ -254,9 +255,18 @@ def _recent_scan_images(app: Any, limit: int = 12, extra_paths: list | None = No
                 pass
         if not paths:
             return []
-        # Paint oldest first so newer frames of the same footprint appear on top.
-        # Combine imported and discovered files before sorting; append order and
-        # newest-first discovery alone do not give the canvas the required order.
+        # OLDEST FIRST — the caller hands this straight to the canvas, which
+        # paints later elements over earlier ones (the same assumption the live
+        # frame relies on by going last). ``get_latest_scans`` is mtime-DESC, and
+        # appending imports after it made age irrelevant, so at a footprint that
+        # has been imaged more than once the picture on top was the OLDEST one
+        # and every newer frame of that spot was invisible.
+        #
+        # With bouncy scanning on, the repeat frames of one footprint alternate
+        # direction, so the one frozen on top always has the same direction and
+        # only one direction is ever shown automatically.
+        # E.g. three frames at the same position arrived newest-first and the
+        # oldest was the one drawn last.
         paths.sort(key=_safe_mtime)
         # The boundary is part of the key: a coarse move changes what these very
         # same files MEAN without touching a single mtime, so a cache keyed only
@@ -306,7 +316,7 @@ _LIVE_FRAME_MAX_AGE_S = 600.0
 def _live_scan_image(app: Any, frame_view) -> "ScanImage | None":
     """The scan IN PROGRESS, as an underlay — or None.
 
-    「扫描地图中得到的STM图没有实时更新」. The mosaic underlay
+    The mosaic underlay
     is built from saved ``.sxm`` files, and Nanonis writes the .sxm when the scan
     FINISHES. So for the entire duration of a scan — the exact window an operator
     watches the map — the map had nothing new to show.
@@ -323,7 +333,7 @@ def _live_scan_image(app: Any, frame_view) -> "ScanImage | None":
     * the frame footprint must be known — an image with no placement is not a map
       element;
     * the PNG must be recent (mtime). A milestone from a previous scan drawn on
-      the current footprint is the falsified history of #76/#78.
+      the current footprint is a frame from a different scan.
     """
     try:
         import os
@@ -508,14 +518,14 @@ def _recent_frame_sources(app: Any, events: list, *,
     recent .sxm files POSITIONALLY (``scan_ptr``), so "which file is event #N's"
     is a property of the whole batch, not of #N. A second, independent
     re-derivation is exactly how you get an enlarge button that opens a
-    different frame than the tile — the falsified history of #76/#78 with an
+    different frame than the tile — the same frame/tile mismatch with an
     extra click.
 
     One deliberate difference from the loop this replaces: a ``frame_path`` that
     ``is_file()`` but then fails to READ used to fall through to the alert/scan
     fallbacks. Here it is chosen and the read fails later, so the tile says it
-    has no picture instead of showing a different event's. That is the direction
-    #76/#78 already settled; it is written down because it is a change.
+    has no picture instead of showing a different event's. This keeps the existing rule that a tile never
+    shows another event's picture; it is written down because it is a change.
     """
     recent_scan_paths = _recent_scan_paths(app, limit)
     scan_ptr = 0
@@ -537,7 +547,7 @@ def _recent_frame_sources(app: Any, events: list, *,
                 pass
         # SECOND: for current-monitor events, the evidence PNG the monitor renders
         # for a CRITICAL — looked up by the segment id in this event's OWN
-        # cause_ref, never borrowed .
+        # cause_ref, never borrowed.
         seg_id = _segment_of(getattr(ev, "cause_ref", None))
         alert_id = evidence_by_segment.get(seg_id) if seg_id is not None else None
         if alert_id:
@@ -670,8 +680,7 @@ def get_vision_recent(request: Request) -> VisionRecentResponse:
 def get_vision_recent_frame(seqno: int, request: Request) -> Response:
     """The picture of 近期标注帧 tile ``seqno``, big enough to look at, or 404.
 
-    -1 (DB #93):「近期标注帧不能点开放大？」— they could not. The
-    grid rendered a bare ``<img>`` with no handler anywhere, on both the 视觉 page
+    The grid rendered a bare ``<img>`` with no handler anywhere, on both the 视觉 page
     and the 对话 page. The current-monitor tiles were the exception: those already
     linked through to the full waveform, which is why only the picture tiles were
     dead ends.
@@ -884,7 +893,7 @@ def _piezo_half_range(app: Any) -> Optional[float]:
 def _planned_marker_views() -> list[MapMarkerView]:
     """The route published by ``show_plan_on_map``, as map markers.
 
-    that tool writes into the process-local ``PlanOverlay``
+    That tool writes into the process-local ``PlanOverlay``
     singleton and answers "计划路线已显示在扫描地图上". It was not — this endpoint
     never read that singleton, so the plan landed in a store with NO READER while
     the tool reported success. The frontend was ready all along: ScanMapCanvas
@@ -999,7 +1008,7 @@ def get_scan_map(request: Request) -> ScanMapResponse:
     # must not inflate this, it means "operations recorded", not "shapes drawn".
     done_marker_count = len(marker_views)
 
-    # Planned route rides in ``markers`` — see _planned_marker_views .
+    # Planned route rides in ``markers`` — see _planned_marker_views.
     marker_views.extend(_planned_marker_views())
 
     frame_view: Optional[ScanFrame] = None
@@ -1040,7 +1049,7 @@ def get_scan_map(request: Request) -> ScanMapResponse:
         image_b64=image_b64,
         # surface-mosaic underlay: recent .sxm in the searched dirs PLUS any scan
         # explicitly imported / linked via a marker's meta.file (shown regardless
-        # of dir or age), PLUS the scan currently in progress (#23 — the .sxm
+        # of dir or age), PLUS the scan currently in progress (the .sxm
         # only lands when a scan finishes, so the map was frozen for exactly the
         # window the operator watches it). The live frame goes LAST so it paints
         # over the older saved scans it overlaps.
@@ -1091,7 +1100,7 @@ def get_scan_map_analysis(request: Request) -> ScanMapAnalysisResponse:
     ctx = request.app.state.ctx
     app = _get_app(ctx)
     if app is None:
-        return ScanMapAnalysisResponse(degraded=True, detail="核心未就绪")
+        return ScanMapAnalysisResponse(degraded=True, detail=tr("核心未就绪", "Core not ready"))
     try:
         from mast.io.map_analysis import analyze_map
 
@@ -1100,7 +1109,7 @@ def get_scan_map_analysis(request: Request) -> ScanMapAnalysisResponse:
         sample_id = getattr(el, "current_sample_id", None) if el else None
         storage = getattr(app, "_storage", None)
         if storage is None:
-            return ScanMapAnalysisResponse(degraded=True, detail="实验记录存储不可用")
+            return ScanMapAnalysisResponse(degraded=True, detail=tr("实验记录存储不可用", "Experiment record storage unavailable"))
         rows = storage.get_markers(exp_id, sample_id) or []
 
         cfg = app.build_map_analysis_config()
@@ -1184,12 +1193,12 @@ def post_scan_map_coarse_move(
     app = _get_app(ctx)
     if app is None:
         return RecordCoarseMoveResponse(ok=False, degraded=True,
-                                        message="核心未就绪")
+                                        message=tr("核心未就绪", "Core not ready"))
     try:
         storage = getattr(app, "_storage", None)
         if storage is None:
             return RecordCoarseMoveResponse(ok=False, degraded=True,
-                                            message="实验记录存储不可用")
+                                            message=tr("实验记录存储不可用", "Experiment record storage unavailable"))
         el = getattr(app, "_experiment_log", None)
         exp_id = getattr(el, "current_experiment_id", None) if el else None
         sample_id = getattr(el, "current_sample_id", None) if el else None
@@ -1212,9 +1221,9 @@ def post_scan_map_coarse_move(
         on_coarse_move_recorded(source="api:scan-map/coarse-move")
         return RecordCoarseMoveResponse(
             ok=True, new_coord_epoch=epoch,
-            message=(f"已补记手动粗动，扫描地图进入第 {epoch} 代坐标系；"
+            message=(tr(f"已补记手动粗动，扫描地图进入第 {epoch} 代坐标系；"
                      "此前的标记将淡显且不再参与选点分析，"
-                     "计划路线与撞针封锁也已清空。"))
+                     "计划路线与撞针封锁也已清空。", f"Manual coarse motion recorded; the scan map enters coordinate-system generation {epoch}. Earlier markers will fade and no longer take part in site-selection analysis, and the planned route and tip-crash blocks have also been cleared.")))
     except Exception as exc:  # noqa: BLE001
         logger.warning("scan-map coarse-move backfill failed: %s", exc)
         return RecordCoarseMoveResponse(ok=False, degraded=True,
@@ -1244,14 +1253,14 @@ def get_coarse_map(request: Request) -> CoarseMapResponse:
     ctx = request.app.state.ctx
     app = _get_app(ctx)
     if app is None:
-        return CoarseMapResponse(degraded=True, detail="核心未就绪")
+        return CoarseMapResponse(degraded=True, detail=tr("核心未就绪", "Core not ready"))
     try:
         from mast.core import coarse_drive, vacuum_interlock
         from mast.io.coarse_map import CoarseMapConfig, build_coarse_map
 
         storage = getattr(app, "_storage", None)
         if storage is None:
-            return CoarseMapResponse(degraded=True, detail="实验记录存储不可用")
+            return CoarseMapResponse(degraded=True, detail=tr("实验记录存储不可用", "Experiment record storage unavailable"))
         el = getattr(app, "_experiment_log", None)
         exp_id = getattr(el, "current_experiment_id", None) if el else None
         sample_id = getattr(el, "current_sample_id", None) if el else None
@@ -1303,7 +1312,7 @@ def get_coarse_selfcheck(request: Request, probe_step_counter: bool = True) -> d
     A dedicated endpoint rather than "ask the agent to run the skill", for two
     reasons that both matter over a slow remote link during commissioning:
     it does not depend on the chat/agent loop being healthy, and it is one
-    request whose whole output can be saved verbatim.
+    request whose whole output can be saved as-is.
 
     STRICTLY READ-ONLY — every call it makes is a getter MAST already issues in
     ordinary operation. Safe with the tip engaged, mid-scan, at any pressure.
@@ -1318,7 +1327,7 @@ def get_coarse_selfcheck(request: Request, probe_step_counter: bool = True) -> d
         exec_ctx = _execution_context(ctx)
         if exec_ctx is None:
             return {"degraded": True,
-                    "detail": "内核未就绪(pool/state/registry 未接线)",
+                    "detail": tr("内核未就绪(pool/state/registry 未接线)", "Core not ready (pool/state/registry not wired)"),
                     "ready": False}
         from mast.skills.builtins.coarse_selfcheck import CoarseMotionSelfCheck
 
@@ -1353,7 +1362,7 @@ def get_vacuum_interlock(request: Request) -> VacuumInterlockResponse:
         # verdict must not render a green light.
         return VacuumInterlockResponse(
             allow=False, degraded=True, detail=str(exc)[:200],
-            reason="真空互锁状态不可用 —— 按拒绝处理")
+            reason=tr("真空互锁状态不可用 —— 按拒绝处理", "Vacuum interlock state unavailable; treated as refused"))
 
 
 @router.post("/coarse-map/vacuum/attest", response_model=VacuumInterlockResponse)
@@ -1375,11 +1384,11 @@ def post_vacuum_attest(request: Request,
     except ValueError as exc:
         return VacuumInterlockResponse(allow=False, degraded=True,
                                        detail=str(exc)[:200],
-                                       reason="签署原因无效")
+                                       reason=tr("签署原因无效", "Invalid attestation reason"))
     except Exception as exc:  # noqa: BLE001
         return VacuumInterlockResponse(allow=False, degraded=True,
                                        detail=str(exc)[:200],
-                                       reason="签署失败")
+                                       reason=tr("签署失败", "Attestation failed"))
 
 
 @router.delete("/coarse-map/vacuum/attest", response_model=VacuumInterlockResponse)
@@ -1392,7 +1401,7 @@ def delete_vacuum_attest(request: Request) -> VacuumInterlockResponse:
         return get_vacuum_interlock(request)
     except Exception as exc:  # noqa: BLE001
         return VacuumInterlockResponse(allow=False, degraded=True,
-                                       detail=str(exc)[:200], reason="撤销失败")
+                                       detail=str(exc)[:200], reason=tr("撤销失败", "Revoke failed"))
 
 
 @router.post("/scan-map/import", response_model=ScanMapImportResponse)
@@ -1409,18 +1418,18 @@ def post_scan_map_import(request: Request, body: ScanMapImportRequest) -> ScanMa
     storage = getattr(app, "_storage", None) if app else None
     if storage is None:
         return ScanMapImportResponse(ok=False, degraded=True,
-                                     message="导入不可用（无实时核心 / 存储）")
+                                     message=tr("导入不可用（无实时核心 / 存储）", "Import unavailable (no live core / storage)"))
     el = getattr(app, "_experiment_log", None)
     exp_id = getattr(el, "current_experiment_id", None) if el else None
     sample_id = getattr(el, "current_sample_id", None) if el else None
     if exp_id is None:
         return ScanMapImportResponse(
             ok=False, degraded=False,
-            message="请先开始一个实验——导入的记录要归属到当前实验/样品。")
+            message=tr("请先开始一个实验——导入的记录要归属到当前实验/样品。", "Start an experiment first: imported records are attributed to the current experiment/sample."))
 
     p = (body.path or "").strip().strip('"')
     if not p or not os.path.exists(p):
-        return ScanMapImportResponse(ok=False, message=f"路径不存在：{p}")
+        return ScanMapImportResponse(ok=False, message=tr(f"路径不存在：{p}", f"Path does not exist: {p}"))
 
     exts = (".sxm", ".dat", ".3ds")
     files: list[str] = []
@@ -1434,7 +1443,7 @@ def post_scan_map_import(request: Request, body: ScanMapImportRequest) -> ScanMa
     elif p.lower().endswith(exts):
         files.append(p)
     if not files:
-        return ScanMapImportResponse(ok=False, message="未找到 .sxm/.dat/.3ds 文件。")
+        return ScanMapImportResponse(ok=False, message=tr("未找到 .sxm/.dat/.3ds 文件。", "No .sxm/.dat/.3ds files found."))
 
     from mast.io.exp_map import manual_marker_from_spectrum_file
     scans = spectra = skipped = 0
@@ -1474,8 +1483,8 @@ def post_scan_map_import(request: Request, body: ScanMapImportRequest) -> ScanMa
     n = scans + spectra
     return ScanMapImportResponse(
         ok=n > 0, imported=n, scans=scans, spectra=spectra, skipped=skipped,
-        message=(f"已导入 {scans} 张扫描 + {spectra} 条谱到地图"
-                 + (f"；{skipped} 个文件无可用坐标已跳过" if skipped else "")),
+        message=(tr(f"已导入 {scans} 张扫描 + {spectra} 条谱到地图", f"Imported {scans} scan(s) + {spectra} spectrum/spectra onto the map")
+                 + (tr(f"；{skipped} 个文件无可用坐标已跳过", f"; {skipped} file(s) skipped for lack of usable coordinates") if skipped else "")),
         degraded=False)
 
 

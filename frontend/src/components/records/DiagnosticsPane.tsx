@@ -2,48 +2,45 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Card, Badge, Spinner, ErrorNote, DegradedNote, EmptyNote } from "@/components/ui";
+import { tr } from "@/lib/i18n";
 
-// 诊断 — the refusal ledger. WHY nothing happened.
+// Diagnostics: the refusal ledger, i.e. why nothing happened.
 //
-// The system records what SUCCEEDS. Until 2026-07-12 it recorded nothing about
-// what it REFUSED, and the field trial fell straight into that gap:
-//
-//   「进针功能调用失败」            ← refused by WHICH layer? on what state?
-//   「STS第五点停下来了」            ← ran and failed? skipped? aborted?
-//   「…在预条件或安全门上反复失败而空转」
-//                                     ← the operator diagnosed this themselves,
-//                                       from the symptom, because we could not.
-//
-// This is the window onto core/diagnostics.py. Empty means nothing has been
-// refused — a true statement, not a broken one.
+// Successful actions are recorded elsewhere; this ledger records what was
+// refused or skipped (precondition, safety gate, mode gate, abort, HITL reject,
+// step skip/fail/abort, stalls), so "the action did nothing" can be traced to the
+// layer that stopped it. It is a window onto core/diagnostics.py. Empty means
+// nothing has been refused, not that the panel is broken.
 
 const KIND_STYLE: Record<
   string,
   { label: string; tone: React.ComponentProps<typeof Badge>["tone"] }
 > = {
-  precondition_block: { label: "前置条件", tone: "WARN" },
-  safety_block: { label: "安全门", tone: "DANGEROUS" },
-  mode_block: { label: "模式门", tone: "WARN" },
-  abort_block: { label: "中止拦截", tone: "DANGEROUS" },
-  hitl_reject: { label: "人工拒绝", tone: "WARN" },
-  step_skip: { label: "跳过", tone: "INFO" },
-  step_fail: { label: "步骤失败", tone: "DANGEROUS" },
-  step_abort: { label: "步骤中止", tone: "DANGEROUS" },
-  stall: { label: "空转", tone: "DANGEROUS" },
-  note: { label: "记录", tone: "INFO" },
-  // ⑰（2026-08-08）本来会打断工作、现在只通知的那一类：缓冲区关键事件不再弹确认
-  // 框，DANGEROUS 技能不再等审批。tone 是 INFO 而不是 WARN —— 它记的是「放行了」，
-  // 把它染成告警色会让面板看起来像出了一堆事。
-  notice_only: { label: "只通知", tone: "INFO" },
+  precondition_block: { label: tr("前置条件", "Precondition"), tone: "WARN" },
+  safety_block: { label: tr("安全门", "Safety gate"), tone: "DANGEROUS" },
+  mode_block: { label: tr("模式门", "Mode gate"), tone: "WARN" },
+  abort_block: { label: tr("中止拦截", "Abort block"), tone: "DANGEROUS" },
+  hitl_reject: { label: tr("人工拒绝", "Operator rejected"), tone: "WARN" },
+  step_skip: { label: tr("跳过", "Skipped"), tone: "INFO" },
+  step_fail: { label: tr("步骤失败", "Step failed"), tone: "DANGEROUS" },
+  step_abort: { label: tr("步骤中止", "Step aborted"), tone: "DANGEROUS" },
+  stall: { label: tr("空转", "Stalled"), tone: "DANGEROUS" },
+  note: { label: tr("记录", "Note"), tone: "INFO" },
+  // Events that would previously have interrupted work and now only notify
+  // (critical buffer events no longer prompt, DANGEROUS skills no longer wait for
+  // approval). INFO rather than WARN: the entry records that the action was
+  // allowed through, and an alarm colour would make the panel look like a pile of
+  // problems.
+  notice_only: { label: tr("只通知", "Notify only"), tone: "INFO" },
 };
 
 const GROUPS = [
-  { id: "", label: "全部" },
-  { id: "refusals", label: "拒绝（前置/安全/模式/中止）" },
-  { id: "steps", label: "步骤（跳过/失败/中止）" },
-  { id: "stall", label: "空转" },
-  // 「本来会拦我几次」是验收时的问题，所以它得是一次点击，不是一次 grep。
-  { id: "notices", label: "只通知（本来会打断）" },
+  { id: "", label: tr("全部", "All") },
+  { id: "refusals", label: tr("拒绝（前置/安全/模式/中止）", "Refusals (precondition/safety/mode/abort)") },
+  { id: "steps", label: tr("步骤（跳过/失败/中止）", "Steps (skipped/failed/aborted)") },
+  { id: "stall", label: tr("空转", "Stalled") },
+  // "How often would this have interrupted me" should be one click, not a log search.
+  { id: "notices", label: tr("只通知（本来会打断）", "Notify only (would have interrupted)") },
 ] as const;
 
 function fmtTs(t: number): string {
@@ -71,25 +68,30 @@ export function DiagnosticsPane() {
   if (q.isPending) return <Spinner />;
   if (q.isError) return <ErrorNote error={q.error} />;
   const data = q.data!;
-  if (data.degraded) return <DegradedNote what="诊断台账" />;
+  if (data.degraded) return <DegradedNote what={tr("诊断台账", "diagnostics ledger")} />;
 
   const top = data.summary?.top_refusals ?? [];
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-baseline gap-3">
-        <h2 className="text-lg font-semibold tracking-tight">诊断</h2>
+        <h2 className="text-lg font-semibold tracking-tight">{tr("诊断", "Diagnostics")}</h2>
         <span className="text-xs text-mast-muted">
-          每一次<strong className="text-mast-text">被拒绝</strong>或
-          <strong className="text-mast-text">被跳过</strong>的动作都记在这里——
-          「为什么什么都没发生」的答案。
+          {tr("每一次", "Every action that was ")}
+          <strong className="text-mast-text">{tr("被拒绝", "refused")}</strong>
+          {tr("或", " or ")}
+          <strong className="text-mast-text">{tr("被跳过", "skipped")}</strong>
+          {tr(
+            "的动作都记在这里——「为什么什么都没发生」的答案。",
+            " is recorded here: the answer to \"why did nothing happen\".",
+          )}
         </span>
       </div>
 
-      {/* 形状先于细节：某一个 subject 独占计数，那就是空转本身 */}
+      {/* Shape before detail: one subject dominating the counts is the stall itself. */}
       {top.length > 0 && (
         <Card className="space-y-2">
-          <div className="text-xs font-medium text-mast-muted">最常被拒绝的动作</div>
+          <div className="text-xs font-medium text-mast-muted">{tr("最常被拒绝的动作", "Most frequently refused actions")}</div>
           <div className="flex flex-wrap gap-2">
             {top.slice(0, 6).map((r) => {
               const what = String(r.what ?? "");
@@ -131,13 +133,13 @@ export function DiagnosticsPane() {
         <input
           value={subject}
           onChange={(e) => setSubject(e.target.value)}
-          placeholder="按技能 / 步骤名过滤"
+          placeholder={tr("按技能 / 步骤名过滤", "Filter by skill / step name")}
           className="ml-auto min-w-0 flex-1 rounded border border-mast-border bg-mast-bg px-3 py-1 text-xs text-mast-text placeholder:text-mast-muted focus:border-mast-accent focus:outline-none sm:max-w-xs"
         />
       </div>
 
       {data.count === 0 ? (
-        <EmptyNote label="尚无拒绝记录——没有任何动作被拦下或跳过。" />
+        <EmptyNote label={tr("尚无拒绝记录——没有任何动作被拦下或跳过。", "No refusals recorded: no action has been blocked or skipped.")} />
       ) : (
         <div className="space-y-1.5">
           {(data.entries ?? []).map((e) => {
@@ -175,7 +177,7 @@ export function DiagnosticsPane() {
 
       {data.summary?.log_path && (
         <p className="text-[11px] text-mast-muted">
-          完整历史（跨重启）：
+          {tr("完整历史（跨重启）：", "Full history (across restarts):")}
           <code className="ml-1 select-all font-mono text-mast-text">
             {data.summary.log_path}
           </code>

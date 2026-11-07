@@ -18,7 +18,7 @@ S1 修针循环设计 D4 / D5 / §3.5 的 ``S1.00`` 行。判据本体是纯函�
 奇数**」。N=2 时「1 坏 1 好」与「1 坏 1 判不了」在直觉上很不同,而聚合规则给它们
 两个不同的待遇(前者 ``surface_feature``、后者 ``undecidable``),没有第三票可依;
 N=3 让这两种情形都还有一票可查。再大只是线性地花时间(每点一整帧,分钟量级),
-买不到新的定性区分。**这个数待用户拍板,不要拿它去标定什么。**
+买不到新的定性区分。**这个数尚未标定,不要拿它去标定什么。**
 
 ## 选点:两条后置筛,都是踩出来的
 
@@ -63,6 +63,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Iterator
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -186,7 +187,7 @@ class CrossPointTipCheck(CompositeSkillGraph):
             # 会移动针尖并扫描 N 帧(分钟量级 × N),所以要人点头 —— 但它
             # **不改变**任何仪器设定,也不在表面上留下任何痕迹。
             safety_level=SafetyLevel.CONFIRM,
-            description=(
+            description=tr(
                 "判定一根被怀疑的坏针尖,问题在**针尖**还是在**表面**:做法是在 N 个"
                 "彼此拉开距离的干净落点上各复测一帧,再把逐点证据聚合成**恰好三个**"
                 "答案:'bad_tip'、'surface_feature' 或 'undecidable'。单帧"
@@ -199,47 +200,89 @@ class CrossPointTipCheck(CompositeSkillGraph):
                 "—— 在我们自己弄出来的坑上判针尖,对针尖什么都说明不了。凑不出足够多"
                 "彼此拉开的候选时,答案就是 'undecidable',并附上淘汰了几个、为什么;"
                 "它绝不凑数。复测视野是**钉死的**(绝不跨尺度换算),因为起伏上限只在"
-                "它被标定的那个视野上才有意义。"
+                "它被标定的那个视野上才有意义。",
+                "Decide whether a suspected bad tip is a problem with the **tip** or with "
+                "the **surface**: re-measure one frame at each of N well-separated clean "
+                "sites, then aggregate the per-site evidence into **exactly three** "
+                "answers: 'bad_tip', 'surface_feature' or 'undecidable'. A single frame "
+                "**cannot tell** these apart - a cluster of steps gives as much "
+                "corrugation as a bad tip - and that is the whole reason this skill "
+                "exists. 'bad_tip' requires **unanimity** among at least 2 decidable "
+                "sites; a site that cannot be judged votes for neither side. "
+                "**Read-only**: it moves and images, but records no tip crash, writes no "
+                "map marker and creates no avoidance circle, so a site found to be "
+                "'different' here never becomes somewhere later searches must avoid. "
+                "Candidate sites must also pass two filters: no two frames may overlap, "
+                "and the site must not have had a tip crash before - judging the tip on "
+                "a crater we made ourselves says nothing about the tip. If not enough "
+                "well-separated candidates can be found, the answer is 'undecidable', "
+                "with how many were rejected and why; it never pads the count. The "
+                "re-measure field of view is **pinned** (never rescaled across scales), "
+                "because the corrugation limit is only meaningful at the field of view "
+                "it was calibrated on."
             ),
             parameters=[
                 ParameterSpec(
                     name="n_points", type="int",
-                    description=(
+                    description=tr(
                         "要复测几个落点。默认 3 —— 这是**还能产生分歧的最小奇数**,"
                         "**不是**一个标定值。小于 2 时根本不存在「另一个位置」,"
-                        "结论就退化成单帧。"),
+                        "结论就退化成单帧。",
+                        "How many sites to re-measure. Default 3 - the **smallest odd "
+                        "number that can still disagree**, **not** a calibrated value. "
+                        "Below 2 there is no 'other site' and the conclusion degrades to "
+                        "a single frame."),
                     required=False, default=DEFAULT_N_POINTS,
                     min_value=2, max_value=9),
                 ParameterSpec(
                     name="scan_nm", type="float",
-                    description=(
+                    description=tr(
                         "复测视野,单位**纳米**(就写一个普通数字,例如 100 表示 "
                         "100 nm)。留空则取样品 profile 里那条起伏上限**标定时所用"
                         "的**视野 —— 阈值与它的视野是**一对**,绝不跨尺度换算。"
-                        "它同时也定下落点之间的最小间距(1.5 个帧宽)。"),
+                        "它同时也定下落点之间的最小间距(1.5 个帧宽)。",
+                        "Re-measure field of view in **nanometres** (a plain number, e.g. "
+                        "100 for 100 nm). If left empty, the field of view the sample "
+                        "profile's corrugation limit was **calibrated at** is used - the "
+                        "threshold and its field of view are a **pair**, never rescaled "
+                        "across scales. It also sets the minimum spacing between sites "
+                        "(1.5 frame widths)."),
                     required=False, min_value=1.0, max_value=1e4),
                 ParameterSpec(
                     name="corrugation_threshold_pm", type="float",
-                    description=(
+                    description=tr(
                         "起伏上限,单位**皮米**(就写一个普通数字,例如 40 表示 "
                         "40 pm)。留空则从样品 profile 里取 —— 这里**刻意没有 "
                         "default**:没传的阈值必须保持「没传」,查 profile 那一行"
                         "才到得了。你要是传了这个数,就**必须(MUST)**同时把 "
                         "scan_nm 也传上;"
-                        "一个显式阈值配上 profile 声明的视野,量的就是另一件事了。"),
+                        "一个显式阈值配上 profile 声明的视野,量的就是另一件事了。",
+                        "Corrugation limit in **picometres** (a plain number, e.g. 40 for "
+                        "40 pm). If left empty it is taken from the sample profile - "
+                        "there is **deliberately no default**: an unset threshold must "
+                        "stay unset, otherwise the profile lookup is never reached. If "
+                        "you pass this value you **MUST** also pass scan_nm; an explicit "
+                        "threshold combined with the profile's declared field of view "
+                        "measures something different."),
                     # 从 schema 入口验证省略参数，防止默认值注入绕过按尺度选择工作点。
                     required=False, min_value=0.1, max_value=1e6),
                 ParameterSpec(
                     name="profile", type="str",
-                    description=("样品阈值 profile 的名字。"
-                                 "留空就用当前生效的那一个。"),
+                    description=tr("样品阈值 profile 的名字。"
+                                   "留空就用当前生效的那一个。",
+                                   "Name of the sample threshold profile. "
+                                   "Leave empty to use the currently active one."),
                     required=False, default=""),
                 ParameterSpec(
                     name="dry_run", type="bool",
-                    description=(
+                    description=tr(
                         "只彩排选点:报告**将会**用哪些落点(以及淘汰了哪些),"
                         "不移动针尖,也不扫任何一帧。这种情况下判定恒为 "
-                        "'undecidable' —— 彩排不产生证据。"),
+                        "'undecidable' —— 彩排不产生证据。",
+                        "Rehearse site selection only: report which sites **would** be "
+                        "used (and which were rejected), without moving the tip or "
+                        "scanning any frame. The verdict is always 'undecidable' in "
+                        "this case - a rehearsal produces no evidence."),
                     required=False, default=False),
             ],
             # D9:本设计不新增任何 precondition。这里用的两条是子技能已有的
@@ -266,26 +309,42 @@ class CrossPointTipCheck(CompositeSkillGraph):
         except (TypeError, ValueError):
             n_points = 0
         if n_points < 2:
-            self._refuse(
+            self._refuse(tr(
                 f"n_points={params.get('n_points')!r} 少于 2 —— 一个点不构成"
                 f"「换位置复测」,那时结论就退回成单帧,而单帧分不开针尖团簇与"
-                f"表面台阶簇。要更严可以调大,不能调小。")
+                f"表面台阶簇。要更严可以调大,不能调小。",
+                f"n_points={params.get('n_points')!r} is below 2 - a single site is "
+                f"not a 're-measure at another site', the conclusion would fall back "
+                f"to a single frame, and a single frame cannot tell a tip cluster "
+                f"from a surface step cluster. It may be raised for stricter "
+                f"checking, never lowered."))
             return
 
         # ── 视野与阈值:成对,不许拼 ────────────────────────────────────────
         scan_nm, scan_src = self._resolve_scan_nm(scan_nm_given, profile)
         if scan_nm is None:
-            self._refuse(
+            self._refuse(tr(
                 "复测视野定不下来:既没有显式 scan_nm,样品 profile 里也没有"
                 "corrugation_ref_scan_nm。起伏阈值离开它标定时的视野就没有意义,"
                 "而跨视野换算在本仓有意不存在 —— 请显式给一个 scan_nm,或者先把"
-                "profile 的那对(阈值 + 参照视野)标出来。")
+                "profile 的那对(阈值 + 参照视野)标出来。",
+                "The re-measure field of view cannot be determined: there is no "
+                "explicit scan_nm and the sample profile has no "
+                "corrugation_ref_scan_nm. A corrugation threshold is meaningless away "
+                "from the field of view it was calibrated at, and rescaling across "
+                "fields of view deliberately does not exist here - pass an explicit "
+                "scan_nm, or first set the profile's pair (threshold + reference "
+                "field of view)."))
             return
         if thr_pm is not None and scan_nm_given is None:
-            self._refuse(
+            self._refuse(tr(
                 f"给了显式阈值 {thr_pm} pm 却没给 scan_nm。一个显式阈值配上 "
                 f"profile 声明的视野({scan_nm} nm),量的就不是同一件事了 —— "
-                f"两个数要么都显式给,要么都走 profile。")
+                f"两个数要么都显式给,要么都走 profile。",
+                f"An explicit threshold {thr_pm} pm was given without scan_nm. An "
+                f"explicit threshold combined with the profile's declared field of "
+                f"view ({scan_nm} nm) measures something different - give both "
+                f"explicitly, or take both from the profile."))
             return
 
         width_m = float(scan_nm) * 1e-9
@@ -324,7 +383,7 @@ class CrossPointTipCheck(CompositeSkillGraph):
             if len(points) > 1 and point.coord_epoch != points[0].coord_epoch:
                 # 代次变了 ⇒ 中途发生过粗动,这批已经作废。**别再扫下去** ——
                 # 后面每一帧都是几分钟,而它们已经不可能拼成一次「同一片区域的
-                # 换位置复测」。作废由聚合器下(它会点名是哪一点),不在这里下。
+                # 换位置复测」。作废由聚合器下(它会指出是哪一点),不在这里下。
                 stopped_early = "coord_epoch_changed"
                 break
 
@@ -351,7 +410,7 @@ class CrossPointTipCheck(CompositeSkillGraph):
 
         result = executor.sub_results.get(step_id)
         if result is None or not getattr(result, "success", False):
-            why = getattr(result, "error", "") or "FindCleanSpot 没有返回结果"
+            why = getattr(result, "error", "") or tr("FindCleanSpot 没有返回结果", "FindCleanSpot returned no result")
             return None, [{"why": REJECT_NO_COORDS, "detail": str(why)}]
 
         data = dict(getattr(result, "data", None) or {})
@@ -403,7 +462,7 @@ class CrossPointTipCheck(CompositeSkillGraph):
             optional=True, checkpoint_after=False, tags=("move", "write"))
         if executor.sub_results.get(move_id) is None:
             # 没走到 ⇒ **绝不在原地扫**:那是把同一片表面测第二次,冒充独立证据。
-            abstain.append("移动失败,这个点没有去成")
+            abstain.append(tr("移动失败,这个点没有去成", "Move failed; the tip never reached this site"))
             return PointVerdict(
                 x_m=x_m, y_m=y_m, coord_epoch=self._read_epoch(),
                 crash_count=0, abstain_reason=";".join(abstain),
@@ -422,11 +481,11 @@ class CrossPointTipCheck(CompositeSkillGraph):
         if not isinstance(tip_ready, bool):
             tip_ready = None            # 三态:``None`` 不折叠成坏,也不折叠成好
         if prescan is None:
-            abstain.append("预检没跑起来")
+            abstain.append(tr("预检没跑起来", "The pre-scan check did not run"))
         elif tip_ready is None:
             abstain.append(str(pre_data.get("abstain_reason")
                                or pre_data.get("unusable_reason")
-                               or "预检判不了"))
+                               or tr("预检判不了", "The pre-scan check could not decide")))
 
         save_id = f"p{index + 1}_save"
         yield CompositeStep(
@@ -436,7 +495,8 @@ class CrossPointTipCheck(CompositeSkillGraph):
         # 等待超时视为没有可用文件，不能继续声称已经取得本次采集。
         scan_path = None if saved.get("timed_out") else saved.get("saved_path")
         if saved.get("timed_out"):
-            abstain.append("存盘超时,不拿「最新文件」冒充这一帧")
+            abstain.append(tr("存盘超时,不拿「最新文件」冒充这一帧",
+                                "Save timed out; the 'latest file' is not passed off as this frame"))
 
         corr: dict = {}
         if scan_path:
@@ -450,7 +510,7 @@ class CrossPointTipCheck(CompositeSkillGraph):
             corr = dict(getattr(executor.sub_results.get(corr_id),
                                 "data", None) or {})
             if not corr:
-                abstain.append("起伏判据没跑起来")
+                abstain.append(tr("起伏判据没跑起来", "The corrugation criterion did not run"))
             else:
                 # 存下来的**是不是我们刚扫的这一帧** —— 用几何对一次账。视野对不上
                 # 时判据②本来也会说「尺度不匹配」,但那句话指向的是「阈值标在别的
@@ -458,15 +518,19 @@ class CrossPointTipCheck(CompositeSkillGraph):
                 # 两个原因指向两个完全不同的下一步,不许折叠成一句。
                 got = _num(corr.get("width_nm"))
                 if got is not None and abs(got - scan_nm) > 0.05 * scan_nm:
-                    abstain.append(
+                    abstain.append(tr(
                         f"存下来的帧宽 {got:.1f} nm ≠ 这次要扫的 {scan_nm:.1f} nm"
-                        f" —— 这个文件很可能不是刚才那一帧,它的起伏结论作废")
+                        f" —— 这个文件很可能不是刚才那一帧,它的起伏结论作废",
+                        f"Saved frame width {got:.1f} nm != the {scan_nm:.1f} nm just "
+                        f"scanned - this file is probably not that frame, so its "
+                        f"corrugation verdict is void"))
                     # 丢掉,不是打个折:一个关于**别的帧**的结论,再准也回答不了
                     # 「这个点上起伏多大」。判据①不受影响 —— 它有自己的取帧路径。
                     corr = {}
         else:
             # 实时缓冲未必与保存文件同源，不能默认二者可比。
-            abstain.append("这一帧没存下来,起伏判不了")
+            abstain.append(tr("这一帧没存下来,起伏判不了",
+                                "This frame was not saved; corrugation cannot be judged"))
 
         verdict = str(corr.get("verdict") or "undecidable")
         # 代次在这个点的**证据采完之后**记:它要证的是「量这一帧的整段时间里
@@ -559,8 +623,11 @@ class CrossPointTipCheck(CompositeSkillGraph):
 
         reason = res.reason
         if dry_run:
-            reason = (f"彩排:选出了 {len(planned)}/{n_points} 个落点,"
-                      f"没有移动针尖、没有扫一帧,所以没有证据 —— 判不了。")
+            reason = tr(f"彩排:选出了 {len(planned)}/{n_points} 个落点,"
+                        f"没有移动针尖、没有扫一帧,所以没有证据 —— 判不了。",
+                        f"Rehearsal: selected {len(planned)}/{n_points} sites; the tip "
+                        f"was not moved and no frame was scanned, so there is no "
+                        f"evidence - cannot decide.")
             out["verdict"] = "undecidable"
         elif short:
             # ⚠️ 这是本技能**唯一**一处盖掉聚合器结论的地方,而且只往
@@ -569,15 +636,24 @@ class CrossPointTipCheck(CompositeSkillGraph):
             # 的动作 —— 不是针。判不了会走到人那里,而 bad_tip 会启动一整套
             # 退针 / 换样品 / 修针(小时量级)。两个方向的代价不对称。
             # 每一个点的原始证据仍在 ``points`` 里,一条都没丢。
-            head = (f"候选不足:要 {n_points} 个互不重叠的落点,只凑出 "
-                    f"{len(points)} 个(淘汰 {len(rejected)} 个候选)。"
-                    f"**不凑数** —— 这一片表面可能已经用完,换个区域再判,"
-                    f"或者先确认筛选半径。")
-            reason = f"{head} 已测到的证据:{res.reason}"
+            head = tr(f"候选不足:要 {n_points} 个互不重叠的落点,只凑出 "
+                      f"{len(points)} 个(淘汰 {len(rejected)} 个候选)。"
+                      f"**不凑数** —— 这一片表面可能已经用完,换个区域再判,"
+                      f"或者先确认筛选半径。",
+                      f"Not enough candidates: {n_points} non-overlapping sites were "
+                      f"needed, only {len(points)} found ({len(rejected)} candidates "
+                      f"rejected). **No padding** - this patch of surface may be used "
+                      f"up; judge again in another area, or first check the "
+                      f"screening radius.")
+            reason = tr(f"{head} 已测到的证据:{res.reason}",
+                        f"{head} Evidence gathered so far: {res.reason}")
             out["verdict"] = "undecidable"
         elif stopped_early == "coord_epoch_changed":
-            reason = (f"中途坐标代次变了(发生过粗动),剩下的点没有再扫 —— "
-                      f"{res.reason}")
+            reason = tr(f"中途坐标代次变了(发生过粗动),剩下的点没有再扫 —— "
+                        f"{res.reason}",
+                        f"The coordinate epoch changed midway (coarse motion "
+                        f"occurred); the remaining sites were not scanned - "
+                        f"{res.reason}")
 
         out["reason"] = reason
         # 闸门 selector 用的名字 —— 与 ``cross_check_analysis`` 那一路同名,
@@ -610,9 +686,14 @@ class CrossPointTipCheck(CompositeSkillGraph):
             logger.debug("撞针记忆快照读不到: %s", exc)
             snap = {}
         snap["scope"] = "process_local"
-        snap["note"] = ("撞针记忆是进程内的(无持久化、无坐标代次,粗动后清空)。"
-                        "tracked_regions=0 意味着这个进程还没见过任何撞针,"
-                        "**不等于**这些点历史上没撞过。")
+        snap["note"] = tr(
+            "撞针记忆是进程内的(无持久化、无坐标代次,粗动后清空)。"
+            "tracked_regions=0 意味着这个进程还没见过任何撞针,"
+            "**不等于**这些点历史上没撞过。",
+            "Tip-crash memory is in-process (not persisted, no coordinate epoch, "
+            "cleared after coarse motion). tracked_regions=0 means this process has "
+            "not seen any tip crash yet; it does **not** mean these sites never "
+            "crashed in the past.")
         return snap
 
     # ── 框架接口 ──────────────────────────────────────────────────────────
@@ -625,7 +706,8 @@ class CrossPointTipCheck(CompositeSkillGraph):
                 "verdict": "undecidable", "cross_verdict": "undecidable",
                 "n_points": 0, "n_judged": 0, "n_bad": 0, "n_good": 0,
                 "coord_epoch": None, "map_known": self._map_known,
-                "reason": "没有走到裁决 —— 判不了。", "points": [],
+                "reason": tr("没有走到裁决 —— 判不了。",
+                           "No verdict was reached - cannot decide."), "points": [],
             }
         return out
 
@@ -657,15 +739,19 @@ class CrossPointTipCheck(CompositeSkillGraph):
 def _summarize(data: dict) -> str:
     """给用户/模型读的一句话。**「判不了」与「判出来是针」是两句不同的话。**"""
     head = {
-        "bad_tip": "换了位置仍然差 ⇒ 指向针尖",
-        "surface_feature": "换个位置就不一样了 ⇒ 指向表面,不是针",
-        "undecidable": "判不了",
+        "bad_tip": tr("换了位置仍然差 ⇒ 指向针尖",
+                      "Still bad at other sites => points to the tip"),
+        "surface_feature": tr("换个位置就不一样了 ⇒ 指向表面,不是针",
+                              "Different at other sites => points to the surface, not the tip"),
+        "undecidable": tr("判不了", "Undecidable"),
     }.get(str(data.get("verdict")), str(data.get("verdict")))
-    out = f"{head} —— {data.get('reason', '')}"
+    out = f"{head} {tr('——', '-')} {data.get('reason', '')}"
     if data.get("dry_run"):
-        out = "【彩排】" + out
+        out = tr("【彩排】", "[Rehearsal] ") + out
     if data.get("map_known") is False:
-        out += " ⚠️ 读不到实验记录,无法确认这些点是否干净(不知道 ≠ 干净)。"
+        out += tr(" ⚠️ 读不到实验记录,无法确认这些点是否干净(不知道 ≠ 干净)。",
+                  " WARNING: the experiment record cannot be read, so it is unknown "
+                  "whether these sites are clean (unknown is not clean).")
     return out
 
 

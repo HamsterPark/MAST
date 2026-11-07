@@ -1,11 +1,13 @@
-// 复制文字（旧版兼容格式 app.js 的 copyText）。
+// Copy text to the clipboard.
 //
-// `navigator.clipboard` 只在安全上下文里有：本机 http://127.0.0.1 可以，局域网里用
-// http://<IP> 打开 MAST 时就没有——那正是远程看数据的常见用法，所以退回到临时
-// textarea + execCommand。两条都失败时按钮上说「复制失败」，而不是假装成功。
+// `navigator.clipboard` only exists in secure contexts: http://127.0.0.1 works, but opening MAST
+// over http://<IP> on a LAN does not -- a common way to view data remotely -- so fall back to a
+// temporary textarea + execCommand. If both fail the button says "Copy failed" instead of
+// pretending to succeed.
 
 import { useState } from "react";
 import clsx from "clsx";
+import { tr } from "@/lib/i18n";
 
 export async function copyText(s: string): Promise<boolean> {
   try {
@@ -30,7 +32,7 @@ export async function copyText(s: string): Promise<boolean> {
 
 export function CopyButton({
   text,
-  label = "复制",
+  label = tr("复制", "Copy"),
   className,
   title,
 }: {
@@ -55,7 +57,7 @@ export function CopyButton({
         setTimeout(() => setState(""), 1200);
       }}
     >
-      {state === "ok" ? "已复制" : state === "fail" ? "复制失败" : label}
+      {state === "ok" ? tr("已复制", "Copied") : state === "fail" ? tr("复制失败", "Copy failed") : label}
     </button>
   );
 }

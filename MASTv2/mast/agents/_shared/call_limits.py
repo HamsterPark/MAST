@@ -51,9 +51,15 @@ logger = logging.getLogger(__name__)
 # Per-run defaults (reset every invocation). Loose enough that a healthy single
 # turn never hits them, tight enough to break a genuine in-turn spin.
 #
-# 模型调用预算需要容纳包含多次读回、动作和验证的回合，同时保持有限上限，
-# 防止重复唤醒或失控循环无限消耗模型调用并持续驱动仪器。
-# 这里的默认值是工程预算，不是实验标定值；改变它时必须同步检查递归预算。
+# ## 为什么是 500 而不是 30
+#
+# 30 **从来不是从任何需求推出来的**,而它会砍断真机实验:
+# 例如手动修针做到第 4-5 针刚移动到位就 `run limit (30/30)`,
+# **扫图都没轮到**。
+#
+# 实测:一次「扎四针 + 扫一张图」就要 ~30 次模型调用 —— 而那是**最基本**的实验单元。
+# 500 给出约 15 倍余量,同时仍然是一道刹车(去掉刹车 = 一个失控循环可以无限烧钱、
+# 无限驱动仪器)。**它不是标定值,是「够用且仍然有限」。**
 #
 # ⚠️ 改这个数**必须**同时看 :data:`MAX_RECURSION_LIMIT` —— 见那里。
 DEFAULT_MODEL_CALLS_PER_RUN = 500

@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import logging
+from mast.i18n import tr
 from pathlib import Path
 from typing import Any
 
@@ -191,10 +192,10 @@ def _result(sc, storage) -> ScopeChangeResult:
 
 
 _NO_SAMPLE_HINT = (
-    "未选定样品 —— 扫描/谱学等产生数据的操作已暂停（对话、提问、查看状态不受影响）。"
-    "请选择或新建一个样品。"
+    tr("未选定样品 —— 扫描/谱学等产生数据的操作已暂停（对话、提问、查看状态不受影响）。"
+    "请选择或新建一个样品。", "No sample selected: scans, spectroscopy and other data-producing operations are paused (chat, questions and status viewing are unaffected). Select or create a sample.")
 )
-_NO_EXPERIMENT_HINT = "还没有进行中的实验。新建或选择一个实验后即可开始。"
+_NO_EXPERIMENT_HINT = tr("还没有进行中的实验。新建或选择一个实验后即可开始。", "No experiment in progress. Create or select one to get started.")
 
 
 # ── endpoints ─────────────────────────────────────────────────────────
@@ -254,7 +255,7 @@ def activate_experiment(experiment_id: str, body: ActivateBody,
     log = _log()
     if log is None or storage is None:
         return ScopeChangeResult(degraded=True, blocked=True,
-                                 block_reason="记录系统未接线")
+                                 block_reason=tr("记录系统未接线", "Record system not wired"))
     adv = _advisory(request)
     if adv.blocking and not body.force:
         return ScopeChangeResult(
@@ -277,7 +278,7 @@ def activate_sample(experiment_id: str, sample_id: str, body: ActivateBody,
     log = _log()
     if log is None or storage is None:
         return ScopeChangeResult(degraded=True, blocked=True,
-                                 block_reason="记录系统未接线")
+                                 block_reason=tr("记录系统未接线", "Record system not wired"))
     adv = _advisory(request)
     if adv.blocking and not body.force:
         return ScopeChangeResult(
@@ -298,7 +299,7 @@ def clear_sample(body: ClearSampleBody, request: Request) -> ScopeChangeResult:
     log = _log()
     if log is None or storage is None:
         return ScopeChangeResult(degraded=True, blocked=True,
-                                 block_reason="记录系统未接线")
+                                 block_reason=tr("记录系统未接线", "Record system not wired"))
     return _result(log.clear_sample(source="gui", reason=body.reason), storage)
 
 
@@ -430,7 +431,7 @@ def nanonis_dir_plan(request: Request) -> NanonisDirPlan:
     log = _log()
     storage = request.app.state.ctx.experiment_storage
     if rt is None or log is None or storage is None:
-        return NanonisDirPlan(degraded=True, reason="记录系统或运行时未接线")
+        return NanonisDirPlan(degraded=True, reason=tr("记录系统或运行时未接线", "Record system or runtime not wired"))
 
     try:
         from mast.core import nanonis_session as ns
@@ -478,7 +479,7 @@ def nanonis_dir_apply(body: NanonisDirBody, request: Request) -> NanonisDirPlan:
     rt = _runtime(request)
     log = _log()
     if rt is None or log is None:
-        return NanonisDirPlan(degraded=True, reason="运行时未接线")
+        return NanonisDirPlan(degraded=True, reason=tr("运行时未接线", "Runtime not wired"))
 
     plan = nanonis_dir_plan(request)
     if plan.degraded or not plan.ok:
@@ -487,7 +488,7 @@ def nanonis_dir_apply(body: NanonisDirBody, request: Request) -> NanonisDirPlan:
     if body.restore:
         target = plan.previous_session_path
         if not target:
-            plan.reason = "没有记录到改动前的保存目录，无法一键恢复。"
+            plan.reason = tr("没有记录到改动前的保存目录，无法一键恢复。", "No save directory from before the change was recorded, so it cannot be restored in one click.")
             plan.ok = False
             return plan
     else:
@@ -498,24 +499,24 @@ def nanonis_dir_apply(body: NanonisDirBody, request: Request) -> NanonisDirPlan:
             Path(target).mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             plan.ok = False
-            plan.reason = f"无法创建目标目录：{exc}"
+            plan.reason = tr(f"无法创建目标目录：{exc}", f"Cannot create the target directory: {exc}")
             return plan
 
     ec = _execution_context(request)
     if ec is None:
         plan.ok = False
-        plan.reason = "Nanonis 未连接——无法修改保存目录。"
+        plan.reason = tr("Nanonis 未连接——无法修改保存目录。", "Nanonis not connected: cannot change the save directory.")
         return plan
     try:
         res = ec.run("SetSessionPath", {"session_path": str(target),
                                         "save_settings_to_previous": True})
         if not getattr(res, "success", False):
             plan.ok = False
-            plan.reason = f"SetSessionPath 失败：{getattr(res, 'error', '') or res}"
+            plan.reason = tr(f"SetSessionPath 失败：{getattr(res, 'error', '') or res}", f"SetSessionPath failed: {getattr(res, 'error', '') or res}")
             return plan
     except Exception as exc:  # noqa: BLE001
         plan.ok = False
-        plan.reason = f"SetSessionPath 未送达：{exc}"
+        plan.reason = tr(f"SetSessionPath 未送达：{exc}", f"SetSessionPath was not delivered: {exc}")
         return plan
 
     # 主动失效 ~15 s 的 session 缓存，否则后续的文件发现还在用旧路径。
@@ -561,7 +562,7 @@ def _execution_context(request: Request) -> Any:
         abort = getattr(app, "_orch_abort", None)
         return ExecutionContext(pool=pool, state=state, registry=registry,
                                 abort_event=abort, approval_source="human",
-                                owner="设置页 · Nanonis 保存目录")
+                                owner="设置页 · Nanonis 保存目录")  # identity, not display text: see instrument_lock.owner_label
     except Exception:  # noqa: BLE001
         return None
 
@@ -689,7 +690,7 @@ def folder_maintenance(body: MaintenanceBody, request: Request) -> MaintenanceRe
         if action == "reindex":
             if storage is None:
                 return MaintenanceResult(degraded=True, action=action,
-                                         message="记录系统未接线")
+                                         message=tr("记录系统未接线", "Record system not wired"))
             repos = getattr(rt, "_v2_repos", None)
             res = rx.rebuild_from_folders(storage=storage, repos=repos,
                                           dry_run=body.dry_run)
@@ -698,25 +699,25 @@ def folder_maintenance(body: MaintenanceBody, request: Request) -> MaintenanceRe
         scope = rt._ensure_scope_dirs() if (rt and hasattr(rt, "_ensure_scope_dirs")) else None
         if not scope:
             return MaintenanceResult(degraded=True, action=action,
-                                     message="当前没有实验文件夹")
+                                     message=tr("当前没有实验文件夹", "There is no experiment folder right now"))
         exp_dir = scope[0]
 
         if action == "export_db":
             p = rx.export_record_db(exp_dir, storage=storage)
             return MaintenanceResult(ok=bool(p), action=action,
                                      artifact=str(p) if p else None,
-                                     message="" if p else "导出失败")
+                                     message="" if p else tr("导出失败", "Export failed"))
         if action == "export_rocrate":
             repos = getattr(rt, "_v2_repos", None)
             v2_eid = getattr(rt, "_v2_eid", None)
             if repos is None or not v2_eid:
                 return MaintenanceResult(degraded=True, action=action,
-                                         message="v2 记录未接线")
+                                         message=tr("v2 记录未接线", "v2 records not wired"))
             p = rx.export_rocrate(exp_dir, repos=repos, v2_experiment_id=v2_eid)
             return MaintenanceResult(ok=bool(p), action=action,
                                      artifact=str(p) if p else None,
-                                     message="" if p else "导出失败")
-        return MaintenanceResult(action=action, message=f"未知动作：{action}")
+                                     message="" if p else tr("导出失败", "Export failed"))
+        return MaintenanceResult(action=action, message=tr(f"未知动作：{action}", f"Unknown action: {action}"))
     except Exception as exc:  # noqa: BLE001
         logger.warning("folder maintenance %s failed: %s", action, exc)
         return MaintenanceResult(action=action, message=str(exc))
@@ -744,7 +745,7 @@ def _advisory(request: Request) -> AdvisoryResponse:
     try:
         orch = bool(getattr(rt, "_orch_running", False)) if rt is not None else False
         if orch:
-            reasons.append("群聊任务正在运行；它接下来的仪器动作会记到新的实验/样品下")
+            reasons.append(tr("群聊任务正在运行；它接下来的仪器动作会记到新的实验/样品下", "A group-chat task is running; its next instrument actions will be recorded under the new experiment/sample"))
     except Exception:  # noqa: BLE001
         pass
     try:
@@ -753,7 +754,7 @@ def _advisory(request: Request) -> AdvisoryResponse:
             background_runs(), "active_count") else (
             1 if background_runs().has_active() else 0)
         if bg:
-            reasons.append(f"有 {bg} 个后台任务正在运行")
+            reasons.append(tr(f"有 {bg} 个后台任务正在运行", f"{bg} background task(s) running"))
     except Exception:  # noqa: BLE001
         bg = 0
     try:
@@ -774,12 +775,14 @@ def _advisory(request: Request) -> AdvisoryResponse:
 
 def _busy_reason_from(holder: dict | None) -> str:
     h = holder or {}
-    who = h.get("owner") or "另一个入口"
-    what = h.get("skill") or "某个仪器动作"
+    from mast.core.instrument_lock import owner_label
+
+    who = owner_label(h.get("owner")) or tr("另一个入口", "another entry point")
+    what = h.get("skill") or tr("某个仪器动作", "an instrument action")
     held = h.get("held_s")
-    held_txt = f"，已 {held:.0f} 秒" if isinstance(held, (int, float)) else ""
-    return (f"仪器正被占用：{who} 正在执行 {what}{held_txt}。"
-            f"现在切换会让这次操作记到错误的样品下。")
+    held_txt = tr(f"，已 {held:.0f} 秒", f", for {held:.0f} s") if isinstance(held, (int, float)) else ""
+    return (tr(f"仪器正被占用：{who} 正在执行 {what}{held_txt}。"
+            f"现在切换会让这次操作记到错误的样品下。", f"Instrument is busy: {who} is running {what}{held_txt}. Switching now would record this operation under the wrong sample."))
 
 
 def _busy_reason(adv: AdvisoryResponse) -> str:

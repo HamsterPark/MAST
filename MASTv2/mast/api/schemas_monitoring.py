@@ -188,7 +188,7 @@ class LiveTraceResponse(BaseModel):
     measuring at that instant. It is not a reading of zero, and it is not a
     missing field: it is the one thing the arrays cannot say by being shorter,
     because the two sides of a gap would then become adjacent and the chart would
-    draw a straight line across the outage.
+    draw a straight line across the outage .
     Where the gaps are is decided in ``store.trace_gap_marks``.
     """
 
@@ -369,7 +369,7 @@ class ThresholdKnob(BaseModel):
 
 class MonitoringConfigResponse(BaseModel):
     enabled: bool = True
-    alerts_enabled: bool = True
+    alerts_enabled: bool = False
     retention_hours: float = 24.0
     retention_gb: float = 4.0
     segment_seconds: float = 1.0

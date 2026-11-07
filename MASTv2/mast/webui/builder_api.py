@@ -26,6 +26,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from mast.i18n import tr
+
 logger = logging.getLogger(__name__)
 
 # ── wiring (set once by app.py at startup, same pattern as composite_panel) ──
@@ -56,7 +58,7 @@ def _domain_by_skill() -> dict[str, str]:
         out: dict[str, str] = {}
         for d in DOMAINS:
             for s in d.get("skills", ()):
-                out.setdefault(s, d.get("name", "其他"))
+                out.setdefault(s, d.get("name", tr("其他", "Other")))
         return out
     except Exception as exc:  # pragma: no cover — defensive
         logger.warning("DOMAINS load failed: %s", exc)
@@ -74,9 +76,11 @@ def _skill_source(cls) -> str:
 
     return classify_origin(cls)
 
-_SOURCE_ZH = {"builtin": "内置", "composite": "组合", "paper": "论文",
-              "custom": "自定义", "user_composite": "用户组合",
-              "agent_tool": "Agent 工具", "overlay": "覆盖", "other": "其他"}
+_SOURCE_ZH = {"builtin": tr("内置", "Built-in"), "composite": tr("组合", "Composite"),
+              "paper": tr("论文", "Paper"), "custom": tr("自定义", "Custom"),
+              "user_composite": tr("用户组合", "User composite"),
+              "agent_tool": tr("Agent 工具", "Agent tool"), "overlay": tr("覆盖", "Overlay"),
+              "other": tr("其他", "Other")}
 
 
 def _zh_sidecar() -> dict[str, dict]:
@@ -164,11 +168,11 @@ def build_catalog() -> dict:
             try:
                 from mast.skills.composite.tool_skills import AGENT_TOOL_DOMAINS
                 domain = AGENT_TOOL_DOMAINS.get(
-                    getattr(cls, "_AGENT_TOOL_SOURCE", ""), "Agent 工具")
+                    getattr(cls, "_AGENT_TOOL_SOURCE", ""), tr("Agent 工具", "Agent tools"))
             except Exception:  # pragma: no cover
-                domain = "Agent 工具"
+                domain = tr("Agent 工具", "Agent tools")
         else:
-            domain = domains.get(m.name, "其他")
+            domain = domains.get(m.name, tr("其他", "Other"))
         entry = {
             "name": m.name,
             "zh": zh_e.get("zh", ""),
@@ -346,6 +350,15 @@ def _node_exprs(n: dict) -> list:
 
 _SAFETY_RANK = {"auto": 0, "confirm": 1, "dangerous": 2}
 
+#: A spec problem that starts with one of these is advisory and does not block a save.
+#: The text is produced in the process/request language (mast/i18n.py), so every
+#: consumer (here, skills/compliance.py, the agent skill-forge tools) must accept both.
+ADVISORY_PREFIXES = ("警告：", "Warning: ")
+
+
+def is_advisory(problem: object) -> bool:
+    return str(problem).startswith(ADVISORY_PREFIXES)
+
 
 def validate_spec_payload(spec_dict: dict, *, registry=None) -> dict:
     """Full design-time validation report for the editor.
@@ -365,7 +378,7 @@ def validate_spec_payload(spec_dict: dict, *, registry=None) -> dict:
     try:
         spec = CompositeSpec.from_dict(spec_dict)
     except Exception as exc:
-        return {"ok": False, "problems": [f"spec 解析失败：{exc}"], "steps": []}
+        return {"ok": False, "problems": [tr(f"spec 解析失败：{exc}", f"Failed to parse spec: {exc}")], "steps": []}
     problems = spec.validate()
 
     reg = registry if registry is not None else _registry
@@ -373,7 +386,9 @@ def validate_spec_payload(spec_dict: dict, *, registry=None) -> dict:
     step_nodes: list[dict] = []
     if not _walk_steps(spec_dict.get("nodes"), step_nodes):
         return {"ok": False,
-                "problems": [f"节点树嵌套超过 {_MAX_TREE_DEPTH} 层"], "steps": []}
+                "problems": [tr(f"节点树嵌套超过 {_MAX_TREE_DEPTH} 层",
+                                f"Node tree is nested deeper than {_MAX_TREE_DEPTH} levels")],
+                "steps": []}
     max_leaf_rank = 0
 
     # $expr 标识符解析检查（review F4：节点 id 重命名后悬空引用此前只在运行期
@@ -414,7 +429,7 @@ def validate_spec_payload(spec_dict: dict, *, registry=None) -> dict:
         dynamic = set(params) - set(literal)
 
         if reg is None or not reg.has(skill):
-            errors.append(f"技能 {skill!r} 不存在于注册表")
+            errors.append(tr(f"技能 {skill!r} 不存在于注册表", f"Skill {skill!r} is not in the registry"))
             steps.append({"id": sid, "skill": skill,
                           "errors": errors, "warnings": warnings})
             continue
@@ -425,12 +440,14 @@ def validate_spec_payload(spec_dict: dict, *, registry=None) -> dict:
             try:
                 reg.get(skill, str(pinned))
             except KeyError:
-                errors.append(f"钉住的版本 {skill}@{pinned} 不在注册表"
-                              "（解除钉住或换可用版本）")
+                errors.append(tr(f"钉住的版本 {skill}@{pinned} 不在注册表"
+                                 "（解除钉住或换可用版本）",
+                                 f"Pinned version {skill}@{pinned} is not in the registry "
+                                 "(unpin it or choose an available version)"))
         try:
             meta = reg._get_metadata(reg.get(skill))
         except Exception as exc:
-            errors.append(f"技能元数据不可读：{exc}")
+            errors.append(tr(f"技能元数据不可读：{exc}", f"Skill metadata is unreadable: {exc}"))
             steps.append({"id": sid, "skill": skill,
                           "errors": errors, "warnings": warnings})
             continue
@@ -442,22 +459,28 @@ def validate_spec_payload(spec_dict: dict, *, registry=None) -> dict:
         # (ExecutionContext.run, 修复项) rejects it anyway; surface it here.
         from mast.core.safety import is_coarse_sample_approach
         if is_coarse_sample_approach(skill, literal):
-            errors.append("开环 Z 粗逼近（z-approach）不可在工作流内执行——"
-                          "必须由人工经审批流程执行")
+            errors.append(tr("开环 Z 粗逼近（z-approach）不可在工作流内执行——"
+                             "必须由人工经审批流程执行",
+                             "Open-loop Z coarse approach (z-approach) cannot run inside a workflow; "
+                             "it must be performed by a human through the approval process"))
         elif skill == "MotorMove" and "direction" in dynamic:
-            errors.append("MotorMove 的 direction 不可动态提供（$expr）——"
-                          "方向必须是设计期字面量")
+            errors.append(tr("MotorMove 的 direction 不可动态提供（$expr）——"
+                             "方向必须是设计期字面量",
+                             "MotorMove `direction` cannot be supplied dynamically ($expr); "
+                             "the direction must be a design-time literal"))
         if sl == "dangerous":
-            warnings.append("DANGEROUS 技能在工作流（agent 路径）中会被运行期"
-                            "审批门拒绝，需人工执行")
+            warnings.append(tr("DANGEROUS 技能在工作流（agent 路径）中会被运行期"
+                               "审批门拒绝，需人工执行",
+                               "DANGEROUS skills are rejected by the runtime approval gate in workflows "
+                               "(agent path); a human must run them"))
 
         spec_params = {p.name: p for p in (meta.parameters or [])}
         for k in params:
             if k not in spec_params:
-                errors.append(f"未知参数 {k!r}")
+                errors.append(tr(f"未知参数 {k!r}", f"Unknown parameter {k!r}"))
         for pname, p in spec_params.items():
             if p.required and pname not in params and p.default is None:
-                errors.append(f"缺少必填参数 {pname!r}")
+                errors.append(tr(f"缺少必填参数 {pname!r}", f"Missing required parameter {pname!r}"))
         if guard is not None and literal:
             try:
                 violations = guard.check_parameter_bounds(meta, literal)
@@ -481,19 +504,23 @@ def validate_spec_payload(spec_dict: dict, *, registry=None) -> dict:
                 }
                 errors.extend(v for v in violations if v not in spurious)
             except Exception as exc:  # pragma: no cover
-                warnings.append(f"边界预检失败：{exc}")
+                warnings.append(tr(f"边界预检失败：{exc}", f"Bounds pre-check failed: {exc}"))
         for pname in dynamic:
             p = spec_params.get(pname)
             if p is not None and p.allowed_values:
-                warnings.append(f"参数 {pname!r} 为枚举型却由 $expr 动态提供——"
-                                "运行期才校验，建议改为字面量")
+                warnings.append(tr(f"参数 {pname!r} 为枚举型却由 $expr 动态提供——"
+                                   "运行期才校验，建议改为字面量",
+                                   f"Parameter {pname!r} is an enum but is supplied dynamically via $expr; "
+                                   "it is only checked at run time, consider a literal"))
         # 悬空引用（review F4）：$expr 引用的标识符必须解析得到。警告级。
         for pname, v in (params or {}).items():
             if isinstance(v, dict) and "$expr" in v:
                 for tok in _expr_idents(v["$expr"]) - known:
-                    warnings.append(
+                    warnings.append(tr(
                         f"参数 {pname!r} 的表达式引用了未知名字 {tok!r}"
-                        "（节点 id 改名了？）——运行期会报 unknown variable")
+                        "（节点 id 改名了？）——运行期会报 unknown variable",
+                        f"The expression of parameter {pname!r} references the unknown name {tok!r} "
+                        "(was a node id renamed?); it will raise 'unknown variable' at run time"))
         steps.append({"id": sid, "skill": skill,
                       "errors": errors, "warnings": warnings})
 
@@ -506,9 +533,11 @@ def validate_spec_payload(spec_dict: dict, *, registry=None) -> dict:
                 continue
             for field, ex in _node_exprs(n):
                 for tok in _expr_idents(ex) - known:
-                    problems.append(
+                    problems.append(tr(
                         f"警告：节点 {n.get('id', '?')!r} 的 {field} 引用了"
-                        f"未知名字 {tok!r}——运行期会报 unknown variable")
+                        f"未知名字 {tok!r}——运行期会报 unknown variable",
+                        f"Warning: node {n.get('id', '?')!r} {field} refers to "
+                        f"unknown name {tok!r} - it will fail at run time with unknown variable"))
             for branch in _child_branches(n):
                 _lint_exprs(branch, depth + 1)
     _lint_exprs(spec_dict.get("nodes"))
@@ -518,13 +547,16 @@ def validate_spec_payload(spec_dict: dict, *, registry=None) -> dict:
         # P4 硬化：折叠/保存不得洗白审批级别（X_safety review 第 3 条）。
         # 只在保存/校验路径强制——既有存量 spec 启动加载仍是警告级
         # （loader 不经此处），避免升级即打坏老工作流。
-        problems.append(
+        _top = [k for k, v in _SAFETY_RANK.items() if v == max_leaf_rank][0]
+        problems.append(tr(
             f"声明的 safety_level={spec.safety_level!r} 低于子技能最高级"
-            f"（{[k for k, v in _SAFETY_RANK.items() if v == max_leaf_rank][0]}）"
-            "——effective level 必须 ≥ max(叶子)，请上调 safety_level")
+            f"（{_top}）"
+            "——effective level 必须 ≥ max(叶子)，请上调 safety_level",
+            f"Declared safety_level={spec.safety_level!r} is below the highest sub-skill level "
+            f"({_top}); the effective level must be >= max(leaves), raise safety_level"))
 
     # 以「警告：」开头的为 advisory（叶子-max 提示、悬空引用）——不拦保存。
-    hard_problems = [p for p in problems if not p.startswith("警告：")]
+    hard_problems = [p for p in problems if not is_advisory(p)]
     ok = not hard_problems and all(not s["errors"] for s in steps)
     return {"ok": ok, "problems": problems, "steps": steps}
 
@@ -647,7 +679,7 @@ def generate_spec_sync(prompt: str, current_spec: dict | None = None,
     try:
         mdl = model if model is not None else _gen_model_factory()
     except Exception as exc:  # noqa: BLE001
-        return {"error": f"模型不可用：{exc}"}
+        return {"error": tr(f"模型不可用：{exc}", f"Model unavailable: {exc}")}
     sys_msg = _GEN_SYSTEM.replace("{catalog}", _skill_digest())
     user = f"用户需求：{prompt}"
     if current_spec:
@@ -660,7 +692,7 @@ def generate_spec_sync(prompt: str, current_spec: dict | None = None,
         try:
             resp = mdl.invoke(msgs)
         except Exception as exc:  # noqa: BLE001
-            return {"error": f"生成调用失败：{exc}"}
+            return {"error": tr(f"生成调用失败：{exc}", f"Generation call failed: {exc}")}
         content = getattr(resp, "content", resp)
         if isinstance(content, list):
             content = " ".join(b.get("text", "") for b in content
@@ -683,7 +715,7 @@ def generate_spec_sync(prompt: str, current_spec: dict | None = None,
         msgs.append({"role": "user",
                      "content": "你的 spec 未通过校验，修复以下问题后重新输出完整 JSON：\n- "
                                 + "\n- ".join(issues[:20])})
-    return {"error": "生成的 spec 未通过校验", "report": last_report}
+    return {"error": tr("生成的 spec 未通过校验", "The generated spec failed validation"), "report": last_report}
 
 
 # ── 分享到实验室库（P5：manifest-only，永不发送 .py） ────────────────────────
@@ -703,7 +735,7 @@ def share_to_lab_sync(name: str) -> dict:
         raw_path = store._root / f"{name}.json"   # 原始 JSON 含 _author/_sha256
         manifest = json.loads(raw_path.read_text(encoding="utf-8"))
     except Exception as exc:  # noqa: BLE001
-        return {"error": f"读取 manifest 失败：{exc}"}
+        return {"error": tr(f"读取 manifest 失败：{exc}", f"Failed to read manifest: {exc}")}
     try:
         from mast._runtime_paths import project_root
         from mast.update.client import (
@@ -713,10 +745,12 @@ def share_to_lab_sync(name: str) -> dict:
         url = read_server_url(root)
         token = _read_token(root)
     except Exception as exc:  # noqa: BLE001
-        return {"error": f"读取实验室服务器配置失败：{exc}"}
+        return {"error": tr(f"读取实验室服务器配置失败：{exc}", f"Failed to read the lab server config: {exc}")}
     if not url or not token:
-        return {"error": "未配置实验室更新服务器（server_url/token）——"
-                         "在启动器的推送设置中配置后重试"}
+        return {"error": tr("未配置实验室更新服务器（server_url/token）——"
+                            "在启动器的推送设置中配置后重试",
+                            "The lab update server (server_url/token) is not configured; "
+                            "configure it in the launcher's push settings and retry")}
     tls_err = _require_https(url)
     if tls_err:
         return {"error": tls_err}
@@ -732,9 +766,9 @@ def share_to_lab_sync(name: str) -> dict:
             body = r.json()
             return {"ok": True, "id": body.get("id"),
                     "status": body.get("status", "pending_review")}
-        return {"error": f"服务器拒绝（HTTP {r.status_code}）：{r.text[:200]}"}
+        return {"error": tr(f"服务器拒绝（HTTP {r.status_code}）：{r.text[:200]}", f"Server rejected (HTTP {r.status_code}): {r.text[:200]}")}
     except Exception as exc:  # noqa: BLE001
-        return {"error": f"上传失败：{exc}"}
+        return {"error": tr(f"上传失败：{exc}", f"Upload failed: {exc}")}
 
 
 # ── favorites (per-machine, RFC §6) ─────────────────────────────────────────
@@ -853,7 +887,7 @@ def build_routes():
         if spec_dict.get("name") != name:
             return JSONResponse(
                 {"error": "name_mismatch",
-                 "detail": "URL 中的名字与 spec.name 不一致"}, status_code=400)
+                 "detail": tr("URL 中的名字与 spec.name 不一致", "The name in the URL does not match spec.name")}, status_code=400)
         report = validate_spec_payload(spec_dict)
         if not report["ok"]:
             return JSONResponse({"error": "invalid_spec", **report},
@@ -886,7 +920,7 @@ def build_routes():
         msg = _hot_register(saved.name)
         invalidate_catalog()
         return JSONResponse({"ok": True, "version": saved.version,
-                             "hot_registered": "已热注册" in msg,
+                             "hot_registered": tr("已热注册", "Hot-registered.") in msg,
                              "message": msg.strip(),
                              "report": report})
 
@@ -911,7 +945,7 @@ def build_routes():
         msg = _hot_register(saved.name)
         invalidate_catalog()
         return JSONResponse({"ok": True, "version": saved.version,
-                             "hot_registered": "已热注册" in msg,
+                             "hot_registered": tr("已热注册", "Hot-registered.") in msg,
                              "message": msg.strip()})
 
     async def _restore(request):

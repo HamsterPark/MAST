@@ -17,6 +17,7 @@ from mast.core.types import (
 )
 from mast.io.nanonis_files import decode_reply
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 
 class SetTipSpeed(BaseSkill):
@@ -28,12 +29,12 @@ class SetTipSpeed(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置 Follow-Me（XY 定位）模式下的针尖移动速度。",
+            description=tr("设置 Follow-Me（XY 定位）模式下的针尖移动速度。", "Set the tip movement speed in Follow-Me (XY positioning) mode."),
             parameters=[
                 ParameterSpec(
                     name="speed_m_s",
                     type="float",
-                    description="表面移动速度，单位米每秒",
+                    description=tr("表面移动速度，单位米每秒", "Surface movement speed, in metres per second"),
                     unit="m/s",
                     required=True,
                     min_value=0.0,
@@ -41,7 +42,7 @@ class SetTipSpeed(BaseSkill):
                 ParameterSpec(
                     name="custom_speed",
                     type="bool",
-                    description="True=用自定义速度，False=用扫描速度",
+                    description=tr("True=用自定义速度，False=用扫描速度", "True = use the custom speed, False = use the scan speed"),
                     required=False,
                     default=True,
                 ),
@@ -79,7 +80,7 @@ class GetTipSpeed(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取 Follow-Me 模式下的针尖表面速度与 custom-speed 标志。",
+            description=tr("读取 Follow-Me 模式下的针尖表面速度与 custom-speed 标志。", "Read the tip surface speed and the custom-speed flag in Follow-Me mode."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["folme", "speed", "read"],
@@ -120,12 +121,12 @@ class SetFolMeOversampling(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置 Follow-Me 模式下移动时所采数据的 oversampling。",
+            description=tr("设置 Follow-Me 模式下移动时所采数据的 oversampling。", "Set the oversampling of the data acquired while moving in Follow-Me mode."),
             parameters=[
                 ParameterSpec(
                     name="oversampling",
                     type="int",
-                    description="oversampling 取值",
+                    description=tr("oversampling 取值", "oversampling value"),
                     required=True,
                     min_value=1,
                 ),
@@ -162,7 +163,7 @@ class StopFolMe(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
-            description="停止 Follow-Me 模式下的针尖移动。",
+            description=tr("停止 Follow-Me 模式下的针尖移动。", "Stop the tip movement in Follow-Me mode."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["folme", "stop", "safety"],
@@ -194,7 +195,7 @@ class GetPointShootOnOff(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取 Follow-Me 模式下 Point & Shoot 是启用还是禁用。",
+            description=tr("读取 Follow-Me 模式下 Point & Shoot 是启用还是禁用。", "Read whether Point & Shoot is enabled or disabled in Follow-Me mode."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["folme", "point_shoot", "read"],
@@ -232,12 +233,12 @@ class SetPointShootOnOff(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="启用或禁用 Follow-Me 模式下的 Point & Shoot。",
+            description=tr("启用或禁用 Follow-Me 模式下的 Point & Shoot。", "Enable or disable Point & Shoot in Follow-Me mode."),
             parameters=[
                 ParameterSpec(
                     name="enable",
                     type="bool",
-                    description="True 为启用 Point & Shoot，False 为禁用",
+                    description=tr("True 为启用 Point & Shoot，False 为禁用", "True enables Point & Shoot, False disables it"),
                     required=True,
                 ),
             ],
@@ -274,12 +275,12 @@ class SetPointShootExperiment(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="选择 Follow-Me 模式下 Point & Shoot 要运行哪个 experiment。",
+            description=tr("选择 Follow-Me 模式下 Point & Shoot 要运行哪个 experiment。", "Select which experiment Point & Shoot runs in Follow-Me mode."),
             parameters=[
                 ParameterSpec(
                     name="experiment_index",
                     type="int",
-                    description="要选择的 Point & Shoot experiment 的索引",
+                    description=tr("要选择的 Point & Shoot experiment 的索引", "Index of the Point & Shoot experiment to select"),
                     required=True,
                     min_value=0,
                 ),
@@ -317,8 +318,9 @@ class GetPointShootProps(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读取 Point & Shoot 配置：auto-resume、basename、"
-                "外部 VI 路径、测量前延时。"
+                tr("读取 Point & Shoot 配置：auto-resume、basename、"
+                "外部 VI 路径、测量前延时。", "Read the Point & Shoot configuration: auto-resume, basename, "
+"external VI path, pre-measurement delay.")
             ),
             estimated_duration_s=0.5,
             composition_level=0,

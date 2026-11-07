@@ -39,6 +39,7 @@ approve —— 批准一份要连跑三天、要动针的流程是人的动作�
 
 from __future__ import annotations
 
+from mast.i18n import tr
 import logging
 from typing import Any, Optional
 
@@ -90,8 +91,10 @@ router = APIRouter(tags=["conduct"])
 
 #: 引擎关着时的那句话。**一处定义** —— 三个端点回同一句,免得用户在不同页面
 #: 读到三种说法然后以为是三件事。
-ENGINE_OFF = ("conduct 指挥线程未启用(设置 → conduct.cd_enabled = 1 后重启生效)。"
-              "已有的 conduct 状态仍然读得到。")
+ENGINE_OFF = tr("conduct 指挥线程未启用(设置 → conduct.cd_enabled = 1 后重启生效)。"
+                "已有的 conduct 状态仍然读得到。",
+                "The conduct commander thread is not enabled (set conduct.cd_enabled = 1 in Settings and "
+                "restart). Existing conduct state can still be read.")
 
 
 # ── 取件 ────────────────────────────────────────────────────────────
@@ -240,7 +243,7 @@ def list_templates(request: Request) -> TemplateListResponse:
         from mast.conduct.templates import TEMPLATES
         from mast.conduct.validator import validate_spec
     except Exception as exc:  # noqa: BLE001
-        return TemplateListResponse(degraded=True, reason=f"模板层不可用: {exc}")
+        return TemplateListResponse(degraded=True, reason=tr(f"模板层不可用: {exc}", f"Template layer unavailable: {exc}"))
     skills, analyses, _missing = _skills_and_analyses(request)
     rows: list[TemplateRow] = []
     for spec in TEMPLATES.values():
@@ -259,7 +262,7 @@ def list_templates(request: Request) -> TemplateListResponse:
             # 表单会变成一张空表,而空表看起来像「这个模板不需要参数」。
             rows.append(TemplateRow(spec_id=spec.spec_id, title=spec.title,
                                     approvable=False,
-                                    findings=[f"校验器抛异常: {exc}"],
+                                    findings=[tr(f"校验器抛异常: {exc}", f"The validator raised: {exc}")],
                                     params_schema=_param_rows(spec)))
     return TemplateListResponse(templates=rows)
 
@@ -280,9 +283,12 @@ def _compile_from_plan(request: Request, plan_id: str):
     """
     store = _plan_store(request)
     if store is None:
-        return None, ("plan 库没接上(standalone dev 或 runtime 还没建 "
-                      "PlanStore)—— 编译器不会自己按默认路径建一个库,"
-                      "那是在真实实验库上动手")
+        return None, tr("plan 库没接上(standalone dev 或 runtime 还没建 "
+                        "PlanStore)—— 编译器不会自己按默认路径建一个库,"
+                        "那是在真实实验库上动手",
+                        "The plan store is not attached (standalone dev, or the runtime has not built a "
+                        "PlanStore yet) - the compiler will not create a store at the default path "
+                        "itself, as that would touch the real experiment store")
     try:
         from mast.conduct.compiler import compile_plan_to_conduct_spec
 
@@ -290,7 +296,7 @@ def _compile_from_plan(request: Request, plan_id: str):
             plan_id, plan_store=store, registry=_skill_registry(request)), ""
     except Exception as exc:  # noqa: BLE001 —— 读库失败 ≠ 「这份方案有问题」
         logger.warning("plan 编译失败(%s): %s", plan_id, exc, exc_info=True)
-        return None, f"编译没能跑起来: {type(exc).__name__}: {exc}"
+        return None, tr(f"编译没能跑起来: {type(exc).__name__}: {exc}", f"Compilation could not run: {type(exc).__name__}: {exc}")
 
 
 def _compile_errors(result) -> list[ConductCompileError]:
@@ -305,9 +311,9 @@ def compile_from_plan(plan_id: str, request: Request,
                       response: Response) -> ConductCompileResponse:
     """把一份 **APPROVED** 的 plan 干跑一遍编译器。**什么都不建、什么都不写。**
 
-    存在的理由:用户要在建 conduct **之前**看得见「这份方案缺哪几个数」。
-    没有它,唯一的反馈路径是 ``POST /api/conducts`` 失败 —— 那时人已经按下了
-    「新建」,而屏幕上说的是一串参数错误,看起来像是自己填错了表。
+    存在的理由:要在建 conduct **之前**看得见「这份方案缺哪几个数」。
+    没有它,唯一的反馈路径是 ``POST /api/conducts`` 失败 —— 那时「新建」已经按下,
+    而返回的是一串参数错误,看起来像是表填错了。
 
     ``ok=False`` 照样是 200:这是一个**答上来了的答案**(见
     :class:`ConductCompileResponse`)。plan 库没接上才是 503 —— 那是读不到。
@@ -369,7 +375,7 @@ def create_conduct(body: ConductCreateRequest, request: Request,
         from mast.conduct.validator import check_params
     except Exception as exc:  # noqa: BLE001
         response.status_code = http.HTTP_503_SERVICE_UNAVAILABLE
-        return ConductCreateResponse(degraded=True, errors=[f"conduct 层不可用: {exc}"])
+        return ConductCreateResponse(degraded=True, errors=[tr(f"conduct 层不可用: {exc}", f"Conduct layer unavailable: {exc}")])
 
     params = dict(body.params)
     created_by = f"ui:from_plan={body.from_plan_id}" if body.from_plan_id else "ui"
@@ -387,23 +393,28 @@ def create_conduct(body: ConductCreateRequest, request: Request,
                                     else http.HTTP_400_BAD_REQUEST)
             return ConductCreateResponse(
                 errors=[str(e) for e in result.errors]
-                       + [f"[未检查] {s}" for s in result.checks_skipped],
+                       + [tr(f"[未检查] {s}", f"[not checked] {s}") for s in result.checks_skipped],
                 compile_errors=_compile_errors(result))
         if spec_id and spec_id != result.spec_id:
             # 两个真源,而且**不一致** —— 明拒优于静默挑一个:挑错了的那次,
             # 建出来的 conduct 跑的是另一份实验,而请求里两个字段都各自「没错」。
             response.status_code = http.HTTP_400_BAD_REQUEST
             return ConductCreateResponse(errors=[
-                f"body.spec_id={spec_id!r} 与 plan {body.from_plan_id!r} 编出来的 "
-                f"{result.spec_id!r} 不一致 —— 走编译就把 spec_id 留空,"
-                f"模板由方案说了算"])
+                tr(f"body.spec_id={spec_id!r} 与 plan {body.from_plan_id!r} 编出来的 "
+                   f"{result.spec_id!r} 不一致 —— 走编译就把 spec_id 留空,"
+                   f"模板由方案说了算",
+                   f"body.spec_id={spec_id!r} does not match {result.spec_id!r} compiled from plan "
+                   f"{body.from_plan_id!r} - when compiling, leave spec_id empty; the plan decides "
+                   f"the template")])
         spec_id, params = result.spec_id, dict(result.params)
         created_by = f"compiler:plan={body.from_plan_id}"
 
     if not spec_id:
         response.status_code = http.HTTP_400_BAD_REQUEST
         return ConductCreateResponse(errors=[
-            "spec_id 必填(或给 from_plan_id 并把 params 留空,让编译器定模板)"])
+            tr("spec_id 必填(或给 from_plan_id 并把 params 留空,让编译器定模板)",
+               "spec_id is required (or give from_plan_id and leave params empty so the compiler "
+               "picks the template)")])
     try:
         spec = get_template(spec_id)
     except KeyError as exc:
@@ -446,13 +457,13 @@ def _param_echo(spec, params: dict, findings) -> list[ParamEcho]:
                      value=params.get(p.name, p.default),
                      unit=p.unit,
                      ok=p.name not in errs,
-                     error="；".join(errs.get(p.name, [])))
+                     error=tr("；", "; ").join(errs.get(p.name, [])))
            for p in spec.params_schema]
     # 模板没声明的键也要回显 —— 一个悄悄被忽略的参数,填的人会一直以为它生效了。
     declared = {p.name for p in spec.params_schema}
     for name in sorted(set(params) - declared):
         out.append(ParamEcho(name=name, value=params[name], ok=False,
-                             error="；".join(errs.get(name, ["spec 没有声明这个参数"]))))
+                             error=tr("；", "; ").join(errs.get(name, [tr("spec 没有声明这个参数", "The spec does not declare this parameter")]))))
     return out
 
 
@@ -466,13 +477,33 @@ def _stages_summary(spec) -> list[StageSummary]:
 # ── 批(**只接受 UI 来源**)─────────────────────────────────────────
 
 def _freeze_measured_params(spec, params: dict) -> "tuple[dict, dict, str]":
-    """批准时冻结需要读取的参数，返回合并参数、审计信息与拒批原因。
+    """approve 那一刻**实测**冻结的槽。返回 ``(合并后的 params, 审计块, 拒批理由)``。
 
-coord_epoch 来源由 MEASURED_AT_APPROVE 定义，应读取当前活动实验的
-坐标代次，不能信任手填值。参数批准后冻结，后续坐标核对据此执行。
+    今天只有一个:``coord_epoch``(单一真源
+    :data:`mast.conduct.compiler.MEASURED_AT_APPROVE`)。
 
-读取失败必须拒批并说明原因，不能把 None 写成零；零明确表示该作用域
-尚未粗动。此路径因此要求活动实验记录和可读的代次。"""
+    ## 为什么必须在 approve 这一刻查,而不是让人填
+
+    conduct 模板里的步骤把
+    ``expected_coord_epoch`` 绑到 ``params.coord_epoch``,而那个数若**由用户手填
+    **,就没有任何东西把它和 ``sts_center_*`` / ``sts_positions_m`` 的真实出身
+    对上账。填对了它守得住,填错了它就是一句安心话:一道「装得像在拦」的闸,
+    所以要由 plan→ConductSpec 编译器在 approve 时测出来。
+
+    approve 是**人按下去的那一刻**,而且此后 params 就冻住了。这一刻的当前代次,
+    正是「这批坐标属于哪一代」唯一有据可查的答案。
+
+    ## 读不到 ⇒ **拒批**,不是 0
+
+    ``read_current_epoch()`` 的三条纪律第二条:读不到返回 None,不是 0
+    —— 0 是一个真实答案(「这个作用域还没粗动过」)。把「读不到」冻成 0,
+    这份 conduct 从此带着一个**编出来的**代次章跑三天,而每一道核对都会说
+    「对得上」。所以这里的出口只有两个:查到了就冻,查不到就拒批,并告诉人
+    去开一个实验记录。
+
+    代价写在明处:approve 从此**要求有活动实验记录**。这是设计里预告过的那个
+    前置条件,不是回归。
+    """
     from mast.conduct.compiler import MEASURED_AT_APPROVE
 
     by_name = {p.name: p for p in getattr(spec, "params_schema", ()) or ()}
@@ -486,18 +517,25 @@ coord_epoch 来源由 MEASURED_AT_APPROVE 定义，应读取当前活动实验�
         epoch = read_current_epoch()
         if epoch is None:
             return params, {}, (
-                f"批不下去:{name} 要在 approve 这一刻**实测**冻结,而当前坐标"
-                f"代次**查不到**(没有活动实验记录 / 记录存储不可用)。"
-                f"查不到不等于 0 —— 0 是「这个作用域还没粗动过」这个真实答案。"
-                f"请先开一个实验记录再批。")
+                tr(f"批不下去:{name} 要在 approve 这一刻**实测**冻结,而当前坐标"
+                   f"代次**查不到**(没有活动实验记录 / 记录存储不可用)。"
+                   f"查不到不等于 0 —— 0 是「这个作用域还没粗动过」这个真实答案。"
+                   f"请先开一个实验记录再批。",
+                   f"Cannot approve: {name} must be frozen from a **measured** value at the moment of "
+                   f"approval, but the current coordinate generation **cannot be read** (no active "
+                   f"experiment record / record store unavailable). Unreadable is not 0 - 0 is the real "
+                   f"answer \"this scope has had no coarse move yet\". Open an experiment record "
+                   f"first, then approve."))
         under = p.min_value is not None and float(epoch) < float(p.min_value)
         over = p.max_value is not None and float(epoch) > float(p.max_value)
         if under or over:
             # 超包络**拒绝,不夹紧** —— 与 check_params 同一条纪律。夹紧会把一个
             # 越界的代次变成一次看起来正常的运行。
             return params, {}, (
-                f"批不下去:实测到的 {name}={epoch} 超出模板声明的包络 "
-                f"[{p.min_value}, {p.max_value}] —— 拒绝,不夹紧")
+                tr(f"批不下去:实测到的 {name}={epoch} 超出模板声明的包络 "
+                   f"[{p.min_value}, {p.max_value}] —— 拒绝,不夹紧",
+                   f"Cannot approve: the measured {name}={epoch} is outside the envelope declared by the "
+                   f"template [{p.min_value}, {p.max_value}] - refused, not clamped"))
         merged[name] = int(epoch)
         audit[name] = int(epoch)
     return merged, audit, ""
@@ -533,19 +571,23 @@ def approve_conduct(conduct_id: str, body: ConductApproveRequest,
     if row is None:
         response.status_code = http.HTTP_404_NOT_FOUND
         return ConductApproveResponse(conduct_id=conduct_id,
-                                       errors=["没有这份 conduct"])
+                                       errors=[tr("没有这份 conduct", "No such conduct")])
     if str(row.get("status")) != "draft":
         response.status_code = http.HTTP_409_CONFLICT
         return ConductApproveResponse(conduct_id=conduct_id,
                                        status=str(row.get("status")),
-                                       errors=[f"只有 DRAFT 能批准,现在是 "
-                                               f"{row.get('status')}"])
+                                       errors=[tr(f"只有 DRAFT 能批准,现在是 "
+                                                  f"{row.get('status')}",
+                                                  f"Only a DRAFT can be approved; it is now "
+                                                  f"{row.get('status')}")])
     spec = _spec_for(row)
     if spec is None:
         response.status_code = http.HTTP_409_CONFLICT
         return ConductApproveResponse(conduct_id=conduct_id, status="draft",
-                                       errors=[f"取不到模板 {row.get('spec_id')!r} —— "
-                                               f"这台机器上没有它"])
+                                       errors=[tr(f"取不到模板 {row.get('spec_id')!r} —— "
+                                                  f"这台机器上没有它",
+                                                  f"Cannot get template {row.get('spec_id')!r} - "
+                                                  f"it is not on this machine")])
 
     # ── 谁能点这个头 ────────────────────────────────────────────────
     # 生效档 = min(全局设置, 模板声明的上限)。模板可以把自己钉得更严。
@@ -575,7 +617,9 @@ def approve_conduct(conduct_id: str, body: ConductApproveRequest,
             validation_ok=bool(rep.ok), validation_complete=bool(rep.complete),
             findings=[str(f) for f in rep.findings],
             checks_skipped=list(rep.checks_skipped),
-            errors=["模板批不下去" + (f";另外这些没接上: {missing}" if missing else "")])
+            errors=[tr("模板批不下去", "Template cannot be approved")
+                    + (tr(f";另外这些没接上: {missing}", f"; also these are not wired: {missing}")
+                       if missing else "")])
 
     # 实测冻结的槽(coord_epoch)。**在渲染快照之前** —— 快照上写的必须是真正
     # 冻进库里的那一组数,不是用户填表时那一组。
@@ -595,7 +639,7 @@ def approve_conduct(conduct_id: str, body: ConductApproveRequest,
         if not doc:
             doc_err = svc.journal(conduct_id).status().reason
     except Exception as exc:  # noqa: BLE001
-        doc_err = f"快照渲染失败: {exc}"
+        doc_err = tr(f"快照渲染失败: {exc}", f"Snapshot rendering failed: {exc}")
 
     changes = {"status": "approved", "approved_by": body.approved_by,
                "approved_at": svc.store.now_iso()}
@@ -648,14 +692,15 @@ def list_conducts(status_filter: Optional[str] = Query(None, alias="status"),
         active = svc.store.active() or {}
     except Exception as exc:  # noqa: BLE001
         return ConductListResponse(engine_enabled=True, degraded=True,
-                                    reason=f"读库失败: {exc}")
+                                    reason=tr(f"读库失败: {exc}", f"Failed to read the store: {exc}"))
     out: list[ConductListRow] = []
     for r in rows:
         spec = _spec_for(r)
         stage_id, step_id = _position_ids(spec, r)
         out.append(ConductListRow(
             conduct_id=str(r["conduct_id"]),
-            title=spec.title if spec is not None else f"(模板 {r['spec_id']} 不在本机)",
+            title=(spec.title if spec is not None
+                   else tr(f"(模板 {r['spec_id']} 不在本机)", f"(template {r['spec_id']} is not on this machine)")),
             spec_id=str(r["spec_id"]), status=str(r["status"]),
             stage_id=stage_id, step_id=step_id,
             updated_at=str(r.get("updated_at") or "")))
@@ -684,10 +729,10 @@ def get_conduct(conduct_id: str, response: Response) -> ConductDetail:
         row = svc.store.get(conduct_id)
     except Exception as exc:  # noqa: BLE001
         return ConductDetail(conduct_id=conduct_id, degraded=True,
-                              reason=f"读库失败: {exc}")
+                              reason=tr(f"读库失败: {exc}", f"Failed to read the store: {exc}"))
     if row is None:
         response.status_code = http.HTTP_404_NOT_FOUND
-        return ConductDetail(conduct_id=conduct_id, reason="没有这份 conduct")
+        return ConductDetail(conduct_id=conduct_id, reason=tr("没有这份 conduct", "No such conduct"))
     try:
         return _detail(svc, row)
     except Exception as exc:  # noqa: BLE001 —— 面板端点永不 500
@@ -695,7 +740,7 @@ def get_conduct(conduct_id: str, response: Response) -> ConductDetail:
         return ConductDetail(conduct_id=conduct_id, ok=False, degraded=True,
                               status=str(row.get("status") or ""),
                               status_reason=str(row.get("status_reason") or ""),
-                              reason=f"面板渲染失败: {type(exc).__name__}: {exc}")
+                              reason=tr(f"面板渲染失败: {type(exc).__name__}: {exc}", f"Panel rendering failed: {type(exc).__name__}: {exc}"))
 
 
 def _position_ids(spec, row: dict) -> tuple[str, str]:
@@ -709,10 +754,10 @@ def _position_ids(spec, row: dict) -> tuple[str, str]:
         return "", ""
     stage = spec.stages[si]
     if pi == AT_ENTRY_GATE:
-        return stage.stage_id, "(入口闸门)"
+        return stage.stage_id, tr("(入口闸门)", "(entry gate)")
     steps = stage.all_steps
     if pi >= len(steps):
-        return stage.stage_id, "(出口闸门)"
+        return stage.stage_id, tr("(出口闸门)", "(exit gate)")
     return stage.stage_id, steps[pi].step_id
 
 
@@ -759,7 +804,9 @@ def _detail(svc, row: dict) -> ConductDetail:
     spec = _spec_for(row)
     na: list[str] = []
     if spec is None:
-        na.append(f"模板 {row.get('spec_id')!r} 不在本机 —— 阶段/步骤/预算上限都算不出来")
+        na.append(tr(f"模板 {row.get('spec_id')!r} 不在本机 —— 阶段/步骤/预算上限都算不出来",
+                     f"Template {row.get('spec_id')!r} is not on this machine - stage / step / budget "
+                     f"limits cannot be computed"))
 
     si, pi = int(row.get("stage_idx") or 0), int(row.get("step_idx") or 0)
     stage_pos, step_pos = StagePos(idx=si), StepPos(idx=pi)
@@ -769,13 +816,13 @@ def _detail(svc, row: dict) -> ConductDetail:
         stage_pos = StagePos(idx=si, id=stage.stage_id, title=stage.title)
         steps = stage.all_steps
         if pi == AT_ENTRY_GATE:
-            step_pos = StepPos(idx=pi, id="(入口闸门)", kind="gate")
+            step_pos = StepPos(idx=pi, id=tr("(入口闸门)", "(entry gate)"), kind="gate")
         elif pi < len(steps):
             st = steps[pi]
             step_pos = StepPos(idx=pi, id=st.step_id, title=st.title or st.step_id,
                                kind=st.kind, timeout_s=st.timeout_s)
         else:
-            step_pos = StepPos(idx=pi, id="(出口闸门)", kind="gate")
+            step_pos = StepPos(idx=pi, id=tr("(出口闸门)", "(exit gate)"), kind="gate")
     if spec is not None:
         for i, stage in enumerate(spec.stages):
             total = len(stage.all_steps)
@@ -806,7 +853,7 @@ def _detail(svc, row: dict) -> ConductDetail:
                     started_at = float(at)
                     break
         except Exception:  # noqa: BLE001
-            na.append("这一步的开始时刻(审计流读失败)")
+            na.append(tr("这一步的开始时刻(审计流读失败)", "The start time of this step (audit stream read failed)"))
     step_pos = step_pos.model_copy(update={"started_at": started_at})
 
     detour = None
@@ -865,7 +912,7 @@ def _pending_decision_view(svc, cid: str, na: list) -> "PendingDecisionView | No
     try:
         pending = svc.director.pending_decision(cid)
     except Exception as exc:  # noqa: BLE001
-        na.append(f"等人放行的闸门判定读不到: {exc}")
+        na.append(tr(f"等人放行的闸门判定读不到: {exc}", f"The gate decision awaiting release cannot be read: {exc}"))
         return None
     if not pending:
         return None
@@ -912,9 +959,9 @@ def _wait_view(row: dict, spec) -> "ActiveWaitView | None":
             waive_reason=str(w.get("waive_reason") or ""))
     lacking = []
     if not ack_ok:
-        lacking.append("人的确认")
+        lacking.append(tr("人的确认", "Human confirmation"))
     if not cond_ok:
-        lacking.append("物理条件")
+        lacking.append(tr("物理条件", "Physical condition"))
     return ActiveWaitView(
         wait_id=str(w.get("wait_id") or ""), kind=str(w.get("kind") or ""),
         message=str(w.get("message") or ""),
@@ -992,7 +1039,7 @@ def _budget(svc, cid: str, spec, na: list) -> BudgetView:
         try:
             detail = getter(cid)
         except Exception as exc:  # noqa: BLE001
-            reason = f"花销读取失败: {exc}"
+            reason = tr(f"花销读取失败: {exc}", f"Failed to read the cost: {exc}")
     if detail is not None:
         # 逐币种读数(``adapters.ConductCost``)。**不折成一个数** ——
         # 折成一个数就得有汇率,而这里没有。
@@ -1005,14 +1052,14 @@ def _budget(svc, cid: str, spec, na: list) -> BudgetView:
         try:
             got = reader(cid)
         except Exception as exc:  # noqa: BLE001
-            reason = f"花销读取失败: {exc}"
+            reason = tr(f"花销读取失败: {exc}", f"Failed to read the cost: {exc}")
         else:
             if isinstance(got, (int, float)) and not isinstance(got, bool):
                 spent = float(got)
     if spent is None and not by_currency and not reason:
         # **读不到 ≠ 花了 0。** 面板上一个空着的预算条会被读成「没花钱」。
-        reason = "还没有按 conduct 归集的实测花销口径 —— 读不到,不是 0"
-        na.append("USD 花销")
+        reason = tr("还没有按 conduct 归集的实测花销口径 —— 读不到,不是 0", "There is no measured cost aggregated per conduct yet - unreadable, not 0")
+        na.append(tr("USD 花销", "USD cost"))
     # **「拦不拦得住」不看这一刻花了多少。**
     #
     # 第一版把它写成 ``spent is not None`` —— 于是一份还没花过钱的 conduct
@@ -1081,7 +1128,7 @@ def _heartbeat(svc, row: dict, step: StepPos,
         return HeartbeatView(at=at if isinstance(at, (int, float)) else None,
                              age_s=age, stalled=False, threshold_s=loop_threshold,
                              in_step=in_step, step_elapsed_s=elapsed,
-                             reason=f"{status} 状态下心跳与停滞无关")
+                             reason=tr(f"{status} 状态下心跳与停滞无关", f"Heartbeat and stall are irrelevant in state {status}"))
 
     if age is None:
         # 一个处在驱动态、却**一次心跳都没有**的 conduct:Director 从来没碰过
@@ -1090,8 +1137,10 @@ def _heartbeat(svc, row: dict, step: StepPos,
         return HeartbeatView(at=None, age_s=None, stalled=True,
                              threshold_s=loop_threshold, in_step=in_step,
                              step_elapsed_s=elapsed,
-                             reason="处在驱动态却一次心跳都没有 —— "
-                                    "指挥线程从来没碰过它(引擎关着?)")
+                             reason=tr("处在驱动态却一次心跳都没有 —— "
+                                       "指挥线程从来没碰过它(引擎关着?)",
+                                       "In a driven state but no heartbeat at all - the commander "
+                                       "thread has never touched it (engine off?)"))
 
     if in_step:
         threshold = float(step.timeout_s or 0.0) + grace
@@ -1101,18 +1150,22 @@ def _heartbeat(svc, row: dict, step: StepPos,
                                  stalled=age > max(loop_threshold, threshold),
                                  threshold_s=max(loop_threshold, threshold),
                                  in_step=True, step_elapsed_s=None,
-                                 reason="在步里,但读不到这一步的开始时刻 —— "
-                                        "退回按心跳年龄判,结论偏保守")
+                                 reason=tr("在步里,但读不到这一步的开始时刻 —— "
+                                           "退回按心跳年龄判,结论偏保守",
+                                           "In a step, but the start time of this step cannot be read - "
+                                           "falling back to heartbeat age; the verdict is conservative"))
         return HeartbeatView(
             at=at, age_s=age, stalled=elapsed > threshold,
             threshold_s=threshold, in_step=True, step_elapsed_s=elapsed,
-            reason=(f"在步里:心跳不更新是设计,看的是这一步已经跑了 "
-                    f"{elapsed / 60:.0f} min(阈值 {threshold / 60:.0f} min)"))
+            reason=tr(f"在步里:心跳不更新是设计,看的是这一步已经跑了 "
+                      f"{elapsed / 60:.0f} min(阈值 {threshold / 60:.0f} min)",
+                      f"In a step: the heartbeat not updating is by design; what counts is that this step "
+                      f"has been running for {elapsed / 60:.0f} min (threshold {threshold / 60:.0f} min)"))
 
     return HeartbeatView(at=at, age_s=age, stalled=age > loop_threshold,
                          threshold_s=loop_threshold, in_step=False,
                          step_elapsed_s=None,
-                         reason=f"不在步里:心跳每 {tick:g} s 该更新一次")
+                         reason=tr(f"不在步里:心跳每 {tick:g} s 该更新一次", f"Not in a step: the heartbeat should update every {tick:g} s"))
 
 
 def _folder(svc, cid: str, experiment_id: str) -> FolderView:
@@ -1121,7 +1174,7 @@ def _folder(svc, cid: str, experiment_id: str) -> FolderView:
         return FolderView(path=st.path, spec_doc=st.spec_doc,
                           progress_lines=st.progress_lines, reason=st.reason)
     except Exception as exc:  # noqa: BLE001
-        return FolderView(reason=f"实验文件夹状态读不到: {exc}")
+        return FolderView(reason=tr(f"实验文件夹状态读不到: {exc}", f"The experiment folder state cannot be read: {exc}"))
 
 
 # ── 意图 ────────────────────────────────────────────────────────────
@@ -1135,7 +1188,7 @@ def _enqueue(conduct_id: str, op: str, response: Response, *,
         return OpResponse(degraded=True, errors=[ENGINE_OFF])
     if svc.store.get(conduct_id) is None:
         response.status_code = http.HTTP_404_NOT_FOUND
-        return OpResponse(errors=["没有这份 conduct"])
+        return OpResponse(errors=[tr("没有这份 conduct", "No such conduct")])
     try:
         op_id = svc.store.enqueue_op(conduct_id, op, args=args or {},
                                      requested_by=by)
@@ -1191,8 +1244,10 @@ def ack_wait(conduct_id: str, body: AckRequest, response: Response) -> OpRespons
         cur = (row.get("active_wait") or {}).get("wait_id")
         if cur and cur != body.wait_id:
             response.status_code = http.HTTP_409_CONFLICT
-            return OpResponse(errors=[f"wait_id {body.wait_id!r} 与当前等待 "
-                                      f"{cur!r} 不匹配 —— 这是对一个旧等待点的确认"])
+            return OpResponse(errors=[tr(f"wait_id {body.wait_id!r} 与当前等待 "
+                                         f"{cur!r} 不匹配 —— 这是对一个旧等待点的确认",
+                                         f"wait_id {body.wait_id!r} does not match the current wait "
+                                         f"{cur!r} - this is a confirmation of an old wait point")])
     out = _enqueue(conduct_id, "ack", response,
                    args={"wait_id": body.wait_id, "note": body.note}, by=body.by)
     if out.ok and svc is not None:
@@ -1243,13 +1298,17 @@ def override_decision(conduct_id: str, body: OverrideDecisionRequest,
         if pending is None:
             response.status_code = http.HTTP_409_CONFLICT
             return OpResponse(errors=[
-                "当前没有停在一个可放行的闸门判定上 —— "
-                "等待步要用 ack / waive-condition,别的停法要用 resume / abort"])
+                tr("当前没有停在一个可放行的闸门判定上 —— "
+                   "等待步要用 ack / waive-condition,别的停法要用 resume / abort",
+                   "It is not stopped at a gate decision that can be released - use ack / "
+                   "waive-condition for a wait step, resume / abort for other kinds of stop")])
         if str(pending.get("decision_id")) != str(body.decision_id):
             response.status_code = http.HTTP_409_CONFLICT
             return OpResponse(errors=[
-                f"decision_id {body.decision_id!r} 与当前判定 "
-                f"{pending.get('decision_id')!r} 不匹配 —— 这是对一个旧判定的放行"])
+                tr(f"decision_id {body.decision_id!r} 与当前判定 "
+                   f"{pending.get('decision_id')!r} 不匹配 —— 这是对一个旧判定的放行",
+                   f"decision_id {body.decision_id!r} does not match the current decision "
+                   f"{pending.get('decision_id')!r} - this is a release of an old decision")])
     return _enqueue(conduct_id, "override_decision", response,
                     args={"decision_id": str(body.decision_id),
                           "reason": body.reason}, by=body.by)
@@ -1281,8 +1340,8 @@ def abort_conduct(conduct_id: str, body: AbortRequest,
 #
 # 2026-08-20 执行层 campaign → conduct 改名（campaign 一词归还 logging/v2
 # 的科研纲领）。前端已经跟着改，但一个仍在运行的旧页面、一个存着旧 URL 的
-# 书签、一份贴在交接文档里的 curl —— 让它们直接 404 是把改名的代价转嫁给
-# 用户。所以旧路径原样再挂一份，指向同一批 handler。
+# 书签、一份记在文档里的 curl —— 让它们直接 404 等于把改名的代价转嫁给
+# 调用方。所以旧路径原样再挂一份，指向同一批 handler。
 #
 # 这一层**没有自己的逻辑**：路由对象是复制来的，handler 是同一个函数。
 # 下一版删掉它时，只删这一段，不会碰到任何业务代码。

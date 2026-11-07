@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import re
 
+from mast.i18n import tr
 from mast.core.types import SensorReading
 from mast.environment.alarm import AlarmSpec
 from mast.environment.base import EnvironmentSensor
@@ -90,7 +91,7 @@ def _sanitize_command(command: str) -> str:
 def _sanitize_channel(channel: str) -> str:
     # None / "" must fall back to 'A' — note str(None) == "None" happens to be a
     # 4-char alphanumeric token that would otherwise pass the regex and get sent
-    # as a literal channel "None" (review 2.1.13 #23).
+    # as a literal channel "None".
     if channel is None:
         return "A"
     ch = str(channel).strip()
@@ -101,7 +102,7 @@ def _sanitize_channel(channel: str) -> str:
 
 
 # Reading-unit implied by the SCPI query, so a CRDG?/SRDG? reading isn't
-# mislabelled as kelvin (review 2.1.13 #7).
+# mislabelled as kelvin.
 _UNIT_BY_COMMAND = {"KRDG?": "K", "CRDG?": "°C", "SRDG?": ""}
 
 
@@ -123,7 +124,7 @@ def parse_idn(raw: bytes | str) -> tuple[bool, str]:
     # Field-based, not substring: the manufacturer token is the FIRST CSV field
     # ("LSCI" exact, or "LAKESHORE..." on older units). A bare substring match
     # would mis-identify a device whose payload merely contains "LSCI", and an
-    # empty model field must NOT be accepted as a Lakeshore (review 2.1.13 #6).
+    # empty model field must NOT be accepted as a Lakeshore.
     is_lsci = first == "LSCI" or first.startswith("LAKESHORE")
     model = parts[1] if len(parts) > 1 else ""
     return (is_lsci and bool(model)), model
@@ -133,8 +134,7 @@ def parse_reading(raw: bytes | str) -> float:
     """Parse a ``KRDG?`` reply (e.g. ``+273.150E+0``) → float kelvin.
 
     Anchored match (not search): a malformed reply like ``ERR 5`` must raise
-    rather than silently return 5 as a plausible-but-wrong temperature
-    (review 2.1.13 #5)."""
+    rather than silently return 5 as a plausible-but-wrong temperature."""
     text = raw.decode("ascii", "replace") if isinstance(raw, (bytes, bytearray)) else str(raw)
     m = _NUM_RE.match(text.strip())
     if not m:
@@ -190,8 +190,13 @@ def probe_lakeshore(port: str, *, candidates=LSCI_SERIAL_CANDIDATES,
             if ok:
                 return LakeshoreInfo(model=model, idn=reply.decode("ascii", "replace").strip(),
                                      settings=settings)
-        except (SerialUnavailable, Exception):
-            pass
+            logger.debug("autodetect: %s at %s: reply %r is not a Lakeshore *IDN?",
+                         port, settings.label(), reply)
+        except (SerialUnavailable, Exception) as exc:
+            # DEBUG, one line per candidate: a silent probe is how nobody noticed that
+            # MAST had written to a laser's port (optical station).
+            logger.debug("autodetect: %s at %s: no Lakeshore answer (%s: %s)",
+                         port, settings.label(), type(exc).__name__, exc)
         finally:
             if transport is not None:
                 transport.close()
@@ -202,15 +207,20 @@ def probe_lakeshore(port: str, *, candidates=LSCI_SERIAL_CANDIDATES,
 # Decode tables for the Model 33x/335/336 family. Unknown codes fall back to the
 # raw number rather than a guess, so a model we haven't verified can't be shown
 # a confident-but-wrong label.
-_OUTMODE_MODES = {0: "关闭", 1: "闭环 PID", 2: "分段 (Zone)", 3: "开环",
-                  4: "监视输出", 5: "升温电源"}
-_OUTMODE_INPUTS = {0: "无", 1: "A", 2: "B", 3: "C", 4: "D"}
-_RANGE_LABELS = {0: "关闭", 1: "低", 2: "中", 3: "高"}
-_SENSOR_TYPES = {0: "未启用", 1: "二极管", 2: "铂电阻 RTD", 3: "NTC 热敏电阻",
-                 4: "热电偶", 5: "电容"}
+_OUTMODE_MODES = {0: tr("关闭", "Off"), 1: tr("闭环 PID", "Closed-loop PID"),
+                  2: tr("分段 (Zone)", "Zone"), 3: tr("开环", "Open loop"),
+                  4: tr("监视输出", "Monitor out"), 5: tr("升温电源", "Warm-up supply")}
+_OUTMODE_INPUTS = {0: tr("无", "None"), 1: "A", 2: "B", 3: "C", 4: "D"}
+_RANGE_LABELS = {0: tr("关闭", "Off"), 1: tr("低", "Low"), 2: tr("中", "Medium"), 3: tr("高", "High")}
+_SENSOR_TYPES = {0: tr("未启用", "Disabled"), 1: tr("二极管", "Diode"),
+                 2: tr("铂电阻 RTD", "Platinum RTD"), 3: tr("NTC 热敏电阻", "NTC thermistor"),
+                 4: tr("热电偶", "Thermocouple"), 5: tr("电容", "Capacitance")}
 # RDGST? bit flags — a non-zero status means the kelvin number is NOT trustworthy.
-_RDGST_FLAGS = ((1, "读数无效"), (16, "温度低于量程"), (32, "温度高于量程"),
-                (64, "传感器读数为零"), (128, "传感器超量程"))
+_RDGST_FLAGS = ((1, tr("读数无效", "invalid reading")),
+                (16, tr("温度低于量程", "temperature below range")),
+                (32, tr("温度高于量程", "temperature above range")),
+                (64, tr("传感器读数为零", "sensor reads zero")),
+                (128, tr("传感器超量程", "sensor over range")))
 
 # The health of one input's reading, as three DISTINCT answers. The third is the
 # whole point: "we asked and it is clean" and "we never got an answer" are
@@ -704,8 +714,8 @@ class LakeshoreTemperatureSensor(EnvironmentSensor):
     def close(self) -> None:
         """Release the OS handle. KEEPS the transport object.
 
-        Discarding it here (``self._transport = None``) is what reopened
-        /#15, which an earlier fix had already closed. The transport is SHARED
+        Discarding it here (``self._transport = None``) is what reintroduced
+        the shared-port bug that commit 0000000 had fixed. The transport is SHARED
         with this instrument's other inputs — one Lake Shore 335 on COM13 serves
         both ``SPM`` and ``Magnet``, and a Windows COM port admits exactly one
         handle. Dropping the reference means the next read calls

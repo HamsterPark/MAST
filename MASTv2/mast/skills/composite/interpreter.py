@@ -26,6 +26,7 @@ import logging
 import time
 from typing import Any, Iterator
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -179,7 +180,24 @@ def human_channel(payload: dict):
         （必须任其传播——graph_executor/execution_context/skill_adapter 三处
         已加控制流豁免）；resume 重放时返回用户决议。
       * 在图运行时之外（GUI 手动路径/裸测试）：langgraph 抛非 interrupt
-        异常 → 返回 None，调用方据此明确失败。"""
+        异常 → 返回 None，调用方据此明确失败。
+
+    直调 / 外部作业路径（``api/direct_exec.run_and_record`` 开了
+    ``operator_hitl.human_node.direct_scope``）：**光学站上**不走 interrupt —— 那条路径上没有图可暂停。
+    节点被映射成一条结构化操作员提示（routes → 选项），**阻塞等操作员在网页 / 启动器弹窗里答**，
+    有上限、随该次执行的中止事件取消；答了就返回 ``{"route", "note", "by"}``，超时 / 被关闭 /
+    被取消以 ``HumanNodeFailed`` 明确失败，操作员中止以 ``AbortRequested`` 结束整个组合技能。
+    **STM 站上**作用域的 ``human_nodes`` 是 False：走下面的老路径，外部作业
+    立刻以 ``needs_human_node`` 结束 —— 不阻塞、不弹窗、不占令牌，和没有操作员提示之前一样。
+    作用域靠 contextvar 判断：LangGraph 路径从不设它，行为不变。"""
+    try:
+        from mast.operator_hitl import human_node as _hn
+
+        scope = _hn.current_scope()
+    except Exception:  # noqa: BLE001 — 没有 operator_hitl 的构建：只剩下面的老路径
+        scope = None
+    if scope is not None and bool(getattr(scope, "human_nodes", False)):
+        return _hn.decide(payload, scope)
     try:
         from langgraph.errors import GraphInterrupt
         from langgraph.types import interrupt
@@ -418,8 +436,7 @@ class SpecComposite(CompositeSkillGraph):
                         # forbids yielding during GeneratorExit). The tip's safety
                         # is handled by the hardware E-STOP path (watchdog
                         # SafeRetract / EmergencyRetract), NOT this finally — make
-                        # the skipped cleanup OBSERVABLE rather than silent
-                        #.
+                        # the skipped cleanup OBSERVABLE rather than silent.
                         _hard_abort = True
                         if node.get("finally"):
                             logger.warning(
@@ -598,16 +615,21 @@ class SpecComposite(CompositeSkillGraph):
             executor.flush_sidecar()
             decision = human_channel(payload)
             if decision is None:
-                raise RuntimeError(
+                raise RuntimeError(tr(
                     f"human 节点 {nid!r} 需要 HITL 通道（agent 路径的"
                     " interrupt/approval pane）——当前执行路径没有人工决策"
-                    "通道，无法继续")
+                    "通道，无法继续",
+                    f"human node {nid!r} needs a HITL channel (the agent path's "
+                    "interrupt/approval pane) - the current execution path has no "
+                    "human-decision channel, cannot continue"))
             route = (decision.get("route") if isinstance(decision, dict)
                      else str(decision))
             if routes and route not in routes:
-                raise RuntimeError(
+                raise RuntimeError(tr(
                     f"human 节点 {nid!r} 收到不在选项内的决策 {route!r}"
-                    f"（可选：{routes}）")
+                    f"（可选：{routes}）",
+                    f"human node {nid!r} received a decision {route!r} that is not "
+                    f"among the options (allowed: {routes})"))
             cached = {"route": route or "resolved",
                       "note": (decision.get("note", "")
                                if isinstance(decision, dict) else "")}

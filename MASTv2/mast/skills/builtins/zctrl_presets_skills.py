@@ -30,6 +30,7 @@ from mast.core.zctrl_presets import (
     resolve,
     upsert_preset,
 )
+from mast.i18n import tr
 from mast.skills.base import BaseSkill
 
 
@@ -42,7 +43,7 @@ class ApplyZCtrlPreset(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description=(
+            description=tr(
                 "按**参数组名**把 Z 控制器参数(P/I 增益 + 设定点)写进硬件。\n\n"
                 "**这是设置 Z 参数的首选方式**,优先于 SetZCtrlGain / SetSetpoint:"
                 "具体数值由代码从用户维护的存储里取出并写入,你只需要说用哪一组,"
@@ -52,15 +53,31 @@ class ApplyZCtrlPreset(BaseSkill):
                 "- `scan` —— 扫图参数(按当前扫描帧尺寸自动选档,与 ScanAt 同源)\n"
                 "- 也可以直接用扫描档名(如 `atomic`)或自定义组名\n\n"
                 "用 ListZCtrlPresets 查看当前可用的全部组名与数值。"
-                "写入后会自动回读比对,不一致会报失败。"
+                "写入后会自动回读比对,不一致会报失败。",
+                "Write the Z controller parameters (P/I gains + setpoint) to the hardware by "
+                "**preset name**.\n\n"
+                "**This is the preferred way to set Z parameters**, ahead of SetZCtrlGain / "
+                "SetSetpoint: the concrete values are taken by code from the user-maintained store "
+                "and written; you only say which group to use, and do not need to (and should not) "
+                "write any numbers yourself.\n\n"
+                "Common group names:\n"
+                "- `approach` -- approach parameters (from the instrument profile, filled in by the user)\n"
+                "- `scan` -- scan parameters (tier chosen automatically from the current scan frame "
+                "size, same source as ScanAt)\n"
+                "- a scan tier name (e.g. `atomic`) or a custom group name also works\n\n"
+                "Use ListZCtrlPresets to see all currently available group names and values. "
+                "After writing, the values are read back and compared automatically; a mismatch "
+                "is reported as a failure.",
             ),
             parameters=[
                 ParameterSpec(
                     name="preset",
                     type="str",
-                    description=(
+                    description=tr(
                         "参数组名,如 'approach' / 'scan' / 档名 / 自定义组名。"
-                        "不确定有哪些就先调 ListZCtrlPresets。"
+                        "不确定有哪些就先调 ListZCtrlPresets。",
+                        "Preset name, e.g. 'approach' / 'scan' / a tier name / a custom group name. "
+                        "If unsure which exist, call ListZCtrlPresets first.",
                     ),
                     required=True,
                 ),
@@ -96,8 +113,9 @@ class ApplyZCtrlPreset(BaseSkill):
             return SkillResult(
                 skill_name="ApplyZCtrlPreset",
                 success=False,
-                error=(
-                    f"参数组 '{resolved.name}' 的增益写入失败: {gain_res.error}"
+                error=tr(
+                    f"参数组 '{resolved.name}' 的增益写入失败: {gain_res.error}",
+                    f"Writing the gains of preset '{resolved.name}' failed: {gain_res.error}",
                 ),
                 data={"preset": resolved.name,
                       "trace": resolved.trace_lines()},
@@ -112,9 +130,11 @@ class ApplyZCtrlPreset(BaseSkill):
                 return SkillResult(
                     skill_name="ApplyZCtrlPreset",
                     success=False,
-                    error=(
+                    error=tr(
                         f"参数组 '{resolved.name}' 的增益已写入,但设定点写入失败: "
-                        f"{sp_res.error}"
+                        f"{sp_res.error}",
+                        f"The gains of preset '{resolved.name}' were written, but writing the "
+                        f"setpoint failed: {sp_res.error}",
                     ),
                     data={"preset": resolved.name, "applied": applied,
                           "trace": resolved.trace_lines()},
@@ -137,7 +157,8 @@ class ApplyZCtrlPreset(BaseSkill):
                 "sources": resolved.sources,
                 "notes": resolved.notes,
                 "message": (
-                    f"已按参数组 '{resolved.name}' 设置 Z 控制器,写入后回读已确认:\n"
+                    tr(f"已按参数组 '{resolved.name}' 设置 Z 控制器,写入后回读已确认:\n",
+                       f"Z controller set from preset '{resolved.name}'; readback after writing confirmed:\n")
                     + summary + (f"\n{notes}" if notes else "")
                 ),
             },
@@ -157,10 +178,10 @@ class CreateZCtrlPreset(BaseSkill):
             # wrong number here is not one bad frame, it is every future
             # ApplyZCtrlPreset of this group — so it goes through the human
             # approval card, where the operator sees the ARGUMENTS AS PARSED
-            # (hitl_bridge mirrors them verbatim) and can edit or reject before
-            # anything is stored. That card is the "建完他被要求检查" step.
+            # (hitl_bridge mirrors them unchanged) and can edit or reject before
+            # anything is stored. That card is the post-creation review step.
             safety_level=SafetyLevel.DANGEROUS,
-            description=(
+            description=tr(
                 "新建(或覆盖)一个自定义 Z 参数组,之后可以用 ApplyZCtrlPreset 按名应用。"
                 "\n\n"
                 "**数值必须写成带 SI 前缀的字符串**,例如 p_gain='3p'、i_gain='180n'、"
@@ -169,23 +190,38 @@ class CreateZCtrlPreset(BaseSkill):
                 "裸数字仍然是一个合法的数,错一万亿倍也没人发现;而前缀掉了就解析失败,"
                 "你会立刻收到一次明确的拒绝。\n\n"
                 "不要用本技能去改进针参数或扫图档位表 —— 那两套由用户在设置界面维护。"
-                "本技能只管自定义组。"
+                "本技能只管自定义组。",
+                "Create (or overwrite) a custom Z parameter group, which can then be applied by "
+                "name with ApplyZCtrlPreset.\n\n"
+                "**Values must be written as strings with an SI prefix**, e.g. p_gain='3p', "
+                "i_gain='180n', setpoint_a='150p' -- the same notation as on the Nanonis panel. "
+                "**The prefix must not be omitted**: a bare number (such as '3') is rejected "
+                "outright. The reason is that once the magnitude is lost, a bare number is still a "
+                "valid number, and being wrong by a factor of 10^12 goes unnoticed; whereas a "
+                "dropped prefix fails to parse and you immediately get a clear rejection.\n\n"
+                "Do not use this skill to change the approach parameters or the scan tier table -- "
+                "those two are maintained by the user in the settings UI. "
+                "This skill only manages custom groups.",
             ),
             parameters=[
                 ParameterSpec(
                     name="name",
                     type="str",
-                    description=(
-                        "参数组名。不能与保留名(approach / scan)或扫描档名重复。"
+                    description=tr(
+                        "参数组名。不能与保留名(approach / scan)或扫描档名重复。",
+                        "Preset name. Must not duplicate a reserved name (approach / scan) or a "
+                        "scan tier name.",
                     ),
                     required=True,
                 ),
                 ParameterSpec(
                     name="p_gain",
                     type="str",
-                    description=(
+                    description=tr(
                         "Z 比例增益,带 SI 前缀的字符串,单位米。例如 '3p' = 3p m。"
-                        "典型 1p ~ 10p。**必须带前缀**。"
+                        "典型 1p ~ 10p。**必须带前缀**。",
+                        "Z proportional gain, a string with an SI prefix, in metres. E.g. '3p' = 3p m. "
+                        "Typical 1p ~ 10p. **The prefix is required**.",
                     ),
                     unit="m",
                     required=True,
@@ -193,9 +229,11 @@ class CreateZCtrlPreset(BaseSkill):
                 ParameterSpec(
                     name="i_gain",
                     type="str",
-                    description=(
+                    description=tr(
                         "Z 积分增益,带 SI 前缀的字符串,单位米每秒。"
-                        "例如 '180n' = 180n m/s。典型 10n ~ 1u。**必须带前缀**。"
+                        "例如 '180n' = 180n m/s。典型 10n ~ 1u。**必须带前缀**。",
+                        "Z integral gain, a string with an SI prefix, in metres per second. "
+                        "E.g. '180n' = 180n m/s. Typical 10n ~ 1u. **The prefix is required**.",
                     ),
                     unit="m/s",
                     required=True,
@@ -203,9 +241,11 @@ class CreateZCtrlPreset(BaseSkill):
                 ParameterSpec(
                     name="setpoint_a",
                     type="str",
-                    description=(
+                    description=tr(
                         "可选。电流设定点,带 SI 前缀的字符串,单位安培。"
-                        "例如 '150p' = 150p A。留空表示这组不改设定点。"
+                        "例如 '150p' = 150p A。留空表示这组不改设定点。",
+                        "Optional. Current setpoint, a string with an SI prefix, in amperes. "
+                        "E.g. '150p' = 150p A. Leave empty if this group should not change the setpoint.",
                     ),
                     unit="A",
                     required=False,
@@ -213,13 +253,15 @@ class CreateZCtrlPreset(BaseSkill):
                 ParameterSpec(
                     name="note",
                     type="str",
-                    description="可选。这组参数的用途说明,给用户看。",
+                    description=tr("可选。这组参数的用途说明,给用户看。",
+                                   "Optional. A description of what this group is for, shown to the user."),
                     required=False,
                 ),
                 ParameterSpec(
                     name="overwrite",
                     type="bool",
-                    description="同名组已存在时是否替换。默认 False(存在则拒绝)。",
+                    description=tr("同名组已存在时是否替换。默认 False(存在则拒绝)。",
+                                   "Whether to replace an existing group of the same name. Default False (refuse if it exists)."),
                     required=False,
                     default=False,
                 ),
@@ -259,9 +301,11 @@ class CreateZCtrlPreset(BaseSkill):
                 "stored": stored,
                 "trace": readback.trace_lines(),
                 "message": (
-                    f"参数组 '{stored['name']}' 已保存。存储里现在的值是:\n"
+                    tr(f"参数组 '{stored['name']}' 已保存。存储里现在的值是:\n",
+                       f"Preset '{stored['name']}' saved. The values now in the store are:\n")
                     + "\n".join(readback.trace_lines())
-                    + f"\n\n用 ApplyZCtrlPreset('{stored['name']}') 应用它。"
+                    + tr(f"\n\n用 ApplyZCtrlPreset('{stored['name']}') 应用它。",
+                         f"\n\nApply it with ApplyZCtrlPreset('{stored['name']}').")
                 ),
             },
         )
@@ -276,9 +320,11 @@ class ListZCtrlPresets(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description=(
+            description=tr(
                 "列出当前可用的全部 Z 参数组名及其数值与来源。"
-                "在调用 ApplyZCtrlPreset 之前不确定有哪些组时使用。"
+                "在调用 ApplyZCtrlPreset 之前不确定有哪些组时使用。",
+                "List all currently available Z preset names with their values and sources. "
+                "Use it when unsure which groups exist before calling ApplyZCtrlPreset.",
             ),
             parameters=[],
             estimated_duration_s=0.5,
@@ -319,9 +365,11 @@ class ListZCtrlPresets(BaseSkill):
             success=True,
             data={
                 "presets": rows,
-                "note": (
+                "note": tr(
                     "'scan' 按当前扫描帧尺寸选档,所以这里不显示它的具体数值 —— "
-                    "应用时才确定。"
+                    "应用时才确定。",
+                    "'scan' picks its tier from the current scan frame size, so its concrete "
+                    "values are not shown here -- they are determined when applied.",
                 ),
             },
         )

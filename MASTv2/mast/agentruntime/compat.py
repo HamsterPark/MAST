@@ -2,13 +2,13 @@
 
 为什么是桥，不是重写
 --------------------
-要移植的那 14 个中间件是四个月现场反馈的沉淀（SafetyGate 794 行、StallGuard 的阶梯与
-台账、AlertDelivery、记忆召回、心愿单回读……）。它们**不是框架适配层**，它们的逻辑就是
-业务本身。把它们逐个重抄一遍，等于把四个月的教训重新誊写一次，每一次誊写都是一次可能
-抄错的机会——而抄错一个安全件的症状是「守卫看起来在，实际不拦」。
+The 14 middlewares being ported (SafetyGate, StallGuard's ladder and ledger,
+AlertDelivery, memory recall, wishlist read-back, ...) are **not framework adapters**;
+their logic is the business logic. Re-copying each of them is a chance to introduce
+transcription errors, and for a safety component the symptom is a guard that appears
+present but does not block.
 
-更现实的一条：那 13 个 ``_shared/*_mw.py`` 改动面很大，机械重写整批文件容易出错。
-桥接**一行都不碰它们**，把改写风险降到零。
+A wide mechanical rewrite of the ``_shared/*_mw.py`` files is also risky. The bridge touches none of them.
 
 所以顺序是：先桥接（逻辑零风险地跑起来），等工作树落定、新运行时在生产上烤熟之后，
 再逐个把桥拆掉换成原生实现——那时每拆一个都有对照测试兜着。

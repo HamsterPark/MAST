@@ -1,0 +1,338 @@
+{
+  "name": "trace_budget_exact",
+  "description": "The budget is exactly what the trace needs: 5 events in all (L1: BS1, M1, D_R, D_T; L2: D_2) with max_trace_events 5 - the trace is complete, nothing is cut and no branch ends with budget. default_max_trace_events is the contract's value of the limit (the trace of this fixture is made with the smaller one in trace_options).",
+  "layout": {
+    "schema": 1,
+    "id": "budget",
+    "title": "Trace budget",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 50.0,
+        "y_mm": 62.5,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "las2",
+        "type": "laser",
+        "label": "L2",
+        "x_mm": 50.0,
+        "y_mm": 400.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 633.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "bs1",
+        "type": "beam_splitter",
+        "label": "BS1",
+        "x_mm": 150.0,
+        "y_mm": 62.5,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.4,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "m1",
+        "type": "mirror",
+        "label": "M1",
+        "x_mm": 150.0,
+        "y_mm": 150.0,
+        "angle_deg": 315.0,
+        "aperture_mm": 25.4,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det_r",
+        "type": "detector",
+        "label": "D_R",
+        "x_mm": 300.0,
+        "y_mm": 150.0,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det_t",
+        "type": "detector",
+        "label": "D_T",
+        "x_mm": 300.0,
+        "y_mm": 62.5,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det_2",
+        "type": "detector",
+        "label": "D_2",
+        "x_mm": 300.0,
+        "y_mm": 400.0,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "trace_options": {
+    "max_trace_events": 5
+  },
+  "default_max_trace_events": 5000,
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 62.5,
+              "x1": 150.0,
+              "y1": 62.5
+            }
+          ],
+          "events": [
+            {
+              "component": "bs1",
+              "action": "split",
+              "x": 150.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 100.0
+            }
+          ],
+          "end": "split"
+        },
+        {
+          "branch": "0.r",
+          "fraction": 0.5,
+          "segments": [
+            {
+              "x0": 150.0,
+              "y0": 62.5,
+              "x1": 150.0,
+              "y1": 150.0
+            },
+            {
+              "x0": 150.0,
+              "y0": 150.0,
+              "x1": 300.0,
+              "y1": 150.0
+            }
+          ],
+          "events": [
+            {
+              "component": "m1",
+              "action": "reflect",
+              "x": 150.0,
+              "y": 150.0,
+              "offset_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 187.5
+            },
+            {
+              "component": "det_r",
+              "action": "stop",
+              "x": 300.0,
+              "y": 150.0,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 337.5
+            }
+          ],
+          "end": "stop"
+        },
+        {
+          "branch": "0.t",
+          "fraction": 0.5,
+          "segments": [
+            {
+              "x0": 150.0,
+              "y0": 62.5,
+              "x1": 300.0,
+              "y1": 62.5
+            }
+          ],
+          "events": [
+            {
+              "component": "det_t",
+              "action": "stop",
+              "x": 300.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 250.0
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "las2",
+      "wavelength_nm": 633.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 400.0,
+              "x1": 300.0,
+              "y1": 400.0
+            }
+          ],
+          "events": [
+            {
+              "component": "det_2",
+              "action": "stop",
+              "x": 300.0,
+              "y": 400.0,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 250.0
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ]
+}

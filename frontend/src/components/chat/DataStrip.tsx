@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/api/client";
 import { writeStickyTab } from "@/lib/stickyTab";
+import { tr, langTag } from "@/lib/i18n";
 
 // LATEST DATA strip — faithful to the old Gradio build_data_strip_html: a row of
 // up to 4 most-recent .sxm scan THUMBNAILS + a "+" tile, headed by
@@ -31,7 +32,7 @@ function ThumbTile({ scan, onOpen }: { scan: ScanEntry; onOpen: () => void }) {
 
   const img = preview.data?.image ?? null;
   const t = scan.mtime
-    ? new Date(scan.mtime * 1000).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
+    ? new Date(scan.mtime * 1000).toLocaleTimeString(langTag(), { hour: "2-digit", minute: "2-digit", hour12: false })
     : "";
   const label = scan.name.replace(/\.[^.]+$/, "").slice(0, 16);
 
@@ -73,11 +74,8 @@ export function DataStrip() {
   });
 
   const scans = (q.data?.scans ?? []).slice(0, 4) as ScanEntry[];
-  // Land on the 数据 tab, not on wherever the operator last was in 实验记录.
-  // The route alone was not enough: `useStickyTab` restores the remembered
-  // sub-tab on arrival, so "打开数据浏览器" opened the records page and then
-  // navigated away from the thing it promised — a link that works and still
-  // does not take you there.
+  // Land on the data tab, not on the records sub-tab last visited. The route alone
+  // is not enough: `useStickyTab` restores the remembered sub-tab on arrival.
   const openData = () => {
     writeStickyTab("records", "data");
     navigate("/records/log");
@@ -95,7 +93,7 @@ export function DataStrip() {
         <button
           type="button"
           onClick={openData}
-          title="打开数据浏览器"
+          title={tr("打开数据浏览器", "Open data browser")}
           className="ml-auto cursor-pointer text-xs text-mast-accent hover:underline"
         >
           open data browser →
@@ -108,7 +106,7 @@ export function DataStrip() {
         <button
           type="button"
           onClick={openData}
-          title="打开数据浏览器"
+          title={tr("打开数据浏览器", "Open data browser")}
           className="flex h-[96px] w-24 shrink-0 items-center justify-center rounded-md border border-dashed border-mast-border text-xl text-mast-muted hover:border-mast-accent hover:text-mast-accent"
         >
           +

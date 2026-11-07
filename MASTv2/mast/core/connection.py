@@ -12,8 +12,10 @@ The Nanonis hardware interface is hardened by years of v1 production use.
 from __future__ import annotations
 
 import contextlib
+from mast.i18n import tr
 import io
 import logging
+import re
 import socket
 import threading
 import time
@@ -37,13 +39,27 @@ _ROLE_ATTR = {
 }
 
 
+def _occupant_hint(host, port) -> str:
+    """连不上 / 没回话时补一句「6501 已被 LabVIEW.exe（pid …）占用」。
+
+    本机上的其它程序（例如 LabVIEW VI）也可能连 Nanonis 6501，而那个口同时只服务一个控制方 ——
+    只报「超时」的话，看日志的人猜不到是谁占着。没发现别的客户端就返回空串，原错误原样不变。
+    """
+    try:
+        from mast.core.port_guard import occupant_hint
+
+        return occupant_hint(host, port)
+    except Exception:  # noqa: BLE001 — 一句提示，绝不影响连接逻辑
+        return ""
+
+
 # Reconnect throttle: when Nanonis is offline, watchdog (0.5 s) + GUI
 # refresh (5 s) would otherwise hammer _reconnect_role hundreds of times
 # per minute, blocking the GUI main thread and flooding the log. Exponential
 # backoff caps the rate; log throttle silences the spam.
 _RECONNECT_BACKOFF_S = (0.0, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 16.0)  # by failure count
 _RECONNECT_LOG_THROTTLE_S = 30.0
-# Graceful stale-socket retirement: per-recv timeout
+# Graceful stale-socket retirement (2026-07-10): per-recv timeout
 # and total budget for draining a timed-out connection to Nanonis's orderly
 # EOF before closing it. Keeps a dead peer from blocking the caller while
 # giving a live-but-slow Nanonis the chance to finish the interrupted reply
@@ -83,10 +99,92 @@ _MAX_CALL_RECV_TIMEOUT_S = 900.0
 #: "the link is busy" apart from "the link answered with an error".
 LOCK_BUSY_PREFIX = "RoleBusy:"
 
+# ── 模块首次加载的宽限（Mimea）────────────────────────────────
+#
+# ``BiasSpectr_Open`` 立即返回，紧跟的 ``BiasSpectr_LimitsSet`` 却在 5 s 的
+# socket 超时内没有回话 → 重连 → 同一条命令在替换连接上被对端重置（10054）→
+# ConfigureSTS 失败。0.5 s 后同一动作成功；关掉谱学窗口再 Open 是 0.09 s，
+# 不复现。所以推断是「Nanonis 启动后**第一次**加载这个模块」：Open 只是把加载
+# 发起，下一条命令要等加载完。**这是推断，没在刚启动的控制器上复现过。**
+#
+# 因此 ``<Module>_Open`` 本身，以及同一角色上紧跟它的**下一条**命令，recv 超时
+# 取 ``max(调用方给的, _MODULE_OPEN_RECV_S)``。只延长等待，不重发任何东西：
+# 等住比「超时 → 重连 → 重发」干净 —— 后者在真机上会让一个还在忙的端口挨一次
+# 替换连接。代价只是控制器真卡死时多等一会才报错。
+_MODULE_OPEN_RECV_S = 30.0
+#: 「紧跟 Open 的下一条命令」只在 Open 之后这么久之内认。过期就不算：
+#: 隔了一分钟的那条命令和模块加载无关，不该白拿一个长超时。
+_MODULE_OPEN_FOLLOWUP_WINDOW_S = 60.0
+
+# ── 「机会型」调用────────────────────────────────
+#
+# 监测服务的辅助通道轮询带 0.1 / 0.5 s 的锁等待上限：data 通道被扫描占着时它就
+# **有意**放弃这一次（拒而不排队），下一轮再来。原来每一次放弃都记一条 ERROR，
+# 扫描期间约 30 s 一条，把真正的争用（默认 30 s、急停 2 s 的等待）淹没在噪声里。
+# 锁等待上限低于这个值的调用按机会型处理：单条降为 DEBUG，按窗口汇总成 INFO。
+_OPPORTUNISTIC_LOCK_TIMEOUT_S = 1.0
+_OPPORTUNISTIC_SUMMARY_S = 300.0
+
+#: ``NanonisCallRecord`` 上的标记：这次失败发生在**传输层**（超时、连接被重置、
+#: 重连失败、空回包），而不是控制器答了一个错误。供调用方判断「对幂等命令重做
+#: 一次是否有意义」—— 应用层错误（参数被锁、越界）重做一万次也一样。
+_TRANSPORT_FLAG = "transport_failure"
+
+
+# ── 可能已经送达的命令不重发──────────────────────────────────
+#
+# 发送中出错、回包超时、空回包之后，safe_call 重连并把命令**原样重发一次**。对读取、
+# 属性设置、停止、退针这是对的；但这种失败多半意味着命令**已经送达**、控制器正在或
+# 已经执行了它 —— 对「每到一次就做一次事」的命令，重发就是让仪器做两次：粗动走 2N 步、
+# 两发脉冲、两次修针、再起一次扫掠或脚本。这些命令照样重连（下一条命令要能走），但
+# **不重发**，错误里说清「可能已经执行过」。连接在发送之前就不在（``get`` 抛
+# ConnectionError）的那一支，命令根本没发出去，照旧重连后发送。
+_ACTS_EACH_TIME = re.compile(r"(Pulse|Start|_Run)$|_Start[A-Z]")
+#: 名字上看不出、但每到一次也做一次事的命令：``Scan_Save`` 再到一次就再存一份
+#: 自动编号的文件（同一帧两份）；``AtomTrack_DriftComp`` 把原子追踪测得的漂移施加到漂移补偿上 —— 是不是
+#: 叠加没有查实，按会叠加处理（不重发的代价只是一条「先读状态」的错误）。
+_ACTS_EACH_TIME_NAMES: frozenset[str] = frozenset({"Scan_Save", "AtomTrack_DriftComp"})
+#: 按第一个参数才「做一次事」的命令：命令名 -> 不可重发的取值
+_ACTS_EACH_TIME_ARG0: dict[str, frozenset[int]] = {
+    "Scan_Action": frozenset({0, 3}),            # 0 Start、3 Resume；Stop / Pause / Freeze 可重发
+    "AutoApproach_OnOffSet": frozenset({1}),     # 开 = 再起一次进针；关可重发
+}
+
+
+def resend_is_safe(method_name: str, args: tuple = ()) -> bool:
+    """Whether a command that may already have reached the controller can be sent again
+    (see ``_ACTS_EACH_TIME``). Reads, property sets, stops and withdrawals can; pulses,
+    starts, runs, a scan start / resume and switching the auto-approach on cannot. An
+    argument that cannot be read as the code it should be counts as unsafe."""
+    if _ACTS_EACH_TIME.search(method_name) or method_name in _ACTS_EACH_TIME_NAMES:
+        return False
+    codes = _ACTS_EACH_TIME_ARG0.get(method_name)
+    if codes is None:
+        return True
+    try:
+        first = int(args[0])
+    except (IndexError, TypeError, ValueError):
+        return False
+    return first not in codes
+
 
 def is_lock_busy(record) -> bool:
     """True iff *record* failed only because the role lock could not be taken."""
     return str(getattr(record, "error", "") or "").startswith(LOCK_BUSY_PREFIX)
+
+
+def is_transport_failure(record) -> bool:
+    """True iff *record* failed at the TCP level (see ``_TRANSPORT_FLAG``).
+
+    False for an application error string, a busy role lock, an open circuit
+    breaker, a closed pool, and for any record that did not come from
+    :meth:`ConnectionPool.safe_call` (test doubles, the abort gate). Only a
+    caller that KNOWS its command is idempotent may act on True by resending."""
+    return bool(getattr(record, _TRANSPORT_FLAG, False))
+
+
+def _mark_transport(record) -> None:
+    setattr(record, _TRANSPORT_FLAG, True)
 
 
 class ConnectionPool:
@@ -99,7 +197,7 @@ class ConnectionPool:
         # monotonic timestamps. Used to throttle reconnect attempts + log
         # output when the instrument is offline.
         self._reconnect_state: dict[str, dict[str, float]] = {}
-        # Thread-safety: the pool is hit concurrently by
+        # Thread-safety the pool is hit concurrently by
         # the SafetyWatchdog (monitor, 0.5 s), InstrumentState background refresh
         # (monitor, 1 s) and the GUI/executor (main). Two threads on the SAME
         # role would otherwise interleave request/response bytes on ONE socket
@@ -123,6 +221,14 @@ class ConnectionPool:
         # Report the OPEN transition to the operator/ledger exactly once per
         # outage (not once per short-circuited call), cleared on recovery.
         self._comms_reported = False
+        # role -> monotonic time of its last successful ``<Module>_Open``; the
+        # next call on that role takes it (one shot). See _MODULE_OPEN_RECV_S.
+        self._open_followup: dict[str, float] = {}
+        # Opportunistic calls refused on a busy role since the last summary,
+        # keyed (role, method). See _OPPORTUNISTIC_LOCK_TIMEOUT_S.
+        self._skipped: dict[tuple[str, str], int] = {}
+        self._skipped_since = time.monotonic()
+        self._skipped_reported_at: float | None = None
 
     def _role_lock(self, role: str) -> threading.RLock:
         with self._struct_lock:
@@ -187,7 +293,8 @@ class ConnectionPool:
                 logger.info("Connected to %s on port %d", role, port)
             except Exception as e:
                 results[role] = False
-                logger.error("Failed to connect %s on port %d: %s", role, port, e)
+                logger.error("Failed to connect %s on port %d: %s%s", role, port, e,
+                             _occupant_hint(self._config.host, port))
         return results
 
     def get(self, role: str = "main") -> Nanonis:
@@ -234,9 +341,14 @@ class ConnectionPool:
         ``recv_timeout_s`` 只给**在仪器端阻塞很久才回话**的命令用
         （``BiasSpectr_Start``、``ZSpectr_Start`` 之类）。默认 ``None`` ＝
         沿用池子的 ``timeout_s``。见 :meth:`_raised_recv_timeout`。
+        ``<Module>_Open`` 与紧跟它的那一条命令另有模块加载的宽限
+        （:data:`_MODULE_OPEN_RECV_S`）。
         Suppresses nanonis_spm stdout noise. Returns NanonisCallRecord.
         On socket/connection errors, attempts one reconnect + retry
         (subject to per-role exponential backoff + throttled logging).
+        A failure at the TCP level is flagged (:func:`is_transport_failure`), and
+        when the resend fails too the error text leads with the FIRST failure —
+        the cause — not the second.
 
         ``lock_timeout_s`` bounds the wait for the per-role lock (default
         :data:`_ROLE_LOCK_TIMEOUT_S`). Emergency callers pass
@@ -287,20 +399,38 @@ class ConnectionPool:
                 f"{LOCK_BUSY_PREFIX} role '{role}' busy — another caller has held "
                 f"the Nanonis connection for more than {waited:.1f}s; "
                 f"'{method_name}' was NOT sent")
-            logger.error(
-                "ConnectionPool: role '%s' lock not acquired in %.1fs — "
-                "'%s' refused rather than queued", role, waited, method_name)
+            if 0 < lock_to < _OPPORTUNISTIC_LOCK_TIMEOUT_S:
+                # The caller chose to give up quickly (a monitoring poll that
+                # yields to a scan): an expected outcome, summarised, not an error.
+                logger.debug(
+                    "ConnectionPool: role '%s' busy — opportunistic '%s' "
+                    "(lock wait %.1fs) skipped", role, method_name, waited)
+                self._note_skipped(role, method_name, waited)
+            else:
+                logger.error(
+                    "ConnectionPool: role '%s' lock not acquired in %.1fs — "
+                    "'%s' refused rather than queued", role, waited, method_name)
             return record
         try:
+          recv_to = self._module_open_budget(role, method_name, recv_timeout_s)
+          # What went wrong on the first try, kept for the error text: when the
+          # resend fails too, the SECOND exception is usually a consequence (the
+          # controller resetting the replacement connection while it is still
+          # busy) and the first one is the cause. Reporting only the second sent
+          # an agent hunting a network fault (the cause was a 5 s
+          # timeout, the agent saw only WinError 10054).
+          first_failure = ""
           for attempt in range(2):
             try:
                 nn = self.get(role)
             except ConnectionError:
                 if attempt == 0:
                     self._log_reconnect_attempt(role, "connection lost")
+                    first_failure = f"role '{role}' had no connection"
                     if self._reconnect_role(role):
                         continue
                 record.error = f"Connection lost for role '{role}' and reconnect failed"
+                _mark_transport(record)
                 if count_health:
                     self._on_comms_failure(f"{role}: {record.error}")
                 return record
@@ -312,7 +442,7 @@ class ConnectionPool:
             method = getattr(nn, method_name)
             t0 = time.perf_counter()
             try:
-                with self._raised_recv_timeout(role, recv_timeout_s), \
+                with self._raised_recv_timeout(role, recv_to), \
                         contextlib.redirect_stdout(io.StringIO()):
                     ret = method(*args)
                 record.elapsed_s = time.perf_counter() - t0
@@ -326,12 +456,17 @@ class ConnectionPool:
                     if attempt == 0:
                         self._log_reconnect_attempt(
                             role, f"empty reply from '{method_name}' — 对端没答,按断链处理")
+                        first_failure = f"'{method_name}' got an empty reply"
+                        if not resend_is_safe(method_name, args):
+                            return self._not_resent(record, role, method_name, first_failure,
+                                                    count_health)
                         if self._reconnect_role(role):
                             continue
                     record.error = (
-                        f"'{method_name}' 回了一个空包 —— 对端没有作答。"
+                        tr(f"'{method_name}' 回了一个空包 —— 对端没有作答。"
                         "这不是「读到了一个空值」,是这条链路没在应答;"
-                        "已按断链记账并尝试重连。")
+                        "已按断链记账并尝试重连。", f"'{method_name}' returned an empty packet: the peer did not answer. This is not \"read an empty value\"; this link is not responding. It has been booked as a broken link and a reconnect was attempted."))
+                    _mark_transport(record)
                     if count_health:
                         self._on_comms_failure(f"{role} {method_name}: empty reply")
                     return record
@@ -339,14 +474,35 @@ class ConnectionPool:
                 # Nanonis returned an application-error string. Reset the breaker.
                 if count_health:
                     self._on_comms_success()
+                if method_name.endswith("_Open") and not record.error:
+                    self._arm_open_followup(role)
                 return record
             except (socket.error, OSError, ConnectionError) as e:
                 record.elapsed_s = time.perf_counter() - t0
+                what = self._describe_tcp_failure(method_name, e, recv_to)
+                if attempt == 0:
+                    # 只在每次失败的第一回补「谁占着这个口」：之后的重试共用这句话。
+                    # getattr 兜底：有测试用 __new__ 造池子，那时没有 _config。
+                    cfg = getattr(self, "_config", None)
+                    port = getattr(cfg, _ROLE_ATTR.get(role, "port_main"), None) if cfg else None
+                    if isinstance(port, int) and port > 0:
+                        what += _occupant_hint(getattr(cfg, "host", "127.0.0.1"), port)
                 if attempt == 0:
                     self._log_reconnect_attempt(role, f"TCP error on '{method_name}': {e}")
+                    first_failure = what
+                    if not resend_is_safe(method_name, args):
+                        return self._not_resent(record, role, method_name, what, count_health)
                     if self._reconnect_role(role):
                         continue
-                record.error = f"{type(e).__name__}: {e}"
+                    record.error = (f"{type(e).__name__}: {e} — {what}; reconnecting "
+                                    "failed or was deferred by the backoff, so "
+                                    "the command was not resent")
+                else:
+                    record.error = (f"{first_failure}; MAST re-established the "
+                                    "connection and resent the command once, and "
+                                    f"the resend failed too: {type(e).__name__}: {e}")
+                    logger.warning("ConnectionPool: %s", record.error)
+                _mark_transport(record)
                 if count_health:
                     self._on_comms_failure(f"{role} {method_name}: {record.error}")
                 return record
@@ -358,6 +514,98 @@ class ConnectionPool:
             lk.release()
 
         return record
+
+    def _not_resent(self, record, role: str, method_name: str, what: str,
+                    count_health: bool):
+        """A command that may already have reached the controller and acts each time it
+        arrives (:func:`resend_is_safe`): reconnect so the next call can go, but do not send
+        it again, and say so. Returns *record*."""
+        reconnected = self._reconnect_role(role)
+        record.error = (
+            f"{what}; MAST {'re-established' if reconnected else 'could not re-establish'} "
+            f"the connection but did not resend '{method_name}': the controller may already "
+            "have received and executed it, and sending it again could make the instrument "
+            "do it twice. Read the instrument state before trying again.")
+        _mark_transport(record)
+        logger.warning("ConnectionPool: %s", record.error)
+        if count_health:
+            self._on_comms_failure(f"{role} {method_name}: {record.error}")
+        return record
+
+    def _module_open_budget(self, role: str, method_name: str,
+                            recv_timeout_s: float | None) -> float | None:
+        """recv timeout for this call: the caller's, raised to
+        :data:`_MODULE_OPEN_RECV_S` for a ``<Module>_Open`` and for the ONE call
+        that follows a successful Open on the same role within
+        :data:`_MODULE_OPEN_FOLLOWUP_WINDOW_S`. Never lowers a larger budget."""
+        grace = method_name.endswith("_Open")
+        if not grace:
+            with self._struct_lock:
+                armed = self._followups().pop(role, None)
+            grace = (armed is not None
+                     and (time.monotonic() - armed) <= _MODULE_OPEN_FOLLOWUP_WINDOW_S)
+        if not grace:
+            return recv_timeout_s
+        return max(float(recv_timeout_s or 0.0), _MODULE_OPEN_RECV_S)
+
+    def _followups(self) -> dict:
+        # Created lazily as well as in __init__: a pool built with __new__ (one
+        # test does, to stay off TCP) must not lose every call to AttributeError.
+        d = getattr(self, "_open_followup", None)
+        if d is None:
+            d = self._open_followup = {}
+        return d
+
+    def _arm_open_followup(self, role: str) -> None:
+        with self._struct_lock:
+            self._followups()[role] = time.monotonic()
+
+    def _describe_tcp_failure(self, method_name: str, exc: BaseException,
+                              recv_to: float | None) -> str:
+        """One clause naming the command and how it failed, with the timeout
+        that applied when it is a timeout ("no reply within 5.0 s" tells the
+        reader the controller was slow, not that the network was down)."""
+        if isinstance(exc, (socket.timeout, TimeoutError)):
+            limit = recv_to if recv_to is not None else getattr(self._config, "timeout_s", None)
+            within = (f" within {float(limit):.1f} s"
+                      if isinstance(limit, (int, float)) and not isinstance(limit, bool) else "")
+            return f"'{method_name}' timed out: the controller sent no reply{within}"
+        return f"'{method_name}' failed on the socket ({type(exc).__name__}: {exc})"
+
+    def _note_skipped(self, role: str, method_name: str, waited: float) -> None:
+        """Count one skipped opportunistic call; log the first one and then one
+        summary per :data:`_OPPORTUNISTIC_SUMMARY_S` (at the next skip after the
+        window, so a quiet pool logs nothing)."""
+        now = time.monotonic()
+        with self._struct_lock:
+            skipped = getattr(self, "_skipped", None)
+            if skipped is None:                      # pool built with __new__
+                skipped = self._skipped = {}
+            key = (role, method_name)
+            skipped[key] = skipped.get(key, 0) + 1
+            reported_at = getattr(self, "_skipped_reported_at", None)
+            first = reported_at is None
+            if not first and (now - reported_at) < _OPPORTUNISTIC_SUMMARY_S:
+                return
+            counts = dict(skipped)
+            since = getattr(self, "_skipped_since", now)
+            skipped.clear()
+            self._skipped_since = now
+            self._skipped_reported_at = now
+        if first:
+            logger.info(
+                "ConnectionPool: role '%s' busy — the opportunistic call '%s' "
+                "(lock wait %.1fs) was skipped rather than queued. Callers with a "
+                "lock wait under %.1fs give up by design (a monitoring poll yields "
+                "to a scan); further skips are summarised every %.0f min.",
+                role, method_name, waited, _OPPORTUNISTIC_LOCK_TIMEOUT_S,
+                _OPPORTUNISTIC_SUMMARY_S / 60.0)
+            return
+        detail = ", ".join(f"'{m}' on '{r}' ×{n}" for (r, m), n in sorted(counts.items()))
+        logger.info(
+            "ConnectionPool: %d opportunistic call(s) skipped in the last %.0f min "
+            "because their role was busy: %s",
+            sum(counts.values()), (now - since) / 60.0, detail)
 
     # ── Last-resort unstick + the emergency call path ────────────────────
 
@@ -416,7 +664,9 @@ class ConnectionPool:
             from mast.core.diagnostics import record as _diag
 
             _diag("comms_force_close", f"nanonis_{role}",
-                  "为解救被卡死的调用，强制关闭了该角色的 TCP 连接", why=why)
+                  tr("为解救被卡死的调用，强制关闭了该角色的 TCP 连接",
+                     "Force-closed this role's TCP connection to rescue a stuck call"),
+                  why=why)
         except Exception:  # noqa: BLE001
             pass
         return True
@@ -465,7 +715,8 @@ class ConnectionPool:
             try:
                 from mast.core.diagnostics import record as _diag
                 _diag("comms_down", "nanonis_tcp",
-                      "连续 TCP 超时/断连,通信熔断——已停止发命令",
+                      tr("连续 TCP 超时/断连,通信熔断——已停止发命令",
+                         "Consecutive TCP timeouts/disconnects: the comms circuit breaker opened and commands have stopped"),
                       **self._breaker.snapshot())
             except Exception:  # noqa: BLE001 — diagnostics never breaks the pool
                 pass
@@ -585,8 +836,10 @@ class ConnectionPool:
             # always logs so the operator gets immediate feedback.
             if failures == 0 or (now - st["last_log_at"]) > _RECONNECT_LOG_THROTTLE_S:
                 logger.error(
-                    "Reconnect failed for '%s' on port %d (failure #%d): %s",
+                    "Reconnect failed for '%s' on port %d (failure #%d): %s%s",
                     role, port, failures + 1, e,
+                    _occupant_hint(getattr(getattr(self, "_config", None), "host", "127.0.0.1"),
+                                   port),
                 )
                 st["last_log_at"] = now
             else:

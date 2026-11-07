@@ -3,20 +3,18 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Badge, DegradedNote, EmptyNote, ErrorNote, Spinner } from "@/components/ui";
 import { Button, Field, Modal, SubTabs, useToast } from "@/components/controls";
+import { langTag, tr } from "@/lib/i18n";
 import { agentLabel } from "./registry";
 
 // ════════════════════════════════════════════════════════════════════════════
-// ArtifactEditor — operator editor for a single workspace artifact (Parity F2).
-//
-// The old Gradio 对象编辑 button was DEAD (called a route that never existed).
-// Wave F1 built the real backend; this wires it:
+// ArtifactEditor — operator editor for a single workspace artifact.
 //
 //   load body   GET  /api/artifacts/{id}/export?format=json  → {body, source}
-//   保存        POST   /api/artifacts/{id}/edit  {body}
-//   还原        DELETE /api/artifacts/{id}/edit
-//   历史        GET    /api/artifacts/{id}/history  → {entries:[{body,t}], current}
-//   查看 diff   GET    /api/artifacts/{id}/diff     → {diff, changed, has_*}
-//   导出        GET    /api/artifacts/{id}/export   → text/plain download
+//   save        POST   /api/artifacts/{id}/edit  {body}
+//   revert      DELETE /api/artifacts/{id}/edit
+//   history     GET    /api/artifacts/{id}/history  → {entries:[{body,t}], current}
+//   diff        GET    /api/artifacts/{id}/diff     → {diff, changed, has_*}
+//   export      GET    /api/artifacts/{id}/export   → text/plain download
 //
 // Opened as a Modal from each artifact row in ArtifactsView. Degrade-safe: every
 // read/write surfaces degraded / error / empty and never freezes the page.
@@ -27,7 +25,7 @@ type Tab = "edit" | "diff" | "history";
 function fmtTime(t?: number | null): string {
   if (t == null) return "—";
   try {
-    return new Date(t * 1000).toLocaleString();
+    return new Date(t * 1000).toLocaleString(langTag());
   } catch {
     return "—";
   }
@@ -163,13 +161,13 @@ export function ArtifactEditor({
     },
     onSuccess: (data) => {
       if (data?.ok && !data.degraded) {
-        // The detail carries the new version's filename — the operator needs to
-        // know their edit became a version, not an overwrite.
-        toast(data.detail ?? "已保存为新版本", "ok");
+        // The detail carries the new version's filename, so the operator can see
+        // the edit became a version rather than an overwrite.
+        toast(data.detail ?? tr("已保存为新版本", "Saved as a new version"), "ok");
         setLoadedFor(null); // re-seed from server on next render
         invalidateAll();
       } else {
-        toast(data?.detail ?? "保存未生效", "err");
+        toast(data?.detail ?? tr("保存未生效", "Save had no effect"), "err");
       }
     },
     onError: (e) => toast(String((e as Error)?.message ?? e), "err"),
@@ -185,17 +183,17 @@ export function ArtifactEditor({
     },
     onSuccess: (data) => {
       if (data?.ok || (data && !data.degraded)) {
-        toast(data.detail ?? (data.reverted ? "已回退到上一版本" : "没有可回退的历史"), "ok");
+        toast(data.detail ?? (data.reverted ? tr("已回退到上一版本", "Reverted to the previous version") : tr("没有可回退的历史", "No history to revert to")), "ok");
         setLoadedFor(null);
         invalidateAll();
       } else {
-        toast(data?.detail ?? "回退未生效", "err");
+        toast(data?.detail ?? tr("回退未生效", "Revert had no effect"), "err");
       }
     },
     onError: (e) => toast(String((e as Error)?.message ?? e), "err"),
   });
 
-  // 导出 — stream the current effective body as a text/plain download.
+  // Export: stream the current effective body as a text/plain download.
   function exportBody() {
     if (!artifactId) return;
     const url = `/api/artifacts/${encodeURIComponent(id)}/export?format=text`;
@@ -214,40 +212,40 @@ export function ArtifactEditor({
       {node}
       {artifactId && (
         <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-mast-muted">
-          {producer && <span>产出 · {agentLabel(producer)}</span>}
+          {producer && <span>{tr(`产出 · ${agentLabel(producer)}`, `Produced by ${agentLabel(producer)}`)}</span>}
           {body.data?.filename && (
-            <Badge tone="INFO">当前版本 · {body.data.filename}</Badge>
+            <Badge tone="INFO">{tr(`当前版本 · ${body.data.filename}`, `Current version · ${body.data.filename}`)}</Badge>
           )}
         </div>
       )}
 
       <SubTabs<Tab>
         tabs={[
-          { id: "edit", label: "编辑" },
-          { id: "diff", label: "差异" },
-          { id: "history", label: "历史" },
+          { id: "edit", label: tr("编辑", "Edit") },
+          { id: "diff", label: tr("差异", "Diff") },
+          { id: "history", label: tr("历史", "History") },
         ]}
         value={tab}
         onChange={setTab}
       />
 
-      {/* ── 编辑 ── */}
+      {/* ── edit ── */}
       {tab === "edit" && (
         <div className="space-y-3">
           {body.isPending && <Spinner />}
           {body.isError && <ErrorNote error={body.error} />}
           {body.data && body.data.degraded ? (
-            // Non-editable / missing file: show ONLY the honest reason. Rendering
-            // an editable-looking textarea + 保存 over a body the backend refuses
-            // to save is exactly the write-only "black hole" this editor replaced
-            // — the caller (AgentsPage) also stops such artifacts being clickable,
-            // this is the defense-in-depth for any other opener.
-            <EmptyNote label={body.data.detail ?? "该产物不可手工编辑"} />
+            // Non-editable / missing file: show ONLY the reason. An editable-looking
+            // textarea with a Save button over a body the backend refuses to save
+            // would be a write-only black hole. The caller (AgentsPage) also stops
+            // such artifacts being clickable; this is defense-in-depth for any
+            // other opener.
+            <EmptyNote label={body.data.detail ?? tr("该产物不可手工编辑", "This artifact cannot be edited manually")} />
           ) : (
             <>
               <Field
-                label="文档正文"
-                hint="保存 = 存为新版本（不覆盖智能体的版本）；下一个打开该文档的智能体会读到你的修改。回退 = 把上一版内容重新存为新版本，不删除任何历史。"
+                label={tr("文档正文", "Document body")}
+                hint={tr("保存 = 存为新版本（不覆盖智能体的版本）；下一个打开该文档的智能体会读到你的修改。回退 = 把上一版内容重新存为新版本，不删除任何历史。", "Save = store as a new version (the agent's version is not overwritten); the next agent to open this document will read your edit. Revert = re-store the previous version's content as a new version; no history is deleted.")}
               >
                 <textarea
                   value={draft}
@@ -262,22 +260,22 @@ export function ArtifactEditor({
                   onClick={() => save.mutate()}
                   disabled={save.isPending}
                 >
-                  {save.isPending ? "保存中…" : "保存"}
+                  {save.isPending ? tr("保存中…", "Saving…") : tr("保存", "Save")}
                 </Button>
                 <Button
                   variant="danger"
                   onClick={() => {
                     // No data is lost, so say so — a scary confirm on a non-destructive
                     // action just teaches people to click through the real ones.
-                    if (window.confirm("回退到上一版本？上一版会被重新存为新版本，任何历史版本都不会被删除。"))
+                    if (window.confirm(tr("回退到上一版本？上一版会被重新存为新版本，任何历史版本都不会被删除。", "Revert to the previous version? It will be re-saved as a new version; no history is deleted.")))
                       revert.mutate();
                   }}
                   disabled={revert.isPending}
                 >
-                  {revert.isPending ? "回退中…" : "回退上一版"}
+                  {revert.isPending ? tr("回退中…", "Reverting…") : tr("回退上一版", "Revert to previous")}
                 </Button>
                 <Button variant="default" onClick={exportBody}>
-                  导出
+                  {tr("导出", "Export")}
                 </Button>
               </div>
             </>
@@ -285,46 +283,46 @@ export function ArtifactEditor({
         </div>
       )}
 
-      {/* ── 差异 ── */}
+      {/* ── diff ── */}
       {tab === "diff" && (
         <div className="space-y-3">
           {diff.isPending && <Spinner />}
           {diff.isError && <ErrorNote error={diff.error} />}
           {diff.data && diff.data.degraded && (
-            <EmptyNote label={diff.data.detail ?? "该产物没有可对比的版本"} />
+            <EmptyNote label={diff.data.detail ?? tr("该产物没有可对比的版本", "This artifact has no version to compare against")} />
           )}
           {diff.data && !diff.data.degraded && (
             <>
               <div className="flex flex-wrap items-center gap-2 text-xs text-mast-muted">
                 <Badge tone={diff.data.changed ? "WARN" : "INFO"}>
-                  {diff.data.changed ? "有改动" : "无改动"}
+                  {diff.data.changed ? tr("有改动", "Changed") : tr("无改动", "Unchanged")}
                 </Badge>
-                {!diff.data.has_original && <span>（只有一个版本，没有可对比的先前版本）</span>}
+                {!diff.data.has_original && <span>{tr("（只有一个版本，没有可对比的先前版本）", "(Only one version; nothing earlier to compare)")}</span>}
               </div>
               {diff.data.changed && diff.data.diff ? (
                 <DiffView diff={diff.data.diff} />
               ) : (
-                <EmptyNote label="上一版本与当前版本一致，无差异。" />
+                <EmptyNote label={tr("上一版本与当前版本一致，无差异。", "The previous version matches the current one; no differences.")} />
               )}
             </>
           )}
         </div>
       )}
 
-      {/* ── 历史 ── */}
+      {/* ── history ── */}
       {tab === "history" && (
         <div className="space-y-3">
           {history.isPending && <Spinner />}
           {history.isError && <ErrorNote error={history.error} />}
           {history.data && history.data.degraded && (
-            <DegradedNote what="编辑历史（需活动会话）" />
+            <DegradedNote what={tr("编辑历史（需活动会话）", "Edit history (requires an active session)")} />
           )}
           {history.data && !history.data.degraded && (
             <>
               {history.data.current && (
                 <div className="rounded-md border border-mast-accent/40 bg-mast-accent/5 p-3">
                   <div className="mb-1 flex items-center gap-2 text-xs">
-                    <Badge tone="WARN">当前编辑</Badge>
+                    <Badge tone="WARN">{tr("当前编辑", "Current edit")}</Badge>
                     <span className="font-mono text-mast-muted">
                       {fmtTime(history.data.current.t)}
                     </span>
@@ -335,12 +333,12 @@ export function ArtifactEditor({
                 </div>
               )}
               {histEntries.length === 0 && !history.data.current && (
-                <EmptyNote label="暂无编辑历史。" />
+                <EmptyNote label={tr("暂无编辑历史。", "No edit history yet.")} />
               )}
               {histEntries.length > 0 && (
                 <div className="space-y-2">
                   <h5 className="text-xs font-medium text-mast-muted">
-                    历史版本（共 {history.data.count}）
+                    {tr(`历史版本（共 ${history.data.count}）`, `Previous versions (${history.data.count})`)}
                   </h5>
                   {histEntries
                     .slice()
@@ -357,10 +355,10 @@ export function ArtifactEditor({
                             onClick={() => {
                               setDraft(h.body);
                               setTab("edit");
-                              toast("已载入该历史版本到编辑框（点保存以应用）", "ok");
+                              toast(tr("已载入该历史版本到编辑框（点保存以应用）", "Loaded this version into the editor (click Save to apply)"), "ok");
                             }}
                           >
-                            载入到编辑框
+                            {tr("载入到编辑框", "Load into editor")}
                           </Button>
                         </div>
                         <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-mast-muted">
@@ -386,7 +384,7 @@ export function ArtifactEditor({
   }
 
   return (
-    <Modal open={open} onClose={onClose ?? (() => {})} title={`对象编辑 · ${id}`} wide>
+    <Modal open={open} onClose={onClose ?? (() => {})} title={tr(`对象编辑 · ${id}`, `Edit artifact · ${id}`)} wide>
       {inner}
     </Modal>
   );

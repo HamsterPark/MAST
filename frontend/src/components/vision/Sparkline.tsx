@@ -2,8 +2,8 @@
 // and the vision_buffer events/s sparkline. Pure presentational.
 //
 // ── why `fill` defaults to off ─────────────────────────────────────────────
-// then #10: 「不宜图线下方填色」. Shading the area under a line
-// claims the area means something, and here it cannot: the y scale is
+// Shading the area under a line claims the area means something, and here it
+// cannot: the y scale is
 // auto-fitted to [min, max] of THIS series (see `vmin`/`rng` below), so the
 // shaded region is measured from the window's own minimum, not from zero. A
 // 0.1 pA ripple and a 100 pA collapse therefore paint the same block. The line

@@ -1,0 +1,238 @@
+{
+  "name": "reflecting_variants",
+  "description": "Everything that reflects like a mirror: a grating (zero order), a reflecting sample and a custom component with behavior reflect, each folding the beam by 90 degrees.",
+  "layout": {
+    "schema": 1,
+    "id": "reflect",
+    "title": "Reflecting components",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 50.0,
+        "y_mm": 62.5,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "gr1",
+        "type": "grating",
+        "label": "GR",
+        "x_mm": 150.0,
+        "y_mm": 62.5,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.0,
+        "props": {
+          "lines_per_mm": 1200.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "sam1",
+        "type": "sample",
+        "label": "SAMPLE",
+        "x_mm": 150.0,
+        "y_mm": 187.5,
+        "angle_deg": 315.0,
+        "aperture_mm": 10.0,
+        "props": {
+          "reflects": true
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "cus1",
+        "type": "custom",
+        "label": "CUSTOM",
+        "x_mm": 300.0,
+        "y_mm": 187.5,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "behavior": "reflect"
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det1",
+        "type": "detector",
+        "label": "D1",
+        "x_mm": 300.0,
+        "y_mm": 350.0,
+        "angle_deg": 270.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 62.5,
+              "x1": 150.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 150.0,
+              "y0": 62.5,
+              "x1": 150.0,
+              "y1": 187.5
+            },
+            {
+              "x0": 150.0,
+              "y0": 187.5,
+              "x1": 300.0,
+              "y1": 187.5
+            },
+            {
+              "x0": 300.0,
+              "y0": 187.5,
+              "x1": 300.0,
+              "y1": 350.0
+            }
+          ],
+          "events": [
+            {
+              "component": "gr1",
+              "action": "reflect",
+              "x": 150.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 100.0
+            },
+            {
+              "component": "sam1",
+              "action": "reflect",
+              "x": 150.0,
+              "y": 187.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 225.0
+            },
+            {
+              "component": "cus1",
+              "action": "reflect",
+              "x": 300.0,
+              "y": 187.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 375.0
+            },
+            {
+              "component": "det1",
+              "action": "stop",
+              "x": 300.0,
+              "y": 350.0,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 537.5
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ]
+}

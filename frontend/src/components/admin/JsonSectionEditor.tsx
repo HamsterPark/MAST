@@ -4,17 +4,17 @@ import { api } from "@/api/client";
 import { Badge, Card, DegradedNote, ErrorNote, Spinner } from "@/components/ui";
 import { Accordion, Button, useToast } from "@/components/controls";
 import { StructuredView } from "@/components/admin/StructuredView";
+import { tr } from "@/lib/i18n";
 
 /** Generic effective+override section editor over the section-config seam
  *  (GET/POST → {data, override, has_override, degraded}). Used by knowledge,
- *  encyclopedia, and (as a fallback) guidance. The shapes are arbitrary nested
- *  JSON the old Gradio admin edited field-by-field.
+ *  encyclopedia, and (as a fallback) guidance. The shapes are arbitrary nested JSON.
  *
  *  READ: the effective value is rendered with <StructuredView> — a smart
  *  recursive renderer that shapes dicts into titled sections, lists of objects
  *  into reference tables, scalar lists into chips, etc. (NOT a raw JSON blob).
  *  WRITE: the override layer stays editable as validated JSON under a
- *  collapsible "高级" section (NO Dataframe, never freezes, round-trips the
+ *  collapsible "Advanced" section (no Dataframe, never freezes, round-trips the
  *  exact override the core persists). Empty/blank override ⇒ reset to default. */
 
 type SectionResponse = {
@@ -82,10 +82,10 @@ export function JsonSectionEditor({
     onSuccess: (res) => {
       setDraft(null);
       queryClient.invalidateQueries({ queryKey });
-      if (res?.degraded) toast("写入未生效（内核未接入）。", "err");
-      else if (res?.ok) toast(res.reloaded ? "已保存并热重载。" : "已保存。", "ok");
+      if (res?.degraded) toast(tr("写入未生效（内核未接入）。", "Write not applied (core not attached)."), "err");
+      else if (res?.ok) toast(res.reloaded ? tr("已保存并热重载。", "Saved and hot-reloaded.") : tr("已保存。", "Saved."), "ok");
     },
-    onError: (e) => toast(`保存失败：${String((e as Error)?.message ?? e)}`, "err"),
+    onError: (e) => toast(`${tr("保存失败：", "Save failed: ")}${String((e as Error)?.message ?? e)}`, "err"),
   });
 
   const onSave = (resetToDefault: boolean) => {
@@ -98,7 +98,7 @@ export function JsonSectionEditor({
     try {
       parsed = raw === "" ? {} : JSON.parse(raw);
     } catch (e) {
-      setJsonErr(`JSON 解析失败：${String((e as Error)?.message ?? e)}`);
+      setJsonErr(`${tr("JSON 解析失败：", "JSON parse error: ")}${String((e as Error)?.message ?? e)}`);
       return;
     }
     setJsonErr(null);
@@ -109,28 +109,31 @@ export function JsonSectionEditor({
     <Card>
       <div className="mb-2 flex items-center gap-2">
         <span className="text-sm font-medium text-mast-text">{title}</span>
-        {q.data?.has_override ? <Badge tone="INFO">已覆盖</Badge> : <Badge tone="AUTO">使用默认</Badge>}
+        {q.data?.has_override ? <Badge tone="INFO">{tr("已覆盖", "Overridden")}</Badge> : <Badge tone="AUTO">{tr("使用默认", "Using default")}</Badge>}
       </div>
       {description && <p className="mb-3 text-xs text-mast-muted">{description}</p>}
 
       {q.isPending && <Spinner />}
       {q.error && <ErrorNote error={q.error} />}
-      {q.data?.degraded && <DegradedNote what={`${title}（读取）`} />}
+      {q.data?.degraded && <DegradedNote what={`${title}${tr("（读取）", " (read)")}`} />}
 
       {q.data && !q.data.degraded && (
         <div className="space-y-4">
           <div>
-            <h4 className="mb-2 text-xs font-medium text-mast-muted">生效值（默认 + 覆盖，只读）</h4>
+            <h4 className="mb-2 text-xs font-medium text-mast-muted">{tr("生效值（默认 + 覆盖，只读）", "Effective value (default + override, read-only)")}</h4>
             {effective == null ? (
-              <p className="text-sm text-mast-muted">（无默认值）</p>
+              <p className="text-sm text-mast-muted">{tr("（无默认值）", "(no default value)")}</p>
             ) : (
               <StructuredView value={effective} />
             )}
           </div>
 
-          <Accordion title="高级：编辑覆盖 JSON" defaultOpen={false}>
+          <Accordion title={tr("高级：编辑覆盖 JSON", "Advanced: edit override JSON")} defaultOpen={false}>
             <p className="mb-2 text-xs text-mast-muted">
-              覆盖层（可编辑 JSON，留空 = 恢复默认）。保存后与上方默认值合并为生效值。
+              {tr(
+                "覆盖层（可编辑 JSON，留空 = 恢复默认）。保存后与上方默认值合并为生效值。",
+                "Override layer (editable JSON; empty = restore default). After saving it is merged with the defaults above into the effective value.",
+              )}
             </p>
             <textarea
               value={draft ?? overrideText}
@@ -144,15 +147,15 @@ export function JsonSectionEditor({
             {jsonErr && <p className="mt-1 text-xs text-mast-danger">{jsonErr}</p>}
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <Button variant="primary" disabled={save.isPending} onClick={() => onSave(false)}>
-                {save.isPending ? "保存中…" : "保存覆盖"}
+                {save.isPending ? tr("保存中…", "Saving…") : tr("保存覆盖", "Save override")}
               </Button>
               {draft != null && (
                 <Button variant="ghost" onClick={() => { setDraft(null); setJsonErr(null); }}>
-                  撤销编辑
+                  {tr("撤销编辑", "Discard edits")}
                 </Button>
               )}
               <Button variant="danger" disabled={save.isPending} onClick={() => onSave(true)}>
-                恢复默认
+                {tr("恢复默认", "Reset to default")}
               </Button>
             </div>
           </Accordion>

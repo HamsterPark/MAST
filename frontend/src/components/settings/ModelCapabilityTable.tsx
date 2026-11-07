@@ -1,12 +1,13 @@
 import { Badge } from "../ui";
+import { tr } from "@/lib/i18n";
 
-// Read-only model-capability table (设置 → 模型 → model_info). Mirrors the old
-// Gradio build_model_info_html: every MODEL_PRESETS row + derived limits.
+// Read-only model-capability table (Settings -> Models -> model_info): every
+// MODEL_PRESETS row plus derived limits.
 
 const THINKING_BADGE: Record<string, { label: string; tone: string }> = {
-  none: { label: "无", tone: "WARN" },
-  fixed: { label: "固定", tone: "INFO" },
-  tunable: { label: "可调", tone: "AUTO" },
+  none: { label: tr("无", "None"), tone: "WARN" },
+  fixed: { label: tr("固定", "Fixed"), tone: "INFO" },
+  tunable: { label: tr("可调", "Tunable"), tone: "AUTO" },
 };
 
 export type ModelRow = {
@@ -27,13 +28,13 @@ export function ModelCapabilityTable({ models }: { models: ModelRow[] }) {
       <table className="w-full text-sm">
         <thead className="bg-mast-bg/60 text-mast-muted">
           <tr>
-            <th className="px-3 py-2 text-left">别名</th>
+            <th className="px-3 py-2 text-left">{tr("别名", "Alias")}</th>
             <th className="px-3 py-2 text-left">Provider</th>
-            <th className="px-3 py-2 text-left">模型 ID</th>
-            <th className="px-3 py-2 text-left">思考</th>
-            <th className="px-3 py-2 text-right">输出上限</th>
-            <th className="px-3 py-2 text-right">输入上下文</th>
-            <th className="px-3 py-2 text-left">说明</th>
+            <th className="px-3 py-2 text-left">{tr("模型 ID", "Model ID")}</th>
+            <th className="px-3 py-2 text-left">{tr("思考", "Thinking")}</th>
+            <th className="px-3 py-2 text-right">{tr("输出上限", "Output limit")}</th>
+            <th className="px-3 py-2 text-right">{tr("输入上下文", "Input context")}</th>
+            <th className="px-3 py-2 text-left">{tr("说明", "Description")}</th>
           </tr>
         </thead>
         <tbody>
@@ -45,7 +46,7 @@ export function ModelCapabilityTable({ models }: { models: ModelRow[] }) {
                   {m.alias}
                   {m.is_default && (
                     <span className="ml-2 rounded bg-mast-accent/20 px-1.5 py-0.5 text-xs text-mast-accent">
-                      默认
+                      {tr("默认", "Default")}
                     </span>
                   )}
                 </td>

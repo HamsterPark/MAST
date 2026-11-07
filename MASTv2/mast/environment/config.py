@@ -21,7 +21,7 @@ Schema::
 
 Every accessor is best-effort: a missing / corrupt file yields the empty
 default ``{"autodetect": True, "sensors": []}`` so the program never crashes
-when no sensors are configured (explicit requirement #7).
+when no sensors are configured.
 """
 
 from __future__ import annotations
@@ -58,7 +58,12 @@ def load_config(path: Path | None = None) -> dict:
     try:
         if not p.exists():
             return json.loads(json.dumps(_DEFAULT))  # fresh copy
-        data = json.loads(p.read_text(encoding="utf-8"))
+        # utf-8-sig: a file saved by Windows PowerShell 5.1 (``Set-Content -Encoding
+        # UTF8``) starts with a BOM, which plain utf-8 rejects - and the failure path
+        # below falls back to ``autodetect: true``, i.e. a hand-written
+        # ``{"autodetect": false}`` would silently turn the serial scan back ON
+        # (found on an optical station).
+        data = json.loads(p.read_text(encoding="utf-8-sig"))
         if not isinstance(data, dict):
             return json.loads(json.dumps(_DEFAULT))
         data.setdefault("autodetect", True)
@@ -148,6 +153,29 @@ def set_autodetect(enabled: bool, *, path: Path | None = None) -> None:
     save_config(cfg, path)
 
 
+def autodetect_policy(cfg: dict | None = None) -> tuple[bool, str]:
+    """``(enabled, reason)``: whether MAST may probe the serial ports for gauges.
+
+    Auto-detection sends ``*IDN?`` (57600/9600/115200 baud, 7O1) and a Modbus frame to
+    every free port. On the optical station those ports belong to the lasers, the
+    temperature controller and the vendors' own software (design
+    ``optical_station_witec.md`` pitfall 8), so the **optical station profile forces
+    it off** whatever the file says. Everywhere else the file decides, and its default
+    is unchanged: on (an STM station finds its Lakeshore monitor this way).
+    """
+    try:
+        from mast import station
+
+        if station.is_optical():
+            return False, "forced off by the optical station profile"
+    except Exception:  # noqa: BLE001 - no profile information: the file decides
+        pass
+    cfg = cfg if cfg is not None else load_config()
+    if cfg.get("autodetect", True):
+        return True, "enabled in environment_sensors.json (default)"
+    return False, "autodetect is false in environment_sensors.json"
+
+
 __all__ = [
     "CONFIG_FILENAME",
     "SENSOR_TYPES",
@@ -158,4 +186,5 @@ __all__ = [
     "update_sensor",
     "remove_sensor",
     "set_autodetect",
+    "autodetect_policy",
 ]

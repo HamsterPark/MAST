@@ -3,13 +3,14 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Card, Badge, Spinner, ErrorNote, DegradedNote, EmptyNote } from "@/components/ui";
 import { Field, TextField, Button } from "@/components/controls";
+import { tr } from "@/lib/i18n";
 
-// 对话阶段摘要 (sharding output) — mirrors cognition_panel.render_phase_summaries_html
+// Conversation phase summaries (sharding output) — mirrors cognition_panel.render_phase_summaries_html
 // over PhaseManager.list_phases via GET /api/cognition/phases.
 //
 // Long conversations are auto/manually sharded; each shard yields a compressed
-// summary. Optionally scope to one experiment_id (read-only; query is debounced
-// to an explicit "查询" click so a stray keystroke never refetches).
+// summary. Optionally scope to one experiment_id (read-only; the query only runs
+// on an explicit "Query" click so a stray keystroke never refetches).
 
 export function PhaseSummaries() {
   const [draft, setDraft] = useState("");
@@ -32,16 +33,16 @@ export function PhaseSummaries() {
     <Card>
       <div className="mb-3 flex items-end gap-2">
         <div className="flex-1">
-          <Field label="实验 ID（可选）" hint="留空 = 全部实验的对话阶段">
+          <Field label={tr("实验 ID（可选）", "Experiment ID (optional)")} hint={tr("留空 = 全部实验的对话阶段", "Leave empty = conversation phases of all experiments")}>
             <TextField
               value={draft}
               onChange={setDraft}
-              placeholder="例如：exp-2026-06-..."
+              placeholder={tr("例如：exp-2026-06-...", "e.g. exp-2026-06-...")}
             />
           </Field>
         </div>
         <Button variant="primary" onClick={() => setExperimentId(draft)}>
-          查询
+          {tr("查询", "Query")}
         </Button>
         {experimentId && (
           <Button
@@ -51,26 +52,26 @@ export function PhaseSummaries() {
               setExperimentId("");
             }}
           >
-            清除筛选
+            {tr("清除筛选", "Clear filter")}
           </Button>
         )}
       </div>
 
       {q.isPending && <Spinner />}
       {q.isError && <ErrorNote error={q.error} />}
-      {q.data?.degraded && <DegradedNote what="分片管理" />}
+      {q.data?.degraded && <DegradedNote what={tr("分片管理", "Phase sharding")} />}
       {q.data && !q.data.degraded && phases.length === 0 && (
-        <EmptyNote label="尚无对话阶段。长对话会自动/手动分片，每段产出压缩摘要。" />
+        <EmptyNote label={tr("尚无对话阶段。长对话会自动/手动分片，每段产出压缩摘要。", "No conversation phases yet. Long conversations are sharded automatically or manually, and each shard yields a compressed summary.")} />
       )}
 
       {q.data && !q.data.degraded && phases.length > 0 && (
         <div className="space-y-1">
           <p className="px-1 text-xs text-mast-muted">
-            {q.data.count} 段
+            {tr(`${q.data.count} 段`, `${q.data.count} ${q.data.count === 1 ? "phase" : "phases"}`)}
             {experimentId && (
               <>
                 {" "}
-                · 实验 <code>{experimentId}</code>
+                · {tr("实验", "Experiment")} <code>{experimentId}</code>
               </>
             )}
           </p>
@@ -82,7 +83,7 @@ export function PhaseSummaries() {
                     #{p.phase_index ?? i}
                   </span>
                   <span>{p.title}</span>
-                  {p.open && <Badge tone="AUTO">进行中</Badge>}
+                  {p.open && <Badge tone="AUTO">{tr("进行中", "In progress")}</Badge>}
                 </div>
                 <div className="mt-1 whitespace-pre-wrap text-mast-muted">
                   {p.summary}

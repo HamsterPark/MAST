@@ -3,6 +3,7 @@ import UplotReact from "uplot-react";
 import type uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { useUiStore } from "@/store";
+import { tr } from "@/lib/i18n";
 import { Badge, EmptyNote } from "@/components/ui";
 import {
   asdUnit,
@@ -18,7 +19,7 @@ import { fmtBias, fmtCurrent } from "@/lib/units";
 import { useElementWidth, useViewportHeight } from "@/hooks/useElementWidth";
 import { TREND_RATIO, sizeChart } from "@/lib/chartSize";
 
-// 噪声谱快照 — one archived spectrum, optionally against an older one.
+// Noise spectrum snapshot — one archived spectrum, optionally against an older one.
 //
 // Log-log, always: a noise floor spans decades on both axes and is meaningless
 // on linear scales. Two curves at most, because the question this view answers
@@ -28,10 +29,9 @@ import { TREND_RATIO, sizeChart } from "@/lib/chartSize";
 // integrates to a variance and therefore what we store; A/√Hz is what every
 // preamp datasheet and every operator's intuition is written in.
 
-// Token names carry the `--mast-` prefix (index.css). They used to read
-// `--fg-muted` / `--border` / `--accent`, none of which are defined anywhere in
-// the app, so every lookup returned "" and the chart silently painted its
-// fallback literals on both themes — same note as EnvSeriesChart.tsx .
+// Token names must carry the `--mast-` prefix (index.css); unprefixed names are
+// not defined and would silently fall back to the literals below (same note as
+// EnvSeriesChart.tsx).
 function token(name: string): string {
   if (typeof window === "undefined") return "";
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -47,9 +47,8 @@ export interface SpectrumLike {
   n_segments: number;
   freqs_hz: number[];
   psd: number[];
-  // 当时的仪器状态。一直在库里，只是从来没送到眼前来过——需要记录
-  // 当时进针与否、偏压、setpoint 等状态。
-  // 每一个都可以是 null = 当时读不到，**不是**零/关。
+  // Instrument state at acquisition time. Each field may be null, meaning it
+  // could not be read then (not zero / off).
   quietness?: string;
   ctx_bias_v?: number | null;
   ctx_setpoint_a?: number | null;
@@ -57,7 +56,7 @@ export interface SpectrumLike {
   ctx_stable?: boolean | null;
 }
 
-/** 这条谱是在什么条件下测的。没有这一行，两条谱之间无法判断可不可比。 */
+/** The conditions this spectrum was measured under; without them two spectra cannot be judged comparable. */
 function StateRow({ s }: { s: SpectrumLike }) {
   const tun = tunnellingLabel(s);
   const caveat = ctxStabilityNote(s);
@@ -65,10 +64,10 @@ function StateRow({ s }: { s: SpectrumLike }) {
     <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
       <Badge tone={tun.tone as never}>{tun.label}</Badge>
       <span className="text-mast-muted">
-        偏压 <span className="font-mono text-mast-text">{fmtBias(s.ctx_bias_v)}</span>
+        {tr("偏压", "Bias")} <span className="font-mono text-mast-text">{fmtBias(s.ctx_bias_v)}</span>
       </span>
       <span className="text-mast-muted">
-        设定点 <span className="font-mono text-mast-text">{fmtCurrent(s.ctx_setpoint_a)}</span>
+        {tr("设定点", "Setpoint")} <span className="font-mono text-mast-text">{fmtCurrent(s.ctx_setpoint_a)}</span>
       </span>
       {caveat && <span className="text-mast-warn">{caveat}</span>}
     </div>
@@ -131,10 +130,10 @@ export function SpectrumViewer({
     const unit = primary ? (asd ? asdUnit(primary.unit) : primary.unit) : "";
     const series: uPlot.Series[] = [
       {},
-      { stroke: accent, width: 1.5, points: { show: false }, label: "当前" },
+      { stroke: accent, width: 1.5, points: { show: false }, label: tr("当前", "Current") },
     ];
     if (prepared?.y2) {
-      series.push({ stroke: dim, width: 1, dash: [4, 3], points: { show: false }, label: "对比" });
+      series.push({ stroke: dim, width: 1, dash: [4, 3], points: { show: false }, label: tr("对比", "Compare") });
     }
     return {
       width,
@@ -145,7 +144,7 @@ export function SpectrumViewer({
       legend: { show: false },
       cursor: { drag: { x: true, y: false }, points: { show: false } },
       axes: [
-        { stroke: muted, label: "频率 (Hz)", grid: { stroke: grid, width: 1 }, ticks: { stroke: grid } },
+        { stroke: muted, label: tr("频率 (Hz)", "Frequency (Hz)"), grid: { stroke: grid, width: 1 }, ticks: { stroke: grid } },
         { stroke: muted, label: unit, labelSize: 52, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid } },
       ],
       series,
@@ -171,7 +170,12 @@ export function SpectrumViewer({
   if (!primary) {
     return (
       <div ref={boxRef}>
-        <EmptyNote label="还没有噪声谱快照。仪器安静地隧穿一段时间之后才会出现第一条。" />
+        <EmptyNote
+          label={tr(
+            "还没有噪声谱快照。仪器安静地隧穿一段时间之后才会出现第一条。",
+            "No noise spectrum snapshots yet. The first one appears after the instrument has tunnelled quietly for a while.",
+          )}
+        />
       </div>
     );
   }
@@ -184,24 +188,34 @@ export function SpectrumViewer({
       <div className="mb-2 flex flex-wrap items-center gap-3 text-xs">
         <span className="font-medium">{channelLabel(primary.channel)}</span>
         <span className="text-mast-muted">
-          {fmtTs(primary.ts)} · {primary.n_segments} 段 · 窗口 {fmtSpan(primary.span_s)} ·
-          采样率 {Math.round(primary.fs_hz)} Hz
+          {fmtTs(primary.ts)} ·{" "}
+          {tr(
+            `${primary.n_segments} 段 · 窗口 ${fmtSpan(primary.span_s)} · 采样率 ${Math.round(primary.fs_hz)} Hz`,
+            `${primary.n_segments} segments · window ${fmtSpan(primary.span_s)} · sample rate ${Math.round(primary.fs_hz)} Hz`,
+          )}
         </span>
         <label className="ml-auto flex items-center gap-1">
           <input type="checkbox" checked={asd} onChange={(e) => setAsd(e.target.checked)} />
-          <span title="幅度谱密度 = √功率谱密度。前置放大器手册用的是这个单位。">
-            按 {asdUnit(primary.unit)} 显示
+          <span
+            title={tr(
+              "幅度谱密度 = √功率谱密度。前置放大器手册用的是这个单位。",
+              "Amplitude spectral density = √(power spectral density). Preamp datasheets use this unit.",
+            )}
+          >
+            {tr(`按 ${asdUnit(primary.unit)} 显示`, `Show as ${asdUnit(primary.unit)}`)}
           </span>
         </label>
       </div>
       <UplotReact options={options} data={data} />
       <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-mast-muted">
-        <span>{prepared?.f.length ?? 0} 个频点</span>
-        {compare && <span>虚线为 {fmtTs(compare.ts)} 的快照</span>}
+        <span>{tr(`${prepared?.f.length ?? 0} 个频点`, `${prepared?.f.length ?? 0} frequency points`)}</span>
+        {compare && (
+          <span>{tr(`虚线为 ${fmtTs(compare.ts)} 的快照`, `Dashed line: snapshot from ${fmtTs(compare.ts)}`)}</span>
+        )}
         {hover && (
           <span className="ml-auto tabular-nums">
             {fmtHz(hover.f)} · {fmtSci(hover.a)} {unit}
-            {hover.b != null ? ` · 对比 ${fmtSci(hover.b)} ${unit}` : ""}
+            {hover.b != null ? ` · ${tr("对比", "compare")} ${fmtSci(hover.b)} ${unit}` : ""}
           </span>
         )}
       </div>

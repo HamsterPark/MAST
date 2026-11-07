@@ -102,7 +102,7 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────
 # Path helpers — all delegate to agents._shared.data_paths (the private
 # _repo_root() walk resolved to the INSTALL dir in frozen builds, so every
-# derived path was wrong on deployments; ).
+# derived path was wrong on deployments).
 # ─────────────────────────────────────────────────────────────────────
 
 def _repo_root() -> Path:
@@ -307,7 +307,7 @@ def lookup_citation(key: str) -> str:
 # experiment records / citations it has gathered. The output never pretends
 # to be finished text — every unfilled slot is rendered as a visible
 # `[FILL: …]` marker so a downstream reader can see at a glance what is
-# still missing (审查: the old templates emitted bare
+# still missing (the old templates emitted bare
 # `{topic}`-style placeholders that were silently returned unfilled and read
 # as finished sentences).
 # ─────────────────────────────────────────────────────────────────────
@@ -536,7 +536,7 @@ def save_draft(title: str, markdown_text: str, doc_id: str = "",
     """Persist the report / manuscript to disk. MUST be called once the text is
     complete — a report that only exists in the conversation is invisible to the
     Paper Review agent's load_draft/check_citations tools and to the human
-    operator ("看不到论文在哪里").
+    operator.
 
     Args:
         title:         Short human-readable title (e.g. "Au(111) 形貌与 STS").
@@ -650,7 +650,7 @@ def export_report_html(doc_id: str = "current") -> str:
     旧实现是固定文件名直接覆盖，上一份交付件就这么没了。
 
     返回路径与内嵌图片数 —— 若有图片找不到，会**明确报告缺了几张**，因为一份看着
-    完整、实则少了数据的报告比报错更糟。在交接消息里写上这个路径。
+    完整、实则少了数据的报告会误导读者。在交接消息里写上这个路径。
     """
     from mast.agents._shared.report_html import render_html
 
@@ -711,7 +711,7 @@ def export_report_docx(doc_id: str = "current") -> str:
     写到 ``<实验>/exports/<名字>_vNNN_<时间戳>.docx``，带时间戳多份共存。
     图片嵌进文档，题注用 Word 的 ``Caption`` 样式。若有图嵌不进去（找不到、或是
     Word 不支持的格式如 PDF），会**在文中标出并在返回值里报数** —— 一份看着完整、
-    实则少了数据的报告比报错更糟。
+    实则少了数据的报告会误导读者。
     """
     try:
         from mast.agents._shared.report_docx import render_docx

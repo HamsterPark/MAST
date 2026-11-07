@@ -43,6 +43,7 @@
 
 from __future__ import annotations
 
+from mast.i18n import tr
 import difflib
 import logging
 import re
@@ -261,8 +262,10 @@ def _resolve(s, doc_id: str):
 
 
 def _not_found(doc_id: str) -> str:
-    return (f"找不到文档 {doc_id!r}。它可能已被搬移或从未存在 —— "
-            f"用 GET /api/documents 列一遍现有文档。")
+    return tr(f"找不到文档 {doc_id!r}。它可能已被搬移或从未存在 —— "
+              f"用 GET /api/documents 列一遍现有文档。",
+              f"Document {doc_id!r} not found. It may have been moved or never existed - "
+              f"list the existing documents with GET /api/documents.")
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -374,13 +377,13 @@ def get_document_diff(
         avail = [vm.v for vm in entry.versions]
         if not avail:
             return DocumentDiffResponse(doc_id=entry.doc_id, versions_available=[],
-                                        detail="该文档还没有任何版本。")
+                                        detail=tr("该文档还没有任何版本。", "This document has no versions yet."))
         to_version = int(to_v) or avail[-1]
         if to_version not in avail:
             response.status_code = 404
             return DocumentDiffResponse(
                 doc_id=entry.doc_id, versions_available=avail,
-                detail=f"没有版本 v{to_version}（现有：{avail}）")
+                detail=tr(f"没有版本 v{to_version}（现有：{avail}）", f"No version v{to_version} (available: {avail})"))
         if from_v:
             from_version = int(from_v)
             if from_version not in avail:
@@ -388,7 +391,7 @@ def get_document_diff(
                 return DocumentDiffResponse(
                     doc_id=entry.doc_id, to_version=to_version,
                     versions_available=avail,
-                    detail=f"没有版本 v{from_version}（现有：{avail}）")
+                    detail=tr(f"没有版本 v{from_version}（现有：{avail}）", f"No version v{from_version} (available: {avail})"))
         else:
             earlier = [v for v in avail if v < to_version]
             if not earlier:
@@ -396,7 +399,7 @@ def get_document_diff(
                     doc_id=entry.doc_id, from_version=0, to_version=to_version,
                     to_words=_words_of(entry, to_version), changed=False,
                     versions_available=avail,
-                    detail="只有一个版本，没有可对比的先前版本。")
+                    detail=tr("只有一个版本，没有可对比的先前版本。", "There is only one version; no earlier version to compare with."))
             from_version = earlier[-1]
 
         a = entry.read_text(from_version) or ""
@@ -448,7 +451,7 @@ def claim_document(doc_id: str, body: DocumentClaimRequest, request: Request,
         response.status_code = 400
         return DocumentSaveResponse(doc_id=entry.doc_id, detail=res.error)
     return _save_response(s, res,
-                          detail=f"已认领到实验 {res.experiment_id}，文档目录已搬到 {res.path}")
+                          detail=tr(f"已认领到实验 {res.experiment_id}，文档目录已搬到 {res.path}", f"Claimed by experiment {res.experiment_id}; the document directory was moved to {res.path}"))
 
 
 @router.post("/documents/{doc_id}/discard", response_model=DocumentSaveResponse,
@@ -480,8 +483,10 @@ def discard_document(doc_id: str, request: Request, response: Response,
         response.status_code = 400
         return DocumentSaveResponse(doc_id=entry.doc_id, detail=res.error)
     return _save_response(s, res, detail=(
-        f"已废弃（未删除，字节仍在 {res.path}）。要撤销请调 "
-        f"POST /api/documents/{res.doc_id}/restore。"))
+        tr(f"已废弃（未删除，字节仍在 {res.path}）。要撤销请调 "
+           f"POST /api/documents/{res.doc_id}/restore。",
+           f"Discarded (not deleted; the bytes are still at {res.path}). To undo, call "
+           f"POST /api/documents/{res.doc_id}/restore.")))
 
 
 @router.post("/documents/{doc_id}/restore", response_model=DocumentSaveResponse,
@@ -494,7 +499,7 @@ def restore_document(doc_id: str, request: Request, response: Response,
     """把废弃的文档搬回来。
 
     给了 ``experiment_id`` 就直接归到那个实验；没给就回 ``_unfiled`` 待认领 ——
-    **不猜**它原来属于谁（猜错的归属比没有归属更糟）。
+    **不猜**它原来属于谁（猜错的归属比没有归属更有害）。
     """
     try:
         s = _docstore(request)
@@ -509,7 +514,7 @@ def restore_document(doc_id: str, request: Request, response: Response,
     if not res.ok:
         response.status_code = 400
         return DocumentSaveResponse(doc_id=entry.doc_id, detail=res.error)
-    return _save_response(s, res, detail=f"已恢复到 {res.path}")
+    return _save_response(s, res, detail=tr(f"已恢复到 {res.path}", f"Restored to {res.path}"))
 
 
 @router.get("/documents/{doc_id}/export", response_model=None,
@@ -556,7 +561,7 @@ def export_document(
             response.status_code = 404
             return DocumentExportResponse(
                 doc_id=entry.doc_id, format=fmt, version=v,
-                detail=f"版本 v{v} 的文件读不到（现有：{[x.v for x in entry.versions]}）")
+                detail=tr(f"版本 v{v} 的文件读不到（现有：{[x.v for x in entry.versions]}）", f"The file of version v{v} cannot be read (available: {[x.v for x in entry.versions]})"))
     except Exception as exc:  # noqa: BLE001
         logger.warning("export resolve failed (%s): %r", doc_id, exc)
         return DocumentExportResponse(doc_id=doc_id, format=fmt, degraded=True,
@@ -576,7 +581,7 @@ def export_document(
         response.status_code = 400
         return DocumentExportResponse(
             doc_id=entry.doc_id, format=fmt, version=v,
-            detail=f"不支持的格式 {fmt!r}（可用：md | html | docx）")
+            detail=tr(f"不支持的格式 {fmt!r}（可用：md | html | docx）", f"Unsupported format {fmt!r} (available: md | html | docx)"))
 
     try:
         from mast.agents._shared.report_html import render_html
@@ -585,12 +590,12 @@ def export_document(
         # 按它解析的。传实验目录或 cwd 会让每张图都 missing（静默交付无图报告）。
         html, inlined, missing = render_html(
             text, base_dir=src.parent,
-            title=entry.meta.title or "实验文档",
+            title=entry.meta.title or tr("实验文档", "Experiment document"),
             subtitle=f"v{v:03d} · {entry.meta.updated_at or entry.meta.created_at}")
     except Exception as exc:  # noqa: BLE001
         logger.warning("html render failed (%s): %r", doc_id, exc)
         return DocumentExportResponse(doc_id=entry.doc_id, format="html", version=v,
-                                      degraded=True, detail=f"HTML 渲染失败：{exc}")
+                                      degraded=True, detail=tr(f"HTML 渲染失败：{exc}", f"HTML rendering failed: {exc}"))
 
     archived = ""
     try:
@@ -627,7 +632,7 @@ def _export_docx(s, entry, v: int, src, text: str, base: str, response: Response
 
         blob, embedded, missing = render_docx(
             text, base_dir=src.parent,
-            title=entry.meta.title or "实验文档",
+            title=entry.meta.title or tr("实验文档", "Experiment document"),
             subtitle=f"v{v:03d} · {entry.meta.updated_at or entry.meta.created_at}")
     except ImportError as exc:
         # python-docx 缺失（未装 / 打包漏了数据文件）—— 如实说，别让它长得像
@@ -636,14 +641,17 @@ def _export_docx(s, entry, v: int, src, text: str, base: str, response: Response
         response.status_code = 400
         return DocumentExportResponse(
             doc_id=entry.doc_id, format="docx", version=v, degraded=True,
-            detail=("Word 导出不可用：python-docx 未安装。"
-                    "装它：pip install python-docx（已在 requirements-v2.txt 里）。"
-                    "md 与 html 两种格式不受影响。"))
+            detail=tr("Word 导出不可用：python-docx 未安装。"
+                      "装它：pip install python-docx（已在 requirements-v2.txt 里）。"
+                      "md 与 html 两种格式不受影响。",
+                      "Word export unavailable: python-docx is not installed. "
+                      "Install it with: pip install python-docx (already in requirements-v2.txt). "
+                      "The md and html formats are not affected."))
     except Exception as exc:  # noqa: BLE001
         logger.warning("docx render failed (%s): %r", entry.doc_id, exc)
         response.status_code = 400
         return DocumentExportResponse(doc_id=entry.doc_id, format="docx", version=v,
-                                      degraded=True, detail=f"Word 渲染失败：{exc}")
+                                      degraded=True, detail=tr(f"Word 渲染失败：{exc}", f"Word rendering failed: {exc}"))
 
     archived = ""
     try:
@@ -671,7 +679,7 @@ def _export_stem(entry, v: int) -> str:
     """
     from mast.core.experiment_paths import slug
 
-    return f"{slug(entry.meta.title or '文档', 'document', max_chars=48)}_v{v:03d}"
+    return f"{slug(entry.meta.title or tr('文档', 'document'), 'document', max_chars=48)}_v{v:03d}"
 
 
 def _attachment(filename: str) -> dict[str, str]:
@@ -712,14 +720,15 @@ def get_document(doc_id: str, request: Request, response: Response,
         v = int(version) or None
         text = entry.read_text(v)
         if text is None:
-            detail = ("该文档还没有任何版本。"
+            detail = (tr("该文档还没有任何版本。", "This document has no versions yet.")
                       if not entry.versions else
-                      f"版本 v{version} 不存在（现有：{[x.v for x in entry.versions]}）")
+                      tr(f"版本 v{version} 不存在（现有：{[x.v for x in entry.versions]}）",
+                         f"Version v{version} does not exist (available: {[x.v for x in entry.versions]})"))
             return DocumentDetail(**base.model_dump(), versions=_version_infos(entry),
                                   version_requested=v, detail=detail)
         truncated = len(text) > _MAX_BODY_CHARS
         if truncated:
-            text = text[:_MAX_BODY_CHARS] + "\n\n…[截断]"
+            text = text[:_MAX_BODY_CHARS] + tr("\n\n…[截断]", "\n\n...[truncated]")
     except Exception as exc:  # noqa: BLE001
         logger.warning("document read failed (%s): %r", doc_id, exc)
         return DocumentDetail(doc_id=doc_id, degraded=True, detail=str(exc))
@@ -738,7 +747,7 @@ def put_document(doc_id: str, body: DocumentWriteRequest, request: Request,
                  response: Response) -> DocumentSaveResponse:
     """用户编辑 —— **存为新版本**（``created_by="operator"``）。
 
-    这是让用户成为参与者而不是旁观者的地方（）。旧的对象编辑器把
+    这是让用户成为参与者而不是旁观者的地方。旧的对象编辑器把
     修改 POST 进一个内存 dict，声称「orchestrator 下一个 super-step 会读」——
     从来没有任何 agent 读过它。写进文件就真的闭环了：``load_draft("current")``
     读的就是这一版。
@@ -758,18 +767,21 @@ def put_document(doc_id: str, body: DocumentWriteRequest, request: Request,
             response.status_code = 400
             return DocumentSaveResponse(
                 doc_id=entry.doc_id, latest_version=entry.latest_version,
-                detail="拒绝保存空文档 —— 清空正文不是一次编辑。")
+                detail=tr("拒绝保存空文档 —— 清空正文不是一次编辑。", "Refusing to save an empty document - clearing the body is not an edit."))
         if body.base_version is not None and int(body.base_version) != entry.latest_version:
             response.status_code = 409
             return DocumentSaveResponse(
                 doc_id=entry.doc_id, conflict=True,
                 latest_version=entry.latest_version,
                 versions_count=len(entry.versions),
-                detail=(f"该文档已有更新的版本（你基于 v{int(body.base_version):03d} 编辑，"
-                        f"当前最新是 v{entry.latest_version:03d}）。"
-                        f"请重新载入最新版本后再改 —— 没有任何版本被覆盖。"))
+                detail=tr(f"该文档已有更新的版本（你基于 v{int(body.base_version):03d} 编辑，"
+                          f"当前最新是 v{entry.latest_version:03d}）。"
+                          f"请重新载入最新版本后再改 —— 没有任何版本被覆盖。",
+                          f"This document has a newer version (you edited from v{int(body.base_version):03d}; "
+                          f"the latest is v{entry.latest_version:03d}). "
+                          f"Reload the latest version and edit again - no version was overwritten."))
         res = s.save(text=text, doc_id=entry.doc_id, created_by="operator",
-                     note=body.note or "用户编辑")
+                     note=body.note or tr("用户编辑", "User edit"))
     except Exception as exc:  # noqa: BLE001
         logger.warning("document write failed (%s): %r", doc_id, exc)
         return DocumentSaveResponse(doc_id=doc_id, degraded=True, detail=str(exc))
@@ -779,7 +791,7 @@ def put_document(doc_id: str, body: DocumentWriteRequest, request: Request,
     logger.info("operator edit saved → %s", res.path)
     return _save_response(
         s, res,
-        detail=f"已保存为新版本 v{res.version:03d}（智能体下次读取该文档时会看到你的修改）")
+        detail=tr(f"已保存为新版本 v{res.version:03d}（智能体下次读取该文档时会看到你的修改）", f"Saved as new version v{res.version:03d} (the agent will see your changes the next time it reads the document)"))
 
 
 @router.patch("/documents/{doc_id}", response_model=DocumentSaveResponse,
@@ -811,7 +823,7 @@ def patch_document(doc_id: str, body: DocumentPatchRequest, request: Request,
     if not res.ok:
         response.status_code = 400
         return DocumentSaveResponse(doc_id=doc_id, detail=res.error)
-    return _save_response(s, res, detail="已更新")
+    return _save_response(s, res, detail=tr("已更新", "Updated"))
 
 
 def _save_response(s, res: Any, *, detail: str) -> DocumentSaveResponse:

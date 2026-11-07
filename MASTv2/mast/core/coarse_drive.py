@@ -64,6 +64,7 @@ can import it.
 from __future__ import annotations
 
 import logging
+from mast.i18n import tr
 import threading
 import time
 from typing import Any, Callable
@@ -89,10 +90,10 @@ READBACK_REL_TOL = 0.02
 #: ``instrument_profile.sanitize``.
 _SPEC: dict[str, tuple[str, str, type, tuple[float, float], Any]] = {
     "max_amplitude_v": (
-        "本机粗动驱动幅度上限(用户声明)", "V", float,
+        tr("本机粗动驱动幅度上限(用户声明)", "Machine coarse-drive amplitude ceiling (user-declared)"), "V", float,
         (0.0, ABSOLUTE_MAX_AMPLITUDE_V), None),
     "expected_frequency_hz": (
-        "本机粗动驱动频率(用于移动前读回核对;留空=不核对频率)", "Hz", float,
+        tr("本机粗动驱动频率(用于移动前读回核对;留空=不核对频率)", "Machine coarse-drive frequency (used for the read-back check before a move; leave empty = no frequency check)"), "Hz", float,
         (0.0, ABSOLUTE_MAX_FREQUENCY_HZ), None),
 }
 _TEXT_KEYS: tuple[str, ...] = ("declared_by", "notes")
@@ -216,10 +217,10 @@ def is_declared() -> bool:
 # ── the gate ─────────────────────────────────────────────────────────────────
 
 _UNDECLARED = (
-    "本机粗动驱动幅度上限【尚未声明】,拒绝设置驱动电压。\n"
+    tr("本机粗动驱动幅度上限【尚未声明】,拒绝设置驱动电压。\n"
     "控制器支持的电压和这台机器的压电叠堆能承受的电压是两个数 —— 有些控制器支持 400 V,"
     "但有的叠堆 300 V 就烧了,而且没有任何读数会告诉你是哪一种。\n"
-    "请用户在【高级】页填写本机上限(需要 admin PIN)。在那之前 MAST 不会替这台机器猜。"
+    "请用户在【高级】页填写本机上限(需要 admin PIN)。在那之前 MAST 不会替这台机器猜。", "The machine coarse-drive amplitude ceiling is [NOT DECLARED]; refusing to set the drive voltage.\nThe voltage the controller supports and the voltage this machine's piezo stack can withstand are two different numbers: some controllers support 400 V while some stacks burn out at 300 V, and no reading tells you which one you have.\nAsk the user to fill in the machine ceiling on the [Advanced] page (needs the admin PIN). Until then MAST will not guess for this machine.")
 )
 
 
@@ -232,27 +233,27 @@ def authorize(amplitude_v: Any, frequency_hz: Any = None,
     try:
         amp = float(amplitude_v)
     except (TypeError, ValueError):
-        return False, f"驱动幅度不是一个数值:{amplitude_v!r}"
+        return False, tr(f"驱动幅度不是一个数值:{amplitude_v!r}", f"Drive amplitude is not a number: {amplitude_v!r}")
     if amp != amp or amp in (float("inf"), float("-inf")):
-        return False, "驱动幅度不是一个有限数值"
+        return False, tr("驱动幅度不是一个有限数值", "Drive amplitude is not a finite number")
     if amp < 0:
-        return False, "驱动幅度不能为负"
+        return False, tr("驱动幅度不能为负", "Drive amplitude cannot be negative")
 
     # Lock 4 — absolute, before anything configurable, so no declaration can
     # widen it and a fat-fingered ceiling cannot authorise an absurd request.
     if amp > ABSOLUTE_MAX_AMPLITUDE_V:
         return False, (
-            f"驱动幅度 {amp:g} V 超过绝对上限 {ABSOLUTE_MAX_AMPLITUDE_V:g} V —— "
-            "这已经不是「上限设低了」,而是数量级/单位错了。任何配置都不能放宽这一条。")
+            tr(f"驱动幅度 {amp:g} V 超过绝对上限 {ABSOLUTE_MAX_AMPLITUDE_V:g} V —— "
+            "这已经不是「上限设低了」,而是数量级/单位错了。任何配置都不能放宽这一条。", f"Drive amplitude {amp:g} V exceeds the absolute ceiling {ABSOLUTE_MAX_AMPLITUDE_V:g} V. This is no longer \"the ceiling was set low\" but an order-of-magnitude / unit error. No configuration can relax this."))
 
     if frequency_hz is not None:
         try:
             freq = float(frequency_hz)
         except (TypeError, ValueError):
-            return False, f"驱动频率不是一个数值:{frequency_hz!r}"
+            return False, tr(f"驱动频率不是一个数值:{frequency_hz!r}", f"Drive frequency is not a number: {frequency_hz!r}")
         if freq != freq or freq < 0 or freq > ABSOLUTE_MAX_FREQUENCY_HZ:
             return False, (
-                f"驱动频率 {frequency_hz!r} 超出 0..{ABSOLUTE_MAX_FREQUENCY_HZ:g} Hz")
+                tr(f"驱动频率 {frequency_hz!r} 超出 0..{ABSOLUTE_MAX_FREQUENCY_HZ:g} Hz", f"Drive frequency {frequency_hz!r} is outside 0..{ABSOLUTE_MAX_FREQUENCY_HZ:g} Hz"))
 
     # Lock 3 — the rig ceiling.
     ceiling = max_amplitude_v()
@@ -260,11 +261,11 @@ def authorize(amplitude_v: Any, frequency_hz: Any = None,
         return False, _UNDECLARED
     if amp > ceiling:
         return False, (
-            f"驱动幅度 {amp:g} V 超过本机声明上限 {ceiling:g} V —— 拒绝执行。\n"
+            tr(f"驱动幅度 {amp:g} V 超过本机声明上限 {ceiling:g} V —— 拒绝执行。\n"
             "【不会自动降到上限】:那样调用方会以为自己设的是 "
             f"{amp:g} V,而实际跑的是 {ceiling:g} V。要用更高的电压,"
-            "必须由用户先修改本机声明。")
-    return True, (f"{amp:g} V ≤ 本机声明上限 {ceiling:g} V（axis={axis}）")
+            "必须由用户先修改本机声明。", f"Drive amplitude {amp:g} V exceeds the machine-declared ceiling {ceiling:g} V; refusing to execute.\n[It will NOT be lowered to the ceiling automatically]: the caller would think it had set {amp:g} V while {ceiling:g} V actually ran. To use a higher voltage, the user must first change the machine declaration."))
+    return True, (tr(f"{amp:g} V ≤ 本机声明上限 {ceiling:g} V（axis={axis}）", f"{amp:g} V <= machine-declared ceiling {ceiling:g} V (axis={axis})"))
 
 
 def readback_matches(read_amplitude_v: Any,
@@ -284,14 +285,14 @@ def readback_matches(read_amplitude_v: Any,
         amp = float(read_amplitude_v)
     except (TypeError, ValueError):
         return False, (
-            "读不到当前粗动驱动幅度,拒绝粗动。"
-            "读不到 ≠ 没问题 —— 电压可能是别人在 Nanonis 界面里改的。")
+            tr("读不到当前粗动驱动幅度,拒绝粗动。"
+            "读不到 ≠ 没问题 —— 电压可能是别人在 Nanonis 界面里改的。", "Cannot read the current coarse-drive amplitude; refusing coarse motion. Cannot read != fine: someone may have changed the voltage in the Nanonis UI."))
     if amp != amp or amp in (float("inf"), float("-inf")):
-        return False, "粗动驱动幅度读数不是有限数值,拒绝粗动"
+        return False, tr("粗动驱动幅度读数不是有限数值,拒绝粗动", "The coarse-drive amplitude reading is not a finite number; refusing coarse motion")
     if amp > ceiling * (1.0 + READBACK_REL_TOL):
         return False, (
-            f"当前粗动驱动幅度 {amp:g} V 高于本机声明上限 {ceiling:g} V —— 拒绝粗动。"
-            "请在 Nanonis 里把它调回来,或由用户更新本机声明。")
+            tr(f"当前粗动驱动幅度 {amp:g} V 高于本机声明上限 {ceiling:g} V —— 拒绝粗动。"
+            "请在 Nanonis 里把它调回来,或由用户更新本机声明。", f"Current coarse-drive amplitude {amp:g} V is above the machine-declared ceiling {ceiling:g} V; refusing coarse motion. Set it back in Nanonis, or have the user update the machine declaration."))
 
     expected = expected_frequency_hz()
     if expected is not None and read_frequency_hz is not None:
@@ -300,14 +301,14 @@ def readback_matches(read_amplitude_v: Any,
         except (TypeError, ValueError):
             freq = float("nan")
         if freq != freq:
-            return False, "读不到当前粗动驱动频率,而本机声明了期望频率,拒绝粗动"
+            return False, tr("读不到当前粗动驱动频率,而本机声明了期望频率,拒绝粗动", "Cannot read the current coarse-drive frequency, and the machine declares an expected frequency; refusing coarse motion")
         if abs(freq - expected) > max(expected * 0.10, 1.0):
             # A warning, not a refusal: a wrong frequency changes how far a step
             # goes (bad for the odometer) but does not destroy the stack.
             return True, (
-                f"幅度 {amp:g} V 合规,但驱动频率 {freq:g} Hz 与声明的 "
-                f"{expected:g} Hz 不符 —— 每步走的距离会变,里程表会漂。")
-    return True, f"当前驱动幅度 {amp:g} V ≤ 本机声明上限 {ceiling:g} V"
+                tr(f"幅度 {amp:g} V 合规,但驱动频率 {freq:g} Hz 与声明的 "
+                f"{expected:g} Hz 不符 —— 每步走的距离会变,里程表会漂。", f"Amplitude {amp:g} V is compliant, but drive frequency {freq:g} Hz differs from the declared {expected:g} Hz: the distance per step will change and the odometer will drift."))
+    return True, tr(f"当前驱动幅度 {amp:g} V ≤ 本机声明上限 {ceiling:g} V", f"Current drive amplitude {amp:g} V <= machine-declared ceiling {ceiling:g} V")
 
 
 def format_block() -> str:

@@ -19,6 +19,7 @@ import logging
 
 import numpy as np
 
+from mast.i18n import tr
 from mast.skills.composite._base import CompositeSkillGraph
 from mast.skills.composite.graph_executor import (
     CompositeProgress,
@@ -56,31 +57,37 @@ class FullScan(CompositeSkillGraph):
             category=SkillCategory.COMPOSITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "一步式扫描:配置扫描区域、设定速度、启动、等它扫完。"
-                "相当于 ConfigureScan + SetScanSpeed + StartScan 合成一步。"
+                tr("一步式扫描:配置扫描区域、设定速度、启动、等它扫完。"
+                   "相当于 ConfigureScan + SetScanSpeed + StartScan 合成一步。",
+                   "One-step scan: configure the scan area, set the speed, start, and wait "
+                   "for it to finish. Equivalent to ConfigureScan + SetScanSpeed + "
+                   "StartScan combined.")
             ),
             parameters=[
                 ParameterSpec(
                     name="center_x_m",
                     type="float",
-                    description="扫描中心 X",
+                    description=tr("扫描中心 X", "Scan center X"),
                     unit="m",
                     required=True,
                 ),
                 ParameterSpec(
                     name="center_y_m",
                     type="float",
-                    description="扫描中心 Y",
+                    description=tr("扫描中心 Y", "Scan center Y"),
                     unit="m",
                     required=True,
                 ),
                 ParameterSpec(
                     name="width_m",
                     type="float",
-                    description=(
+                    description=tr(
                         "扫描宽度,单位**米**(SI),**不是纳米**。"
                         "换算:100 nm → 100n,50 nm → 50n。像 100 这样的裸值"
-                        "(=100 m)是单位写错,会被拒绝。"
+                        "(=100 m)是单位写错,会被拒绝。",
+                        "Scan width in **meters** (SI), **not nanometers**. "
+                        "Conversion: 100 nm → 100n, 50 nm → 50n. A bare value like 100 "
+                        "(= 100 m) is a unit mistake and will be rejected.",
                     ),
                     unit="m",
                     required=True,
@@ -90,10 +97,13 @@ class FullScan(CompositeSkillGraph):
                 ParameterSpec(
                     name="height_m",
                     type="float",
-                    description=(
+                    description=tr(
                         "扫描高度,单位**米**(SI),**不是纳米**。"
                         "换算:100 nm → 100n,50 nm → 50n。像 100 这样的裸值"
-                        "(=100 m)是单位写错,会被拒绝。"
+                        "(=100 m)是单位写错,会被拒绝。",
+                        "Scan height in **meters** (SI), **not nanometers**. "
+                        "Conversion: 100 nm → 100n, 50 nm → 50n. A bare value like 100 "
+                        "(= 100 m) is a unit mistake and will be rejected.",
                     ),
                     unit="m",
                     required=True,
@@ -103,11 +113,16 @@ class FullScan(CompositeSkillGraph):
                 ParameterSpec(
                     name="line_time_s",
                     type="float",
-                    description=(
+                    description=tr(
                         "正扫每线时间,单位秒。**除非要求说了一个数,否则"
                         "别填**:省略时,它来自用户的逐尺度档位表(这个帧尺寸"
                         "该配多快,是他们的知识,不是你的)。优先用 ScanAt,"
-                        "它对每一个扫描参数都是这么定的。"
+                        "它对每一个扫描参数都是这么定的。",
+                        "Forward-scan time per line, in seconds. **Do not fill it in unless "
+                        "the user named a number**: when omitted it comes from the user's "
+                        "per-scale preset table (how fast a frame of this size should run is "
+                        "their knowledge, not yours). Prefer ScanAt, which decides every "
+                        "scan parameter this way.",
                     ),
                     unit="s",
                     required=False,
@@ -121,18 +136,23 @@ class FullScan(CompositeSkillGraph):
                 ParameterSpec(
                     name="channels",
                     type="str",
-                    description="分号分隔的通道列表",
+                    description=tr("分号分隔的通道列表", "Semicolon-separated channel list"),
                     required=False,
                     default="",
                 ),
                 ParameterSpec(
                     name="wait_timeout_s",
                     type="float",
-                    description=(
+                    description=tr(
                         "等扫描完成最多等多久。留空则由**真实的扫描几何自动估算**"
                         "(从仪器读回的实际行数 × line_time × 2 个方向,"
                         "+30% 余量,下限 300 s)—— **不要**自己挑一个短值,"
-                        "否则可能把一张慢扫 / 高分辨的图截断。超时会停掉扫描。"
+                        "否则可能把一张慢扫 / 高分辨的图截断。超时会停掉扫描。",
+                        "Maximum time to wait for the scan to finish. When left empty it is "
+                        "**estimated from the real scan geometry** (actual line count read "
+                        "back from the instrument x line_time x 2 directions, +30% margin, "
+                        "minimum 300 s). **Do not** pick a short value yourself, or a slow / "
+                        "high-resolution frame may be cut off. On timeout the scan is stopped.",
                     ),
                     unit="s",
                     required=False,
@@ -223,13 +243,13 @@ class FullScan(CompositeSkillGraph):
         # Honour the requested line time (the ParameterSpec bounds it to
         # 0.01–60 s). The old min(..., 0.1) silently clamped every slow/
         # high-quality scan back to 0.1 s/line despite the declared range
-        #.
+        
         line_time, _lt_src = self._resolve_line_time(params)
         channels = params.get("channels", "")
         # Default the wait timeout to the scan's real duration, estimated from the
         # ACTUAL line count (params["_n_lines"], read from Scan_BufferGet by
-        # run_composite) × line_time × 2 directions — not a hardcoded 512 (field
-        # ). An explicit wait_timeout_s is honoured as-is.
+        # run_composite) × line_time × 2 directions — not a hardcoded 512.
+        # An explicit wait_timeout_s is honoured as-is.
         wait_timeout = self._resolve_wait_timeout(params)
 
         cfg_params: dict = {
@@ -354,8 +374,8 @@ class FullScan(CompositeSkillGraph):
             return self.fail(escape, repeated_crash=True,
                              center_x_m=center_x, center_y_m=center_y)
         # Read the ACTUAL scan resolution ONCE, up front, so the wait-timeout
-        # estimate matches the real scan instead of assuming 512 lines (field
-        # ). Stash it into params so self.plan() below uses the
+        # estimate matches the real scan instead of assuming 512 lines.
+        # Stash it into params so self.plan() below uses the
         # same number. Only needed when the caller did not pin wait_timeout_s.
         if params.get("wait_timeout_s") is None and params.get("_n_lines") is None:
             n_lines = self._read_scan_lines(context)
@@ -409,11 +429,15 @@ class FullScan(CompositeSkillGraph):
             data["_progress"] = executor.progress.to_dict()
             done = executor.progress.partial_data.get("scan_lines_done")
             total = executor.progress.partial_data.get("scan_lines_total")
-            where = (f"{done}/{total} 行" if done is not None and total
-                     else "行数未知")
+            where = (tr(f"{done}/{total} 行", f"{done}/{total} lines")
+                     if done is not None and total
+                     else tr("行数未知", "line count unknown"))
             return self.fail(
-                f"扫描中途停止({where}),这一帧没有扫完。可能是用户按了 Stop、"
-                f"Nanonis 自行停止,或安全停机。不要把这一帧当作完整图像使用。",
+                tr(f"扫描中途停止({where}),这一帧没有扫完。可能是用户按了 Stop、"
+                   f"Nanonis 自行停止,或安全停机。不要把这一帧当作完整图像使用。",
+                   f"Scan stopped midway ({where}); this frame is incomplete. The user may "
+                   f"have pressed Stop, Nanonis may have stopped by itself, or a safety "
+                   f"shutdown occurred. Do not use this frame as a complete image."),
                 stopped_early=True, **data,
             )
 
@@ -488,8 +512,11 @@ class FullScan(CompositeSkillGraph):
                 # cannot name the failure mode (multi-tip claims in particular
                 # have no reliable detector; see vigil_truth_validation).
                 out["vision_note"] = (
-                    "视觉判定针尖状态为 bad（状态档位判断，不指认具体失效模式）— "
-                    "不要将图像质量描述为正常；考虑 ConditionTip/TipPulse 后重扫。")
+                    tr("视觉判定针尖状态为 bad（状态档位判断，不指认具体失效模式）— "
+                       "不要将图像质量描述为正常；考虑 ConditionTip/TipPulse 后重扫。",
+                       "Vision judges the tip state as bad (a state-tier judgement; it does "
+                       "not name a specific failure mode) - do not describe the image "
+                       "quality as normal; consider rescanning after ConditionTip/TipPulse."))
             return out
         except Exception:  # noqa: BLE001 — vision verdict is best-effort
             return {}
@@ -516,7 +543,7 @@ class FullScan(CompositeSkillGraph):
             return None
         # Shared robust parse of the heterogeneous [name_len, name, rows, cols,
         # data_2D, dir] body (was inlined here; now shared with scan_frame.py /
-        # drift_track.py so all three stay in sync — 审查).
+        # drift_track.py so all three stay in sync).
         from mast.io.nanonis_files import parse_frame_grab
         return parse_frame_grab(rec.return_value)
 

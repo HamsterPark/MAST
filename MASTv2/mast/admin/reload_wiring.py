@@ -49,6 +49,8 @@ import weakref
 from dataclasses import dataclass
 from typing import Any
 
+from mast.i18n import tr
+
 logger = logging.getLogger(__name__)
 
 # orchestrator 侧的调度结果。写成常量是因为它会进日志和判定分支，
@@ -84,11 +86,13 @@ class RefreshOutcome:
 
     def describe(self) -> str:
         bits = [
-            f"手动路径={'已刷新' if self.guard_reloaded else '未刷新'}",
-            f"私聊图={'下一回合重建' if self.chat_invalidated else '未清缓存'}",
-            f"群聊图={self.orchestrator}",
+            tr(f"手动路径={'已刷新' if self.guard_reloaded else '未刷新'}",
+               f"manual path={'refreshed' if self.guard_reloaded else 'not refreshed'}"),
+            tr(f"私聊图={'下一回合重建' if self.chat_invalidated else '未清缓存'}",
+               f"chat graph={'rebuilt next turn' if self.chat_invalidated else 'cache not cleared'}"),
+            tr(f"群聊图={self.orchestrator}", f"group-chat graph={self.orchestrator}"),
         ]
-        return "；".join(bits)
+        return tr("；", "; ").join(bits)
 
 
 # 模块级状态。故意用弱引用持 runtime —— 这个模块不该让一个 CoreRuntime 活得比它
@@ -162,7 +166,8 @@ def _rebuild_orchestrator(rt: Any) -> str:
     except Exception:  # noqa: BLE001
         logger.exception("orchestrator rebuild request failed")
         return ORCH_FAILED
-    if "任务运行中" in suffix:
+    # The suffix is written in the process/request language (mast/i18n.py).
+    if "任务运行中" in suffix or "task is running" in suffix:
         return ORCH_SKIPPED_TASK_ACTIVE
     if suffix:
         return ORCH_REBUILDING

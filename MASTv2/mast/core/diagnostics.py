@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 from collections import deque
@@ -45,7 +46,7 @@ logger = logging.getLogger(__name__)
 # reader can ask "show me everything that REFUSED something" without knowing every
 # layer's name.
 Kind = Literal[
-    "precondition_block",   # a skill's stated precondition was not met 
+    "precondition_block",   # a skill's stated precondition was not met
     "safety_block",         # SafetyGate refused (global bounds / Layer-0 / rules)
     "mode_block",           # the operating-mode gate refused (safe/semi)
     "abort_block",          # an abort is latched — instrument writes refused
@@ -56,23 +57,23 @@ Kind = Literal[
     "step_skip",            # a composite step was SKIPPED (resume / already done)
     "step_fail",            # a composite step ran and failed
     "step_abort",           # a composite stopped because the operator aborted
-    "stall",                # the same failure, over and over 
+    "stall",                # the same failure, over and over
     # 本来会**打断工作**的东西,现在只通知。缓冲区关键事件不再弹
     # 确认框、DANGEROUS 技能不再等审批 —— 那条链路被割掉之后,这一行就是它留下的
-    # 全部痕迹。与 ``note`` 分开是因为它必须**可查**:验收这条改动时该问的
-    # 正是「本来会拦我几次」,而那是一个 kinds=("notice_only",) 的查询。
+    # 全部痕迹。与 ``note`` 分开是因为它必须**可查**:
+    # 「本来会拦几次」是一个 kinds=("notice_only",) 的查询。
     "notice_only",
     # An exception that KILLED a run. Distinct from the *_block kinds above:
     # those are the system correctly saying no, this is the system falling over.
-    # Added 2026-07-28 — a run died three times on "IndexError: list index out
-    # of range" and neither the log nor 诊断 held a single frame of it .
+    # Added because a run once died on "IndexError: list index out
+    # of range" and neither the log nor 诊断 held a single frame of it.
     "run_error",
-    # agent 自己铸了一个组合技能(技能工坊,2026-08-25)。与 ``note`` 分开是因为
-    # 验收这条能力时该问的正是「它今天造了什么」,而那是一个
+    # agent 自己铸了一个组合技能(技能工坊)。与 ``note`` 分开是因为
+    # 「它今天造了什么」是一个
     # kinds=("skill_forged",) 的查询 —— 混在 note 里就要靠文案 grep。
     "skill_forged",
-    # 目标终止判据求了一次值(2026-08-27)。与 ``note`` 分开的理由同上:用户
-    # 验收这条改动时问的是「它为什么停了 / 为什么没停」,而那是一个
+    # 目标终止判据求了一次值。与 ``note`` 分开的理由同上:
+    # 「它为什么停了 / 为什么没停」是一个
     # kinds=("goal_verdict",) 的查询 —— 混在 note 里就要靠文案 grep。
     # 三种决定各留一行:done 直接结束 / 判据没满足却想结束(转人问)/ 判不了
     # (照旧由模型说了算,但这件事本身要留痕)。
@@ -117,6 +118,12 @@ def _safe(v: Any) -> Any:
 
 
 def _dir() -> Path:
+    """``MAST_DIAGNOSTICS_DIR`` when set (the test suite points it at tmp so tests
+    do not pollute the real ledger), else
+    ``<project root>/artifacts/diagnostics``."""
+    env = os.environ.get("MAST_DIAGNOSTICS_DIR", "").strip()
+    if env:
+        return Path(env).expanduser()
     from mast._runtime_paths import project_root
 
     return project_root() / "artifacts" / "diagnostics"

@@ -1,7 +1,8 @@
-// 数据图库的提示条（旧版兼容格式 series.js 的 toast）。
+// Toast for the data gallery.
 //
-// 一个页面级的 store 而不是每个组件各自 useToast：底部操作条、已标记页、构建面板都要
-// 提示，而提示要在触发它的组件卸载之后还留着（比如「已存为系列」之后视图跳走了）。
+// A page-level store rather than a per-component useToast: the bottom bar, the Marked page and
+// the build panel all need toasts, and a toast must outlive the component that raised it (for
+// example the view navigates away right after "Saved as series").
 
 import { useEffect } from "react";
 import type { ReactNode } from "react";

@@ -1,4 +1,4 @@
-; MAST — Inno Setup script  (renamed from "MAST2"; v2.6.0+)
+﻿; MAST — Inno Setup script  (renamed from "MAST2"; v2.6.0+)
 ;
 ; Builds a single-file installer (MAST-Setup-v<version>-windows-x64.exe) that:
 ;   * installs MAST.exe + _internal/ to C:\MAST\ (default — user changeable)
@@ -13,6 +13,13 @@
 ; installer mast_setup.iss is dead (kept only as the source of v1's AppId).
 ;
 ; Build:  ISCC.exe /DMAST_VERSION=2.6.0 installer\mast2_setup.iss
+;
+; Unattended install (7.0+):  MAST-Setup-....exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+;   /DIR="D:\MAST" /DATADIR="D:\MAST-data" /MERGETASKS="!desktopicon" [/NOICONS] [/LOG=...]
+; Every question in [Code] goes through SuppressibleMsgBox, whose silent default is the
+; cautious answer: upgrade in place yes; uninstall a legacy product no; close a running
+; MAST no (the install is cancelled instead — a force-kill can wedge the Nanonis port).
+; A plain MsgBox is NOT suppressed by /SUPPRESSMSGBOXES: it would wait, invisibly, forever.
 ; Prerequisite: PyInstaller --onedir build at dist\MAST\ has run.
 
 #ifndef MAST_VERSION
@@ -67,11 +74,22 @@ CloseApplications=no
 UninstallDisplayIcon={app}\MAST.exe
 UninstallDisplayName={#MAST_NAME} v{#MAST_VERSION}
 DisableDirPage=no
-ShowLanguageDialog=auto
+; Always offer the language page; do not auto-pick from the OS locale.
+; English is first in [Languages] so it is the default selection; Chinese
+; (and Czech) remain available. ShowLanguageDialog=auto previously hid the
+; page on matching locales (e.g. zh-CN Windows → silent Chinese, no choice).
+ShowLanguageDialog=yes
+LanguageDetectionMethod=none
+; Tell Explorer to refresh icons/associations after install. Replaces the
+; previous hand-rolled SHChangeNotify external call, which could raise a
+; Pascal Script "Runtime error … Type mismatch" at ssPostInstall on some
+; Inno/Windows combinations even though the files were already installed.
+ChangesAssociations=yes
 
 [Languages]
 Name: "english";  MessagesFile: "compiler:Default.isl"
 Name: "chinesesimplified"; MessagesFile: "ChineseSimplified.isl"
+Name: "czech"; MessagesFile: "Czech.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
@@ -107,11 +125,41 @@ Type: filesandordirs; Name: "{app}\_internal\mast\_src"
 ; 那么写的。整棵 `assets\` 都是构建产物，清掉之后 [Files] 立刻铺回当前那份。
 Type: filesandordirs; Name: "{app}\_internal\frontend\dist\assets"
 
+; 第三处（7.0 起）：客户端集成 —— MCP 桥、Claude Code 插件与市场清单、Codex 配置工具、
+; 外部 agent 文档。这次留下旧文件不只是占地方：Codex 直接从
+; `{app}\integrations\claude-code\server` 启动 MCP 桥，Claude Code 从 `{app}` 这个本地
+; 市场装插件。桥的模块改名或删掉之后，旧文件会原样留着，与新版混在同一个包里被 import。
+; 这三棵全是构建产物，没有操作员数据（Codex 的 config.toml 和 agent 工作区在用户目录里，
+; 不在这里）；插件 python 路径的改写由下面 [Run] 在每次安装后重做。
+Type: filesandordirs; Name: "{app}\integrations"
+Type: filesandordirs; Name: "{app}\.claude-plugin"
+Type: filesandordirs; Name: "{app}\docs\external"
+
+; 第四处（7.1.3 起）：被精简掉的 torch 全家桶。视觉模型权重不再随包，torch / timm /
+; transformers 等约 4 GB 纯死重量已整个从打包里排除（见 mast2.spec 的 excludes）。但 Inno
+; 只覆盖不删 —— 从 7.0.x / 7.1.0–7.1.2 升级上来的老机器，`_internal\torch` 等旧目录会原样
+; 留着继续占约 4 GB。所以这里显式清掉这些包目录和各自的 *.dist-info（通配）。全是构建产物，
+; 没有操作员数据。OTA 差量升级则通过清单里的 removed[] 清除。
+Type: filesandordirs; Name: "{app}\_internal\torch*"
+Type: filesandordirs; Name: "{app}\_internal\functorch*"
+Type: filesandordirs; Name: "{app}\_internal\timm*"
+Type: filesandordirs; Name: "{app}\_internal\peft*"
+Type: filesandordirs; Name: "{app}\_internal\transformers*"
+Type: filesandordirs; Name: "{app}\_internal\accelerate*"
+Type: filesandordirs; Name: "{app}\_internal\safetensors*"
+Type: filesandordirs; Name: "{app}\_internal\huggingface_hub*"
+Type: filesandordirs; Name: "{app}\_internal\tokenizers*"
+Type: filesandordirs; Name: "{app}\_internal\sympy*"
+Type: filesandordirs; Name: "{app}\_internal\mpmath*"
+
 [Files]
 ; Incompressible binary assets (DINOv3 backbone weights + literature index
 ; vectors/parquet) — store WITHOUT compression. Must precede the catch-all + be
 ; excluded from it so each file is packed exactly once.
-Source: "..\dist\MAST\MASTv2\artifacts\*"; DestDir: "{app}\MASTv2\artifacts"; Flags: ignoreversion recursesubdirs createallsubdirs nocompression
+; skipifsourcedoesntexist：构建脚本默认不带这两类资产（-IncludeLiteratureIndex /
+; -IncludeVisionModels 才拷），这时 dist\MAST\MASTv2\artifacts 不存在，而 ISCC 遇到
+; 一个什么都匹配不上的通配会直接中止编译。
+Source: "..\dist\MAST\MASTv2\artifacts\*"; DestDir: "{app}\MASTv2\artifacts"; Flags: ignoreversion recursesubdirs createallsubdirs nocompression skipifsourcedoesntexist
 ; Everything else (MAST.exe + _internal torch/python — compressible).
 Source: "..\dist\MAST\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "MASTv2\artifacts\*"
 
@@ -124,17 +172,75 @@ Name: "{app}\config\overrides"; Permissions: users-modify
 
 [Icons]
 Name: "{group}\{#MAST_NAME}";          Filename: "{app}\MAST.exe"; WorkingDir: "{app}"
-Name: "{group}\Uninstall {#MAST_NAME}"; Filename: "{uninstallexe}"
+Name: "{group}\{cm:UninstallProgram,{#MAST_NAME}}"; Filename: "{uninstallexe}"
 Name: "{commondesktop}\{#MAST_NAME}";   Filename: "{app}\MAST.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MAST_NAME}"; Filename: "{app}\MAST.exe"; WorkingDir: "{app}"; Tasks: quicklaunchicon
 
 [Run]
+; 把 Claude Code 插件的 `python` 缺省值改成**这次安装**的随包运行时的绝对路径（插件里写的
+; 是 "python"，在 Windows 上常常打开的是应用商店）。之后用户只需在 Claude Code 里
+; `/plugin marketplace add <安装目录>`、`/plugin install mast@mast`。
+; 没有随包运行时（只含代码的构建）就由 Check 跳过；它失败也不拦安装 —— 插件仍可在
+; Claude Code 的插件选项里手工填 python。
+; Parameters 里 `""` 是 Inno 字符串里的一个双引号：路径带空格也是一个参数。
+Filename: "{app}\MASTv2\pyruntime\python.exe"; Parameters: "-I -X utf8 ""{app}\integrations\setup_clients.py"" patch-plugin --app ""{app}"""; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; Check: PyRuntimePresent
 Filename: "{app}\MAST.exe"; Description: "{cm:LaunchProgram,{#StringChange(MAST_NAME, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 Type: files;          Name: "{app}\MAST.exe"
 Type: filesandordirs; Name: "{app}\_internal"
+; 客户端集成同样是程序文件：Codex 从这里启动桥时 Python 可能写下 __pycache__，
+; 那不在安装清单里，卸载不会自己删。
+Type: filesandordirs; Name: "{app}\integrations"
+Type: filesandordirs; Name: "{app}\.claude-plugin"
+Type: filesandordirs; Name: "{app}\docs\external"
 
+[CustomMessages]
+; [Code] 里所有面向用户的文字。占位符 %1、%2 由 FmtMessage 填；%n 是换行。
+; 三种语言的键必须一一对应（缺一种会回落到英文/默认语言，而不是报错）。
+english.LegacyFound=Found an old %1 v%2.%nThis version renames MAST2 to MAST. Uninstall it now, before installing?%n(Only program files are removed; user data is kept. You can also clean up later with MAST-Legacy-Uninstall.exe.)
+chinesesimplified.LegacyFound=检测到旧版 %1 v%2。%n本版已将 MAST2 更名为 MAST。是否现在先卸载它？%n(仅删除程序文件，保留用户数据；也可日后用 MAST-Legacy-Uninstall.exe 清理。)
+czech.LegacyFound=Byla nalezena stará verze %1 v%2.%nTato verze přejmenovává MAST2 na MAST. Chcete ji nyní odinstalovat před instalací?%n(Odstraní se pouze soubory programu, uživatelská data zůstanou zachována. Později lze také použít MAST-Legacy-Uninstall.exe.)
+
+english.UpgradeFound=Found an installed MAST v%1%nUpgrading to v%2 will overwrite MAST.exe and _internal\, but all user data is kept.%n%nContinue with the installation?
+chinesesimplified.UpgradeFound=检测到已安装的 MAST v%1%n本次升级到 v%2 将覆盖 MAST.exe 与 _internal\，但保留所有用户数据。%n%n继续安装？
+czech.UpgradeFound=Byl nalezen nainstalovaný MAST v%1%nAktualizace na v%2 přepíše MAST.exe a _internal\, ale všechna uživatelská data zůstanou zachována.%n%nPokračovat v instalaci?
+
+english.DataDirTitle=Data directory
+chinesesimplified.DataDirTitle=数据保存目录
+czech.DataDirTitle=Adresář s daty
+
+english.DataDirSubTitle=All experiment data, chat history, API keys, logs and so on are stored here
+chinesesimplified.DataDirSubTitle=所有实验数据、对话历史、API key、日志等都会保存在这里
+czech.DataDirSubTitle=Zde se ukládají všechna experimentální data, historie konverzací, klíče API, protokoly atd.
+
+english.DataDirBody=Choose MAST's "user data directory".%n%nEverything produced after installation (experiment records, conversations, API keys, TTS cache, Nanonis sessions, trained models, config overrides, launcher/service logs) is stored under this directory.%n%nUpgrading or uninstalling MAST will **not** delete or overwrite its contents.
+chinesesimplified.DataDirBody=请选择 MAST 的"用户数据目录"。%n%n安装后产生的所有数据（实验记录、对话、API key、TTS 缓存、Nanonis 会话、训练好的模型、配置 override、启动器/服务日志）都保存在此目录下。%n%n升级或卸载 MAST 时，此目录的内容**不会**被删除或覆盖。
+czech.DataDirBody=Vyberte „adresář s uživatelskými daty“ aplikace MAST.%n%nVšechna data vzniklá po instalaci (záznamy experimentů, konverzace, klíče API, mezipaměť TTS, relace Nanonis, natrénované modely, přepsání konfigurace, protokoly spouštěče a služby) se ukládají do tohoto adresáře.%n%nPři aktualizaci ani odinstalaci aplikace MAST se jeho obsah **nesmaže** ani nepřepíše.
+
+english.DataDirLabel=Data directory:
+chinesesimplified.DataDirLabel=数据目录:
+czech.DataDirLabel=Adresář s daty:
+
+english.BackupFailed=Could not back up the literature index (robocopy returned %1).%nContinuing will overwrite %2,%nwhich holds the papers this machine has collected on its own.%n%nCopy that directory manually first, then continue.
+chinesesimplified.BackupFailed=无法备份文献索引（robocopy 返回 %1）。%n继续安装会覆盖 %2，%n其中包含本机自主取文攒下的文献。%n%n建议先手动复制该目录再继续。
+czech.BackupFailed=Zálohování indexu literatury se nezdařilo (robocopy vrátil %1).%nPokračováním se přepíše %2,%nkde jsou uloženy články, které tento počítač sám shromáždil.%n%nNejprve tento adresář ručně zkopírujte a poté pokračujte.
+
+english.RunningPrompt=MAST is running (this may include the windowless background update server).%nIt has to be closed before its program files can be overwritten.%n%nFirst save unfinished work in MAST and stop any scan in progress.%n%nClick "Yes" = close MAST and continue; click "No" = cancel the installation.
+chinesesimplified.RunningPrompt=检测到 MAST 正在运行（可能包括无窗口的后台更新服务器）。%n安装需要先关闭它才能覆盖程序文件。%n%n请先在 MAST 中保存未完成的工作、停止正在进行的扫描。%n%n点"是"= 关闭 MAST 并继续安装；点"否"= 取消安装。
+czech.RunningPrompt=Aplikace MAST je spuštěna (může jít i o službu aktualizací na pozadí bez okna).%nPřed přepsáním souborů programu je nutné ji zavřít.%n%nNejprve v aplikaci MAST uložte rozdělanou práci a zastavte probíhající skenování.%n%nKlepnutím na „Ano“ aplikaci MAST zavřete a pokračujete v instalaci; klepnutím na „Ne“ instalaci zrušíte.
+
+english.StillRunning=MAST is still running, so the installation cannot continue.%nEnd all MAST.exe processes manually in Task Manager, then run the installer again.
+chinesesimplified.StillRunning=仍检测到 MAST 在运行，无法继续安装。%n请在任务管理器中手动结束所有 MAST.exe 后，重新运行安装程序。
+czech.StillRunning=Aplikace MAST stále běží, instalaci nelze dokončit.%nUkončete ve Správci úloh ručně všechny procesy MAST.exe a poté instalační program spusťte znovu.
+
+english.InstallCancelled=Installation cancelled: close MAST first, then run the installer again.
+chinesesimplified.InstallCancelled=安装已取消：请先关闭 MAST，再运行安装程序。
+czech.InstallCancelled=Instalace byla zrušena: nejprve zavřete aplikaci MAST a poté instalační program spusťte znovu.
+
+english.UninstallSummary=MAST has been uninstalled (program files only).%nThe following user data was kept in %1:%n  - experiments\ (experiment records, conversations, TTS cache, plans, logs)%n  - api key\ (LLM API keys + LAN auth)%n  - working-sessions\ (Nanonis scan sessions)%n  - models\ (trained ML models)%n  - config\ (admin overrides)%n%nTo remove everything, delete these directories manually.
+chinesesimplified.UninstallSummary=MAST 已卸载（仅删除程序文件）。%n以下用户数据被保留在 %1：%n  - experiments\（实验记录、对话、TTS 缓存、计划、日志）%n  - api key\（LLM API key + LAN auth）%n  - working-sessions\（Nanonis 扫描会话）%n  - models\（训练好的 ML 模型）%n  - config\（admin override）%n%n如需彻底清除，请手动删除上述目录。
+czech.UninstallSummary=Aplikace MAST byla odinstalována (pouze soubory programu).%nNásledující uživatelská data zůstala zachována v %1:%n  - experiments\ (záznamy experimentů, konverzace, mezipaměť TTS, plány, protokoly)%n  - api key\ (klíče API LLM + ověření v síti LAN)%n  - working-sessions\ (relace skenování Nanonis)%n  - models\ (natrénované modely ML)%n  - config\ (přepsání konfigurace správcem)%n%nChcete-li vše odstranit, výše uvedené adresáře smažte ručně.
 [Code]
 var
   DataDirPage: TInputDirWizardPage;
@@ -142,6 +248,14 @@ var
 function UninstKey(AppId: String): String;
 begin
   Result := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\' + AppId + '_is1';
+end;
+
+// [Run] 里 patch-plugin 那一行的 Check：随包运行时和脚本都在才跑（只含代码的构建没有
+// MASTv2\pyruntime）。[Run] 的条目在文件装完之后才求值，所以这里看到的是新装的树。
+function PyRuntimePresent(): Boolean;
+begin
+  Result := FileExists(ExpandConstant('{app}\MASTv2\pyruntime\python.exe')) and
+            FileExists(ExpandConstant('{app}\integrations\setup_clients.py'));
 end;
 
 // Graceful-then-force close of a running product exe (port-fragility: a
@@ -162,10 +276,8 @@ var unins, ver: String; rc: Integer;
 begin
   if not RegQueryStringValue(HKLM64, UninstKey(AppId), 'DisplayVersion', ver) then
     Exit;
-  if MsgBox('检测到旧版 ' + ProdLabel + ' v' + ver + '。' + #13#10 +
-            '本版已将 MAST2 更名为 MAST。是否现在先卸载它？' + #13#10 +
-            '(仅删除程序文件，保留用户数据；也可日后用 MAST-Legacy-Uninstall.exe 清理。)',
-            mbConfirmation, MB_YESNO) = IDYES then
+  if SuppressibleMsgBox(FmtMessage(CustomMessage('LegacyFound'), [ProdLabel, ver]),
+            mbConfirmation, MB_YESNO, IDNO) = IDYES then
   begin
     KillExe(ExeName);
     if RegQueryStringValue(HKLM64, UninstKey(AppId), 'UninstallString', unins) then
@@ -183,11 +295,9 @@ begin
   // carries a trailing `}}` (AppId={{...}}), so match that here too.
   if RegQueryStringValue(HKLM64, UninstKey('{D9A4E1B7-6F2C-4D85-B3E0-MAST26STM2026}}'), 'DisplayVersion', PriorVersion) then
   begin
-    Confirmed := MsgBox(
-      '检测到已安装的 MAST v' + PriorVersion + #13#10 +
-      '本次升级到 v{#MAST_VERSION} 将覆盖 MAST.exe 与 _internal\，但保留所有用户数据。' + #13#10#13#10 +
-      '继续安装？',
-      mbConfirmation, MB_YESNO);
+    Confirmed := SuppressibleMsgBox(
+      FmtMessage(CustomMessage('UpgradeFound'), [PriorVersion, '{#MAST_VERSION}']),
+      mbConfirmation, MB_YESNO, IDYES);
     if Confirmed = IDNO then
     begin
       Result := False;
@@ -203,15 +313,13 @@ procedure InitializeWizard;
 begin
   DataDirPage := CreateInputDirPage(
     wpSelectDir,
-    '数据保存目录',
-    '所有实验数据、对话历史、API key、日志等都会保存在这里',
-    '请选择 MAST 的"用户数据目录"。' + #13#10#13#10 +
-    '安装后产生的所有数据（实验记录、对话、API key、TTS 缓存、Nanonis 会话、' +
-    '训练好的模型、配置 override、启动器/服务日志）都保存在此目录下。' + #13#10#13#10 +
-    '升级或卸载 MAST 时，此目录的内容**不会**被删除或覆盖。',
+    CustomMessage('DataDirTitle'),
+    CustomMessage('DataDirSubTitle'),
+    CustomMessage('DataDirBody'),
     False, '');
-  DataDirPage.Add('数据目录:');
-  DataDirPage.Values[0] := ExpandConstant('{sd}\MAST-data');
+  DataDirPage.Add(CustomMessage('DataDirLabel'));
+  // 无人值守安装可以用 /DATADIR="D:\MAST-data" 直接给出；没给就是 C:\MAST-data。
+  DataDirPage.Values[0] := ExpandConstant('{param:DATADIR|{sd}\MAST-data}');
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
@@ -222,6 +330,9 @@ var
 begin
   if (DataDirPage <> nil) and (CurPageID = DataDirPage.ID) then
   begin
+    // 命令行明确给了 /DATADIR，就以它为准（不被上一版的 data_dir.txt 覆盖）。
+    if ExpandConstant('{param:DATADIR|}') <> '' then
+      Exit;
     PriorMarker := ExpandConstant('{app}\data_dir.txt');
     if FileExists(PriorMarker) then
     begin
@@ -238,17 +349,6 @@ begin
     begin
       DataDirPage.Values[0] := ExpandConstant('{app}');
     end;
-  end;
-end;
-
-procedure SHChangeNotify(wEventId: Cardinal; uFlags: Cardinal; dwItem1, dwItem2: Cardinal);
-  external 'SHChangeNotify@shell32.dll stdcall';
-
-procedure NotifyIconCacheChanged;
-begin
-  try
-    SHChangeNotify($08000000, 0, 0, 0);
-  except
   end;
 end;
 
@@ -297,11 +397,8 @@ begin
        '', SW_HIDE, ewWaitUntilTerminated, rc) then
     rc := 16;
   if rc >= 8 then
-    MsgBox('无法备份文献索引（robocopy 返回 ' + IntToStr(rc) + '）。' + #13#10 +
-           '继续安装会覆盖 ' + IndexDir + '，' + #13#10 +
-           '其中包含本机自主取文攒下的文献。' + #13#10#13#10 +
-           '建议先手动复制该目录再继续。',
-           mbError, MB_OK);
+    SuppressibleMsgBox(FmtMessage(CustomMessage('BackupFailed'), [IntToStr(rc), IndexDir]),
+           mbError, MB_OK, IDOK);
 end;
 
 // Run BEFORE overwriting files (can abort the install). Prompt first.
@@ -310,24 +407,20 @@ begin
   Result := '';
   if IsMASTRunning() then
   begin
-    if MsgBox(
-         '检测到 MAST 正在运行（可能包括无窗口的后台更新服务器）。' + #13#10 +
-         '安装需要先关闭它才能覆盖程序文件。' + #13#10#13#10 +
-         '请先在 MAST 中保存未完成的工作、停止正在进行的扫描。' + #13#10#13#10 +
-         '点"是"= 关闭 MAST 并继续安装；点"否"= 取消安装。',
-         mbConfirmation, MB_YESNO) = IDYES then
+    // 静默安装时默认「否」：无人确认就强关一个可能正连着 Nanonis 的 MAST，代价太大。
+    if SuppressibleMsgBox(CustomMessage('RunningPrompt'),
+         mbConfirmation, MB_YESNO, IDNO) = IDYES then
     begin
       KillExe('MAST.exe');
       if IsMASTRunning() then
       begin
-        Result := '仍检测到 MAST 在运行，无法继续安装。' + #13#10 +
-                  '请在任务管理器中手动结束所有 MAST.exe 后，重新运行安装程序。';
+        Result := CustomMessage('StillRunning');
         Exit;
       end;
     end
     else
     begin
-      Result := '安装已取消：请先关闭 MAST，再运行安装程序。';
+      Result := CustomMessage('InstallCancelled');
       Exit;
     end;
   end;
@@ -368,8 +461,7 @@ begin
       ExpandConstant('{app}\data_dir.txt'),
       ChosenDir + #13#10,
       False);
-
-    NotifyIconCacheChanged;
+    // Icon/association refresh: ChangesAssociations=yes in [Setup].
   end;
 end;
 
@@ -393,15 +485,7 @@ begin
       end;
     end;
 
-    MsgBox(
-      'MAST 已卸载（仅删除程序文件）。' + #13#10 +
-      '以下用户数据被保留在 ' + DataDirPath + '：' + #13#10 +
-      '  - experiments\（实验记录、对话、TTS 缓存、计划、日志）' + #13#10 +
-      '  - api key\（LLM API key + LAN auth）' + #13#10 +
-      '  - working-sessions\（Nanonis 扫描会话）' + #13#10 +
-      '  - models\（训练好的 ML 模型）' + #13#10 +
-      '  - config\（admin override）' + #13#10#13#10 +
-      '如需彻底清除，请手动删除上述目录。',
-      mbInformation, MB_OK);
+    SuppressibleMsgBox(FmtMessage(CustomMessage('UninstallSummary'), [DataDirPath]),
+      mbInformation, MB_OK, IDOK);
   end;
 end;

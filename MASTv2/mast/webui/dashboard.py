@@ -22,8 +22,23 @@ def run_system_check(app: Any) -> list[dict]:
     """
     results: list[dict] = []
 
+    # 光学站画像（mast.station）：没有 Nanonis，下面第 1、2 项不适用 —— 列出四个「未连接」
+    # 和一条「查不到版本」只会让首页的自检表永远带着一片假的故障。
+    try:
+        from mast import station
+
+        optical = station.runtime_is_optical(app)
+    except Exception:  # noqa: BLE001 - no profile information: STM, as before
+        optical = False
+
     # 1. Nanonis TCP connections
-    if app._pool is not None:
+    if optical:
+        results.append({
+            "name": "Station profile",
+            "status": "ok",
+            "detail": "Optical station - Nanonis is not used",
+        })
+    elif app._pool is not None:
         port_names = {
             "main": app.config.nanonis.port_main,
             "monitor": app.config.nanonis.port_monitor,
@@ -57,7 +72,8 @@ def run_system_check(app: Any) -> list[dict]:
         # non-existent `Version` method, so this row ALWAYS said "Cannot query
         # version" even when connected. Use the pool's
         # safe_call and parse the returned Product Line + Version strings.
-        rec = app._pool.safe_call("Util_VersionGet", role="main") if app._pool else None
+        rec = (app._pool.safe_call("Util_VersionGet", role="main")
+               if (app._pool and not optical) else None)
         detail = None
         if rec is not None and not getattr(rec, "error", ""):
             parsed = getattr(rec, "return_value", None)
@@ -65,7 +81,9 @@ def run_system_check(app: Any) -> list[dict]:
             strings = [v for v in (vals or []) if isinstance(v, str) and v.strip()]
             if strings:
                 detail = " · ".join(strings[:2])  # Product Line · Version
-        if detail:
+        if optical:
+            pass                     # no Nanonis, so no version row (see above)
+        elif detail:
             results.append({"name": "Nanonis version", "status": "ok", "detail": detail})
         else:
             results.append({

@@ -63,38 +63,75 @@ from mast.skills.composite._tip_phases import (
 from mast.skills.composite.graph_executor import CompositeStep, GraphExecutor
 from mast.skills.composite.prepare_noble_tip import _TipComposite
 from mast.vision.atomic_lines import ADVISORY_STREAK
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
-_FROM_TABLE = "留空即按流程表取值；只有用户逐字说过的数才填进来。"
+_FROM_TABLE = tr("留空即按流程表取值；只有用户明确给出的数才填进来。",
+                 "Leave empty to take the value from the workflow table; fill in only numbers the "
+                 "user gave explicitly.")
 
 _OUTCOME_CN = {
     # 配方 1
-    "sts_tip_ready": "针尖已验证为金属性（肖克利表面态在该在的位置）。",
-    "sts_rounds_exhausted": ("扎针与测谱来回做满预算，表面态仍未出现在正确位置 —— "
-                             "建议回到完整修针流程（PrepareNobleTip），或换针。"),
-    "sts_no_substrate": "不知道台面上是什么衬底，定不出表面态的期望位置。",
-    "sts_no_surface_state": "这个衬底没有肖克利表面态，换个判据或换块衬底。",
-    "sts_spectrum_unavailable": "谱采集完成但拿不到数据文件，判据无从做起。",
+    "sts_tip_ready": tr("针尖已验证为金属性（肖克利表面态在该在的位置）。",
+                        "The tip is verified metallic (the Shockley surface state is where it should "
+                        "be)."),
+    "sts_rounds_exhausted": (tr("扎针与测谱来回做满预算，表面态仍未出现在正确位置 —— "
+                             "建议回到完整修针流程（PrepareNobleTip），或换针。",
+                                "Poking and spectroscopy alternated through the whole budget, and "
+                                "the surface state still does not appear at the right position: go "
+                                "back to the full tip-conditioning flow (PrepareNobleTip), or change "
+                                "the tip.")),
+    "sts_no_substrate": tr("不知道台面上是什么衬底，定不出表面态的期望位置。",
+                           "The substrate on the terrace is unknown, so the expected surface-state "
+                           "position cannot be determined."),
+    "sts_no_surface_state": tr("这个衬底没有肖克利表面态，换个判据或换块衬底。",
+                               "This substrate has no Shockley surface state: use a different "
+                               "criterion or a different substrate."),
+    "sts_spectrum_unavailable": tr("谱采集完成但拿不到数据文件，判据无从做起。",
+                                   "Spectrum acquisition finished but no data file is available, so "
+                                   "the criterion cannot be evaluated."),
     # 配方 2
-    "atomic_tip_ready": "针尖已达原子分辨。",
-    "atomic_cycles_exhausted": ("扰动与回退扎针做满预算仍未出现原子相 —— "
-                                "建议回到完整修针流程，或换一块更平整的区域。"),
-    "atomic_time_budget_done": ("时间预算用完，交出这段时间里**最好的那一张**图 —— "
-                                "产物是图不是针尖，图会累积。"),
-    "atomic_time_budget_exhausted": ("时间预算用完，一张都没拿到。"
-                                     "建议加预算重来，或先回完整修针流程。"),
-    "atomic_no_flat_area": "找不到够大的无台阶平区来做原子分辨扫描。",
-    "sts_split_tip": ("大图上台阶出现重影（多针尖）—— 找不到台面的原因在**针尖**不在表面，"
-                      "换位置无效。这一路要打脉冲，不是接着浅扎。"),
-    "sts_no_clean_terrace": ("找不到干净台面来测谱 —— 这是**表面**的问题不是针尖的，"
+    "atomic_tip_ready": tr("针尖已达原子分辨。", "The tip has reached atomic resolution."),
+    "atomic_cycles_exhausted": (tr("扰动与回退扎针做满预算仍未出现原子相 —— "
+                                "建议回到完整修针流程，或换一块更平整的区域。",
+                                   "Perturbation and fallback pokes used up the whole budget and no "
+                                   "atomic phase appeared: go back to the full tip-conditioning "
+                                   "flow, or move to a flatter area.")),
+    "atomic_time_budget_done": (tr("时间预算用完，交出这段时间里**最好的那一张**图 —— "
+                                "产物是图不是针尖，图会累积。",
+                                   "The time budget is used up; handing over **the best single "
+                                   "image** from this period: the product is the image, not the tip, "
+                                   "and images accumulate.")),
+    "atomic_time_budget_exhausted": (tr("时间预算用完，一张都没拿到。"
+                                     "建议加预算重来，或先回完整修针流程。",
+                                        "The time budget is used up and not one image was obtained. "
+                                        "Retry with a larger budget, or go back to the full "
+                                        "tip-conditioning flow first.")),
+    "atomic_no_flat_area": tr("找不到够大的无台阶平区来做原子分辨扫描。",
+                              "Cannot find a large enough step-free flat area for the "
+                              "atomic-resolution scan."),
+    "sts_split_tip": (tr("大图上台阶出现重影（多针尖）—— 找不到台面的原因在**针尖**不在表面，"
+                      "换位置无效。这一路要打脉冲，不是接着浅扎。",
+                         "Steps show ghosting in the large image (multiple tips): the reason no "
+                         "terrace can be found lies in the **tip**, not the surface, and changing "
+                         "position does not help. This route needs pulses, not more shallow poking.")),
+    "sts_no_clean_terrace": (tr("找不到干净台面来测谱 —— 这是**表面**的问题不是针尖的，"
                              "流程主动停手：继续扎针只会把一根可能已经合格的针尖"
-                             "扎废。建议换区或换样品位置后重来。"),
-    "atomic_scale_misconfigured": "评估帧的像素尺度判不出原子相（见 reason）。",
+                             "扎废。建议换区或换样品位置后重来。",
+                                "Cannot find a clean terrace for spectroscopy: this is a problem of "
+                                "the **surface**, not the tip. The flow stops on purpose: continuing "
+                                "to poke would only ruin a tip that may already be good. Move to "
+                                "another area or sample position and try again.")),
+    "atomic_scale_misconfigured": tr("评估帧的像素尺度判不出原子相（见 reason）。",
+                                     "The pixel scale of the evaluation frame cannot decide on an "
+                                     "atomic phase (see reason)."),
     # 共用
-    "surface_spent": "这片表面已经没有干净的地方了 —— 需要粗动换区或换样品位置。",
-    "poke_failed": "扎针精修没能完成。",
-    "incomplete": "流程未走完。",
+    "surface_spent": tr("这片表面已经没有干净的地方了 —— 需要粗动换区或换样品位置。",
+                        "This surface has no clean place left: coarse motion to a new area or a new "
+                        "sample position is needed."),
+    "poke_failed": tr("扎针精修没能完成。", "Poking fine-tuning could not be completed."),
+    "incomplete": tr("流程未走完。", "The flow did not finish."),
 }
 
 
@@ -118,7 +155,9 @@ def _wrap(phases: list[dict], outcome: str, extra: str = "") -> dict:
     # 读不到地图时,「没记录」不等于「表面干净」—— 这句必须出现在报告里
     # (与 PrepareNobleTip 同一条纪律)。
     if any(p.get("map_known") is False for p in phases):
-        bits.append("⚠ 期间读不到实验记录，无法确认落点是否干净。")
+        bits.append(tr("⚠ 期间读不到实验记录，无法确认落点是否干净。",
+                       "WARNING: the experiment record could not be read during this period, so it "
+                       "cannot be confirmed whether the landing spot is clean."))
     return {"phases": phases, "outcome": outcome, "summary_cn": " ".join(bits)}
 
 
@@ -160,73 +199,113 @@ class MakeSpectroscopyTip(_TipComposite):
             capabilities=frozenset({"tip_shaping"}),
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "把一根能用的针尖变成适合做 STS 的**金属性**针尖:**浅**扎出一个"
+                tr("把一根能用的针尖变成适合做 STS 的**金属性**针尖:**浅**扎出一个"
                 "小而圆的簇,然后打开 lock-in 采一条 dI/dV 谱,检查贵金属 (111) 的"
                 "肖克利表面态有没有出现在该在的能量上。不达标就反复「扎针—测谱」。"
                 "金属性针尖**不是**最尖的针尖 —— 这正是它比 PrepareNobleTip 扎得"
                 "更浅的原因。需要一个有表面态的衬底(Au/Ag/Cu(111));"
-                "在 qPlus 传感器上默认拒绝,除非显式允许。"
+                "在 qPlus 传感器上默认拒绝,除非显式允许。",
+                   "Turn a usable tip into a **metallic** tip suitable for STS: poke **shallowly** "
+                   "to make a small round cluster, then turn on the lock-in and take a dI/dV "
+                   "spectrum to check whether the Shockley surface state of the noble-metal (111) "
+                   "appears at the energy where it should. If it does not pass, repeat 'poke - "
+                   "spectrum'. A metallic tip is **not** the sharpest tip: this is exactly why it "
+                   "pokes shallower than PrepareNobleTip. Needs a substrate with a surface state "
+                   "(Au/Ag/Cu(111)); refused by default on a qPlus sensor unless explicitly allowed.")
             ),
             parameters=[
                 ParameterSpec(
                     name="substrate", type="str",
-                    description=("衬底,例如 'Au(111)'。"
-                                 "留空则从已登记的样品里推断。"),
+                    description=(tr("衬底,例如 'Au(111)'。"
+                                 "留空则从已登记的样品里推断。",
+                                    "Substrate, e.g. 'Au(111)'. If empty, inferred from the "
+                                    "registered sample.")),
                     required=False, default=""),
                 ParameterSpec(
                     name="expected_onset_v", type="float", unit="V",
-                    description=("预期的肖克利 onset 位置。"
-                                 "留空则取自衬底。"),
+                    description=(tr("预期的肖克利 onset 位置。"
+                                 "留空则取自衬底。",
+                                    "Expected Shockley onset position. If empty, taken from the "
+                                    "substrate.")),
                     required=False, min_value=-10.0, max_value=10.0),
                 ParameterSpec(
                     name="onset_tol_v", type="float", unit="V",
-                    description=f"onset 位置容差。{_FROM_TABLE}表值 {wf.onset_tol_v} V。",
+                    description=tr(f"onset 位置容差。{_FROM_TABLE}表值 {wf.onset_tol_v} V。",
+                                   f"Onset position tolerance. {_FROM_TABLE} Table value "
+                                   f"{wf.onset_tol_v} V."),
                     required=False, min_value=0.001, max_value=0.5),
                 ParameterSpec(
                     name="poke_depth_nm", type="float", unit="nm",
-                    description=(f"浅扎深度。{_FROM_TABLE}表值 {wf.poke_depth_nm} nm。"
-                                 f"会过当前针尖的安全包络。"),
+                    description=(tr(f"浅扎深度。{_FROM_TABLE}表值 {wf.poke_depth_nm} nm。"
+                                 f"会过当前针尖的安全包络。",
+                                    f"Shallow poke depth. {_FROM_TABLE} Table value "
+                                    f"{wf.poke_depth_nm} nm. It passes the safety envelope of the "
+                                    "current tip.")),
                     required=False, min_value=0.01, max_value=100.0),
                 ParameterSpec(
                     name="critical_repeat_n", type="int",
-                    description=f"临界深度上反复扎几次。{_FROM_TABLE}表值 {wf.critical_repeat_n}。",
+                    description=tr(f"临界深度上反复扎几次。{_FROM_TABLE}表值 {wf.critical_repeat_n}。",
+                                   "How many times to poke repeatedly at the critical depth. "
+                                   f"{_FROM_TABLE} Table value {wf.critical_repeat_n}."),
                     required=False, min_value=1, max_value=50),
                 ParameterSpec(
                     name="mod_amp_v", type="float", unit="V",
-                    description=(f"lock-in 调制幅度。{_FROM_TABLE}表值 {wf.mod_amp_v} V。"
-                                 f"注意：rms 还是峰值取决于本机 lock-in 设置。"),
+                    description=(tr(f"lock-in 调制幅度。{_FROM_TABLE}表值 {wf.mod_amp_v} V。"
+                                 f"注意：rms 还是峰值取决于本机 lock-in 设置。",
+                                    f"Lock-in modulation amplitude. {_FROM_TABLE} Table value "
+                                    f"{wf.mod_amp_v} V. Note: whether it is rms or peak depends on "
+                                    "this machine's lock-in setting.")),
                     required=False, min_value=1e-5, max_value=1.0),
                 ParameterSpec(
                     name="mod_freq_hz", type="float", unit="Hz",
-                    description=f"lock-in 调制频率。{_FROM_TABLE}表值 {wf.mod_freq_hz} Hz。",
+                    description=tr(f"lock-in 调制频率。{_FROM_TABLE}表值 {wf.mod_freq_hz} Hz。",
+                                   f"Lock-in modulation frequency. {_FROM_TABLE} Table value "
+                                   f"{wf.mod_freq_hz} Hz."),
                     required=False, min_value=1.0, max_value=100000.0),
                 ParameterSpec(
                     name="sts_points", type="int",
-                    description=f"谱的采样点数。{_FROM_TABLE}表值 {wf.sts_points}。",
+                    description=tr(f"谱的采样点数。{_FROM_TABLE}表值 {wf.sts_points}。",
+                                   f"Number of spectrum sample points. {_FROM_TABLE} Table value "
+                                   f"{wf.sts_points}."),
                     required=False, min_value=16, max_value=10000),
                 ParameterSpec(
                     name="stab_bias_v", type="float", unit="V",
-                    description=f"设谱前的稳定偏压。{_FROM_TABLE}表值 {wf.stab_bias_v} V。",
+                    description=tr(f"设谱前的稳定偏压。{_FROM_TABLE}表值 {wf.stab_bias_v} V。",
+                                   f"Stabilisation bias before the spectrum. {_FROM_TABLE} Table "
+                                   f"value {wf.stab_bias_v} V."),
                     required=False, min_value=-10.0, max_value=10.0),
                 ParameterSpec(
                     name="stab_setpoint_a", type="float", unit="A",
-                    description=f"设谱前的稳定电流。{_FROM_TABLE}表值 {format_si(wf.stab_setpoint_a)}A。",
+                    description=tr(f"设谱前的稳定电流。{_FROM_TABLE}表值 {format_si(wf.stab_setpoint_a)}A。",
+                                   f"Stabilisation current before the spectrum. {_FROM_TABLE} Table "
+                                   f"value {format_si(wf.stab_setpoint_a)}A."),
                     required=False, min_value=1e-12, max_value=1e-7),
                 ParameterSpec(
                     name="temperature_k", type="float", unit="K",
-                    description=(f"样品温度（只用于算展宽下限，不驱动硬件）。"
-                                 f"{_FROM_TABLE}表值 {wf.temperature_k} K。"),
+                    description=(tr(f"样品温度（只用于算展宽下限，不驱动硬件）。"
+                                 f"{_FROM_TABLE}表值 {wf.temperature_k} K。",
+                                    "Sample temperature (only used to compute the broadening floor, "
+                                    f"does not drive hardware). {_FROM_TABLE} Table value "
+                                    f"{wf.temperature_k} K.")),
                     required=False, min_value=0.01, max_value=400.0),
                 ParameterSpec(
                     name="max_rounds", type="int",
-                    description=f"扎针↔测谱最多来回几次。{_FROM_TABLE}表值 {wf.max_rounds}。",
+                    description=tr(f"扎针↔测谱最多来回几次。{_FROM_TABLE}表值 {wf.max_rounds}。",
+                                   f"Maximum number of poke <-> spectrum rounds. {_FROM_TABLE} Table "
+                                   f"value {wf.max_rounds}."),
                     required=False, min_value=1, max_value=20),
                 ParameterSpec(
                     name="allow_on_qplus", type="bool",
-                    description=("默认关 —— 在 nm 尺度上扎针**本来就是常规操作**,不需要额外"
+                    description=(tr("默认关 —— 在 nm 尺度上扎针**本来就是常规操作**,不需要额外"
                                 "许可。只有当那道守卫被重新打开时(MAST_QPLUS_POKE_GUARD=1),"
                                 "这个开关才有意义。真正保护音叉的是深度包络(超上限**拒绝**,"
-                                "绝不夹紧),以及扎针前自动把偏压调到 20 mV —— 不是这个开关。"),
+                                "绝不夹紧),以及扎针前自动把偏压调到 20 mV —— 不是这个开关。",
+                                    "Default off: poking at the nm scale **is routine anyway** and "
+                                    "needs no extra permission. This switch only matters when that "
+                                    "guard is turned back on (MAST_QPLUS_POKE_GUARD=1). What really "
+                                    "protects the tuning fork is the depth envelope (over the limit "
+                                    "it **refuses**, never clamps) and the automatic bias drop to 20 "
+                                    "mV before poking, not this switch.")),
                     required=False, default=False),
             ],
             estimated_duration_s=900.0,
@@ -300,7 +379,9 @@ class MakeSpectroscopyTip(_TipComposite):
                                         purpose="pulse", used=_dirty(executor))
             if spot is None:
                 outcome = "surface_spent"
-                phases.append({"phase": "sts", "reason": "找不到干净区域测谱"})
+                phases.append({"phase": "sts", "reason": tr("找不到干净区域测谱",
+                                                            "Cannot find a clean area for "
+                                                            "spectroscopy")})
                 break
             sx, sy, map_known = spot
 
@@ -326,22 +407,32 @@ class MakeSpectroscopyTip(_TipComposite):
                 outcome = "sts_split_tip"
                 phases.append({
                     "phase": "terrace", "round": rnd, "map_known": map_known,
-                    "reason": ("大图上台阶出现重影（多针尖）—— 找不到台面的原因"
+                    "reason": (tr("大图上台阶出现重影（多针尖）—— 找不到台面的原因"
                                "**在针尖不在表面**，换位置无效。这一路要打脉冲，"
-                               "不是接着浅扎。")})
+                               "不是接着浅扎。",
+                                  "Steps show ghosting in the large image (multiple tips): the "
+                                  "reason no terrace can be found is **in the tip, not the "
+                                  "surface**, and changing position does not help. This route needs "
+                                  "pulses, not more shallow poking."))})
                 break
             if status == "spent" or not sites:
                 # **不是针尖的问题**，所以不再扎 —— 这条是整段改动的要害。
                 outcome = "sts_no_clean_terrace"
                 phases.append({
                     "phase": "terrace", "round": rnd, "map_known": map_known,
-                    "reason": ("找不到干净台面来测谱 —— 这是**表面**的问题，"
+                    "reason": (tr("找不到干净台面来测谱 —— 这是**表面**的问题，"
                                "不是针尖的。继续扎针只会把一根可能已经合格的"
-                               "针尖扎废。建议粗动换区或换样品位置后重来。")})
+                               "针尖扎废。建议粗动换区或换样品位置后重来。",
+                                  "Cannot find a clean terrace for spectroscopy: this is a problem "
+                                  "of the **surface**, not the tip. Continuing to poke would only "
+                                  "ruin a tip that may already be good. Coarse-move to another area "
+                                  "or sample position and try again."))})
                 break
             sx, sy = sites[0]
             phases.append({"phase": "terrace", "round": rnd, "spot": [sx, sy],
-                           "reason": "落点已验过：单台面窗口内无台阶，并已在台面上调平"})
+                           "reason": tr("落点已验过：单台面窗口内无台阶，并已在台面上调平",
+                                        "Landing spot verified: no steps within the single-terrace "
+                                        "window, and levelled on the terrace")})
 
             # ── 3) 稳定条件 + lock-in + 谱参数 ──
             yield CompositeStep(
@@ -364,7 +455,9 @@ class MakeSpectroscopyTip(_TipComposite):
                 optional=False, checkpoint_after=False, tags=("sts",))
             if not all(_ok(executor, f"S{rnd}:{s}") for s in
                        ("stab_bias", "stab_setpoint", "lockin_on", "sts_config")):
-                phases.append({"phase": "sts", "reason": "谱采集条件没能建立",
+                phases.append({"phase": "sts", "reason": tr("谱采集条件没能建立",
+                                                            "Spectrum acquisition conditions could "
+                                                            "not be established"),
                                "map_known": map_known})
                 outcome = "sts_spectrum_unavailable"
                 break
@@ -380,7 +473,9 @@ class MakeSpectroscopyTip(_TipComposite):
                 # 谱跑完了但没有落盘路径(autosave 关着?)—— 这一轮判不了,但不是
                 # 针尖的问题,别把它算成一次失败的锻造尝试。
                 phases.append({"phase": "sts", "round": rnd,
-                               "reason": "谱采集完成但拿不到 .dat 路径（检查 Nanonis 的自动保存）",
+                               "reason": tr("谱采集完成但拿不到 .dat 路径（检查 Nanonis 的自动保存）",
+                                            "Spectrum acquisition finished but no .dat path is "
+                                            "available (check Nanonis auto-save)"),
                                "map_known": map_known})
                 outcome = "sts_spectrum_unavailable"
                 break
@@ -406,14 +501,17 @@ class MakeSpectroscopyTip(_TipComposite):
                 "warnings": verdict.get("warnings"),
             }
             if not _ok(executor, f"S{rnd}:assess"):
-                entry["reason"] = "谱分析没能完成"
+                entry["reason"] = tr("谱分析没能完成", "Spectrum analysis could not be completed")
             elif entry["passed"]:
                 entry["reason"] = (
-                    f"onset {float(verdict.get('onset_v') or 0.0) * 1000:.0f} mV"
-                    f"（期望 {expected * 1000:.0f}±{wf.onset_tol_v * 1000:.0f} mV）")
+                    tr(f"onset {float(verdict.get('onset_v') or 0.0) * 1000:.0f} mV"
+                    f"（期望 {expected * 1000:.0f}±{wf.onset_tol_v * 1000:.0f} mV）",
+                       f"onset {float(verdict.get('onset_v') or 0.0) * 1000:.0f} mV (expected "
+                       f"{expected * 1000:.0f}+/-{wf.onset_tol_v * 1000:.0f} mV)"))
             else:
                 entry["reason"] = (
-                    f"第 {rnd} 轮未通过：{'、'.join(verdict.get('reasons') or [])}")
+                    tr(f"第 {rnd} 轮未通过：{'、'.join(verdict.get('reasons') or [])}",
+                       f"Round {rnd} did not pass: {', '.join(verdict.get('reasons') or [])}"))
             phases.append(entry)
 
             if entry["passed"]:
@@ -432,7 +530,7 @@ class MakeSpectroscopyTip(_TipComposite):
             params={"mod_on": False},
             optional=True, checkpoint_after=False, tags=("finalize",))
 
-        extra = (f"第 {passed_round} 轮通过。" if passed_round else "")
+        extra = (tr(f"第 {passed_round} 轮通过。", f"Round {passed_round} passed.") if passed_round else "")
         self._phase_out = _wrap(phases, outcome, extra)
         executor.set_partial("outcome", outcome)
 
@@ -464,88 +562,139 @@ class MakeAtomicResolutionTip(_TipComposite):
             capabilities=frozenset({"tip_shaping"}),
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "把一根针尖哄出**原子**分辨:找一块无台阶的平区,在低偏压下"
+                tr("把一根针尖哄出**原子**分辨:找一块无台阶的平区,在低偏压下"
                 "(20 mV / 500 pA)快扫它,同时让偏压在 ±20 mV 之内随机跳变;"
                 "然后扫一张干净帧,查它的 FFT 里有没有真正的晶格。扰动跑在一张"
                 "**牺牲帧**里,判定来自紧随其后的那张干净帧 —— 一张在扰动期间采的"
                 "帧,它自己的证据里就带着那份扰动。每隔几轮不成,就回退去做两次"
                 "临界深度扎针。在 qPlus 传感器上默认拒绝,除非显式允许。"
                 "**这是阶梯里的一档，不是入口** —— 用户只说「我想要原子分辨」"
-                "时调 AchieveAtomicResolution，由它决定要不要走到这一档。"
+                "时调 AchieveAtomicResolution，由它决定要不要走到这一档。",
+                   "Coax a tip into **atomic** resolution: find a step-free flat area, scan it fast "
+                   "at low bias (20 mV / 500 pA) while the bias jumps randomly within +/-20 mV; then "
+                   "scan one clean frame and check its FFT for a real lattice. The perturbation runs "
+                   "in a **sacrificial frame**, and the verdict comes from the clean frame right "
+                   "after it: a frame acquired during the perturbation carries that perturbation in "
+                   "its own evidence. Every few unsuccessful rounds, fall back to two critical-depth "
+                   "pokes. Refused by default on a qPlus sensor unless explicitly allowed. **This is "
+                   "one rung of the ladder, not the entry point**: when the user only says 'I want "
+                   "atomic resolution', call AchieveAtomicResolution, which decides whether to come "
+                   "down to this rung.")
             ),
             parameters=[
                 ParameterSpec(
                     name="eval_frame_nm", type="float", unit="nm",
-                    description=(f"评估帧视野。{_FROM_TABLE}表值 {wf.eval_frame_nm} nm。"
-                                 f"与像素数一起决定判不判得出原子相。"),
+                    description=(tr(f"评估帧视野。{_FROM_TABLE}表值 {wf.eval_frame_nm} nm。"
+                                 f"与像素数一起决定判不判得出原子相。",
+                                    f"Evaluation frame field of view. {_FROM_TABLE} Table value "
+                                    f"{wf.eval_frame_nm} nm. Together with the pixel count it decides "
+                                    "whether an atomic phase can be recognised.")),
                     required=False, min_value=0.5, max_value=500.0),
                 ParameterSpec(
                     name="eval_pixels", type="int",
-                    description=f"评估帧像素数。{_FROM_TABLE}表值 {wf.eval_pixels}。",
+                    description=tr(f"评估帧像素数。{_FROM_TABLE}表值 {wf.eval_pixels}。",
+                                   f"Evaluation frame pixel count. {_FROM_TABLE} Table value "
+                                   f"{wf.eval_pixels}."),
                     required=False, min_value=16, max_value=4096),
                 ParameterSpec(
                     name="eval_bias_v", type="float", unit="V",
-                    description=f"成像偏压。{_FROM_TABLE}表值 {wf.eval_bias_v} V。",
+                    description=tr(f"成像偏压。{_FROM_TABLE}表值 {wf.eval_bias_v} V。",
+                                   f"Imaging bias. {_FROM_TABLE} Table value {wf.eval_bias_v} V."),
                     required=False, min_value=-10.0, max_value=10.0),
                 ParameterSpec(
                     name="eval_setpoint_a", type="float", unit="A",
-                    description=f"成像电流。{_FROM_TABLE}表值 {format_si(wf.eval_setpoint_a)}A。",
+                    description=tr(f"成像电流。{_FROM_TABLE}表值 {format_si(wf.eval_setpoint_a)}A。",
+                                   f"Imaging current. {_FROM_TABLE} Table value "
+                                   f"{format_si(wf.eval_setpoint_a)}A."),
                     required=False, min_value=1e-12, max_value=1e-7),
                 ParameterSpec(
                     name="eval_line_time_s", type="float", unit="s",
-                    description=f"每线时间（要快）。{_FROM_TABLE}表值 {wf.eval_line_time_s} s。",
+                    description=tr(f"每线时间（要快）。{_FROM_TABLE}表值 {wf.eval_line_time_s} s。",
+                                   f"Time per line (should be fast). {_FROM_TABLE} Table value "
+                                   f"{wf.eval_line_time_s} s."),
                     required=False, min_value=1e-3, max_value=60.0),
                 ParameterSpec(
                     name="wiggle_upper_v", type="float", unit="V",
-                    description=(f"偏压扰动的幅值上限。{_FROM_TABLE}表值 "
-                                 f"{wf.wiggle_upper_v} V。BiasWiggle 另有 ±0.1 V 硬帽。"),
+                    description=(tr(f"偏压扰动的幅值上限。{_FROM_TABLE}表值 "
+                                 f"{wf.wiggle_upper_v} V。BiasWiggle 另有 ±0.1 V 硬帽。",
+                                    f"Upper limit of the bias perturbation amplitude. {_FROM_TABLE} "
+                                    f"Table value {wf.wiggle_upper_v} V. BiasWiggle also has a hard "
+                                    "cap of +/-0.1 V.")),
                     required=False, min_value=0.001, max_value=0.1),
                 ParameterSpec(
                     name="wiggle_burst_s", type="float", unit="s",
-                    description=f"一次扰动突发多久。{_FROM_TABLE}表值 {wf.wiggle_burst_s} s。",
+                    description=tr(f"一次扰动突发多久。{_FROM_TABLE}表值 {wf.wiggle_burst_s} s。",
+                                   f"Duration of one perturbation burst. {_FROM_TABLE} Table value "
+                                   f"{wf.wiggle_burst_s} s."),
                     required=False, min_value=0.1, max_value=10.0),
                 ParameterSpec(
                     name="time_budget_min", type="float", unit="min",
                     description=(
-                        "总时间预算（分钟）。0 = 不设，只受 max_cycles 约束。"
-                        "**通过之后默认不停**：只要还有时间预算就继续尝试，"
+                        tr("总时间预算（分钟）。0 = 不设，只受 max_cycles 约束。"
+                        "**通过之后默认不停**：想要好图就反复试，只是有个"
+                        "时间预期而已，因为只要最后有一张可用的图即可。"
                         "确认帧都落成 .sxm，图会累积；针尖只有一个、没有备份，"
-                        "针尖质量可能改善也可能退化，每轮均需重新验证。"),
+                        "而连续确认帧的质量是随机游走（可升可降），所以多试几次才有意义。",
+                           "Total time budget (minutes). 0 = none, only max_cycles applies. **By "
+                           "default it does not stop after a pass**: keep "
+                           "trying for a good image, with only a rough time expectation, since all "
+                           "that matters is one usable image in the end. Confirmation frames "
+                           "are all saved as .sxm and images accumulate; there is only one tip and "
+                           "no backup, and the quality of successive confirmation frames is a random walk "
+                           "(it can rise or fall), so trying several times is what makes sense.")),
                     required=False, default=0.0, min_value=0.0, max_value=1440.0),
                 ParameterSpec(
                     name="stop_at_first_pass", type="bool",
                     description=(
-                        "第一次通过就停。要的是**针尖处在好状态**（后面还要接着做别的）"
-                        "而不是**一张图**时用它 —— 那两个目标的最优停机点不一样。"),
+                        tr("第一次通过就停。要的是**针尖处在好状态**（后面还要接着做别的）"
+                        "而不是**一张图**时用它 —— 那两个目标的最优停机点不一样。",
+                           "Stop at the first pass. Use it when what you want is a **tip in a good "
+                           "state** (to go on and do other things) rather than **one image**: the "
+                           "optimal stopping points of those two goals differ.")),
                     required=False, default=False),
                 ParameterSpec(
                     name="max_cycles", type="int",
-                    description=f"最多做几轮扰动+评估。{_FROM_TABLE}表值 {wf.max_cycles}。",
+                    description=tr(f"最多做几轮扰动+评估。{_FROM_TABLE}表值 {wf.max_cycles}。",
+                                   "Maximum number of perturbation + evaluation rounds. "
+                                   f"{_FROM_TABLE} Table value {wf.max_cycles}."),
                     required=False, min_value=1, max_value=50),
                 ParameterSpec(
                     name="cycles_per_fallback", type="int",
-                    description=(f"每几轮不成就回退去扎两下。{_FROM_TABLE}表值 "
-                                 f"{wf.cycles_per_fallback}。"),
+                    description=(tr(f"每几轮不成就回退去扎两下。{_FROM_TABLE}表值 "
+                                 f"{wf.cycles_per_fallback}。",
+                                    "Fall back to two pokes every this many unsuccessful rounds. "
+                                    f"{_FROM_TABLE} Table value {wf.cycles_per_fallback}.")),
                     required=False, min_value=1, max_value=50),
                 ParameterSpec(
                     name="fallback_budget", type="int",
-                    description=f"回退扎针最多几次。{_FROM_TABLE}表值 {wf.fallback_budget}。",
+                    description=tr(f"回退扎针最多几次。{_FROM_TABLE}表值 {wf.fallback_budget}。",
+                                   f"Maximum number of fallback pokes. {_FROM_TABLE} Table value "
+                                   f"{wf.fallback_budget}."),
                     required=False, min_value=0, max_value=20),
                 ParameterSpec(
                     name="expected_a_nm", type="float", unit="nm",
-                    description=("预期的原子行间距。留空则取自衬底;"
-                                 "填 0 就关掉这道检查。"),
+                    description=(tr("预期的原子行间距。留空则取自衬底;"
+                                 "填 0 就关掉这道检查。",
+                                    "Expected atomic row spacing. If empty, taken from the "
+                                    "substrate; enter 0 to turn this check off.")),
                     required=False, min_value=0.0, max_value=10.0),
                 ParameterSpec(
                     name="substrate", type="str",
-                    description="衬底名;留空 = 从样品记录里推断。",
+                    description=tr("衬底名;留空 = 从样品记录里推断。",
+                                   "Substrate name; empty = inferred from the sample record."),
                     required=False, default=""),
                 ParameterSpec(
                     name="allow_on_qplus", type="bool",
-                    description=("默认关 —— 在 nm 尺度上扎针**本来就是常规操作**,不需要额外"
+                    description=(tr("默认关 —— 在 nm 尺度上扎针**本来就是常规操作**,不需要额外"
                                 "许可。只有当那道守卫被重新打开时(MAST_QPLUS_POKE_GUARD=1),"
                                 "这个开关才有意义。真正保护音叉的是深度包络(超上限**拒绝**,"
-                                "绝不夹紧),以及扎针前自动把偏压调到 20 mV —— 不是这个开关。"),
+                                "绝不夹紧),以及扎针前自动把偏压调到 20 mV —— 不是这个开关。",
+                                    "Default off: poking at the nm scale **is routine anyway** and "
+                                    "needs no extra permission. This switch only matters when that "
+                                    "guard is turned back on (MAST_QPLUS_POKE_GUARD=1). What really "
+                                    "protects the tuning fork is the depth envelope (over the limit "
+                                    "it **refuses**, never clamps) and the automatic bias drop to 20 "
+                                    "mV before poking, not this switch.")),
                     required=False, default=False),
             ],
             estimated_duration_s=1200.0,
@@ -636,7 +785,7 @@ class MakeAtomicResolutionTip(_TipComposite):
                 outcome = ("atomic_time_budget_done" if best_frame
                            else "atomic_time_budget_exhausted")
                 phases.append({"phase": "atomic", "cycle": cyc,
-                               "reason": "时间预算用完了。"})
+                               "reason": tr("时间预算用完了。", "The time budget is used up.")})
                 break
             pfx = f"C{cyc}"
 
@@ -687,7 +836,9 @@ class MakeAtomicResolutionTip(_TipComposite):
                     "line_snr_median": line_med,
                     "line_streak": line_streak,
                     "wiggle_flips": wig.get("flips_executed"),
-                    "reason": adv.get("advisory") or "线级判读没给出建议",
+                    "reason": adv.get("advisory") or tr("线级判读没给出建议",
+                                                        "The line-level reading gave no "
+                                                        "recommendation"),
                 })
                 continue
 
@@ -722,7 +873,8 @@ class MakeAtomicResolutionTip(_TipComposite):
                 "scan_path": eval_path,
             }
             if not eval_path:
-                entry["reason"] = f"第 {cyc} 轮拿不到评估帧的文件路径"
+                entry["reason"] = tr(f"第 {cyc} 轮拿不到评估帧的文件路径",
+                                     f"Round {cyc}: no file path for the evaluation frame")
                 phases.append(entry)
                 continue
 
@@ -752,21 +904,39 @@ class MakeAtomicResolutionTip(_TipComposite):
                     entry["mid_frame_tip_change"] = {"first": first, "second": second,
                                                      "ratio": second / first}
                     entry["reason"] = (
-                        f"第 {cyc} 轮整帧判过（conc "
+                        tr(f"第 {cyc} 轮整帧判过（conc "
                         f"{verdict.get('angular_concentration')}），但**针尖在这一帧"
                         f"中途变了**：前半 {first:.0f} / 后半 {second:.0f}"
                         f"（比值 {second / first:.4f} < {_MID_FRAME_CHANGE_RATIO}）。"
-                        f"这一帧证明不了针尖**现在**好 —— 不发证，接着修。")
+                        f"这一帧证明不了针尖**现在**好 —— 不发证，接着修。",
+                           f"Round {cyc}: the whole frame was judged (conc "
+                           f"{verdict.get('angular_concentration')}), but **the tip changed midway "
+                           f"through this frame**: first half {first:.0f} / second half {second:.0f} "
+                           f"(ratio {second / first:.4f} < {_MID_FRAME_CHANGE_RATIO}). This frame "
+                           "cannot prove the tip is good **now**: no certificate issued, keep "
+                           "repairing."))
 
             if entry["passed"]:
                 per = verdict.get("period_fast_axis_nm")
                 conc = verdict.get("angular_concentration")
                 entry["reason"] = (
-                    f"第 {cyc} 轮出现原子相"
-                    + (f"（快扫方向周期 {float(per):.3f} nm）" if per else ""))
+                    tr(f"第 {cyc} 轮出现原子相", f"Round {cyc}: atomic phase appeared")
+                    + (tr(f"（快扫方向周期 {float(per):.3f} nm）", f" (fast-scan period {float(per):.3f} nm)") if per else ""))
                 phases.append(entry)
                 outcome = "atomic_tip_ready"
-                # 确认帧独立存盘，预算内可继续尝试；后续质量退化不会改变已保存帧。
+                # ── 通过之后停不停：**产物是图，不是针尖** ──
+                #
+                # 做法：想要好图就反复试，只有一个时间预期，
+                # 因为**只要最后有一张可用于论文的图即可**。
+                #
+                # 所以这里默认**不停**：确认帧都已经落成 .sxm，图会**累积**，
+                # 而针尖只有一个、没有备份。同一根针尖连着几张确认帧的质量是
+                # 随机游走（不是单调爬坡）—— 正因为它
+                # 是随机游走，多试几次才有意义，而下行**不会**把已经拿到的那张
+                # 图弄坏。约束是**时间**，不是「别把针尖弄坏」。
+                #
+                # （这与 ForgeAuTip 的改动同源：预算单位从
+                #  「站点数×轮数」换成**总时间**。）
                 if conc is not None and float(conc or 0) > float(best_conc):
                     best_conc = float(conc)
                     best_frame = {"cycle": cyc, "scan_path": eval_path,
@@ -779,8 +949,11 @@ class MakeAtomicResolutionTip(_TipComposite):
                     break
                 phases.append({
                     "phase": "atomic", "cycle": cyc, "keep_going": True,
-                    "reason": ("已经拿到一张（角向集中度 %s）。**图已落袋**，"
-                               "还有 %.0f 分钟预算 —— 接着试，最后交最好的那张。"
+                    "reason": (tr("已经拿到一张（角向集中度 %s）。**图已落袋**，"
+                               "还有 %.0f 分钟预算 —— 接着试，最后交最好的那张。",
+                                  "An image has already been obtained (angular concentration %s). "
+                                  "**The image is in the bag**, with %.0f minutes of budget left: "
+                                  "keep trying and hand over the best one at the end.")
                                % (("%.1f" % conc) if conc else "?",
                                   _budget_left(t_start, budget_s) / 60.0))})
                 line_streak = 0
@@ -788,13 +961,17 @@ class MakeAtomicResolutionTip(_TipComposite):
             if "scale_gate" in (verdict.get("reasons") or []):
                 # 判不了 ≠ 没有。接着扰动只会白白消耗针尖。
                 entry["reason"] = (
-                    f"评估帧判不出原子相（{verdict.get('nm_per_px')} nm/px 太粗）—— "
-                    f"这不等于没有原子相。")
+                    tr(f"评估帧判不出原子相（{verdict.get('nm_per_px')} nm/px 太粗）—— "
+                    f"这不等于没有原子相。",
+                       "The evaluation frame cannot decide on an atomic phase "
+                       f"({verdict.get('nm_per_px')} nm/px is too coarse): this does not mean there "
+                       "is no atomic phase."))
                 phases.append(entry)
                 outcome = "atomic_scale_misconfigured"
                 break
             entry["reason"] = (
-                f"第 {cyc} 轮无原子相：{'、'.join(verdict.get('reasons') or [])}")
+                tr(f"第 {cyc} 轮无原子相：{'、'.join(verdict.get('reasons') or [])}",
+                   f"Round {cyc}: no atomic phase: {', '.join(verdict.get('reasons') or [])}"))
             phases.append(entry)
 
             # ── 3) 每几轮不成,退回去扎两下 ──
@@ -810,20 +987,31 @@ class MakeAtomicResolutionTip(_TipComposite):
                     outcome = "surface_spent"
                     break
 
-                # 扎针后移动到新的平坦区域再评估。
-                # 避免把处理位置的局部形貌变化误归因于针尖质量。
+                # ── 3.5) 扎完针要**换地方** ──
+                #
+                # 流程要求：停下来扎一下针尖，然后**到平的地方继续**。
+                # 若扎完就回原来的 fx, fy —— 而那块地方刚被扎针的坑和前面
+                # 几轮的打磨弄脏了，在受损的表面上评估没有意义。
+                #
+                # 观察到：坏针尖上单靠扰动磨很多轮
+                # 质量指标只在低位打转；一次**扎针 + 换到新地方** + 两轮扰动就
+                # 明显上升，确认帧 passed。**换地方是钥匙，不是收尾动作。**
+                # （样本很少，分不开「扎针的贡献」与「换地方的贡献」。）
                 spot2 = yield from _relocate(
                     executor, step_prefix=f"K{fallbacks_used}R",
                     purpose="tip_shape", used=_dirty(executor))
                 if spot2 is None:
                     phases.append({"phase": "relocate", "after_poke": fallbacks_used,
-                                   "reason": "扎完针找不到新的干净落点了"})
+                                   "reason": tr("扎完针找不到新的干净落点了",
+                                                "No new clean landing spot found after poking")})
                     outcome = "surface_spent"
                     break
                 fx, fy = spot2[0], spot2[1]
                 phases.append({"phase": "relocate", "after_poke": fallbacks_used,
                                "flat_center": [fx, fy], "map_known": spot2[2],
-                               "reason": "扎完针换到新落点继续 —— 不在刚扎出来的坑上判读"})
+                               "reason": tr("扎完针换到新落点继续 —— 不在刚扎出来的坑上判读",
+                                            "Moved to a new landing spot after poking and "
+                                            "continuing: not judging on the pit just made")})
                 line_streak = 0
                 cycles_since_eval = 0
         else:
@@ -842,8 +1030,11 @@ class MakeAtomicResolutionTip(_TipComposite):
 
         if best_frame is not None:
             phases.append({"phase": "best", **best_frame,
-                           "reason": ("**交出的是这一段里最好的那张**（角向集中度 "
-                                      "%.1f，第 %d 轮）—— 图会累积，针尖不会。"
+                           "reason": (tr("**交出的是这一段里最好的那张**（角向集中度 "
+                                      "%.1f，第 %d 轮）—— 图会累积，针尖不会。",
+                                         "**Handing over the best image from this period** (angular "
+                                         "concentration %.1f, round %d): images accumulate, the tip "
+                                         "does not.")
                                       % (best_frame["angular_concentration"],
                                          best_frame["cycle"]))})
         self._phase_out = _wrap(phases, outcome)

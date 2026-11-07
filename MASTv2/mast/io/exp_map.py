@@ -23,6 +23,7 @@ import logging
 import math
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
+from mast.i18n import tr
 
 import numpy as np
 
@@ -39,21 +40,21 @@ logger = logging.getLogger(__name__)
 # kind → (colour, matplotlib marker, Chinese label). "scan"/"frame"/"manual"
 # footprints draw as rectangles; the rest draw as scatter points.
 KIND_STYLE: dict[str, tuple[str, str, str]] = {
-    "scan":        ("#3b82f6", "s", "扫图"),
-    "sts":         ("#22c55e", "o", "STS 点谱"),
-    "pulse":       ("#f59e0b", "*", "电脉冲"),
-    "tip_shape":   ("#ef4444", "^", "修针尖"),
-    "move":        ("#94a3b8", ".", "移动"),
-    "manual":      ("#e879f9", "D", "手动操作"),
-    "plan":        ("#38bdf8", "X", "计划"),
-    "frame":       ("#06b6d4", "s", "当前扫描框"),
-    "tip":         ("#f43f5e", "P", "针尖"),
+    "scan":        ("#3b82f6", "s", tr("扫图", "Scan")),
+    "sts":         ("#22c55e", "o", tr("STS 点谱", "STS point spectrum")),
+    "pulse":       ("#f59e0b", "*", tr("电脉冲", "Electrical pulse")),
+    "tip_shape":   ("#ef4444", "^", tr("修针尖", "Tip conditioning")),
+    "move":        ("#94a3b8", ".", tr("移动", "Move")),
+    "manual":      ("#e879f9", "D", tr("手动操作", "Manual operation")),
+    "plan":        ("#38bdf8", "X", tr("计划", "Plan")),
+    "frame":       ("#06b6d4", "s", tr("当前扫描框", "Current scan frame")),
+    "tip":         ("#f43f5e", "P", tr("针尖", "Tip")),
     # 2026-07-30 — the three events that decide WHERE the tip may still go.
     # ``coarse_move`` also ends one coordinate generation and starts the next
     # (see ``map_markers.coord_epoch``).
-    "coarse_move": ("#8b5cf6", "H", "粗动换区"),
-    "approach":    ("#14b8a6", "v", "进针"),
-    "crash":       ("#991b1b", "x", "撞针"),
+    "coarse_move": ("#8b5cf6", "H", tr("粗动换区", "Coarse relocation")),
+    "approach":    ("#14b8a6", "v", tr("进针", "Approach")),
+    "crash":       ("#991b1b", "x", tr("撞针", "Tip crash")),
 }
 
 # Positioned skill-name → marker kind. Substring match, lower-cased. Order
@@ -134,7 +135,7 @@ _READONLY_PREFIXES = ("get", "list",
 #: 逐个点名的只读/无关技能：动词前缀盖不住它们。
 _NEVER_POSITIONED = (
     "selfcheck",          # *SelfCheck 一族：只读自检，什么都不做
-    "scanbackground",     # 背景扣除的复制粘贴：图像运算，不动仪器
+    "scanbackground",     # 背景扣除的拷贝技能：图像运算，不动仪器
     "autocrop", "diffscans",                # 离线图像处理
     # 「li-sts-…」：ListSignalChannels 里含子串 "sts"，会被记成一个谱学测量点。
     # 它只是把信号通道列出来。（同形的 list_fetch_requests 由 snake_case 规则覆盖。）
@@ -146,11 +147,32 @@ _NEVER_POSITIONED = (
 
 
 def _never_positions(raw: str, n: str) -> bool:
-    """判断技能是否确定不产生 STM 表面事件。
-    
-    按只读/分析动词、SelfCheck、桥接分析工具命名和光学台类别排除，
-    避免名称子串把读取或分析误认为采集。纯自检不能生成扫描或修针标记，
-    否则会污染清洁位置选择和覆盖率；具体动词范围以 _READONLY_PREFIXES 为准。"""
+    """这个技能是不是「不可能在表面上留下事件」。
+
+    曾出现过：``TipConditioningSelfCheck`` 与 ``ScanIntelSelfCheck``
+    这两个**只读自检**，各自往实验地图里写了 ``status=done`` 的「修针尖」和
+    「扫图」标记 —— 针没扎过，图也没扫过。
+
+    这不只是画面难看：修针流程靠地图挑没动过的位置（``core/map_scope`` 就是为此
+    存在的），一个凭空的坑会让它**永远绕开一块干净的表面**；而假的扫描框会进
+    ``coverage_pct`` 的预算账。地图是实验记录的一部分,往里写没发生过的事,就是
+    「系统分不清『做了』和『说做了』」。
+
+    根因是 ``_SKILL_KIND_RULES`` 全靠子串匹配,而它已经被同一类问题咬过两次
+    （``StopAutoApproach`` 含 "autoapproach"、``MakeSpectroscopyTip`` 含 "spectr",
+    两处都在上面留了注释）。逐个补名字追不上新技能,所以这里改成按**动词**和
+    **命名约定**排除:
+
+    * ``Get/List/Wait/Stop/Configure/Set`` 开头 —— 读或配置,不产生空间事件;
+    * ``*SelfCheck`` —— 只读自检;
+    * snake_case —— 那是经 ``tool_skills`` 桥接进来的 agent 工具
+      （``plot_scan`` / ``load_scan`` / ``fit_sts_peaks`` …）,**根本不碰仪器**。
+      仪器技能一律 PascalCase,这条区分是可靠的;
+    * 光学台一族 —— 另一台仪器,不该出现在 STM 表面地图上。
+
+    另有两个误判:``ListSignalChannels`` 与 ``list_fetch_requests``
+    里的 "**lists**" 含子串 "sts",此前都会被记成一个谱学点。
+    """
     if any(n.startswith(p) for p in _READONLY_PREFIXES):
         return True
     if "_" in raw and raw == raw.lower():
@@ -238,7 +260,7 @@ def _coerce_float(v: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     # Reject NaN / ±inf at the source — a non-finite coordinate poisons the
-    # whole extent math and makes matplotlib's set_xlim raise ().
+    # whole extent math and makes matplotlib's set_xlim raise.
     return f if math.isfinite(f) else None
 
 
@@ -345,7 +367,7 @@ def frame_marker_from_state(state: "HardwareState | None") -> MapMarker | None:
     return MapMarker(
         kind="frame", x_m=cx, y_m=cy, w_m=w, h_m=h,
         angle_deg=getattr(state, "scan_angle_deg", None) or 0.0,
-        source="live", label="当前扫描框",
+        source="live", label=tr("当前扫描框", "Current scan frame"),
     )
 
 
@@ -374,12 +396,12 @@ def tip_xy_from_state(state: "HardwareState | None") -> tuple[float, float] | No
 # Nanonis GUI (the same ops done THROUGH MAST are captured as skill markers).
 
 _ZSTATUS_LABEL = {
-    "On": "手动启用 Z 反馈",
-    "Off": "手动关闭 Z 反馈",
-    "Hold": "手动暂停 Z 反馈",
-    "SafeTip": "安全收针 (SafeTip)",
-    "Withdrawing": "手动收针",
-    "SwitchingOff": "手动关闭 Z 反馈",
+    "On": tr("手动启用 Z 反馈", "Manual Z feedback on"),
+    "Off": tr("手动关闭 Z 反馈", "Manual Z feedback off"),
+    "Hold": tr("手动暂停 Z 反馈", "Manual Z feedback hold"),
+    "SafeTip": tr("安全收针 (SafeTip)", "Safe tip retract (SafeTip)"),
+    "Withdrawing": tr("手动收针", "Manual withdraw"),
+    "SwitchingOff": tr("手动关闭 Z 反馈", "Manual Z feedback off"),
 }
 
 
@@ -484,7 +506,7 @@ def detect_manual_state_changes(
             fr = cur["frame"]
             markers.append(MapMarker(
                 kind="manual", x_m=fr[0], y_m=fr[1], w_m=fr[2], h_m=fr[3],
-                angle_deg=fr[4] or 0.0, label="手动开始扫描", source="manual"))
+                angle_deg=fr[4] or 0.0, label=tr("手动开始扫描", "Manual scan start"), source="manual"))
         nb["scanning"] = True
         nb["tip"] = cur.get("tip")
         return markers, nb
@@ -499,7 +521,7 @@ def detect_manual_state_changes(
             fr = cur["frame"]
             markers.append(MapMarker(
                 kind="manual", x_m=fr[0], y_m=fr[1], w_m=fr[2], h_m=fr[3],
-                angle_deg=fr[4] or 0.0, label="手动改扫描框", source="manual"))
+                angle_deg=fr[4] or 0.0, label=tr("手动改扫描框", "Manual scan-frame change"), source="manual"))
             nb["frame"] = cur.get("frame")
         return markers, nb
 
@@ -508,12 +530,12 @@ def detect_manual_state_changes(
         fr = cur["frame"]
         markers.append(MapMarker(
             kind="manual", x_m=fr[0], y_m=fr[1], w_m=fr[2], h_m=fr[3],
-            angle_deg=fr[4] or 0.0, label="手动改扫描框", source="manual"))
+            angle_deg=fr[4] or 0.0, label=tr("手动改扫描框", "Manual scan-frame change"), source="manual"))
         nb["frame"] = cur.get("frame")
     elif _tip_moved(baseline.get("tip"), cur.get("tip"), tol_m) and cur.get("tip"):
         tp = cur["tip"]
         markers.append(MapMarker(kind="manual", x_m=tp[0], y_m=tp[1],
-                                 label="手动移动针尖", source="manual"))
+                                 label=tr("手动移动针尖", "Manual tip move"), source="manual"))
         nb["tip"] = cur.get("tip")
 
     # ── Bias change (debounced: only when settled) ──
@@ -523,7 +545,7 @@ def detect_manual_state_changes(
         px, py = _param_xy()
         markers.append(MapMarker(
             kind="manual", x_m=px, y_m=py,
-            label=(f"手动改偏压 {v:.3f} V" if v is not None else "手动改偏压"),
+            label=(tr(f"手动改偏压 {v:.3f} V", f"Manual bias change {v:.3f} V") if v is not None else tr("手动改偏压", "Manual bias change")),
             source="manual", meta={"bias_v": v}))
         nb["bias"] = cur.get("bias")
 
@@ -534,14 +556,14 @@ def detect_manual_state_changes(
         px, py = _param_xy()
         markers.append(MapMarker(
             kind="manual", x_m=px, y_m=py,
-            label=(f"手动改设定点 {s * 1e12:.1f} pA" if s is not None else "手动改设定点"),
+            label=(tr(f"手动改设定点 {s * 1e12:.1f} pA", f"Manual setpoint change {s * 1e12:.1f} pA") if s is not None else tr("手动改设定点", "Manual setpoint change")),
             source="manual", meta={"setpoint_a": s}))
         nb["setpoint"] = cur.get("setpoint")
 
     # ── Z-controller status change (On/Off/Hold/Withdraw/SafeTip) ──
     if cur.get("zstatus") != baseline.get("zstatus") and cur.get("zstatus") is not None:
         px, py = _param_xy()
-        lbl = _ZSTATUS_LABEL.get(cur["zstatus"], f"手动 Z 状态→{cur['zstatus']}")
+        lbl = _ZSTATUS_LABEL.get(cur["zstatus"], tr(f"手动 Z 状态→{cur['zstatus']}", f"Manual Z state -> {cur['zstatus']}"))
         markers.append(MapMarker(kind="manual", x_m=px, y_m=py, label=lbl,
                                  source="manual", meta={"zstatus": cur["zstatus"]}))
         nb["zstatus"] = cur.get("zstatus")
@@ -629,14 +651,15 @@ def manual_marker_from_spectrum_file(path) -> MapMarker | None:
         if bbox is None:
             return None
         return MapMarker(kind="manual", x_m=bbox[0], y_m=bbox[1],
-                         w_m=bbox[2], h_m=bbox[3], label="手动跑网格谱",
+                         w_m=bbox[2], h_m=bbox[3], label=tr("手动跑网格谱", "Manual grid spectroscopy"),
                          source="manual", meta={"file": str(path)})
     if pl.endswith(".dat"):
         pos = extract_dat_position(path)
         if pos is None:
             return None
         return MapMarker(kind="manual", x_m=pos[0], y_m=pos[1],
-                         label="手动跑点谱 (STS)", source="manual",
+                         label=tr("手动跑点谱 (STS)", "Manual point spectroscopy (STS)"),
+                         source="manual",
                          meta={"file": str(path)})
     return None
 
@@ -704,7 +727,7 @@ def compute_extent(
         xs.append(tip[0])
         ys.append(tip[1])
     # Drop any non-finite coordinate (inf/nan from an error state or a bad TCP
-    # parse) — one would make min/max/span NaN and crash set_xlim ().
+    # parse) — one would make min/max/span NaN and crash set_xlim.
     xs = [x for x in xs if x is not None and math.isfinite(x)]
     ys = [y for y in ys if y is not None and math.isfinite(y)]
     if not xs or not ys:
@@ -716,7 +739,7 @@ def compute_extent(
     # Degenerate (single point / zero span) → give it a small FIXED window so the
     # marker isn't a dot in an infinite plane. Use a fixed ~100 nm (a typical STM
     # frame) rather than the coordinate magnitude — a lone marker at 500 µm must
-    # not zoom out to a 500 µm window ().
+    # not zoom out to a 500 µm window.
     if span_x <= 0 and span_y <= 0:
         pad = 5e-8  # → 100 nm window
         return (x_min - pad, x_max + pad, y_min - pad, y_max + pad)
@@ -773,7 +796,9 @@ def _add_footprint(ax, m: MapMarker, *, edgecolor, facecolor, lw, ls, alpha,
               alpha=alpha, zorder=zorder, linestyle=ls, label=label)
     if abs(m.angle_deg) > 0.5:
         try:
-            rect = Rectangle((x0, y0), w_nm, h_nm, angle=m.angle_deg,
+            # 正 SCAN_ANGLE = 顺时针(data_gallery T6,与 px_to_m / to_frame 一致);
+            # matplotlib 的 Rectangle(angle) 是**逆时针**,所以取负,足迹才朝对的方向转。
+            rect = Rectangle((x0, y0), w_nm, h_nm, angle=-m.angle_deg,
                              rotation_point="center", **kw)
         except (TypeError, ValueError):  # old matplotlib: no rotation_point
             rect = Rectangle((x0, y0), w_nm, h_nm, **kw)
@@ -820,7 +845,8 @@ def render_map_figure(
     extent = compute_extent(markers, frame=frame, tip=tip, plan=plan)
     if extent is None:
         ax.text(0.5, 0.5,
-                "等待扫描范围…\n\n开始扫描或读取仪器状态后，\n本图将显示扫描框与所有带位置的操作。",
+                tr("等待扫描范围…\n\n开始扫描或读取仪器状态后，\n本图将显示扫描框与所有带位置的操作。",
+                   "Waiting for the scan range...\n\nAfter a scan starts or the instrument state is read,\nthis map shows the scan frame and all operations with a position."),
                 ha="center", va="center", color="#64748b", fontsize=11,
                 transform=ax.transAxes, **_fp_kw)
         ax.set_axis_off()
@@ -851,7 +877,7 @@ def render_map_figure(
         if len(pts) >= 2:
             ax.plot([p[0] for p in pts], [p[1] for p in pts],
                     color="#38bdf8", lw=1.4, ls="--", alpha=0.7, zorder=4,
-                    label="计划路线")
+                    label=tr("计划路线", "Planned route"))
         for i, m in enumerate(plan):
             if not m.has_xy:
                 continue
@@ -893,7 +919,7 @@ def render_map_figure(
     # 4) live current scan frame — bright cyan outline, no fill ("你在这").
     if frame is not None and frame.has_footprint:
         _add_footprint(ax, frame, edgecolor="#06b6d4", facecolor="none",
-                       lw=2.0, ls="-", alpha=1.0, zorder=9, label="当前扫描框")
+                       lw=2.0, ls="-", alpha=1.0, zorder=9, label=tr("当前扫描框", "Current scan frame"))
 
     # 5) live tip — crosshair + dot.
     if tip is not None:
@@ -901,11 +927,11 @@ def render_map_figure(
         ax.axhline(ty, color="#f43f5e", lw=0.6, alpha=0.35, zorder=9)
         ax.axvline(tx, color="#f43f5e", lw=0.6, alpha=0.35, zorder=9)
         ax.scatter([tx], [ty], s=70, c="#f43f5e", marker="P",
-                   edgecolors="white", linewidths=0.6, zorder=11, label="针尖")
+                   edgecolors="white", linewidths=0.6, zorder=11, label=tr("针尖", "Tip"))
 
     n_ops = sum(1 for m in markers if m.kind != "frame")
-    ttl = title or (f"扫描地图 · {sample_label}" if sample_label else "扫描地图")
-    ax.set_title(f"{ttl}   ({n_ops} 个操作)", color="#e2e8f0", fontsize=11,
+    ttl = title or (tr(f"扫描地图 · {sample_label}", f"Scan map · {sample_label}") if sample_label else tr("扫描地图", "Scan map"))
+    ax.set_title(tr(f"{ttl}   ({n_ops} 个操作)", f"{ttl}   ({n_ops} operations)"), color="#e2e8f0", fontsize=11,
                  **_fp_kw)
 
     handles, labels = ax.get_legend_handles_labels()
@@ -948,12 +974,12 @@ def summarize_markers(markers: list[MapMarker]) -> str:
             continue
         counts[m.kind] = counts.get(m.kind, 0) + 1
     if not counts:
-        return "尚无带位置的操作记录。"
+        return tr("尚无带位置的操作记录。", "No operations with a position recorded yet.")
     parts = []
     for kind, n in counts.items():
         zh = KIND_STYLE.get(kind, (None, None, kind))[2]
         parts.append(f"{zh} ×{n}")
-    return "已记录 " + "，".join(parts) + "。"
+    return tr("已记录 ", "Recorded ") + tr("，", ", ").join(parts) + tr("。", ".")
 
 
 __all__ = [

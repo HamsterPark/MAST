@@ -203,9 +203,18 @@ def test_remote_urls_ip_first_magicdns_last():
     # so a browser hard-rejects the self-signed cert on the MagicDNS name (no
     # click-through). The IP is not preloaded → click-through works. So IP first.
     urls = ts.remote_urls(_ready_status(), 7862, "https")
-    assert urls[0]["url"] == "https://100.101.102.103:7862"              # IPv4 recommended
+    assert [u["url"] for u in urls] == [
+        "https://100.101.102.103:7862",                                   # IPv4 recommended
+        "https://mast-box.tail1a2b3c.ts.net:7862",                        # MagicDNS last
+    ]
+
+
+def test_remote_urls_skip_ipv6_unless_the_listener_takes_it():
+    # MAST binds IPv4 0.0.0.0: https://[fd7a:…]:7862 was offered as a 备用地址 and
+    # refused every connection.
+    assert not any("fd7a" in u["url"] for u in ts.remote_urls(_ready_status(), 7862))
+    urls = ts.remote_urls(_ready_status(), 7862, "https", include_ipv6=True)
     assert urls[1]["url"] == "https://[fd7a:115c:a1e0::1234]:7862"        # v6 bracketed
-    assert urls[2]["url"] == "https://mast-box.tail1a2b3c.ts.net:7862"    # MagicDNS last
 
 
 def test_remote_urls_empty_when_not_ready():
@@ -236,3 +245,38 @@ def test_summary_accepts_injected_status():
     s = ts.summary(9000, "https", status=_ready_status())
     assert s["urls"][0]["host"] == "100.101.102.103"       # IP recommended, first
     assert s["tailscale"]["installed"] is True
+
+
+# ── peer_names (who connected to remote AI access) ───────────────────────────
+
+def test_peer_names_map_every_address_to_the_machine_name(monkeypatch):
+    body = json.loads(RUNNING_JSON)
+    body["Peer"] = {
+        "nodekey:1": {"HostName": "DESKTOP-7Q2", "DNSName": "alice-laptop.tail1a2b3c.ts.net.",
+                      "TailscaleIPs": ["100.80.1.2", "fd7a:115c:a1e0::2"]},
+        "nodekey:2": {"HostName": "phone", "DNSName": "", "TailscaleIPs": ["100.80.1.3"]},
+        "nodekey:3": "not a node",
+    }
+    monkeypatch.setattr(ts, "find_cli", lambda: "tailscale")
+    monkeypatch.setattr(ts.subprocess, "run", _fake_run(stdout=json.dumps(body)))
+    names = ts.peer_names()
+    assert names["100.80.1.2"] == "alice-laptop"          # the MagicDNS label, not HostName
+    assert names["fd7a:115c:a1e0::2"] == "alice-laptop"
+    assert names["100.80.1.3"] == "phone"                   # no MagicDNS name: the host name
+    assert names["100.101.102.103"] == "mast-box"           # this device too
+
+
+@pytest.mark.parametrize("run", [
+    _fake_run(stdout="<html>"), _fake_run(stdout=""), _fake_run(stdout="[1, 2]"),
+    _fake_run(raise_exc=subprocess.TimeoutExpired(["tailscale"], 3)),
+    _fake_run(raise_exc=OSError("boom")),
+])
+def test_peer_names_never_raise(monkeypatch, run):
+    monkeypatch.setattr(ts, "find_cli", lambda: "tailscale")
+    monkeypatch.setattr(ts.subprocess, "run", run)
+    assert ts.peer_names() == {}
+
+
+def test_peer_names_without_tailscale(monkeypatch):
+    monkeypatch.setattr(ts, "find_cli", lambda: None)
+    assert ts.peer_names() == {}

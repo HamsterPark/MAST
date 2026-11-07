@@ -37,7 +37,9 @@ def _canvas_source() -> str:
 
 def _object_literal(src: str, name: str) -> dict[str, str]:
     body = src.split(f"const {name} = {{", 1)[1].split("};", 1)[0]
-    return dict(re.findall(r"(\w+):\s*\"([^\"]+)\"", body))
+    # Values are plain strings or bilingual `tr("中文", "English")`; take the string
+    # (the Chinese one for tr()).
+    return dict(re.findall(r"(\w+):\s*(?:tr\(\s*)?\"([^\"]+)\"", body))
 
 
 def test_every_backend_kind_has_a_frontend_colour():

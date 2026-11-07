@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -56,44 +57,53 @@ class AcquireBiasSeries(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "在**同一个位置**按一串偏压各扫一帧，用来看偏压依赖（占据态／空态）。"
-                "\n\n**按恒定结阻 R=V/I 配 setpoint。** "
-                "改变偏压时相应调整设定电流，避免固定电流造成额外的结条件变化。"
-                "\n\n**序列首尾各加一帧相同条件做漂移对照。** "
-                "用首尾对照区分时间变化与偏压依赖；仍需逐帧评估稳定性。"
-                "\n\n每帧同时报 `AssessFrameTrust` 的逐行 MAD，好让调用方知道哪几帧可信。"
+                tr("在**同一个位置**按一串偏压各扫一帧，用来看偏压依赖（占据态／空态）。"
+                "\n\n**关键：按恒定结阻 R=V/I 配 setpoint，不是固定 setpoint。** "
+                "隧道结的距离由结阻决定；偏压降下去而 setpoint 不动 ⇒ 针尖被推近。"
+                "在某个表面覆着松散团簇的样品上，把偏压往下调而 setpoint 不动，"
+                "同一位置连扫几帧，RMS 会一路爬升、Z 摆动可能接近压电"
+                "量程上限；拉开到更低结阻后立刻稳定。"
+                "**不是针尖坏，是条件太近。**"
+                "\n\n**序列首尾各加一帧相同条件做漂移对照。** 没有它，整组图不能横向比 —— "
+                "曾见过：首尾 RMS 与逐行 σ 都明显下降，是针尖在这几分钟里变稳了，"
+                "若没有对照就会被读成偏压的效应。"
+                "\n\n每帧同时报 `AssessFrameTrust` 的逐行 MAD，好让调用方知道哪几帧可信。",
+                "Scan one frame at each of a series of biases at the **same position**, to see the bias dependence (occupied / empty states).\n\n**Key: set the setpoint by constant junction resistance R=V/I, not a fixed setpoint.** The tunnel-junction distance is determined by the junction resistance; lowering the bias while the setpoint stays put => the tip is pushed closer. This is a known failure mode: several frames in a row at the same position at a low junction resistance can see the RMS climb and Z swing close to the piezo range; it looks like 'the tip is degrading', but widening to a higher junction resistance stabilises it immediately. **The tip was not bad, the conditions were too close.**\n\n**Add one frame of identical conditions at each end of the sequence as a drift control.** Without it the whole set cannot be compared across frames - in one case the RMS and row sigma both dropped clearly from first to last, meaning the tip became stable over those minutes, which without the control would be read as a bias effect.\n\nEach frame also reports the per-row MAD of `AssessFrameTrust`, so the caller knows which frames to trust.")
             ),
             parameters=[
                 ParameterSpec(
                     name="center_x_m", type="float", unit="m",
-                    description="扫描中心 x。", required=True),
+                    description=tr("扫描中心 x。", "Scan centre x."), required=True),
                 ParameterSpec(
                     name="center_y_m", type="float", unit="m",
-                    description="扫描中心 y。", required=True),
+                    description=tr("扫描中心 y。", "Scan centre y."), required=True),
                 ParameterSpec(
                     name="size_m", type="float", unit="m",
-                    description="视野边长。", required=True,
+                    description=tr("视野边长。", "Field-of-view edge length."), required=True,
                     min_value=1e-9, max_value=2e-6),
                 ParameterSpec(
                     name="biases_v", type="str",
                     description=(
-                        "偏压序列，逗号分隔（V）。**正负都给**才看得出占据态与空态的差别，"
-                        "例如 '2,1.5,1,0.5,-0.5,-1,-1.5,-2'。"),
+                        tr("偏压序列，逗号分隔（V）。**正负都给**才看得出占据态与空态的差别，"
+                        "例如 '2,1.5,1,0.5,-0.5,-1,-1.5,-2'。",
+                        "Bias sequence, comma-separated (V). Give **both signs** to see the difference between occupied and empty states, e.g. '2,1.5,1,0.5,-0.5,-1,-1.5,-2'.")),
                     required=True),
                 ParameterSpec(
                     name="junction_r_ohm", type="float", unit="ohm",
                     description=(
-                        "目标结阻。整条序列共用它计算每档的 setpoint；应按当前样品、针尖与结状态选择并验证，不能把默认值理解为已标定的操作条件。"
-                        ),
+                        tr("目标结阻。整条序列共用它来算每一档的 setpoint。"
+                        "越大针尖越远越安全；脏表面上宜取 100 GΩ 以上"
+                        "（过小的结阻会推动松散团簇）。",
+                        "Target junction resistance. The whole sequence uses it to compute each step's setpoint. The larger it is, the farther and safer the tip; on a dirty surface use 100 GΩ or more (too small a junction resistance can push loose clusters).")),
                     required=False, default=1e11,
                     min_value=1e8, max_value=1e13),
                 ParameterSpec(
                     name="pixels", type="int",
-                    description="每帧像素数。", required=False, default=192,
+                    description=tr("每帧像素数。", "Pixels per frame."), required=False, default=192,
                     min_value=32, max_value=1024),
                 ParameterSpec(
                     name="line_time_s", type="float", unit="s",
-                    description="每行时间。", required=False, default=0.05,
+                    description=tr("每行时间。", "Time per line."), required=False, default=0.05,
                     min_value=0.005, max_value=5.0),
             ],
             estimated_duration_s=600.0,
@@ -108,14 +118,15 @@ class AcquireBiasSeries(BaseSkill):
             try:
                 vals = [float(t) for t in raw.split(",") if t.strip()]
             except ValueError:
-                errors.append("biases_v 解析不了：%r（要逗号分隔的数字）" % raw)
+                errors.append(tr("biases_v 解析不了：%r（要逗号分隔的数字）", "biases_v could not be parsed: %r (a comma-separated list of numbers is expected)") % raw)
             else:
                 if len(vals) < 2:
-                    errors.append("偏压序列至少要 2 档（给了 %d）" % len(vals))
+                    errors.append(tr("偏压序列至少要 2 档（给了 %d）", "The bias sequence needs at least 2 steps (%d given)") % len(vals))
                 if any(v == 0 for v in vals):
                     errors.append(
-                        "偏压序列里不能有 0 V —— 恒结阻在 0 V 处算出 0 电流，"
-                        "而且 0 偏压下本来就没有隧穿。")
+                        tr("偏压序列里不能有 0 V —— 恒结阻在 0 V 处算出 0 电流，"
+                        "而且 0 偏压下本来就没有隧穿。",
+                        "The bias sequence cannot contain 0 V - at 0 V the constant junction resistance gives 0 current, and there is no tunnelling at 0 bias anyway."))
         return errors
 
     def _one(self, context, x, y, size, bias, sp, px, line, tag):
@@ -147,13 +158,14 @@ class AcquireBiasSeries(BaseSkill):
             biases = [float(t) for t in raw.split(",") if t.strip()]
         except ValueError:
             return SkillResult(skill_name="AcquireBiasSeries", success=False,
-                               error="biases_v 解析不了：%r（要逗号分隔的数字）" % raw)
+                               error=tr("biases_v 解析不了：%r（要逗号分隔的数字）", "biases_v could not be parsed: %r (a comma-separated list of numbers is expected)") % raw)
         biases = [b for b in biases if b != 0.0]     # 0 V 在恒结阻下算出 0 电流
         if len(biases) < 2:
             return SkillResult(
                 skill_name="AcquireBiasSeries", success=False,
-                error=("偏压序列至少要 2 档非零值（收到 %d）。0 V 在恒结阻下算出 0 电流，"
-                       "而且 0 偏压下本来就没有隧穿。" % len(biases)))
+                error=(tr("偏压序列至少要 2 档非零值（收到 %d）。0 V 在恒结阻下算出 0 电流，"
+                       "而且 0 偏压下本来就没有隧穿。",
+                       "The bias sequence needs at least 2 non-zero values (received %d). At 0 V the constant junction resistance gives 0 current, and there is no tunnelling at 0 bias anyway.") % len(biases)))
         r_ohm = float(params.get("junction_r_ohm") or 1e11)
         x = float(params["center_x_m"])
         y = float(params["center_y_m"])
@@ -181,23 +193,25 @@ class AcquireBiasSeries(BaseSkill):
             drift = {
                 "pre_row_mad_pm": a, "post_row_mad_pm": b,
                 "comparable": not (worse or better),
-                "note": ("针尖在序列中**变差**了（%.1f → %.1f pm）—— 这组图不能横向比，"
-                         "偏压的效应和针尖的变化混在一起。" % (a, b)) if worse else
-                        ("针尖在序列中**变稳**了（%.1f → %.1f pm）—— 别把这段变化读成偏压的效应。"
+                "note": (tr("针尖在序列中**变差**了（%.1f → %.1f pm）—— 这组图不能横向比，"
+                         "偏压的效应和针尖的变化混在一起。",
+                         "The tip got **worse** during the sequence (%.1f -> %.1f pm) - this set cannot be compared across frames; bias effects and tip changes are mixed together.") % (a, b)) if worse else
+                        (tr("针尖在序列中**变稳**了（%.1f → %.1f pm）—— 别把这段变化读成偏压的效应。", "The tip got **more stable** during the sequence (%.1f -> %.1f pm) - do not read this change as a bias effect.")
                          % (a, b)) if better else
-                        ("首尾针尖状态相当（%.1f / %.1f pm）—— 这组图可以横向比。" % (a, b)),
+                        (tr("首尾针尖状态相当（%.1f / %.1f pm）—— 这组图可以横向比。", "First and last tip states are comparable (%.1f / %.1f pm) - this set can be compared across frames.") % (a, b)),
             }
         ok = [f for f in frames if f.get("ok")]
         return SkillResult(
             skill_name="AcquireBiasSeries", success=bool(ok),
-            error="" if ok else "一帧都没扫成。",
+            error="" if ok else tr("一帧都没扫成。", "No frame was scanned successfully."),
             data={
                 "junction_r_ohm": r_ohm,
                 "plan": [{"bias_v": b, "setpoint_a": s, "clamped": c} for b, s, c in plan],
                 "clamped_biases": clamped,
                 "clamp_note": (
-                    "这几档的 setpoint 被夹在 [%.0f, %.0f] pA 之内，结阻不再等于目标值：%s"
-                    " —— 横向比较时要知道它们的针尖距离与其余档不同。"
+                    tr("这几档的 setpoint 被夹在 [%.0f, %.0f] pA 之内，结阻不再等于目标值：%s"
+                    " —— 横向比较时要知道它们的针尖距离与其余档不同。",
+                    "The setpoint of these steps was clamped to within [%.0f, %.0f] pA, so the junction resistance no longer equals the target: %s - when comparing across steps, note that their tip distance differs from the others.")
                     % (_MIN_SETPOINT_A * 1e12, _MAX_SETPOINT_A * 1e12, clamped)) if clamped else "",
                 "frames": frames,
                 "n_ok": len(ok), "n_total": len(frames),

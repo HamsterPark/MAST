@@ -32,6 +32,7 @@ from typing import Any
 
 from mast.core import instrument_profile as _iprof
 from mast.core import tip_state
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -105,13 +106,13 @@ def register_tip(
     mat = tip_state.normalize_material(material)
     if mat is None and str(material or "").strip():
         mat = str(material).strip()
-        warnings.append(f"材料「{mat}」不在受控词表里，已原样记录（可用 update_tip 更正）")
+        warnings.append(tr(f"材料「{mat}」不在受控词表里，已原样记录（可用 update_tip 更正）", f"Material \"{mat}\" is not in the controlled vocabulary; recorded as given (can be corrected with update_tip)"))
     fab = tip_state.normalize_fabrication(fabrication)
     if fab is None and str(fabrication or "").strip():
-        warnings.append(f"制备方式「{fabrication}」不在受控词表里，已记为 unknown")
+        warnings.append(tr(f"制备方式「{fabrication}」不在受控词表里，已记为 unknown", f"Fabrication \"{fabrication}\" is not in the controlled vocabulary; recorded as unknown"))
     frm = tip_state.normalize_form(form)
     if frm is None and str(form or "").strip():
-        warnings.append(f"针尖形态「{form}」不在受控词表里，已记为 stm_wire")
+        warnings.append(tr(f"针尖形态「{form}」不在受控词表里，已记为 stm_wire", f"Tip form \"{form}\" is not in the controlled vocabulary; recorded as stm_wire"))
 
     diameter = None
     if wire_diameter_mm is not None and str(wire_diameter_mm).strip() != "":
@@ -120,9 +121,9 @@ def register_tip(
             if d > 0 and d == d and d != float("inf"):
                 diameter = d
             else:
-                warnings.append(f"线材直径 {wire_diameter_mm!r} 非正数，已忽略")
+                warnings.append(tr(f"线材直径 {wire_diameter_mm!r} 非正数，已忽略", f"Wire diameter {wire_diameter_mm!r} is not positive; ignored"))
         except (TypeError, ValueError):
-            warnings.append(f"线材直径 {wire_diameter_mm!r} 不是数字，已忽略")
+            warnings.append(tr(f"线材直径 {wire_diameter_mm!r} 不是数字，已忽略", f"Wire diameter {wire_diameter_mm!r} is not a number; ignored"))
 
     def _pos(val: Any, label: str) -> "float | None":
         if val is None or str(val).strip() == "":
@@ -133,7 +134,7 @@ def register_tip(
                 return f
         except (TypeError, ValueError):
             pass
-        warnings.append(f"{label} {val!r} 非法，已忽略")
+        warnings.append(tr(f"{label} {val!r} 非法，已忽略", f"{label} {val!r} is invalid; ignored"))
         return None
 
     fields = {
@@ -144,9 +145,9 @@ def register_tip(
         "form": frm or "stm_wire",
         "wire_diameter_mm": diameter,
         "qplus_sensor_model": str(qplus_sensor_model or "").strip(),
-        "qplus_f0_hz": _pos(qplus_f0_hz, "qPlus 共振频率"),
-        "qplus_q": _pos(qplus_q, "qPlus Q 值"),
-        "qplus_k_n_per_m": _pos(qplus_k_n_per_m, "qPlus 弹性常数"),
+        "qplus_f0_hz": _pos(qplus_f0_hz, tr("qPlus 共振频率", "qPlus resonance frequency")),
+        "qplus_q": _pos(qplus_q, tr("qPlus Q 值", "qPlus Q value")),
+        "qplus_k_n_per_m": _pos(qplus_k_n_per_m, tr("qPlus 弹性常数", "qPlus spring constant")),
         "installed_at": str(installed_at).strip() if installed_at else _now_iso(),
         "installed_by": str(installed_by or "").strip(),
         "note": str(note or "").strip(),
@@ -164,7 +165,7 @@ def register_tip(
         tip_id = storage.create_tip(fields, retire_snapshot=snapshot)
     except Exception as exc:  # noqa: BLE001
         logger.warning("登记针尖失败: %s", exc)
-        return {"ok": False, "error": f"登记针尖失败: {exc}",
+        return {"ok": False, "error": tr(f"登记针尖失败: {exc}", f"Failed to register the tip: {exc}"),
                 "warnings": warnings, "cleared": {}}
 
     # 名字留空时用序号补一个人能认的默认名(序号由库分配,所以只能事后补)。
@@ -184,7 +185,7 @@ def register_tip(
     except Exception as exc:  # noqa: BLE001
         logger.warning("清除上一根针的标定失败: %s", exc)
         cleared = {}
-        warnings.append("上一根针的学习标定未能清除，请在设置里手动清一次 dI/dV 标定")
+        warnings.append(tr("上一根针的学习标定未能清除，请在设置里手动清一次 dI/dV 标定", "The learned calibration of the previous tip could not be cleared; please clear the dI/dV calibration manually once in Settings"))
 
     row = _refresh_holder(storage)
     label = (row or {}).get("name") or tip_id[:8]
@@ -211,11 +212,11 @@ def remove_current_tip(storage: Any, *, note: str = "") -> dict[str, Any]:
         did = storage.retire_current_tip(retire_snapshot=snapshot)
     except Exception as exc:  # noqa: BLE001
         logger.warning("退役当前针尖失败: %s", exc)
-        return {"ok": False, "error": f"退役当前针尖失败: {exc}", "cleared": {}}
+        return {"ok": False, "error": tr(f"退役当前针尖失败: {exc}", f"Failed to retire the current tip: {exc}"), "cleared": {}}
     if not did:
         tip_state.set_current_tip(None)
         return {"ok": True, "changed": False, "cleared": {},
-                "message": "当前没有已登记的针尖，无需退役。"}
+                "message": tr("当前没有已登记的针尖，无需退役。", "There is no registered tip at the moment; nothing to retire.")}
     try:
         cleared = _iprof.clear_tip_bound_state()
     except Exception:  # noqa: BLE001
@@ -236,19 +237,19 @@ def update_tip(storage: Any, tip_id: str, fields: dict) -> dict[str, Any]:
     if "material" in fields:
         mat = tip_state.normalize_material(fields["material"])
         if mat is None:
-            warnings.append(f"材料「{fields['material']}」不在受控词表里，未改动")
+            warnings.append(tr(f"材料「{fields['material']}」不在受控词表里，未改动", f"Material \"{fields['material']}\" is not in the controlled vocabulary; unchanged"))
         else:
             clean["material"] = mat
     if "fabrication" in fields:
         fab = tip_state.normalize_fabrication(fields["fabrication"])
         if fab is None:
-            warnings.append(f"制备方式「{fields['fabrication']}」不在受控词表里，未改动")
+            warnings.append(tr(f"制备方式「{fields['fabrication']}」不在受控词表里，未改动", f"Fabrication \"{fields['fabrication']}\" is not in the controlled vocabulary; unchanged"))
         else:
             clean["fabrication"] = fab
     if "form" in fields:
         frm = tip_state.normalize_form(fields["form"])
         if frm is None:
-            warnings.append(f"针尖形态「{fields['form']}」不在受控词表里，未改动")
+            warnings.append(tr(f"针尖形态「{fields['form']}」不在受控词表里，未改动", f"Tip form \"{fields['form']}\" is not in the controlled vocabulary; unchanged"))
         else:
             clean["form"] = frm
     for key in ("wire_diameter_mm", "qplus_f0_hz", "qplus_q", "qplus_k_n_per_m"):
@@ -258,18 +259,18 @@ def update_tip(storage: Any, tip_id: str, fields: dict) -> dict[str, Any]:
                 if f > 0 and f == f and f != float("inf"):
                     clean[key] = f
                 else:
-                    warnings.append(f"{key} = {fields[key]!r} 非正数，未改动")
+                    warnings.append(tr(f"{key} = {fields[key]!r} 非正数，未改动", f"{key} = {fields[key]!r} is not positive; unchanged"))
             except (TypeError, ValueError):
-                warnings.append(f"{key} = {fields[key]!r} 不是数字，未改动")
+                warnings.append(tr(f"{key} = {fields[key]!r} 不是数字，未改动", f"{key} = {fields[key]!r} is not a number; unchanged"))
     if not clean:
-        return {"ok": False, "error": "没有可改的字段。", "warnings": warnings}
+        return {"ok": False, "error": tr("没有可改的字段。", "There are no fields to change."), "warnings": warnings}
     try:
         changed = storage.update_tip(tip_id, clean)
     except Exception as exc:  # noqa: BLE001
         logger.warning("更新针尖失败: %s", exc)
-        return {"ok": False, "error": f"更新针尖失败: {exc}", "warnings": warnings}
+        return {"ok": False, "error": tr(f"更新针尖失败: {exc}", f"Failed to update the tip: {exc}"), "warnings": warnings}
     if not changed:
-        return {"ok": False, "error": f"没有 id={tip_id} 的针尖。", "warnings": warnings}
+        return {"ok": False, "error": tr(f"没有 id={tip_id} 的针尖。", f"There is no tip with id={tip_id}."), "warnings": warnings}
     row = _refresh_holder(storage)
     try:
         updated = storage.get_tip(tip_id)

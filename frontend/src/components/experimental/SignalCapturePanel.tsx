@@ -14,6 +14,7 @@ import {
 } from "@/components/controls";
 import { FftChart, type FftSeries } from "@/components/vision/FftChart";
 import { TimeTraceChart } from "@/components/experimental/TimeTraceChart";
+import { tr } from "@/lib/i18n";
 
 type SignalChannel = components["schemas"]["SignalChannel"];
 type FFT = components["schemas"]["FFTResponse"];
@@ -21,24 +22,26 @@ type WindowFn = "hann" | "hamming" | "rect";
 type OutputKind = "magnitude" | "power";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 信号捕获 + FFT — ITEM 6 (fuller redesign of gui/exp_capture).
+// Signal capture + FFT.
 //
-// The live hardware capture (Osci1T 20 kHz / 轮询 fast-path) runs in the desktop
-// core and streams huge sample arrays that NEVER cross the typed HTTP wire — so
-// there is no read-only capture endpoint. What IS exposed:
-//   · GET  /api/experimental/signals — channels + units + Osci timebases + enums
-//   · POST /api/experimental/fft     — pure one-sided rfft over supplied samples
+// The live hardware capture (Osci1T 20 kHz / polling fast path) runs in the desktop
+// core and streams huge sample arrays that never cross the typed HTTP wire, so
+// there is no read-only capture endpoint. What is exposed:
+//   - GET  /api/experimental/signals: channels + units + Osci timebases + enums
+//   - POST /api/experimental/fft:     pure one-sided rfft over supplied samples
 //
-// Added capability on top of the first redesign:
-//   1. 多通道选择 / 通道对比 — pick 2+ channels, paste a trace each, overlay spectra
-//   2. 平均 (N 次) — average N FFT computes to pull down the noise floor + 计数器
-//   3. 峰值读出表 — top-N peaks per channel (DataTable in FftChart)
-//   4. 频率轴控制 — min/max Hz 缩放 + 线性/对数 X（外加既有对数 Y）
-//   5. 实时连续模式 — 按间隔自动重算 vs 单次
-//   6. 单位/标度读出 — |FFT| (V) / PSD (V/√Hz) 标注
-//   7. 预设保存/加载 (localStorage) + 时域 trace & 频谱各导 CSV + PNG
-// Degrade-safe: no live signals → default channel list (degraded flag); live
-// capture needs hardware → clear "需连接 Nanonis" note; never freezes.
+// Features:
+//   1. Multi-channel selection / channel comparison: pick 2+ channels, paste a
+//      trace for each, overlay the spectra
+//   2. N-capture averaging to pull down the noise floor, with a counter
+//   3. Peak readout table: top-N peaks per channel (DataTable in FftChart)
+//   4. Frequency-axis control: min/max Hz zoom + linear/log X (plus log Y)
+//   5. Live continuous mode: recompute on an interval vs single shot
+//   6. Unit/scale readout: |FFT| (V) / PSD (V/sqrt(Hz)) labels
+//   7. Preset save/load (localStorage) + CSV and PNG export of trace and spectrum
+// Degrades safely: no live signals gives the default channel list (degraded flag);
+// live capture needs hardware, with a clear "Nanonis connection required" note;
+// never freezes.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const PRESET_KEY = "mast.exp.capture.presets.v1";
@@ -69,9 +72,8 @@ function parseSamples(text: string): number[] {
 }
 
 /** Build a representative demo time-domain trace so the FFT path can be exercised
- *  WITHOUT hardware: a couple of sine components on a small noise floor. `seed`
- *  decorrelates the noise/phase per channel so an overlay compare looks distinct.
- *  Mirrors the kind of trace gui/exp_capture captured from Osci1T (a few tones). */
+ *  without hardware: a couple of sine components on a small noise floor. `seed`
+ *  decorrelates the noise/phase per channel so an overlay compare looks distinct. */
 function demoTrace(n = 1024, fsHz = 20000, seed = 0): number[] {
   // Two tones placed well inside Nyquist, scaled to a typical pA-ish magnitude.
   const f1 = 1000 + seed * 250; // Hz
@@ -256,7 +258,7 @@ export function SignalCapturePanel() {
 
   // ── Per-channel editing state (pasted trace + last spectrum + average accum) ──
   const [chanStates, setChanStates] = useState<Record<number, ChannelState>>({});
-  // Collapse the raw paste textareas by default — the one-click 示例 → FFT path is
+  // Collapse the raw paste textareas by default: the one-click demo -> FFT path is
   // the default experience; manual pasting is an advanced/opt-in area.
   const [showManualPaste, setShowManualPaste] = useState(false);
 
@@ -279,7 +281,7 @@ export function SignalCapturePanel() {
     setChanStates((prev) => ({ ...prev, [idx]: { ...prev[idx]!, samplesText: text } }));
 
   // Fill one channel's textarea with a representative demo trace (sine+noise) so
-  // the FFT can be tried WITHOUT hardware. `seed` keeps channels distinct in the
+  // the FFT can be tried without hardware. `seed` keeps channels distinct in the
   // overlay compare. Uses the current N / fs so the spectrum lands sensibly.
   const fillDemoFor = (idx: number, seed: number) => {
     const n = nPoints > 0 ? Math.min(nPoints, 4096) : 1024;
@@ -287,7 +289,7 @@ export function SignalCapturePanel() {
     setSamplesFor(idx, formatSamples(demoTrace(n, fs, seed)));
   };
 
-  // Fill EVERY selected channel at once (one-click demo → compute → FFT).
+  // Fill every selected channel at once (one-click demo, compute, FFT).
   const fillDemoAll = () => {
     const n = nPoints > 0 ? Math.min(nPoints, 4096) : 1024;
     const fs = Number.isFinite(fsHz) && fsHz > 0 ? fsHz : 20000;
@@ -298,7 +300,7 @@ export function SignalCapturePanel() {
       });
       return next;
     });
-    toast(`已为 ${selectedChannels.length} 个通道填入示例数据`);
+    toast(tr(`已为 ${selectedChannels.length} 个通道填入示例数据`, `Demo data filled for ${selectedChannels.length} channels`));
   };
 
   const windowOptions: { value: WindowFn; label: string }[] = meta?.windows?.length
@@ -306,13 +308,13 @@ export function SignalCapturePanel() {
     : [
         { value: "hann", label: "Hann" },
         { value: "hamming", label: "Hamming" },
-        { value: "rect", label: "矩形/无窗 (Rect)" },
+        { value: "rect", label: tr("矩形/无窗 (Rect)", "Rectangular / no window (Rect)") },
       ];
   const outputOptions: { value: OutputKind; label: string }[] = meta?.output_modes?.length
     ? meta.output_modes.map((o) => ({ value: o.value as OutputKind, label: o.label }))
     : [
-        { value: "magnitude", label: "幅度 |FFT|" },
-        { value: "power", label: "功率谱 PSD" },
+        { value: "magnitude", label: tr("幅度 |FFT|", "Magnitude |FFT|") },
+        { value: "power", label: tr("功率谱 PSD", "Power spectrum PSD") },
       ];
 
   // ── Compute one FFT for one channel via POST /fft ──
@@ -434,7 +436,7 @@ export function SignalCapturePanel() {
   };
 
   const savePreset = () => {
-    const name = presetName.trim() || `预设 ${presets.length + 1}`;
+    const name = presetName.trim() || tr(`预设 ${presets.length + 1}`, `Preset ${presets.length + 1}`);
     const p: CapturePreset = {
       name,
       windowFn,
@@ -453,7 +455,7 @@ export function SignalCapturePanel() {
     const list = [...presets.filter((x) => x.name !== name), p];
     persistPresets(list);
     setPresetName("");
-    toast(`已保存预设「${name}」`);
+    toast(tr(`已保存预设「${name}」`, `Preset "${name}" saved`));
   };
 
   const applyPreset = (name: string) => {
@@ -471,12 +473,12 @@ export function SignalCapturePanel() {
     setAvgN(p.avgN);
     setManualFsText(p.manualFsText);
     setNPointsText(p.nPointsText);
-    toast(`已加载预设「${name}」`);
+    toast(tr(`已加载预设「${name}」`, `Preset "${name}" loaded`));
   };
 
   const deletePreset = (name: string) => {
     persistPresets(presets.filter((x) => x.name !== name));
-    toast(`已删除预设「${name}」`);
+    toast(tr(`已删除预设「${name}」`, `Preset "${name}" deleted`));
   };
 
   // ── Exports (spectrum: wide CSV with one column per channel) ──
@@ -493,7 +495,7 @@ export function SignalCapturePanel() {
       lines.push(row.join(","));
     }
     downloadText(`fft_${Date.now()}.csv`, lines.join("\n"));
-    toast("频谱 CSV 已导出");
+    toast(tr("频谱 CSV 已导出", "Spectrum CSV exported"));
   };
 
   const onExportTraceCsv = () => {
@@ -510,16 +512,16 @@ export function SignalCapturePanel() {
       lines.push(row.join(","));
     }
     downloadText(`trace_${Date.now()}.csv`, lines.join("\n"));
-    toast("时域 trace CSV 已导出");
+    toast(tr("时域 trace CSV 已导出", "Time-domain trace CSV exported"));
   };
 
   const onExportSpectrumPng = () => {
     const ok = exportCanvasPng(document.getElementById("fft-spectrum-chart"), `fft_${Date.now()}.png`);
-    toast(ok ? "频谱 PNG 已导出" : "无可导出的频谱图", ok ? "ok" : "err");
+    toast(ok ? tr("频谱 PNG 已导出", "Spectrum PNG exported") : tr("无可导出的频谱图", "No spectrum chart to export"), ok ? "ok" : "err");
   };
   const onExportTracePng = () => {
     const ok = exportCanvasPng(document.getElementById("fft-trace-chart"), `trace_${Date.now()}.png`);
-    toast(ok ? "时域 PNG 已导出" : "无可导出的时域图", ok ? "ok" : "err");
+    toast(ok ? tr("时域 PNG 已导出", "Time-domain PNG exported") : tr("无可导出的时域图", "No time-domain chart to export"), ok ? "ok" : "err");
   };
 
   const totalSamples = selectedChannels.reduce(
@@ -540,22 +542,26 @@ export function SignalCapturePanel() {
     <div className="space-y-3">
       {node}
       <p className="text-xs text-mast-muted">
-        <strong className="text-mast-text">信号捕获 + FFT</strong> —
-        多通道选择 / 通道对比、N 次平均降噪、峰值读出表、频率轴缩放（线性/对数 X + 对数 Y）、实时连续模式、单位标度，并支持时域
-        trace 与频谱的 CSV / PNG 导出与采集预设保存。
+        <strong className="text-mast-text">{tr("信号捕获 + FFT", "Signal capture + FFT")}</strong> —{" "}
+        {tr(
+          "多通道选择 / 通道对比、N 次平均降噪、峰值读出表、频率轴缩放（线性/对数 X + 对数 Y）、实时连续模式、单位标度，并支持时域 trace 与频谱的 CSV / PNG 导出与采集预设保存。",
+          "multi-channel selection / comparison, N-average denoising, peak readout table, frequency-axis zoom (linear/log X + log Y), live continuous mode, unit scaling, CSV / PNG export of the time-domain trace and spectrum, and saved acquisition presets.",
+        )}
       </p>
 
-      {/* Hardware-capture seam note: live acquisition (Osci1T 20 kHz / 轮询 fast-path)
-          runs in the desktop core and streams large arrays that never cross the
-          typed wire. The web seam exposes the channel/timebase metadata + the pure
-          rfft compute; paste an already-captured trace to get the full spectrum. */}
-      {/* 删掉「大样本数组永不过线 / 桌面内核 / 轮询 fast-path」——
-          那是这条缝怎么实现的，不是用户要知道的。留下的两句都是他要做的动作：
-          波形从哪来，以及没接硬件时怎么试。 */}
+      {/* Hardware-capture seam note: live acquisition (Osci1T 20 kHz / polling fast
+          path) runs in the desktop core and streams large arrays that never cross the
+          typed wire. The web seam exposes the channel/timebase metadata and the pure
+          rfft compute; paste an already-captured trace to get the full spectrum.
+          The notice below deliberately states only what the user has to do (where the
+          waveform comes from, and how to try it without hardware), not how the seam
+          is implemented. */}
       <div className="rounded-md border border-mast-warn-border bg-mast-warn-bg px-3 py-2 text-xs text-mast-text">
-        <strong className="text-mast-warn">需连接 Nanonis</strong>：本页不直接采集波形，
-        对<strong className="text-mast-text">已采集的时域 trace</strong> 做单边 rfft 并按所选采样率标注。
-        <span className="text-mast-muted">未接硬件时可点各通道的「示例」按钮填入演示数据。</span>
+        <strong className="text-mast-warn">{tr("需连接 Nanonis", "Nanonis connection required")}</strong>
+        {tr("：本页不直接采集波形，对", ": this page does not acquire waveforms itself; it runs a one-sided rfft on an ")}
+        <strong className="text-mast-text">{tr("已采集的时域 trace", "already-acquired time-domain trace")}</strong>
+        {tr(" 做单边 rfft 并按所选采样率标注。", " and labels it with the selected sample rate. ")}
+        <span className="text-mast-muted">{tr("未接硬件时可点各通道的「示例」按钮填入演示数据。", "Without hardware, click each channel's \"Demo\" button to fill in demo data.")}</span>
       </div>
 
       {signals.isError && <ErrorNote error={signals.error} />}
@@ -567,28 +573,28 @@ export function SignalCapturePanel() {
           <Card className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <span className="flex items-center gap-1.5 text-sm font-semibold text-mast-text">
-                信号通道（可多选对比）
+                {tr("信号通道（可多选对比）", "Signal channels (multi-select to compare)")}
                 {selectedChannels.length > 0 && (
                   <span className="rounded-full bg-mast-accent px-1.5 py-0.5 text-[10px] font-semibold leading-none text-mast-accent-ink">
-                    已选 {selectedChannels.length}
+                    {tr("已选", "Selected")} {selectedChannels.length}
                   </span>
                 )}
               </span>
               <span className="shrink-0 text-xs text-mast-muted">
-                {meta ? `共 ${meta.n_channels} 个` : ""}
-                {meta?.degraded && <span className="ml-1 text-mast-warn">默认列表</span>}
+                {meta ? tr(`共 ${meta.n_channels} 个`, `${meta.n_channels} total`) : ""}
+                {meta?.degraded && <span className="ml-1 text-mast-warn">{tr("默认列表", "Default list")}</span>}
               </span>
             </div>
             {signals.isLoading ? (
-              <Spinner label="读取信号通道…" />
+              <Spinner label={tr("读取信号通道…", "Reading signal channels…")} />
             ) : channels.length === 0 ? (
-              <EmptyNote label="无可用信号通道。" />
+              <EmptyNote label={tr("无可用信号通道。", "No signal channels available.")} />
             ) : (
               <>
-                <TextField value={search} onChange={setSearch} placeholder="搜索通道名 / 索引…" />
+                <TextField value={search} onChange={setSearch} placeholder={tr("搜索通道名 / 索引…", "Search channel name / index…")} />
                 <div className="max-h-56 overflow-auto rounded-md border border-mast-border">
                   {filteredChannels.length === 0 ? (
-                    <p className="p-2 text-xs text-mast-muted">无匹配通道。</p>
+                    <p className="p-2 text-xs text-mast-muted">{tr("无匹配通道。", "No matching channels.")}</p>
                   ) : (
                     filteredChannels.map((c) => {
                       const active = selectedIdx.includes(c.index);
@@ -623,7 +629,7 @@ export function SignalCapturePanel() {
                               {c.name}
                               {c.is_current && (
                                 <span className="ml-1.5 rounded bg-mast-auto-bg px-1 text-[10px] text-mast-auto">
-                                  电流
+                                  {tr("电流", "Current")}
                                 </span>
                               )}
                             </span>
@@ -637,12 +643,12 @@ export function SignalCapturePanel() {
                   )}
                 </div>
                 <p className="text-xs text-mast-muted">
-                  已选 <span className="text-mast-text">{selectedChannels.length}</span> 个：
+                  {tr("已选", "Selected")} <span className="text-mast-text">{selectedChannels.length}</span>{tr(" 个：", ": ")}
                   {selectedChannels.length === 0 ? (
-                    <span className="ml-1 text-mast-warn">请至少选一个通道</span>
+                    <span className="ml-1 text-mast-warn">{tr("请至少选一个通道", "Select at least one channel")}</span>
                   ) : (
                     <span className="ml-1 text-mast-text">
-                      {selectedChannels.map((c) => c.name).join("、")}
+                      {selectedChannels.map((c) => c.name).join(tr("、", ", "))}
                     </span>
                   )}
                 </p>
@@ -652,9 +658,9 @@ export function SignalCapturePanel() {
 
           {/* 2. Acquisition params */}
           <Card className="space-y-2">
-            <span className="text-sm font-semibold text-mast-text">采集参数</span>
+            <span className="text-sm font-semibold text-mast-text">{tr("采集参数", "Acquisition parameters")}</span>
             {timebases.length > 0 ? (
-              <Field label="Osci 时基 / 采样率">
+              <Field label={tr("Osci 时基 / 采样率", "Osci timebase / sample rate")}>
                 <SelectField<string>
                   value={timebaseIdx || String(timebases[0]?.index ?? "")}
                   onChange={setTimebaseIdx}
@@ -665,11 +671,11 @@ export function SignalCapturePanel() {
                 />
               </Field>
             ) : (
-              <Field label="采样率 fs (Hz)" hint={meta?.osci_available ? undefined : "Osci1T 时基不可用，手动填写采样率"}>
+              <Field label={tr("采样率 fs (Hz)", "Sample rate fs (Hz)")} hint={meta?.osci_available ? undefined : tr("Osci1T 时基不可用，手动填写采样率", "Osci1T timebase unavailable; enter the sample rate manually")}>
                 <TextField value={manualFsText} onChange={setManualFsText} mono />
               </Field>
             )}
-            <Field label="采样点数 N" hint={fsHz > 0 ? `时长 ≈ ${(durationS * 1e3).toFixed(2)} ms · fs=${fsHz.toFixed(0)} Hz` : undefined}>
+            <Field label={tr("采样点数 N", "Number of samples N")} hint={fsHz > 0 ? tr(`时长 ≈ ${(durationS * 1e3).toFixed(2)} ms · fs=${fsHz.toFixed(0)} Hz`, `Duration ≈ ${(durationS * 1e3).toFixed(2)} ms · fs=${fsHz.toFixed(0)} Hz`) : undefined}>
               <TextField value={nPointsText} onChange={setNPointsText} mono />
             </Field>
             <p className="text-xs text-mast-muted">
@@ -680,32 +686,32 @@ export function SignalCapturePanel() {
 
           {/* 3. FFT + axis options */}
           <Card className="space-y-2">
-            <span className="text-sm font-semibold text-mast-text">FFT 选项</span>
-            <Field label="窗函数">
+            <span className="text-sm font-semibold text-mast-text">{tr("FFT 选项", "FFT options")}</span>
+            <Field label={tr("窗函数", "Window function")}>
               <SelectField<WindowFn> value={windowFn} onChange={setWindowFn} options={windowOptions} />
             </Field>
-            <Field label="输出模式">
+            <Field label={tr("输出模式", "Output mode")}>
               <SelectField<OutputKind> value={output} onChange={setOutput} options={outputOptions} />
             </Field>
             <div className="grid grid-cols-2 gap-2">
               <label className="flex items-center justify-between text-sm">
-                <span className="text-mast-muted">对数 Y</span>
-                <Toggle checked={logY} onChange={setLogY} label="对数 Y" />
+                <span className="text-mast-muted">{tr("对数 Y", "Log Y")}</span>
+                <Toggle checked={logY} onChange={setLogY} label={tr("对数 Y", "Log Y")} />
               </label>
               <label className="flex items-center justify-between text-sm">
-                <span className="text-mast-muted">对数 X</span>
-                <Toggle checked={logX} onChange={setLogX} label="对数 X" />
+                <span className="text-mast-muted">{tr("对数 X", "Log X")}</span>
+                <Toggle checked={logX} onChange={setLogX} label={tr("对数 X", "Log X")} />
               </label>
               <label className="flex items-center justify-between text-sm">
-                <span className="text-mast-muted">去 DC</span>
-                <Toggle checked={dropDc} onChange={setDropDc} label="去 DC" />
+                <span className="text-mast-muted">{tr("去 DC", "Remove DC")}</span>
+                <Toggle checked={dropDc} onChange={setDropDc} label={tr("去 DC", "Remove DC")} />
               </label>
               <label className="flex items-center justify-between text-sm">
-                <span className="text-mast-muted">峰值</span>
-                <Toggle checked={showPeaks} onChange={setShowPeaks} label="峰值" />
+                <span className="text-mast-muted">{tr("峰值", "Peaks")}</span>
+                <Toggle checked={showPeaks} onChange={setShowPeaks} label={tr("峰值", "Peaks")} />
               </label>
             </div>
-            <Field label="峰值个数 (Top-N)">
+            <Field label={tr("峰值个数 (Top-N)", "Number of peaks (Top-N)")}>
               <SelectField<string>
                 value={String(topN)}
                 onChange={(v) => setTopN(Math.max(1, Number(v) || 5))}
@@ -716,24 +722,24 @@ export function SignalCapturePanel() {
 
           {/* 4. Frequency-axis zoom */}
           <Card className="space-y-2">
-            <span className="text-sm font-semibold text-mast-text">频率轴缩放</span>
+            <span className="text-sm font-semibold text-mast-text">{tr("频率轴缩放", "Frequency-axis zoom")}</span>
             <div className="grid grid-cols-2 gap-2">
-              <Field label="最小 f (Hz)" hint="留空=自动">
+              <Field label={tr("最小 f (Hz)", "Min f (Hz)")} hint={tr("留空=自动", "Empty = auto")}>
                 <TextField value={fMinText} onChange={setFMinText} mono placeholder="auto" />
               </Field>
-              <Field label="最大 f (Hz)" hint={`≤ Nyquist ${nyquist > 0 ? nyquist.toFixed(0) : "—"}`}>
+              <Field label={tr("最大 f (Hz)", "Max f (Hz)")} hint={`≤ Nyquist ${nyquist > 0 ? nyquist.toFixed(0) : "—"}`}>
                 <TextField value={fMaxText} onChange={setFMaxText} mono placeholder="auto" />
               </Field>
             </div>
             {fMin != null && fMax != null && fMin >= fMax && (
-              <span className="text-xs text-mast-warn">最小 f 应小于最大 f。</span>
+              <span className="text-xs text-mast-warn">{tr("最小 f 应小于最大 f。", "Min f must be smaller than max f.")}</span>
             )}
           </Card>
 
           {/* 5. Averaging + live mode */}
           <Card className="space-y-2">
-            <span className="text-sm font-semibold text-mast-text">平均 / 实时</span>
-            <Field label="平均次数 N" hint="保留最近 N 次频谱做平均以降噪">
+            <span className="text-sm font-semibold text-mast-text">{tr("平均 / 实时", "Averaging / live")}</span>
+            <Field label={tr("平均次数 N", "Averages N")} hint={tr("保留最近 N 次频谱做平均以降噪", "Keep the last N spectra and average them to reduce noise")}>
               <SelectField<string>
                 value={String(avgN)}
                 onChange={(v) => setAvgN(Math.max(1, Number(v) || 1))}
@@ -741,38 +747,38 @@ export function SignalCapturePanel() {
               />
             </Field>
             <div className="flex items-center justify-between text-sm">
-              <span className="text-mast-muted">已累积捕获</span>
+              <span className="text-mast-muted">{tr("已累积捕获", "Captures accumulated")}</span>
               <span className="font-mono text-mast-text">
                 {captureCount} / {avgN}
               </span>
             </div>
             <label className="flex items-center justify-between text-sm">
-              <span className="text-mast-muted">实时连续模式</span>
-              <Toggle checked={liveMode} onChange={setLiveMode} label="实时" />
+              <span className="text-mast-muted">{tr("实时连续模式", "Live continuous mode")}</span>
+              <Toggle checked={liveMode} onChange={setLiveMode} label={tr("实时", "Live")} />
             </label>
             {liveMode && (
-              <Field label="刷新间隔 (s)">
+              <Field label={tr("刷新间隔 (s)", "Refresh interval (s)")}>
                 <TextField value={liveIntervalText} onChange={setLiveIntervalText} mono />
               </Field>
             )}
             <Button variant="ghost" onClick={resetAverage}>
-              清空平均累积
+              {tr("清空平均累积", "Clear average accumulation")}
             </Button>
           </Card>
 
           {/* 7. Presets */}
           <Card className="space-y-2">
-            <span className="text-sm font-semibold text-mast-text">采集预设</span>
+            <span className="text-sm font-semibold text-mast-text">{tr("采集预设", "Acquisition presets")}</span>
             <div className="flex gap-1.5">
               <div className="min-w-0 flex-1">
-                <TextField value={presetName} onChange={setPresetName} placeholder="预设名称…" />
+                <TextField value={presetName} onChange={setPresetName} placeholder={tr("预设名称…", "Preset name…")} />
               </div>
               <Button variant="primary" onClick={savePreset}>
-                保存
+                {tr("保存", "Save")}
               </Button>
             </div>
             {presets.length === 0 ? (
-              <p className="text-xs text-mast-muted">尚无预设。当前 FFT / 轴 / 平均设置可保存复用（存于本地浏览器）。</p>
+              <p className="text-xs text-mast-muted">{tr("尚无预设。当前 FFT / 轴 / 平均设置可保存复用（存于本地浏览器）。", "No presets yet. The current FFT / axis / averaging settings can be saved for reuse (stored in this browser).")}</p>
             ) : (
               <div className="space-y-1">
                 {presets.map((p) => (
@@ -780,10 +786,10 @@ export function SignalCapturePanel() {
                     <span className="truncate text-mast-text">{p.name}</span>
                     <span className="flex shrink-0 gap-1">
                       <Button variant="ghost" onClick={() => applyPreset(p.name)}>
-                        加载
+                        {tr("加载", "Load")}
                       </Button>
                       <Button variant="ghost" onClick={() => deletePreset(p.name)}>
-                        删除
+                        {tr("删除", "Delete")}
                       </Button>
                     </span>
                   </div>
@@ -798,27 +804,27 @@ export function SignalCapturePanel() {
           {/* Per-channel trace input */}
           <Card className="space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-semibold text-mast-text">时域 trace 数据</span>
-              <span className="shrink-0 text-xs text-mast-muted">共识别 {totalSamples} 个样本</span>
+              <span className="text-sm font-semibold text-mast-text">{tr("时域 trace 数据", "Time-domain trace data")}</span>
+              <span className="shrink-0 text-xs text-mast-muted">{tr(`共识别 ${totalSamples} 个样本`, `${totalSamples} samples recognized`)}</span>
             </div>
             <p className="text-xs text-mast-muted">
-              粘贴一段时域采样值（空格 / 逗号 / 换行分隔），或点「示例」自动填入演示数据（正弦 + 噪声），即可在无硬件时看到 FFT 效果。
+              {tr("粘贴一段时域采样值（空格 / 逗号 / 换行分隔），或点「示例」自动填入演示数据（正弦 + 噪声），即可在无硬件时看到 FFT 效果。", "Paste time-domain samples (separated by spaces / commas / newlines), or click \"Demo\" to fill in demo data (sine + noise) and see the FFT without hardware.")}
             </p>
             {selectedChannels.length === 0 ? (
-              <EmptyNote label="请先在左侧选择至少一个信号通道。" />
+              <EmptyNote label={tr("请先在左侧选择至少一个信号通道。", "Select at least one signal channel on the left first.")} />
             ) : (
               <div className="space-y-2">
                 {/* One-click: fill demo data into every selected channel. */}
                 <div className="flex flex-wrap items-center gap-2">
                   <Button variant="primary" onClick={fillDemoAll}>
-                    填入示例数据（全部通道）
+                    {tr("填入示例数据（全部通道）", "Fill demo data (all channels)")}
                   </Button>
                   <button
                     type="button"
                     onClick={() => setShowManualPaste((v) => !v)}
                     className="text-xs text-mast-accent hover:underline"
                   >
-                    {showManualPaste ? "▾ 收起手动粘贴" : "▸ 手动粘贴（高级）"}
+                    {showManualPaste ? tr("▾ 收起手动粘贴", "▾ Hide manual paste") : tr("▸ 手动粘贴（高级）", "▸ Manual paste (advanced)")}
                   </button>
                 </div>
 
@@ -838,17 +844,17 @@ export function SignalCapturePanel() {
                           </span>
                           <span className="flex shrink-0 items-center gap-2">
                             <span className={cnt === 0 ? "text-mast-muted" : cnt < 4 ? "text-mast-warn" : "text-mast-auto"}>
-                              {cnt === 0 ? "无数据" : `${cnt} 样本${cnt < 4 ? "（至少 4）" : ""}`}
+                              {cnt === 0 ? tr("无数据", "No data") : tr(`${cnt} 样本${cnt < 4 ? "（至少 4）" : ""}`, `${cnt} samples${cnt < 4 ? " (at least 4)" : ""}`)}
                             </span>
                             <Button variant="ghost" onClick={() => fillDemoFor(ch.index, i)}>
-                              示例
+                              {tr("示例", "Demo")}
                             </Button>
                           </span>
                         </div>
                         {showManualPaste && (
                           <textarea
                             className="h-16 w-full rounded border border-mast-border bg-mast-bg px-2 py-1.5 font-mono text-xs text-mast-text outline-none focus:border-mast-accent"
-                            placeholder="0.0, 0.12, 0.23, …（空格 / 逗号 / 换行分隔），或点「示例」自动填入"
+                            placeholder={tr("0.0, 0.12, 0.23, …（空格 / 逗号 / 换行分隔），或点「示例」自动填入", "0.0, 0.12, 0.23, … (separated by spaces / commas / newlines), or click \"Demo\" to fill in")}
                             value={st?.samplesText ?? ""}
                             onChange={(e) => setSamplesFor(ch.index, e.target.value)}
                           />
@@ -861,22 +867,22 @@ export function SignalCapturePanel() {
             )}
             <div className="flex flex-wrap items-center gap-2">
               <Button variant="primary" onClick={() => void runCompute()} disabled={!canCompute}>
-                {/* No read-only hardware capture endpoint exists — this computes
-                    the FFT of the PASTED/demo trace, so don't label it "采集". */}
-                {computing ? "计算中…" : liveMode ? "立即计算一次" : "计算 FFT（粘贴/演示数据）"}
+                {/* No read-only hardware capture endpoint exists: this computes the FFT
+                    of the pasted/demo trace, so it must not be labelled "acquire". */}
+                {computing ? tr("计算中…", "Computing…") : liveMode ? tr("立即计算一次", "Compute once now") : tr("计算 FFT（粘贴/演示数据）", "Compute FFT (pasted/demo data)")}
               </Button>
               {liveMode && (
                 <RadioGroup<string>
                   value="on"
                   onChange={() => setLiveMode(false)}
                   options={[
-                    { value: "on", label: "实时中" },
-                    { value: "off", label: "停止" },
+                    { value: "on", label: tr("实时中", "Live") },
+                    { value: "off", label: tr("停止", "Stop") },
                   ]}
                 />
               )}
               {selectedChannels.length > 0 && !anyReady && (
-                <span className="text-xs text-mast-warn">每通道至少需要 4 个样本。</span>
+                <span className="text-xs text-mast-warn">{tr("每通道至少需要 4 个样本。", "Each channel needs at least 4 samples.")}</span>
               )}
             </div>
           </Card>
@@ -888,7 +894,7 @@ export function SignalCapturePanel() {
             <Card className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold text-mast-text">
-                  时域 trace · {traceChannel?.name}
+                  {tr("时域 trace", "Time-domain trace")} · {traceChannel?.name}
                 </span>
                 <div className="flex gap-1.5">
                   <Button variant="ghost" onClick={onExportTraceCsv}>
@@ -909,7 +915,7 @@ export function SignalCapturePanel() {
               </div>
               {selectedChannels.length > 1 && (
                 <p className="text-xs text-mast-muted">
-                  多通道时域单位各异，仅显示首个通道波形；CSV 导出含全部通道。
+                  {tr("多通道时域单位各异，仅显示首个通道波形；CSV 导出含全部通道。", "Time-domain units differ between channels, so only the first channel is plotted; the CSV export contains all channels.")}
                 </p>
               )}
             </Card>
@@ -920,7 +926,7 @@ export function SignalCapturePanel() {
             <Card className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold text-mast-text">
-                  FFT 频谱{series.length > 1 ? `（${series.length} 通道对比）` : ""}
+                  {tr("FFT 频谱", "FFT spectrum")}{series.length > 1 ? tr(`（${series.length} 通道对比）`, ` (${series.length}-channel comparison)`) : ""}
                 </span>
                 <div className="flex gap-1.5">
                   <Button variant="ghost" onClick={onExportSpectrumCsv}>
@@ -936,10 +942,10 @@ export function SignalCapturePanel() {
                 <span>fs={series[0]!.fft.fs_hz.toFixed(2)} Hz</span>
                 <span>Nyquist={series[0]!.fft.nyquist_hz.toFixed(2)} Hz</span>
                 <span>Δf={series[0]!.fft.df_hz.toFixed(3)} Hz</span>
-                <span>窗={series[0]!.fft.window}</span>
-                <span>输出={series[0]!.fft.output === "power" ? "PSD" : "|FFT|"}</span>
-                {avgN > 1 && <span className="text-mast-accent">平均×{captureCount}/{avgN}</span>}
-                {liveMode && <span className="text-mast-auto">● 实时</span>}
+                <span>{tr("窗", "Window")}={series[0]!.fft.window}</span>
+                <span>{tr("输出", "Output")}={series[0]!.fft.output === "power" ? "PSD" : "|FFT|"}</span>
+                {avgN > 1 && <span className="text-mast-accent">{tr("平均", "Avg")}×{captureCount}/{avgN}</span>}
+                {liveMode && <span className="text-mast-auto">● {tr("实时", "Live")}</span>}
               </div>
               <div id="fft-spectrum-chart">
                 <FftChart
@@ -957,7 +963,7 @@ export function SignalCapturePanel() {
           )}
 
           {series.length === 0 && selectedChannels.length > 0 && anyReady && !computing && (
-            <EmptyNote label="点「采集 / 计算 FFT」生成频谱。" />
+            <EmptyNote label={tr("点「采集 / 计算 FFT」生成频谱。", "Click \"Compute FFT\" to generate the spectrum.")} />
           )}
         </div>
       </div>

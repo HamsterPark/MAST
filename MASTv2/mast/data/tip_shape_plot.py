@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from mast.i18n import tr
 
 
 def _plt():
@@ -39,20 +40,20 @@ def _plt():
 
 # TipShaper stage → (label, color)
 _STAGE_STYLE = {
-    "pre_roll": ("基线", "#94a3b8"),
-    "switch_off": ("关反馈", "#64748b"),
-    "z_ramp_1_plunge": ("下扎", "#dc2626"),
+    "pre_roll": (tr("基线", "baseline"), "#94a3b8"),
+    "switch_off": (tr("关反馈", "feedback off"), "#64748b"),
+    "z_ramp_1_plunge": (tr("下扎", "plunge"), "#dc2626"),
     "bias_settle": ("bias", "#a855f7"),
-    "z_ramp_2_retract": ("回抬", "#2563eb"),
-    "end_wait": ("等待", "#64748b"),
-    "post_roll": ("恢复", "#16a34a"),
+    "z_ramp_2_retract": (tr("回抬", "retract"), "#2563eb"),
+    "end_wait": (tr("等待", "wait"), "#64748b"),
+    "post_roll": (tr("恢复", "recovery"), "#16a34a"),
 }
 
 _VERDICT_CN = {
-    "no_change": "没扎上",
-    "cluster": "扎上了 (cluster)",
-    "tip_changed_or_pit": "针尖改变/坑",
-    "insufficient_data": "数据不足",
+    "no_change": tr("没扎上", "no contact"),
+    "cluster": tr("扎上了 (cluster)", "contact made (cluster)"),
+    "tip_changed_or_pit": tr("针尖改变/坑", "tip changed / pit"),
+    "insufficient_data": tr("数据不足", "insufficient data"),
 }
 
 
@@ -97,8 +98,8 @@ def render_tip_shape_readback(data: dict[str, Any], save_path: str | Path) -> st
     ax_z.grid(True, alpha=0.2)
     if it:
         ax_i.plot(it, isamp, color="#d97706", lw=1.2)
-    ax_i.set_ylabel("电流 I (nA)")
-    ax_i.set_xlabel("时间 t (s)")
+    ax_i.set_ylabel(tr("电流 I (nA)", "Current I (nA)"))
+    ax_i.set_xlabel(tr("时间 t (s)", "Time t (s)"))
     ax_i.grid(True, alpha=0.2)
 
     # full time extent for an open-ended final stage band
@@ -166,8 +167,10 @@ def render_tip_shape_readback(data: dict[str, Any], save_path: str | Path) -> st
 
     tm = data.get("timing", {}) or {}
     fig.suptitle(
-        f"针尖整形 + current/z 实时读出  (n_z={tm.get('n_z', len(zs))}, "
-        f"fs≈{tm.get('fs_z_hz', 0):.0f}Hz)", fontsize=10)
+        tr(f"针尖整形 + current/z 实时读出  (n_z={tm.get('n_z', len(zs))}, "
+           f"fs≈{tm.get('fs_z_hz', 0):.0f}Hz)",
+           f"Tip shaping + live current/z readout  (n_z={tm.get('n_z', len(zs))}, "
+           f"fs≈{tm.get('fs_z_hz', 0):.0f}Hz)"), fontsize=10)
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     fig.savefig(str(save_path), dpi=150, bbox_inches="tight")
     plt.close(fig)

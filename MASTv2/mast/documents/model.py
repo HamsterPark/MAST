@@ -30,6 +30,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from mast.core.experiment_paths import slug as _slug
+from mast.i18n import tr
 
 SCHEMA_VERSION = "1.0.0"
 
@@ -53,11 +54,11 @@ KIND_CODES: dict[str, str] = {
 
 #: 中文标签，给 UI 徽章和工具返回文案用（前端不必自己再维护一份）。
 KIND_LABELS: dict[str, str] = {
-    "literature_report": "文献报告",
-    "experiment_plan": "实验计划",
-    "experiment_report": "实验报告",
-    "paper_draft": "论文草稿",
-    "review": "评审报告",
+    "literature_report": tr("文献报告", "Literature report"),
+    "experiment_plan": tr("实验计划", "Experiment plan"),
+    "experiment_report": tr("实验报告", "Experiment report"),
+    "paper_draft": tr("论文草稿", "Paper draft"),
+    "review": tr("评审报告", "Review report"),
 }
 
 #: 文档落在实验文件夹的哪个子目录。

@@ -1,11 +1,10 @@
 import { type ReactNode, type SVGProps, useEffect, useState } from "react";
 import clsx from "clsx";
+import { tr } from "@/lib/i18n";
 
-/** Shared interactive primitives for the parity rebuild — sub-tab navigation,
- *  form controls, modal. In-page sub-tabs replace the old Gradio nested Tabs
- *  (which froze); here they are plain React state, no freeze class.
- *  Restyled onto the MAST Lab Console design system — color/radius/shadow come
- *  from design tokens only, so both themes + density inherit automatically. */
+/** Shared interactive primitives: sub-tab navigation, form controls, modal.
+ *  Color/radius/shadow come from design tokens only, so both themes and
+ *  density inherit automatically. */
 
 /* Inline loader-circle (no icon dependency installed); spin via caller class. */
 function IconLoader({ className, ...rest }: SVGProps<SVGSVGElement>) {
@@ -56,12 +55,9 @@ export function SubTabs<T extends string>({
               <span
                 className={clsx(
                   "inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 font-mono text-[10.5px] tabular-nums",
-                  // On the active (accent-filled) tab the count pill INVERTS —
-                  // solid ink behind accent text. It used to be ink at 20% with
-                  // ink text, i.e. white-on-pale-cyan in light mode (~2.8:1 at
-                  // 10.5px). Same misuse of `accent-ink` as that token
-                  // is the foreground for a SOLID accent fill, never for a tint
-                  // of itself.
+                  // On the active (accent-filled) tab the count pill inverts: solid
+                  // ink behind accent text. `accent-ink` is the foreground for a
+                  // solid accent fill, never for a tint of itself (low contrast).
                   active
                     ? "bg-mast-accent-ink text-mast-accent"
                     : "bg-mast-accent text-mast-accent-ink",
@@ -115,19 +111,22 @@ export function NumberField({
 
 export function SelectField<T extends string>({
   value, onChange, options,
-}: { value: T; onChange: (v: T) => void; options: { value: T; label: string }[] }) {
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  /** disabled: shown but not selectable (e.g. an "(undeclared, choose)" placeholder). */
+  options: { value: T; label: string; disabled?: boolean }[];
+}) {
   return (
     <select value={value} onChange={(e) => onChange(e.target.value as T)} className={inputCls}>
       {options.map((o) => (
-        <option key={o.value} value={o.value}>{o.label}</option>
+        <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>
       ))}
     </select>
   );
 }
 
-/** Segmented radio group — visual parity with the old gr.Radio (one row of
- *  pill choices, the selected one highlighted). Used for 字体大小 / 主题 /
- *  知识注入模式 / Thinking where the old GUI used gr.Radio, not a dropdown. */
+/** Segmented radio group: one row of pill choices, the selected one highlighted. */
 export function RadioGroup<T extends string>({
   value, onChange, options,
 }: { value: T; onChange: (v: T) => void; options: { value: T; label: string }[] }) {
@@ -203,14 +202,13 @@ export type ChoiceOption = { label: string; description?: string };
 /** Stacked choice cards for an agent's ask_user question.
  *
  *  Distinct from RadioGroup (a one-row pill segment for settings): each option
- *  here carries a description, because what the operator is choosing between is
- *  a trade-off — "B 区 / 平坦台面，适合先做 STS 基线" is the actual decision, and
- *  a bare label makes them guess it. Handles single-select, multi-select, and
- *  the "其他" free-text escape in one control, so the three approval surfaces
- *  render an identical question.
+ *  can carry a description, because the operator is choosing between trade-offs
+ *  and a bare label forces them to guess. Handles single-select, multi-select,
+ *  and the "other" free-text escape in one control, so every approval surface
+ *  renders an identical question.
  *
- *  With no options at all this degrades to just the text box — an open question.
- *  That is why `allowCustom` cannot be turned off in that case upstream: a
+ *  With no options at all this degrades to just the text box (an open question).
+ *  `allowCustom` therefore cannot be turned off in that case upstream: a
  *  question with neither options nor a text box is unanswerable. */
 export function OptionGroup({
   options, multi, allowCustom, value, onChange, disabled,
@@ -295,7 +293,7 @@ export function OptionGroup({
                 disabled && "cursor-not-allowed opacity-60",
               )}
             >
-              其他 / 自己写一个答案…
+              {tr("其他 / 自己写一个答案…", "Other / write your own answer…")}
             </button>
           )}
           {customOpen && (
@@ -305,7 +303,7 @@ export function OptionGroup({
               autoFocus={options.length > 0}
               onChange={(e) => onChange({ ...value, customText: e.target.value })}
               rows={options.length === 0 ? 4 : 2}
-              placeholder={options.length === 0 ? "写下你的回答…" : "补充说明，或写一个上面没有的选项…"}
+              placeholder={options.length === 0 ? tr("写下你的回答…", "Write your answer…") : tr("补充说明，或写一个上面没有的选项…", "Add detail, or write an option not listed above…")}
               className="w-full resize-y rounded-md border border-mast-border bg-mast-bg px-3 py-2 text-sm text-mast-text outline-none focus:border-mast-accent disabled:opacity-60"
             />
           )}
@@ -315,15 +313,10 @@ export function OptionGroup({
   );
 }
 
-/** Collapsible accordion — parity with gr.Accordion (clickable title row with a
- *  ▸/▾ caret, open/closed). Defaults open. Replaces the page's SubTabs so the
- *  设置 / 记忆 surfaces stack as collapsible sections like the old Gradio build
- *  (no nested gr.Tabs — and no freeze, since it is plain React state). */
 /**
- * Collapsible panel. Uncontrolled by default; pass `open` + `onOpenChange` to
- * drive it from outside — 新仪器初始化 does that so a search hit can open the
- * group holding it (an item the operator cannot find is an item they cannot fix,
- * which was the 2026-08-04 complaint about 退针方向).
+ * Collapsible accordion (clickable title row with a ▸/▾ caret). Defaults open.
+ * Uncontrolled by default; pass `open` + `onOpenChange` to drive it from outside,
+ * as the new-instrument setup does so a search hit can open the group holding it.
  */
 export function Accordion({
   title, defaultOpen = true, open: controlled, onOpenChange, children,

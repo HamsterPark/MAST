@@ -27,6 +27,7 @@ import json
 import logging
 from typing import Any
 
+from mast.i18n import tr
 from mast.skills.composite._base import CompositeSkillGraph
 from mast.skills.composite.graph_executor import (
     CompositeProgress,
@@ -76,43 +77,66 @@ class BatchRegionsScan(CompositeSkillGraph):
             version="1.0.0",
             category=SkillCategory.COMPOSITE,
             safety_level=SafetyLevel.CONFIRM,
-            description=(
+            description=tr(
                 "把用户指定的一串区域一个接一个扫过去,每个区域产出一张 .sxm,"
-                "外加一份汇总。适用场景:要求了几片要成像的区域(例如离开"
+                "外加一份汇总。适用场景:用户指定了几片要成像的区域(例如离开"
                 "仪器过夜之前),想要一次无人值守的表面巡游。`regions` 是一个 JSON "
                 "数组,每一项是 {center_x_m, center_y_m, width_m, height_m, "
                 "[angle_deg], [label]} 对象,所有距离都以**米**计。只在针尖已经"
-                "进针并稳定之后才跑。每个区域都是可选的 —— 一个失败不会中止其余的。"
+                "进针并稳定之后才跑。每个区域都是可选的 —— 一个失败不会中止其余的。",
+                "Scan a user-specified list of regions one after another, producing "
+                "one .sxm per region plus a summary. Use when the user has named "
+                "several regions to image (e.g. before leaving the instrument "
+                "overnight) and wants an unattended tour of the surface. `regions` is "
+                "a JSON array of {center_x_m, center_y_m, width_m, height_m, "
+                "[angle_deg], [label]} objects; all distances are in **metres**. Run "
+                "only after the tip has been approached and is stable. Every region is "
+                "optional - one failure does not abort the rest."
             ),
             parameters=[
                 ParameterSpec(
                     name="regions",
                     type="str",
-                    description=(
+                    description=tr(
                         "由区域对象组成的 JSON 数组,每一项都要有 center_x_m、"
                         "center_y_m、width_m、height_m,单位**米**"
                         "(angle_deg、label 可选)。例: "
                         '[{"center_x_m": 1e-7, "center_y_m": 0, "width_m": 5e-8, '
                         '"height_m": 5e-8, "label": "A"}, {"center_x_m": -2e-7, '
                         '"center_y_m": 1e-7, "width_m": 1e-7, "height_m": 1e-7}]。'
-                        "最多 64 个区域。尺寸 100p–10u m。"
+                        "最多 64 个区域。尺寸 100p–10u m。",
+                        "A JSON array of region objects; each needs center_x_m, "
+                        "center_y_m, width_m, height_m, in **metres** (angle_deg and "
+                        "label optional). Example: "
+                        '[{"center_x_m": 1e-7, "center_y_m": 0, "width_m": 5e-8, '
+                        '"height_m": 5e-8, "label": "A"}, {"center_x_m": -2e-7, '
+                        '"center_y_m": 1e-7, "width_m": 1e-7, "height_m": 1e-7}]. '
+                        "At most 64 regions. Size 100p-10u m."
                     ),
                     required=True,
                 ),
                 ParameterSpec(
                     name="channels",
                     type="str",
-                    description="每个区域要采的通道,逗号分隔。缺省 'Z,Current'。",
+                    description=tr("每个区域要采的通道,逗号分隔。缺省 'Z,Current'。",
+                                   "Channels to acquire for each region, comma-separated. "
+                                   "Default 'Z,Current'."),
                     required=False, default="Z,Current",
                 ),
                 ParameterSpec(
                     name="line_time_s",
                     type="float",
-                    description=(
-                        "每个区域的正扫每线时间(s)。**除非要求说了一个数,"
+                    description=tr(
+                        "每个区域的正扫每线时间(s)。**除非用户明确给出了一个数,"
                         "否则别填**:省略时,每个区域会按**它自己的**尺寸去查逐尺度"
                         "档位表拿线时间 —— 一个批次里的区域尺寸可以差很多,给它们"
-                        "同一个速度,对其中大多数都是错的。"
+                        "同一个速度,对其中大多数都是错的。",
+                        "Forward-scan time per line for each region (s). **Do not fill "
+                        "this in unless the user gave an explicit number**: when "
+                        "omitted, each region looks up the per-scale tier table with "
+                        "**its own** size to get its line time - region sizes in one "
+                        "batch can differ a lot, and giving them all the same speed is "
+                        "wrong for most of them."
                     ),
                     unit="s", required=False,
                     # None,不是 0.1(pydantic 会物化 default,写 0.1 就分不出
@@ -123,20 +147,23 @@ class BatchRegionsScan(CompositeSkillGraph):
                 ParameterSpec(
                     name="wait_timeout_s",
                     type="float",
-                    description="每个区域的扫描最多等多久(s)。",
+                    description=tr("每个区域的扫描最多等多久(s)。",
+                                   "Maximum time to wait for each region's scan (s)."),
                     unit="s", required=False, default=180.0,
                     min_value=10.0, max_value=3600.0,
                 ),
                 ParameterSpec(
                     name="save_each",
                     type="bool",
-                    description="每个区域扫完就 SaveScan(每个区域一张 .sxm)。",
+                    description=tr("每个区域扫完就 SaveScan(每个区域一张 .sxm)。",
+                                   "Run SaveScan after each region (one .sxm per region)."),
                     required=False, default=True,
                 ),
                 ParameterSpec(
                     name="assess_quality",
                     type="bool",
-                    description="对每个区域跑一次 AssessImageQuality;并推荐最好的那一个。",
+                    description=tr("对每个区域跑一次 AssessImageQuality;并推荐最好的那一个。",
+                                   "Run AssessImageQuality on each region and recommend the best one."),
                     required=False, default=False,
                 ),
             ],
@@ -313,7 +340,7 @@ class BatchRegionsScan(CompositeSkillGraph):
                 rec["success"] = False
                 done = data.get("lines_done")
                 total = data.get("lines_total")
-                where = (f" ({done}/{total} 行)"
+                where = (tr(f" ({done}/{total} 行)", f" ({done}/{total} lines)")
                          if done is not None and total else "")
                 rec.setdefault("error", f"scan stopped early{where}")
         elif phase == "save":
@@ -419,9 +446,11 @@ class BatchRegionsScan(CompositeSkillGraph):
             res = self.ok(**data)
             # ok() only fills data; the shortfall has to reach SkillResult.summary,
             # which is what the caller and the records layer actually surface.
-            res.summary = (
+            res.summary = tr(
                 f"部分完成：{success_count}/{region_count} 个区域实际扫描成功，"
-                f"{fail_count} 个失败（详见 regions[].error）。")
+                f"{fail_count} 个失败（详见 regions[].error）。",
+                f"Partially complete: {success_count}/{region_count} regions scanned "
+                f"successfully, {fail_count} failed (see regions[].error).")
             return res
         return self.ok(**data)
 

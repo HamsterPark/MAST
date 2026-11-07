@@ -31,6 +31,7 @@ from typing import Any
 
 from mast.core import instrument_profile
 from mast.core.si_quantity import format_si_readable
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -123,7 +124,7 @@ def _stopped_by_operator(skill: str, calls, where: str) -> SkillResult:
     """
     return SkillResult(
         skill_name=skill, success=False,
-        error=f"aborted by user —— 用户要求停止。{where}",
+        error=tr(f"aborted by user —— 已按用户要求停止。{where}", f"aborted by user -- stopped at the user's request. {where}"),
         data={"aborted": True, "aborted_by_operator": True,
               "abort_reason": "aborted by user", "stopped_where": where},
         nanonis_calls=calls)
@@ -133,7 +134,7 @@ def _measure(context, params: dict) -> "tuple[dict | None, str]":
     """跑一次 TiltProbeCircle,返回 (data, error)。"""
     res = context.run("TiltProbeCircle", dict(params))
     if not getattr(res, "success", False):
-        return None, getattr(res, "error", "TiltProbeCircle 失败")
+        return None, getattr(res, "error", tr("TiltProbeCircle 失败", "TiltProbeCircle failed"))
     return dict(getattr(res, "data", {}) or {}), ""
 
 
@@ -147,31 +148,45 @@ class TiltCalibrate(BaseSkill):
             category=SkillCategory.COMPOSITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "一次性标定 Piezo_TiltSet 的两个轴与实测表面斜率之间的对应关系："
+                tr("一次性标定 Piezo_TiltSet 的两个轴与实测表面斜率之间的对应关系："
                 "在每个轴上施加一个小的试探步，解出 2x2 响应矩阵"
                 "（符号 + 轴交换 + 增益一次吃掉）。解得出来就把结果存进 instrument profile；**解不稳（响应矩阵条件数超过 TILT_CAL_MAX_COND）则整个技能失败、什么都不写** —— 那不是「存了一个差的」，是没有标定，AutoTilt 仍然会拒绝运行。"
                 "**没有它 AutoTilt 一律拒绝运行** —— 轴对应与符号取决于这台装置的"
                 "接线，猜错方向不是把倾斜去掉，而是把它**加倍**。"
-                "每台仪器跑一次，跑在一块**平**的地方，而且要有用户在场。"
+                "每台仪器跑一次，跑在一块**平**的地方，而且要有用户在场。",
+                "Calibrate, once, the mapping between the two Piezo_TiltSet axes "
+                "and the measured surface slope: apply a small probe step on each "
+                "axis and solve the 2x2 response matrix (sign, axis swap and gain "
+                "in one go). If the solution is stable the result is stored in the "
+                "instrument profile; if it is not (response-matrix condition number"
+                " above TILT_CAL_MAX_COND) the whole skill fails and nothing is "
+                "written -- that is not a poor calibration saved, it is no "
+                "calibration, and AutoTilt will still refuse to run. **AutoTilt "
+                "always refuses to run without it** -- the axis mapping and signs "
+                "depend on the wiring of this setup, and a wrong guess does not "
+                "remove the tilt, it **doubles** it. Run once per instrument, on a "
+                "**flat** area, with the user present.")
             ),
             parameters=[
                 ParameterSpec(
                     name="step_deg", type="float",
                     description=(
-                        "施加在每个倾斜轴上的试探步长。小到无害，"
-                        "大到可测。"),
+                        tr("施加在每个倾斜轴上的试探步长。小到无害，"
+                        "大到可测。",
+                        "Probe step applied on each tilt axis. Small enough to be harmless,"
+                        " large enough to measure.")),
                     unit="deg", required=False, default=CALIB_STEP_DEG,
                     min_value=0.02, max_value=1.0,
                 ),
                 ParameterSpec(
                     name="radius_m", type="float",
-                    description="测量圆的半径（见 TiltProbeCircle）。",
+                    description=tr("测量圆的半径（见 TiltProbeCircle）。", "Radius of the measurement circle (see TiltProbeCircle)."),
                     unit="m", required=False,
                     min_value=2e-9, max_value=5e-7,
                 ),
                 ParameterSpec(
                     name="n_points", type="int",
-                    description="每个测量圆上取几个点。",
+                    description=tr("每个测量圆上取几个点。", "Number of points on each measurement circle."),
                     required=False, default=24, min_value=8, max_value=180,
                 ),
             ],
@@ -191,7 +206,9 @@ class TiltCalibrate(BaseSkill):
         if orig is None:
             return SkillResult(
                 skill_name="TiltCalibrate", success=False,
-                error="读不到当前压电倾斜(Piezo_TiltGet)—— 无法标定,也无法回滚",
+                error=tr("读不到当前压电倾斜(Piezo_TiltGet)—— 无法标定,也无法回滚",
+                      "Cannot read the current piezo tilt (Piezo_TiltGet) -- cannot "
+                      "calibrate, and cannot roll back"),
                 nanonis_calls=calls)
 
         def restore():
@@ -204,7 +221,7 @@ class TiltCalibrate(BaseSkill):
             if base is None:
                 return SkillResult(
                     skill_name="TiltCalibrate", success=False,
-                    error=f"基线测量失败: {err}", nanonis_calls=calls)
+                    error=tr(f"基线测量失败: {err}", f"Baseline measurement failed: {err}"), nanonis_calls=calls)
             s0 = (base["tilt_x_deg"], base["tilt_y_deg"])
 
             responses = []
@@ -215,9 +232,13 @@ class TiltCalibrate(BaseSkill):
                     # E_STOP / 用户的事(缺陷⑬ 要求四)。停在哪儿说清楚就是了。
                     return _stopped_by_operator(
                         "TiltCalibrate", calls,
-                        f"压电倾斜停在试探步上(原值 {orig[0]:.4f}/{orig[1]:.4f}°,"
+                        tr(f"压电倾斜停在试探步上(原值 {orig[0]:.4f}/{orig[1]:.4f}°,"
                         f"当前可能是轴 {axis} 上 +{step}° 的试探值)。"
-                        "需要的话用 SetPiezoTilt 手动写回原值。")
+                        "需要的话用 SetPiezoTilt 手动写回原值。",
+                        "Piezo tilt is left at the probe step (original "
+                        f"{orig[0]:.4f}/{orig[1]:.4f} deg; it may currently be the probe "
+                        f"value of +{step} deg on axis {axis}). Write the original value "
+                        "back manually with SetPiezoTilt if needed."))
                 target = list(orig)
                 target[axis] += step
                 werr = _write_tilt(context, calls, target[0], target[1])
@@ -225,7 +246,7 @@ class TiltCalibrate(BaseSkill):
                     restore()
                     return SkillResult(
                         skill_name="TiltCalibrate", success=False,
-                        error=f"施加试探步失败(轴 {axis}): {werr}",
+                        error=tr(f"施加试探步失败(轴 {axis}): {werr}", f"Applying the probe step failed (axis {axis}): {werr}"),
                         nanonis_calls=calls)
                 time.sleep(TILT_STEP_SETTLE_S)
 
@@ -234,7 +255,7 @@ class TiltCalibrate(BaseSkill):
                     restore()
                     return SkillResult(
                         skill_name="TiltCalibrate", success=False,
-                        error=f"试探测量失败(轴 {axis}): {err}",
+                        error=tr(f"试探测量失败(轴 {axis}): {err}", f"Probe measurement failed (axis {axis}): {err}"),
                         nanonis_calls=calls)
                 # 响应是**二维向量**:x 轴的一步可能主要出现在测到的 y 上
                 # (轴交换),这正是要把它解成矩阵而不是两个标量的原因。
@@ -269,17 +290,24 @@ class TiltCalibrate(BaseSkill):
                 return SkillResult(
                     skill_name="TiltCalibrate", success=False,
                     error=(
-                        f"轴 {i} 的响应幅度 {mag:.3f} 不在合理区间 "
+                        tr(f"轴 {i} 的响应幅度 {mag:.3f} 不在合理区间 "
                         f"[{CALIB_RESPONSE_MIN}, {CALIB_RESPONSE_MAX}] —— "
                         "该轴可能没有响应,或响应异常。**未写入任何标定**;"
-                        "先确认压电倾斜通道接线与当前位置是否够平。"),
+                        "先确认压电倾斜通道接线与当前位置是否够平。",
+                        f"Response magnitude {mag:.3f} of axis {i} is outside the plausible "
+                        f"range [{CALIB_RESPONSE_MIN}, {CALIB_RESPONSE_MAX}] -- the axis may"
+                        " not respond, or responds abnormally. **No calibration was "
+                        "written**; first check the piezo tilt channel wiring and that the "
+                        "current position is flat enough.")),
                     data=data, nanonis_calls=calls)
 
         det = m[0][0] * m[1][1] - m[0][1] * m[1][0]
         if abs(det) < 1e-9:
             return SkillResult(
                 skill_name="TiltCalibrate", success=False,
-                error="响应矩阵奇异(两轴响应共线),未写入标定",
+                error=tr("响应矩阵奇异(两轴响应共线),未写入标定",
+                      "Response matrix is singular (the two axes respond collinearly); no"
+                      " calibration written"),
                 data=data, nanonis_calls=calls)
 
         # G = -M⁻¹:要抵消测到的斜率 s,施加 Δtilt = G·s。
@@ -303,16 +331,23 @@ class TiltCalibrate(BaseSkill):
             data["matrix_g"] = g
             return SkillResult(
                 skill_name="TiltCalibrate", success=False,
-                error=(f"无法计算响应矩阵的条件数({exc})—— 标定是否可靠**无从判断**,"
-                       "拒绝写入。算不出条件数不是条件数良好的证据。"),
+                error=(tr(f"无法计算响应矩阵的条件数({exc})—— 标定是否可靠**无从判断**,"
+                       "拒绝写入。算不出条件数不是条件数良好的证据。",
+                       f"Cannot compute the condition number of the response matrix ({exc})"
+                       " -- whether the calibration is reliable **cannot be judged**, so "
+                       "it is not written. Failing to compute a condition number is not "
+                       "evidence of a well-conditioned matrix.")),
                 data=data, nanonis_calls=calls)
         if not math.isfinite(cond):
             data["matrix_m"] = m
             data["matrix_g"] = g
             return SkillResult(
                 skill_name="TiltCalibrate", success=False,
-                error=(f"响应矩阵条件数非有限({cond})—— 两轴响应实际上共线,"
-                       "解出来的矩阵不可靠。**未写入**。"),
+                error=(tr(f"响应矩阵条件数非有限({cond})—— 两轴响应实际上共线,"
+                       "解出来的矩阵不可靠。**未写入**。",
+                       f"Condition number of the response matrix is not finite ({cond}) -- "
+                       "the two axes respond practically collinearly and the solved matrix"
+                       " is unreliable. **Not written**.")),
                 data=data, nanonis_calls=calls)
         data["matrix_m"] = m
         data["matrix_g"] = g
@@ -323,16 +358,22 @@ class TiltCalibrate(BaseSkill):
             return SkillResult(
                 skill_name="TiltCalibrate", success=False,
                 error=(
-                    f"标定被拒绝(条件数 {cond:.1f} 超过上限 "
+                    tr(f"标定被拒绝(条件数 {cond:.1f} 超过上限 "
                     f"{instrument_profile.TILT_CAL_MAX_COND})—— 两轴响应几乎"
-                    "共线,解出来的矩阵不可靠。**未写入**。"),
+                    "共线,解出来的矩阵不可靠。**未写入**。",
+                    f"Calibration rejected (condition number {cond:.1f} exceeds the "
+                    f"limit {instrument_profile.TILT_CAL_MAX_COND}) -- the two axes "
+                    "respond almost collinearly and the solved matrix is unreliable. "
+                    "**Not written**.")),
                 data=data, nanonis_calls=calls)
 
         data["stored"] = stored
         return SkillResult(
             skill_name="TiltCalibrate", success=True, data=data,
-            summary=(f"倾斜响应标定完成:条件数 {cond:.2f},"
-                     f"响应幅度 {mag0:.2f}/{mag1:.2f}"),
+            summary=(tr(f"倾斜响应标定完成:条件数 {cond:.2f},"
+                     f"响应幅度 {mag0:.2f}/{mag1:.2f}",
+                     f"Tilt response calibration done: condition number {cond:.2f}, "
+                     f"response magnitude {mag0:.2f}/{mag1:.2f}")),
             nanonis_calls=calls)
 
 
@@ -346,57 +387,76 @@ class AutoTilt(BaseSkill):
             category=SkillCategory.COMPOSITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "在一块平地上测出样品倾斜，用 piezo tilt 把它补偿掉，"
+                tr("在一块平地上测出样品倾斜，用 piezo tilt 把它补偿掉，"
                 "再复测一次验收。要不要补偿由它自己判（判据是：在你**接下来"
                 "要扫的那一帧**上，这个斜坡吃掉多少 Z 量程），补偿分成限幅的小步"
                 "施加，残差不收敛就**回滚**（ROLLS BACK）。前提是这台仪器上"
                 "已经跑过 TiltCalibrate。"
                 "图看起来是斜的、或者要换到更精细的尺度之前，就调它；"
-                "你不需要给任何角度 —— 角度是它自己测的。"
+                "你不需要给任何角度 —— 角度是它自己测的。",
+                "Measure the sample tilt on a flat area, compensate it with the "
+                "piezo tilt, then re-measure to verify. It decides by itself "
+                "whether to compensate (criterion: how much of the Z range this "
+                "slope eats on the frame you are **about to scan**); compensation "
+                "is applied in clamped small steps, and if the residual does not "
+                "converge it **ROLLS BACK**. Requires TiltCalibrate to have been "
+                "run on this instrument. Call it when the image looks tilted, or "
+                "before moving to a finer scale; you do not need to give any angle "
+                "-- it measures the angle itself.")
             ),
             parameters=[
                 ParameterSpec(
                     name="next_frame_m", type="float",
                     description=(
-                        "这次调平要对多大的帧负责 —— 那一帧的边长。"
+                        tr("这次调平要对多大的帧负责 —— 那一帧的边长。"
                         "触发判据是斜坡**在那一帧上**吃掉多少 Z 量程，"
                         "所以一张 1 um 的综览会比一张 10 nm 的特写"
-                        "严得多。不填则用当前帧。"),
+                        "严得多。不填则用当前帧。",
+                        "Size (edge length) of the frame this leveling is responsible for. "
+                        "The trigger criterion is how much of the Z range the slope eats "
+                        "**on that frame**, so a 1 um overview is much stricter than a 10 "
+                        "nm close-up. If omitted, the current frame is used.")),
                     unit="m", required=False,
                     min_value=1e-10, max_value=1e-5,
                 ),
                 ParameterSpec(
                     name="radius_m", type="float",
-                    description="测量圆的半径（见 TiltProbeCircle）。",
+                    description=tr("测量圆的半径（见 TiltProbeCircle）。", "Radius of the measurement circle (see TiltProbeCircle)."),
                     unit="m", required=False,
                     min_value=2e-9, max_value=5e-7,
                 ),
                 ParameterSpec(
                     name="n_points", type="int",
-                    description="每个测量圆上取几个点。",
+                    description=tr("每个测量圆上取几个点。", "Number of points on each measurement circle."),
                     required=False, default=24, min_value=8, max_value=180,
                 ),
                 ParameterSpec(
                     name="max_iterations", type="int",
-                    description="「补偿 + 验收」最多做几轮。",
+                    description=tr("「补偿 + 验收」最多做几轮。", "Maximum number of compensate-and-verify rounds."),
                     required=False, default=MAX_ITERATIONS,
                     min_value=1, max_value=6,
                 ),
                 ParameterSpec(
                     name="surface_rms_m", type="float",
                     description=(
-                        "表面自身高度起伏的 RMS，从一张扫描帧上量出来。"
+                        tr("表面自身高度起伏的 RMS，从一张扫描帧上量出来。"
                         "给了它之后，斜坡一旦把形貌淹没，也会触发一次"
                         "补偿（这正是「图明显看着是斜的」那种情况）。"
-                        "没有帧可以拿来量的话就不填。"),
+                        "没有帧可以拿来量的话就不填。",
+                        "RMS of the surface's own height variation, measured from a scan "
+                        "frame. If given, compensation is also triggered once the slope "
+                        "swamps the topography (the case where the image obviously looks "
+                        "tilted). Leave empty if there is no frame to measure from.")),
                     unit="m", required=False,
                     min_value=0.0, max_value=1e-6,
                 ),
                 ParameterSpec(
                     name="force", type="bool",
                     description=(
-                        "即便实测倾斜对目标帧来说已经在预算之内，"
-                        "也照样补偿。"),
+                        tr("即便实测倾斜对目标帧来说已经在预算之内，"
+                        "也照样补偿。",
+                        "Compensate even if the measured tilt is already within budget for "
+                        "the target frame.")),
                     required=False, default=False,
                 ),
             ],
@@ -416,7 +476,7 @@ class AutoTilt(BaseSkill):
 
           * **安全**:斜坡吃掉太多 Z 量程,帧角上有 rail / 撞边风险
             (``z_span > z_budget_frac × z_range``);
-          * **数据质量**:斜坡把形貌淹没了 —— 这正是要求的「图明显是倾斜的」
+          * **数据质量**:斜坡把形貌淹没了 —— 即「图明显是倾斜的」
             (``z_span > k_topo × 表面起伏``)。
 
         任一成立就该调平,所以触发阈取两者的**较小值**。之前这里写的是 max,
@@ -480,16 +540,22 @@ class AutoTilt(BaseSkill):
             return report(
                 "skipped", "calibration_missing",
                 next_action_hint="run_tilt_calibrate",
-                detail=("这台仪器还没做过倾斜响应标定。Piezo_TiltSet 的轴对应与"
+                detail=(tr("这台仪器还没做过倾斜响应标定。Piezo_TiltSet 的轴对应与"
                         "符号取决于接线,猜错方向会把倾斜往反方向加倍 —— "
-                        "先跑一次 TiltCalibrate。"))
+                        "先跑一次 TiltCalibrate。",
+                        "This instrument has not had its tilt response calibrated yet. The "
+                        "Piezo_TiltSet axis mapping and signs depend on the wiring; a wrong"
+                        " guess doubles the tilt in the wrong direction -- run "
+                        "TiltCalibrate first.")))
         g = calib["g"]
 
         # ② 原始倾斜(回滚目标是**它**,不是 0)
         orig = _read_tilt(context, calls)
         if orig is None:
             return report("failed", "tilt_unreadable",
-                          detail="读不到当前压电倾斜,无法安全回滚")
+                          detail=tr("读不到当前压电倾斜,无法安全回滚",
+                                 "Cannot read the current piezo tilt, so a safe rollback is not "
+                                 "possible"))
 
         diag = self._frame_diagonal(context, calls, params)
 
@@ -567,9 +633,12 @@ class AutoTilt(BaseSkill):
                     # 小步本来就是为了「随时停下都还在安全范围内」而拆的。
                     return _stopped_by_operator(
                         "AutoTilt", calls,
-                        f"倾斜停在 {current[0]:.4f}/{current[1]:.4f}°"
+                        tr(f"倾斜停在 {current[0]:.4f}/{current[1]:.4f}°"
                         f"(第 {i + 1}/{max_iter} 轮的第 {_k}/{n_sub} 小步)。"
-                        "每一小步都在限幅内,停在这里是安全的。")
+                        "每一小步都在限幅内,停在这里是安全的。",
+                        f"Tilt left at {current[0]:.4f}/{current[1]:.4f} deg (sub-step "
+                        f"{_k}/{n_sub} of round {i + 1}/{max_iter}). Every sub-step stays "
+                        "within the limit, so stopping here is safe."))
                 target = [current[0] + sub_step[0], current[1] + sub_step[1]]
                 for axis in (0, 1):
                     if abs(target[axis]) > limit:
@@ -631,11 +700,16 @@ class AutoTilt(BaseSkill):
                     "rolled_back", "diverged",
                     # ``detail`` 是给**人**读的那句话（它会被旁白原样念出去），
                     # 所以数字走可读 SI，不是 `%g` —— 后者把 6.4 nm 印成
-                    # `6.4e-09 m`，一个用户当场比不出大小的形状。
-                    detail=(f"第 {i + 1} 轮后残余 Z 占用 "
-                            f"{format_si_readable(new_span, 'm')},"
-                            f"未降到上一轮 {format_si_readable(span, 'm')} 的 "
-                            f"{CONVERGENCE_RATIO:.0%} 以下"),
+                    # `6.4e-09 m`，一个读者当场比不出大小的形状。
+                    detail=tr(
+                        f"第 {i + 1} 轮后残余 Z 占用 "
+                        f"{format_si_readable(new_span, 'm')},"
+                        f"未降到上一轮 {format_si_readable(span, 'm')} 的 "
+                        f"{CONVERGENCE_RATIO:.0%} 以下",
+                        f"After round {i + 1} the residual Z usage is "
+                        f"{format_si_readable(new_span, 'm')}, not below "
+                        f"{CONVERGENCE_RATIO:.0%} of the previous round's "
+                        f"{format_si_readable(span, 'm')}"),
                     iterations=i + 1, history=history, **common)
 
             span = new_span
@@ -644,9 +718,13 @@ class AutoTilt(BaseSkill):
         # 迭代用尽仍未达标:保留已改善的结果,但如实说没达标。
         return report(
             "failed", "not_converged",
-            detail=f"{max_iter} 轮后残余 Z 占用 "
-                   f"{format_si_readable(span, 'm')} 仍高于验收阈 "
-                   f"{format_si_readable(accept, 'm')}",
+            detail=tr(
+                f"{max_iter} 轮后残余 Z 占用 "
+                f"{format_si_readable(span, 'm')} 仍高于验收阈 "
+                f"{format_si_readable(accept, 'm')}",
+                f"After {max_iter} rounds the residual Z usage is "
+                f"{format_si_readable(span, 'm')}, still above the acceptance "
+                f"threshold {format_si_readable(accept, 'm')}"),
             after={"tilt_x_deg": current[0], "tilt_y_deg": current[1],
                    "z_span_m": span},
             applied={"tilt_x_deg": current[0], "tilt_y_deg": current[1]}

@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 
 from mast.gallery import paths as _paths
+from mast.i18n import tr
 from mast.gallery.figures import common as C
 
 VER = 1
@@ -51,7 +52,7 @@ def make_frame_sheet(lay: _paths.Layout, it: dict, mark: dict | None, options: d
     wpan = min(nx * max(1, math.ceil(384 / nx)), 512)
     table = C.lut("afmhot")
     panels = []
-    for arr, lab in ((raw, "原版（只减平面）"), (lev, "逐行调平")):
+    for arr, lab in ((raw, tr("原版（只减平面）", "Original (plane subtracted only)")), (lev, tr("逐行调平", "Row-levelled"))):
         img, lo, hi = C.to_img(arr, table)
         hp = max(1, round(img.height * wpan / img.width * (h / w) / (ny / nx)))
         rs = Image.Resampling.NEAREST if wpan >= img.width else Image.Resampling.LANCZOS
@@ -70,19 +71,19 @@ def make_frame_sheet(lay: _paths.Layout, it: dict, mark: dict | None, options: d
     t = it.get("t")
     left = "%s    %s    %s    %s" % (C.local(t, "%Y-%m-%d %H:%M:%S"), C.fmt_bias(it.get("b")),
                                      C.fmt_cur(it.get("sp")), C.fmt_size(it.get("w"), it.get("hn")))
-    extra = ["目录%s/%s" % (C.dir_short(it["d"]), C.num4(it["fn"]))]
+    extra = [tr("目录%s/%s", "dir %s/%s") % (C.dir_short(it["d"]), C.num4(it["fn"]))]
     rating = (mark or {}).get("r")
     if rating in C.RWORD:
         extra.append(C.RWORD[rating])
     if n_ok < rall:
-        extra.append("扫了 %d/%d 行" % (n_ok, rall))
+        extra.append(tr("扫了 %d/%d 行", "scanned %d/%d rows") % (n_ok, rall))
     if it.get("ang"):
-        extra.append("转角 %g°" % float(it["ang"]))
+        extra.append(tr("转角 %g°", "rotation %g°") % float(it["ang"]))
     if bwd_only:
-        extra.append("反扫")
+        extra.append(tr("反扫", "retrace"))
     dup = it.get("dup")
     if dup:
-        extra.append("重复保存=%s" % C.num4(str(dup).rsplit("/", 1)[-1]))
+        extra.append(tr("重复保存=%s", "duplicate save=%s") % C.num4(str(dup).rsplit("/", 1)[-1]))
     used = C.caption(d, W, Hp, left, " · ".join(extra))
     canvas = canvas.crop((0, 0, W, Hp + used))
 
@@ -92,17 +93,18 @@ def make_frame_sheet(lay: _paths.Layout, it: dict, mark: dict | None, options: d
     C.write_bytes(lay, CAT, name, C.png_bytes(canvas))
 
     span_raw, span_lev = float(panels[0][2]), float(panels[1][2])
-    summary = {"色标 原版 pm": round(span_raw, 1), "色标 调平 pm": round(span_lev, 1),
-               "有效行": f"{n_ok}/{rall}"}
+    summary = {tr("色标 原版 pm", "Colour scale original pm"): round(span_raw, 1),
+               tr("色标 调平 pm", "Colour scale levelled pm"): round(span_lev, 1),
+               tr("有效行", "Valid rows"): f"{n_ok}/{rall}"}
     if rating in C.RWORD:
-        summary["评级"] = C.RWORD[rating]
+        summary[tr("评级", "Rating")] = C.RWORD[rating]
     if bwd_only:
-        summary["反扫"] = "是"
+        summary[tr("反扫", "Retrace")] = tr("是", "yes")
     if dup:
-        summary["重复保存"] = C.num4(str(dup).rsplit("/", 1)[-1])
+        summary[tr("重复保存", "Duplicate save")] = C.num4(str(dup).rsplit("/", 1)[-1])
     detail = {"span_raw": span_raw, "span_lev": span_lev, "rows_ok": n_ok, "rall": rall,
               "i0": i0, "i1": i1, "bwd": bwd_only, "rating": rating, "dup": dup, "name": name}
-    title = "%s %s · 原版 | 逐行调平" % (C.dir_title(it["d"]), C.num4(it["fn"]))
+    title = tr("%s %s · 原版 | 逐行调平", "%s %s · original | row-levelled") % (C.dir_title(it["d"]), C.num4(it["fn"]))
     return C.write_figure_json(lay, CAT, base, kind="frame_sheet", title=title, files=[name],
                                ids=[it["id"]], options=options, summary=summary, detail=detail,
                                maker_version=VER)

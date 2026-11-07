@@ -1,11 +1,10 @@
 import type { ReactNode, SVGProps } from "react";
 import clsx from "clsx";
+import { tr } from "@/lib/i18n";
 
-/** Shared, dependency-light UI primitives every panel reuses. Replaces the old
- *  Gradio gr.HTML/gr.Markdown table hacks with plain, typed components.
- *  Restyled onto the MAST Lab Console design system — all color/radius/shadow
- *  comes from the design tokens (never hardcoded hex), so both themes + density
- *  inherit automatically. */
+/** Shared, dependency-light UI primitives every panel reuses. All
+ *  color/radius/shadow comes from the design tokens (never hardcoded hex), so
+ *  both themes and density inherit automatically. */
 
 /* ── Inline icons (no icon dependency installed; tiny lucide-shaped SVGs) ──── */
 function Icon({ className, children, ...rest }: SVGProps<SVGSVGElement>) {
@@ -98,8 +97,8 @@ export function Card({ className, children }: { className?: string; children: Re
 }
 
 // Semantic safety tones — single source mapping to the design-system tokens
-// (fg + bg + border each). AUTO=自主/安全 · INFO=信息/只读 · WARN=需确认 ·
-// DANGEROUS=停/失败. Color is never the sole signal (callers pair with a label).
+// (fg + bg + border each). AUTO=autonomous/safe · INFO=info/read-only ·
+// WARN=needs confirmation · DANGEROUS=stop/failure. Color is never the sole signal (callers pair with a label).
 const BADGE_TONE: Record<string, string> = {
   AUTO: "text-mast-auto bg-mast-auto-bg border border-mast-auto-border",
   INFO: "text-mast-info bg-mast-info-bg border border-mast-info-border",
@@ -121,7 +120,7 @@ export function Badge({ tone, children }: { tone?: string; children: ReactNode }
   );
 }
 
-export function Spinner({ label = "加载中…" }: { label?: string }) {
+export function Spinner({ label = tr("加载中…", "Loading…") }: { label?: string }) {
   return (
     <p className="flex items-center gap-2 text-sm text-mast-muted">
       <IconLoader className="h-4 w-4 animate-spin text-mast-accent" />
@@ -130,30 +129,29 @@ export function Spinner({ label = "加载中…" }: { label?: string }) {
   );
 }
 
-export function ErrorNote({ error, label = "加载失败" }: { error: unknown; label?: string }) {
-  // ``label`` lets a caller use a context-appropriate prefix — a mid-run stream
-  // error is NOT a "加载失败" (load failed); RunTaskPanel/AgentChatPanel pass
-  // "运行出错" so a recursion-limit/abort message reads correctly.
+export function ErrorNote({ error, label = tr("加载失败", "Failed to load") }: { error: unknown; label?: string }) {
+  // ``label`` lets a caller use a context-appropriate prefix: a mid-run stream
+  // error is not a load failure, so run panels pass their own label.
   return (
     <div className="flex items-center gap-2 rounded-mast-ctl border border-mast-danger-border bg-mast-danger-bg px-3 py-2.5 text-sm text-mast-danger">
       <IconAlertCircle className="h-[15px] w-[15px] shrink-0" />
       <span>
-        {label}：{String((error as Error)?.message ?? error)}
+        {label}{tr("：", ": ")}{String((error as Error)?.message ?? error)}
       </span>
     </div>
   );
 }
 
-export function DegradedNote({ what = "此功能" }: { what?: string }) {
+export function DegradedNote({ what = tr("此功能", "This feature") }: { what?: string }) {
   return (
     <div className="flex items-center gap-2 rounded-mast-ctl border border-mast-warn-border bg-mast-warn-bg px-3 py-2.5 text-sm text-mast-warn">
       <IconCloudOff className="h-[15px] w-[15px] shrink-0" />
-      <span>{what}当前未连接到运行中的内核（独立开发模式）。接入实时服务后将显示真实数据。</span>
+      <span>{what}{tr("当前未连接到运行中的内核（独立开发模式）。接入实时服务后将显示真实数据。", " is not connected to a running kernel (standalone dev mode). Real data appears once a live service is attached.")}</span>
     </div>
   );
 }
 
-export function EmptyNote({ label = "暂无数据" }: { label?: string }) {
+export function EmptyNote({ label = tr("暂无数据", "No data") }: { label?: string }) {
   return (
     <div className="flex items-center gap-2 rounded-mast-ctl border border-dashed border-mast-border-strong px-3 py-2.5 text-sm text-mast-muted">
       <IconInbox className="h-[15px] w-[15px] shrink-0" />

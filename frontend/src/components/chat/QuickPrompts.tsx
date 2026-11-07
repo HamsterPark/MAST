@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import { tr } from "@/lib/i18n";
 
-// Quick-prompt button row — curated + operator-override prompts from
-// GET /api/chat/quick-prompts. Clicking a button fills the chat input. Mirrors
-// the old Gradio 快速提示按钮行.
+// Quick-prompt button row: curated + operator-override prompts from
+// GET /api/chat/quick-prompts. Clicking a button fills the chat input.
 
 export function QuickPrompts({ onPick }: { onPick: (prompt: string) => void }) {
   const q = useQuery({
@@ -22,7 +22,7 @@ export function QuickPrompts({ onPick }: { onPick: (prompt: string) => void }) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {q.data?.degraded && (
-        <span className="text-xs text-mast-warn">（覆盖项降级，仅显示内置）</span>
+        <span className="text-xs text-mast-warn">{tr("（覆盖项降级，仅显示内置）", "(overrides unavailable, built-in prompts only)")}</span>
       )}
       {prompts.map((p, i) => (
         <button

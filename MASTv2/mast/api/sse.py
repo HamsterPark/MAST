@@ -1,5 +1,6 @@
 """Shared SSE plumbing — response headers + a keep-alive wrapper.
 
+Network changes on a remotely controlled machine can stall a conversation.
 The operator drives this box over Tailscale, and a roam / re-route / sleep kills
 the TCP connection under a long-running SSE stream. Two independent problems fed
 that symptom, and this module fixes the backend half of both:
@@ -44,6 +45,7 @@ abort``), which is the only place hardware-affecting cancellation belongs.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import queue
 import threading
@@ -170,7 +172,10 @@ def with_heartbeat(
     # to before — this wrapper is on every SSE route in the app, and a keep-alive
     # layer is the last place that should acquire a new failure mode.
     poll = min(beat, IDLE_POLL_S) if on_idle is not None else beat
-    thread = threading.Thread(target=_pump, name=f"sse-pump-{label}", daemon=True)
+    # The producer runs in the request's context, so text it builds with tr() is in
+    # the language of the browser that opened the stream (mast/i18n.py).
+    thread = threading.Thread(target=contextvars.copy_context().run, args=(_pump,),
+                              name=f"sse-pump-{label}", daemon=True)
     thread.start()
     last_beat = time.monotonic()
     try:

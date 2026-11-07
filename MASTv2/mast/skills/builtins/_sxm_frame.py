@@ -14,6 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+from mast.i18n import tr
+
 __all__ = ["LoadedFrame", "load_frame", "split_paths"]
 
 
@@ -68,24 +70,25 @@ def load_frame(path: str, channel: str = "Z") -> LoadedFrame:
     from pathlib import Path
 
     if not path:
-        return LoadedFrame(error="没有给 scan_path")
+        return LoadedFrame(error=tr("没有给 scan_path", "No scan_path given"))
     if not Path(path).exists():
-        return LoadedFrame(error=f"文件不存在: {path}")
+        return LoadedFrame(error=tr(f"文件不存在: {path}", f"File does not exist: {path}"))
     try:
         from mast.io.nanonis_files import read_sxm, sxm_oriented_frames
     except ImportError as exc:  # noqa: BLE001 — 独立 API 模式下 io 可能没装
-        return LoadedFrame(error=f"缺依赖: {exc}")
+        return LoadedFrame(error=tr(f"缺依赖: {exc}", f"Missing dependency: {exc}"))
     try:
         scan = read_sxm(path)
     except Exception as exc:  # noqa: BLE001
-        return LoadedFrame(error=f".sxm 读取失败: {exc}")
+        return LoadedFrame(error=tr(f".sxm 读取失败: {exc}", f"Failed to read .sxm: {exc}"))
 
     topo = sxm_oriented_frames(scan, channel)
     if topo.get("forward") is None:
-        return LoadedFrame(error=f"没有通道 {channel!r} 的正扫数据")
+        return LoadedFrame(error=tr(f"没有通道 {channel!r} 的正扫数据",
+                                    f"No forward-scan data for channel {channel!r}"))
     nmpp = topo.get("nm_per_px")
     if not nmpp:
-        return LoadedFrame(error="文件头里没有像素标度")
+        return LoadedFrame(error=tr("文件头里没有像素标度", "No pixel scale in the file header"))
     cur = sxm_oriented_frames(scan, "Current")
     header = scan.get("header") or {}
 

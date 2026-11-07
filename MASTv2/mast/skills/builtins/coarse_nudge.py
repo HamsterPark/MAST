@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -37,7 +38,7 @@ class StepCoarseXY(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "把粗动台横向**挪几步**（可以只挪一步）——"
+                tr("把粗动台横向**挪几步**（可以只挪一步）——"
                 "标定步长、微调位置用。"
                 "\n\n转调 `RelocateCoarseXY(allow_revisit=True)`，**一层薄壳，"
                 "不重写任何东西**：清障阶梯、真空互锁、驱动电压读回、降偏压到 "
@@ -48,32 +49,36 @@ class StepCoarseXY(BaseSkill):
                 "那 200 步是效率约束（别重复用同一片表面），不是安全约束，"
                 "所以这里明说地跳过它，安全检查一条不跳。"
                 "\n\n**常规换区不要用它**，用 `RelocateCoarseXY`：重复用同一片"
-                "表面是真的浪费。超过 %d 步会被拒 —— 那是换区不是挪一下。"
+                "表面是真的浪费。超过 %d 步会被拒 —— 那是换区不是挪一下。",
+                "Nudge the coarse stage laterally **by a few steps** (even just one step) - for calibrating the step size and fine-tuning position.\n\nDelegates to `RelocateCoarseXY(allow_revisit=True)`, **a thin shell that rewrites nothing**: the obstacle-clearing ladder, vacuum interlock, drive-voltage readback, bias lowering to 0.5 V, proof that the current is zero, odometer recording and re-engage are all run by that one implementation.\n\nWhy it exists: `MotorMove` is hard-gated on the autonomous path ('only a guarded path is an autonomous path'), while the landing check of `RelocateCoarseXY` requires >=200 steps from visited sites - **'move 2 steps' passes neither**. Those 200 steps are an efficiency constraint (do not reuse the same patch of surface), not a safety constraint, so it is skipped here explicitly, and not one safety check is skipped.\n\n**Do not use it for a routine change of area**, use `RelocateCoarseXY`: reusing the same patch of surface is a real waste. More than %d steps is refused - that is a change of area, not a nudge.")
                 % _NUDGE_MAX_STEPS
             ),
             parameters=[
                 ParameterSpec(
                     name="axis", type="str", required=True,
-                    description="横向轴：'x' 或 'y'", allowed_values=["x", "y"]),
+                    description=tr("横向轴：'x' 或 'y'", "Lateral axis: 'x' or 'y'"), allowed_values=["x", "y"]),
                 ParameterSpec(
                     name="direction", type="str", required=True,
-                    description="方向：'+' 或 '-'", allowed_values=["+", "-"]),
+                    description=tr("方向：'+' 或 '-'", "Direction: '+' or '-'"), allowed_values=["+", "-"]),
                 ParameterSpec(
                     name="steps", type="int", required=False, default=1,
                     min_value=1, max_value=_NUDGE_MAX_STEPS,
-                    description=("走几步。默认 1。超过 %d 步请改用 "
-                                 "RelocateCoarseXY。" % _NUDGE_MAX_STEPS)),
+                    description=(tr("走几步。默认 1。超过 %d 步请改用 "
+                                 "RelocateCoarseXY。",
+                                 "How many steps. Default 1. For more than %d steps use RelocateCoarseXY.") % _NUDGE_MAX_STEPS)),
                 ParameterSpec(
                     name="reapproach", type="bool", required=False, default=True,
-                    description="走完是否自动重新进针。"),
+                    description=tr("走完是否自动重新进针。", "Whether to re-engage automatically when done.")),
                 ParameterSpec(
                     name="prewithdraw_steps", type="int", required=False,
                     default=None, min_value=0, max_value=100_000,
-                    description=("横移前的粗动 Z 退针步数，用于清障。留空采用 instrument_profile 的配置；每步位移必须按当前硬件标定，不能由步数直接假定固定距离。"
-                                 )),
+                    description=(tr("横移前的粗动 Z 退针步数（清障）。留空用 "
+                                 "instrument_profile 的默认。每步位移必须按当前硬件标定,"
+                                 "不能由步数直接假定固定距离。",
+                                 "Number of coarse Z withdraw steps before the lateral move (obstacle clearing). Empty uses the instrument_profile default. The displacement per step must be calibrated for the current hardware; do not assume a fixed distance from the step count."))),
                 ParameterSpec(
                     name="dry_run", type="bool", required=False, default=False,
-                    description="跑完整条相位但不发出任何移动命令。"),
+                    description=tr("跑完整条相位但不发出任何移动命令。", "Run the whole phase sequence without issuing any move command.")),
             ],
             estimated_duration_s=180.0,
             composition_level=4,
@@ -86,9 +91,10 @@ class StepCoarseXY(BaseSkill):
         if steps > _NUDGE_MAX_STEPS:
             return SkillResult(
                 skill_name="StepCoarseXY", success=False,
-                error=("%d 步不是「挪一下」，那是换区 —— 用 RelocateCoarseXY。"
+                error=(tr("%d 步不是「挪一下」，那是换区 —— 用 RelocateCoarseXY。"
                        "这条路明说地跳过了「别重复访问」的效率约束，"
-                       "拿它做大距离移动会把那条规则整个架空。" % steps))
+                       "拿它做大距离移动会把那条规则整个架空。",
+                       "%d steps is not a 'nudge', it is a change of area - use RelocateCoarseXY. This path explicitly skips the 'do not revisit' efficiency constraint, and using it for large moves would hollow that rule out entirely.") % steps))
 
         inner = {"axis": params.get("axis"),
                  "direction": params.get("direction"),

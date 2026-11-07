@@ -95,7 +95,7 @@ class TestDeriveHitlMap:
     # current-feedback AutoApproach). That premise held while every skill drove the
     # core STM — it is why TipShape, which deliberately crashes the tip into the
     # surface, is merely AUTO. It does NOT survive contact with a laser and an RF
-    # amplifier. The five below are exactly the actions whose hazard Nanonis' limits
+    # amplifier. The six below are exactly the actions whose hazard Nanonis' limits
     # do not bound:
     #
     #   SetLaserOnOff        a human eye hazard. Nanonis bounds nothing here, and MAST
@@ -107,8 +107,15 @@ class TestDeriveHitlMap:
     #                        range and knows NOTHING about where the other probes are.
     #   SetPiControllerOnOff closes a feedback loop onto an ARBITRARY output — it can
     #                        drive a piezo with no tip-contact stop, which is precisely
-    #                        the "coarse motion, no feedback stop" class the 2026-06-11
+    #                        the "coarse motion, no feedback stop" class the design
     #                        re-scoping named as the one real danger.
+    #   SetPmtHighVoltage    (the optics module) puts high voltage on a
+    #                        photomultiplier on the rig1 satellite. Nanonis bounds
+    #                        nothing there, and a PMT under HV with room light on it is
+    #                        damaged in seconds — whether the box is dark is exactly the
+    #                        thing MAST cannot see. Switching HV OFF (volts=0) is the
+    #                        de-escalating direction; it is the same skill only because
+    #                        the satellite takes both on one device.
     #
     # Everything else in the optional set is CONFIRM: a bias sweep is bounded like
     # SetBias, a per-probe Z loop is bounded like the core one. Note in particular
@@ -123,6 +130,7 @@ class TestDeriveHitlMap:
         "RunRfFrequencySweep",
         "SetLaserOnOff",
         "SetPiControllerOnOff",
+        "SetPmtHighVoltage",
         "StartRfGenerator",
     ]
 

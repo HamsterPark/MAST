@@ -19,6 +19,7 @@ import logging
 import math
 from typing import Iterator
 
+from mast.i18n import tr
 from mast.skills.composite._base import CompositeSkillGraph
 from mast.skills.composite.graph_executor import (
     CompositeProgress,
@@ -51,19 +52,26 @@ class DemoScanAndSTS(CompositeSkillGraph):
             version="2.0.0",
             category=SkillCategory.COMPOSITE,
             safety_level=SafetyLevel.AUTO,
-            description=(
+            description=tr(
                 "**仅供演示** —— 用预设参数做一次「扫描 + STS」。"
                 "**跳过全部针尖质量检查**（不做 AssessImageQuality、"
                 "ConditionTip、TipShape、PreScanCheck）。只用于现场演示，"
-                "且用户已经知道针尖是好的。扫描存盘、STS 谱采完之后返回。"
+                "且用户已经知道针尖是好的。扫描存盘、STS 谱采完之后返回。",
+                "**Demo only** - run one 'scan + STS' with preset parameters. "
+                "**Skips all tip-quality checks** (no AssessImageQuality, "
+                "ConditionTip, TipShape or PreScanCheck). Use only for live "
+                "demonstrations where the user already knows the tip is good. "
+                "Returns after the scan is saved and the STS spectra are acquired."
             ),
             parameters=[
                 ParameterSpec(
                     name="center_x_m",
                     type="float",
-                    description=(
+                    description=tr(
                         "扫描中心 X，单位 METERS。默认 0。"
-                        "常见 -1.5u 到 1.5u（+/-1.5 um）。"
+                        "常见 -1.5u 到 1.5u（+/-1.5 um）。",
+                        "Scan centre X, in METERS. Default 0. "
+                        "Typically -1.5u to 1.5u (+/-1.5 um)."
                     ),
                     unit="m",
                     required=False,
@@ -74,7 +82,8 @@ class DemoScanAndSTS(CompositeSkillGraph):
                 ParameterSpec(
                     name="center_y_m",
                     type="float",
-                    description="扫描中心 Y，单位 METERS。默认 0。",
+                    description=tr("扫描中心 Y，单位 METERS。默认 0。",
+                                   "Scan centre Y, in METERS. Default 0."),
                     unit="m",
                     required=False,
                     default=0.0,
@@ -84,9 +93,11 @@ class DemoScanAndSTS(CompositeSkillGraph):
                 ParameterSpec(
                     name="scan_size_m",
                     type="float",
-                    description=(
+                    description=tr(
                         "方形扫描的边长，单位 METERS。默认 50n"
-                        "（50 nm）。硬上限 10u（10 um）。"
+                        "（50 nm）。硬上限 10u（10 um）。",
+                        "Side length of the square scan, in METERS. Default 50n "
+                        "(50 nm). Hard limit 10u (10 um)."
                     ),
                     unit="m",
                     required=False,
@@ -97,7 +108,8 @@ class DemoScanAndSTS(CompositeSkillGraph):
                 ParameterSpec(
                     name="line_time_s",
                     type="float",
-                    description="正扫每行时间。默认 0.1。",
+                    description=tr("正扫每行时间。默认 0.1。",
+                                   "Forward-scan time per line. Default 0.1."),
                     unit="s",
                     required=False,
                     default=0.1,
@@ -107,9 +119,11 @@ class DemoScanAndSTS(CompositeSkillGraph):
                 ParameterSpec(
                     name="sts_count",
                     type="int",
-                    description=(
+                    description=tr(
                         "要采几条 STS 谱。默认 5"
-                        "（中心 + 内接正方形的 4 个角）。"
+                        "（中心 + 内接正方形的 4 个角）。",
+                        "How many STS spectra to acquire. Default 5 "
+                        "(the centre + the 4 corners of an inscribed square)."
                     ),
                     required=False,
                     default=5,
@@ -119,7 +133,8 @@ class DemoScanAndSTS(CompositeSkillGraph):
                 ParameterSpec(
                     name="sts_start_v",
                     type="float",
-                    description="STS 起始偏压，单位伏。默认 -1.0。",
+                    description=tr("STS 起始偏压，单位伏。默认 -1.0。",
+                                   "STS start bias, in volts. Default -1.0."),
                     unit="V",
                     required=False,
                     default=-1.0,
@@ -129,7 +144,8 @@ class DemoScanAndSTS(CompositeSkillGraph):
                 ParameterSpec(
                     name="sts_end_v",
                     type="float",
-                    description="STS 终止偏压，单位伏。默认 1.0。",
+                    description=tr("STS 终止偏压，单位伏。默认 1.0。",
+                                   "STS end bias, in volts. Default 1.0."),
                     unit="V",
                     required=False,
                     default=1.0,
@@ -139,7 +155,8 @@ class DemoScanAndSTS(CompositeSkillGraph):
                 ParameterSpec(
                     name="sts_num_points",
                     type="int",
-                    description="STS 扫描点数。默认 100。",
+                    description=tr("STS 扫描点数。默认 100。",
+                                   "Number of STS points. Default 100."),
                     required=False,
                     default=100,
                     min_value=20,
@@ -148,7 +165,8 @@ class DemoScanAndSTS(CompositeSkillGraph):
                 ParameterSpec(
                     name="scan_timeout_s",
                     type="float",
-                    description="等待扫描完成的上限。",
+                    description=tr("等待扫描完成的上限。",
+                                   "Upper limit on waiting for the scan to finish."),
                     unit="s",
                     required=False,
                     default=180.0,

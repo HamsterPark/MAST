@@ -1,13 +1,53 @@
-"""Process-local record of a refused tip-approach escalation.
+"""Sticky record of a REFUSED tip-approach escalation.
 
-ApproachTip first attempts controlled engagement and escalates only after its
-checks justify coarse approach. A refusal must remain effective if another
-entry point directly requests AutoApproach. This module guards that sequence
-without changing AutoApproach metadata or the normal verified escalation path.
+The hole this closes
+--------------------
+``ApproachTip`` is the safe front door for 进针: it tries the Z-controller
+first and escalates to the Nanonis current-feedback ``AutoApproach`` module
+ONLY when it has established that feedback cannot reach tunnelling. When its
+engage phase fails it deliberately does NOT escalate — the field message was:
 
-The record is bounded by TTL and is not persisted in a model checkpoint. A
-subsequent ApproachTip attempt makes a fresh decision: engagement or permitted
-escalation clears it, while another refusal updates its reason and timestamp.
+    "engage phase failed: 未能建立隧穿 … 但也**不能**建议粗进针：实时控制器回报
+     Z 反馈仍然闭合 … 反馈环还在的时候跑开环粗进针马达就是撞针"
+
+In one observed run that reasoning survived only a couple of minutes. After
+``ApproachTip`` refused, the agent called ``AutoApproach``
+directly — same coarse approach, ``safety_level=AUTO``, no confirmation — and
+it ran for minutes. Nothing in the system remembered that a safety decision had
+just been made, so picking a different door erased it.
+
+Why not simply gate ``AutoApproach``
+------------------------------------
+Two tempting fixes are both wrong:
+
+* **Make AutoApproach DANGEROUS.** Its AUTO level is not an oversight — it is
+  the fix for a v0.3.21 deadlock (approach needed a confirmation dialog
+  that could not be shown). Re-gating it would break 进针 for every ordinary run in order
+  to close a rare bypass.
+* **Add a ``z_controller_*`` precondition.** ``check_state_preconditions``
+  fails OPEN when ``z_controller_on`` is ``None`` — and ``None`` (state
+  unparsed) is precisely the state in this incident. A precondition that
+  fails open on the unreadable state is not a gate.
+
+So the gate is not on the skill, it is on the *sequence*: a coarse approach
+that ``ApproachTip`` has just declined may not be re-entered through the side
+door while the reason for declining still stands.
+
+Deliberately process-local
+--------------------------
+This describes the LIVE instrument, not the conversation. It must NOT reach
+the LangGraph checkpointer: a resumed 3-day-old checkpoint re-imposing a stale
+refusal (or, worse, a checkpoint written before the refusal clearing a live
+one) would be a safety bug in both directions. In-process, TTL-bounded, and
+lost on restart — which is correct, because a restart means the hardware was
+re-checked by a human.
+
+Never a dead end
+----------------
+The refusal is superseded the moment ``ApproachTip`` re-runs and reaches a
+fresh decision (escalate → cleared; engage succeeds → cleared; refuse again →
+re-recorded with a new reason and a new clock). So the escape from the block
+is always "run the safe front door again", never "wait it out".
 """
 
 from __future__ import annotations

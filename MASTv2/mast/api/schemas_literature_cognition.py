@@ -97,7 +97,7 @@ class IngestResponse(BaseModel):
 
 # ── POST /api/literature/manual-entry ────────────────────────────────────────
 class ManualEntryRequest(BaseModel):
-    """Register a paper from TYPED metadata — no PDF (#125 '直接管理条目').
+    """Register a paper from TYPED metadata — no PDF.
 
     The operator hand-enters a paper that is not in OpenAlex and has no PDF at
     hand. The core mints a synthetic ``local:<hash>`` work_id (unless one is

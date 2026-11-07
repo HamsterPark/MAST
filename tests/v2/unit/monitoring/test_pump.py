@@ -29,6 +29,7 @@ import time
 import numpy as np
 import pytest
 
+from mast.monitoring import pump as P
 from mast.core.types import NanonisCallRecord
 from mast.monitoring.pump import (
     Osci1TPump, PumpPaused, PumpUnavailable, Segment,
@@ -370,6 +371,84 @@ def test_reconfigure_is_rate_limited(monkeypatch):
     pump, _ = _pump(h, segment_s=0.2)
     _run_pump(pump)
     assert calls["n"] <= 2          # initial + at most one throttled retry
+
+
+NOT_RUNNING = ("Error in command: osci1t.dataget: Cannot access the Oscilloscope. \n"
+               "Please make sure it is running.")
+
+
+def _stopped_then_running_handlers(runs_needed: int = 1):
+    """示波器模块一开始没在运行：``Run`` 之前 DataGet 被拒，之后出数据。"""
+    state = {"runs": 0, "t0": 0.0}
+    handlers = _base_handlers()
+
+    def run(_args):
+        state["runs"] += 1
+        return ()
+
+    def data(_args):
+        if state["runs"] <= runs_needed:
+            return NanonisCallRecord(method="Osci1T_DataGet", args=_args, error=NOT_RUNNING)
+        state["t0"] += NPTS * DT
+        return _data_reply(state["t0"])
+
+    handlers["Osci1T_Run"] = run
+    handlers["Osci1T_DataGet"] = data
+    return handlers, state
+
+
+def test_a_stopped_scope_is_restarted_without_the_generic_backoff():
+    """模块被关掉后不等满 10 份、也不排在 30 s 后面：过了 5 s 就再发 Run。"""
+    handlers, state = _stopped_then_running_handlers()
+    pump, _ = _pump(handlers)
+    pump.configure()
+    pump._last_reconfig -= P._SCOPE_STOPPED_RETRY_S + 1
+
+    segments = _run_pump(pump)
+
+    assert state["runs"] == 2                  # configure 一次 + 恢复一次
+    assert segments, "Run 之后应当恢复采集"
+    assert pump.stats["bad_reply"] < P._BAD_REPLY_LIMIT
+
+
+def test_a_stopped_scope_is_not_restarted_inside_the_retry_interval():
+    handlers, state = _stopped_then_running_handlers(runs_needed=10_000)
+    pump, _ = _pump(handlers)
+    pump.configure()
+
+    stop = threading.Event()
+    timer = threading.Timer(0.5, stop.set)
+    timer.start()
+    try:
+        list(pump.pump_segments(stop))
+    finally:
+        timer.cancel()
+
+    assert state["runs"] == 1
+    assert "Cannot access the Oscilloscope" in pump.last_bad_reply
+
+
+def test_stopped_scope_retry_backs_off_to_the_same_ceiling():
+    pump, _ = _pump(_base_handlers())
+    pump._malformed_reconfigs = 0
+    assert pump._malformed_backoff_s(P._SCOPE_STOPPED_RETRY_S) == P._SCOPE_STOPPED_RETRY_S
+    pump._malformed_reconfigs = 2
+    assert pump._malformed_backoff_s(P._SCOPE_STOPPED_RETRY_S) == 4 * P._SCOPE_STOPPED_RETRY_S
+    pump._malformed_reconfigs = 16
+    assert pump._malformed_backoff_s(P._SCOPE_STOPPED_RETRY_S) == P._RECONFIG_MAX_INTERVAL_S
+    assert pump._malformed_backoff_s() == P._RECONFIG_MAX_INTERVAL_S
+
+
+@pytest.mark.parametrize("text,want", [
+    (NOT_RUNNING, True),
+    ("Error in command: osci2t.chsget: Cannot access the Oscilloscope 2T . \n"
+     "Please make sure it is running.", True),
+    ("NeedModule", False),
+    ("empty buffer (dt=0, n=0)", False),
+    ("", False),
+])
+def test_scope_not_running_recognises_the_instruments_words(text, want):
+    assert P.scope_not_running(text) is want
 
 
 def test_segment_boundary_respects_the_requested_length():
@@ -1211,3 +1290,161 @@ def test_osci1t_remains_reachable_as_an_explicit_choice():
     pump = make_pump(lambda: pool, strategy="osci1t")
     assert isinstance(pump, Osci1TPump) and pump.fallback_note == ""
     assert not [c for c in pool.calls if c[0].startswith("Osci2T")]
+
+
+# ── 回包不可用：说出原因、放慢、别跟操作员抢示波器 ───────
+#
+# 曾出现过连续数天每一份 Osci1T_DataGet 都不可用，日志只有每 31 s 一行
+# 「repeated malformed replies」：仪器自己说了什么一个字都没留下，而重配一次就
+# 往共享的示波器里写一遍通道/时基/触发，固定 30 s 一次、累计数千次。
+
+def _rejected_data_reply(status: int, note: bytes) -> NanonisCallRecord:
+    """这种拒绝：全部声明字段照给（t0, dt, size=0, 空数组），后跟错误段。"""
+    import struct
+    raw = (struct.pack(">ddi", 0.0, 0.0, 0)
+           + struct.pack(">ii", status, len(note)) + note)
+    return NanonisCallRecord(method="Osci1T_DataGet",
+                             return_value=("", raw, [0.0, 0.0, 0, []]))
+
+
+def test_the_instruments_error_text_becomes_the_reason():
+    h = _base_handlers()
+    h["Osci1T_DataGet"] = lambda a: NanonisCallRecord(
+        method="Osci1T_DataGet", error="Osci1T: the instrument's own words")
+    pump, _ = _pump(h)
+    pump.configure()
+    assert pump.poll_once() is None
+    assert "the instrument's own words" in pump.last_bad_reply
+    assert pump.stats["bad_reply"] == 1, "这个计数在此之前从来没加过，状态里恒为 0"
+
+
+def test_a_status_zero_note_in_the_raw_reply_reaches_the_reason():
+    """status=0 却带描述：解析器当「无错误」，描述只在原始字节里还读得到。"""
+    note = b"Oscilloscope front panel says something"
+    h = _base_handlers()
+    h["Osci1T_DataGet"] = lambda a: _rejected_data_reply(0, note)
+    pump, _ = _pump(h)
+    pump.configure()
+    assert pump.poll_once() is None
+    assert note.decode() in pump.last_bad_reply
+    assert "4 fields" in pump.last_bad_reply      # 形状也在：size=0、空数组
+
+
+def test_a_persistent_failure_is_logged_once_per_reason(caplog):
+    import logging
+    caplog.set_level(logging.INFO, logger="mast.monitoring.pump")
+    said = {"text": "Osci1T: first complaint"}
+    h = _base_handlers()
+    h["Osci1T_DataGet"] = lambda a: NanonisCallRecord(
+        method="Osci1T_DataGet", error=said["text"])
+    pump, _ = _pump(h)
+    pump.configure()
+    for _ in range(35):
+        assert pump.poll_once() is None
+    warns = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warns) == 1 and "first complaint" in warns[0].getMessage()
+
+    said["text"] = "Osci1T: second complaint"
+    for _ in range(5):
+        pump.poll_once()
+    warns = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warns) == 2 and "second complaint" in warns[1].getMessage()
+    assert "second complaint" in pump.trouble
+    assert pump.stats["bad_reply"] == 40
+
+
+def test_a_brief_empty_buffer_after_run_is_neither_logged_nor_trouble(caplog):
+    """刚 Run 完缓冲没满是正常的 —— 不能每次启动都留一条 WARNING。"""
+    import logging
+    caplog.set_level(logging.INFO, logger="mast.monitoring.pump")
+    state = {"i": 0}
+
+    def data(_a):
+        state["i"] += 1
+        if state["i"] <= 3:
+            return _wire(0.0, (0.0,), (0,), [])
+        return _data_reply(float(state["i"]))
+
+    h = _base_handlers()
+    h["Osci1T_DataGet"] = data
+    pump, _ = _pump(h)
+    pump.configure()
+    for _ in range(3):
+        assert pump.poll_once() is None
+        assert pump.trouble == ""
+    assert pump.poll_once() is not None
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert pump.stats["bad_reply"] == 3
+
+
+def test_recovery_is_logged_and_resets_the_backoff(caplog):
+    import logging
+    caplog.set_level(logging.INFO, logger="mast.monitoring.pump")
+    state = {"i": 0}
+
+    def data(_a):
+        state["i"] += 1
+        if state["i"] <= 12:
+            return NanonisCallRecord(method="Osci1T_DataGet", error="Osci1T: no")
+        return _data_reply(float(state["i"]))
+
+    h = _base_handlers()
+    h["Osci1T_DataGet"] = data
+    pump, _ = _pump(h)
+    pump.configure()
+    for _ in range(12):
+        pump.poll_once()
+    pump._malformed_reconfigs = 3
+    assert pump.trouble
+    assert pump.poll_once() is not None
+    assert pump.trouble == "" and pump._malformed_reconfigs == 0
+    assert any("恢复可用" in r.getMessage() for r in caplog.records)
+
+
+def test_the_malformed_backoff_doubles_from_30_s_and_caps_at_10_min():
+    pump, _ = _pump(_base_handlers())
+    got = []
+    for k in range(8):
+        pump._malformed_reconfigs = k
+        got.append(pump._malformed_backoff_s())
+    assert got == [30, 60, 120, 240, 480, 600, 600, 600]
+
+
+class _FakeClock:
+    """顶替 pump 模块里的 ``time``：一小时的退避一瞬间跑完。"""
+
+    def __init__(self):
+        self.t = 1000.0
+
+    def monotonic(self):
+        return self.t
+
+    def time(self):
+        return self.t
+
+
+def test_a_persistent_failure_reconfigures_less_and_less_often(monkeypatch):
+    """固定 30 s 时一小时约 90 次重配（连续失败数天会累计数千次）；
+    翻倍到 10 min 封顶后约 10 次。"""
+    import mast.monitoring.pump as pump_mod
+    clock = _FakeClock()
+    monkeypatch.setattr(pump_mod, "time", clock)
+    horizon = clock.t + 3600.0
+
+    def fake_sleep(ev, seconds):
+        clock.t += max(0.0, seconds)
+        if clock.t >= horizon:
+            ev.set()
+        return ev.is_set()
+
+    monkeypatch.setattr(pump_mod, "_sleep_interruptible", fake_sleep)
+    h = _base_handlers()
+    h["Osci1T_DataGet"] = lambda a: NanonisCallRecord(
+        method="Osci1T_DataGet", error="Osci1T: still no")
+    pump, pool = _pump(h)
+    for _ in pump.pump_segments(threading.Event()):
+        pass
+    configures = [c for c in pool.calls if c[0] == "Osci1T_Run"]
+    assert 8 <= len(configures) <= 12, len(configures)
+    polls = [c for c in pool.calls if c[0] == "Osci1T_DataGet"]
+    assert len(polls) < 4000, "持续失败时还在按 10 Hz 轮询"

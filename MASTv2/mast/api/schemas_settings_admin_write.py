@@ -99,6 +99,16 @@ class SettingsWriteRequest(BaseModel):
     nanonis_port_emergency: Optional[int] = None
     orchestrator_recursion_limit: Optional[int] = None  # run-task super-step budget (default 250)
     orchestrator_auto_background: Optional[bool] = None  # auto-detach a paired literature survey; default OFF
+    # Legacy feature set (built-in agent chat, Agents, query assistant, multi-day conduct,
+    # memory, vision models, wishlist feedback). Default OFF; vision models load at
+    # service start, so a change needs a restart. No admin PIN.
+    legacy_features_enabled: Optional[bool] = None
+    # Station profile ("stm" | "optical"). Any other value is refused by the write
+    # route (not stored): a typo must not quietly turn an STM station into something
+    # else. In admin_pin.GUARDED_KEYS: a write without the admin PIN is refused
+    # (pin_required), because the choice decides at the next start whether Nanonis is
+    # dialled and which watchdogs run. Read side: SettingsResponse.station_profile.
+    station_profile: Optional[str] = None
     # LangGraph 退出的两个切换面（2026-08-26/27）。写入侧与读出侧**必须成对**——
     # 只加一边的结果是「表单存得进读不回」，而这条闸门（test_settings_write_
     # reachability）正是为此存在的：它抓到了我只改 KNOWN_KEYS 的那一版。
@@ -115,7 +125,7 @@ class SettingsWriteRequest(BaseModel):
     daily_budget_usd: Optional[float] = None  # USD across ALL runs today (default 300.0; 0 = OFF)
     orchestrator_activation_gating: Optional[bool] = None  # park unready agents; default OFF
     wake_max_per_day: Optional[int] = None  # per-experiment auto-wake ceiling/day (default 6; 0 = 不自动唤醒)
-    experiment_defaults: Optional[dict[str, Any]] = None  # preferred default scan/spectroscopy params 
+    experiment_defaults: Optional[dict[str, Any]] = None  # preferred default scan/spectroscopy params
     instrument_profile: Optional[dict[str, Any]] = None  # per-rig retract/dI-dV config + learned calibration
     # Coarse-stepper drive ceiling. In admin_pin.GUARDED_KEYS: a write without a
     # valid PIN is refused outright, and with no PIN configured at all it is
@@ -181,8 +191,7 @@ class SettingsWriteRequest(BaseModel):
     # 压缩摘要用的模型别名。空串 = 跟随当前 agent 模型。
     compaction_model: Optional[str] = None
     # 上传全文后是否自动把停住的那轮文献跑完(默认开)。KNOWN_KEYS 的说明里写着
-    # 「Set False to keep fulfilment silent」—— 那是一句对用户说的话,而在此
-    # 之前全仓没有任何地方 set 得了它。
+    # "Set False to keep fulfilment silent",因此写侧必须能 set 它。
     literature_fetch_auto_resume: Optional[bool] = None
     # 实验文件夹归档的四个开关 + 一个模式。读侧 2026-08-10 刚修好(七处
     # ``SettingsStore()`` 无参构造实测全死),写侧就是这里。
@@ -195,6 +204,9 @@ class SettingsWriteRequest(BaseModel):
     ingest_copy_mode: Optional[str] = None  # hardlink 省盘但只能同卷
     env_csv_enabled: Optional[bool] = None           # default ON
     conv_export_enabled: Optional[bool] = None       # default ON
+    # 卫星通道 /ws/satellite/v1 的总开关(默认开)。live-read:SatelliteHub 每秒读一次,
+    # 关掉后断开已连的卫星、新连接回 403;不用重启。
+    satellite_hub_enabled: Optional[bool] = None
 
     # Required whenever hardware_modules or advanced_capabilities is present. Never
     # persisted — it is compared (SHA-256) against config/admin_pin.txt and dropped.

@@ -43,6 +43,7 @@ import logging
 import time
 from typing import Any
 
+from mast.i18n import tr
 from mast.core import coord_epoch
 from mast.core.types import (
     ParameterSpec,
@@ -96,32 +97,49 @@ class ExecuteScanPlan(BaseSkill):
             version="1.0.0",
             category=SkillCategory.COMPOSITE,
             safety_level=SafetyLevel.CONFIRM,
-            description=(
+            description=tr(
                 "执行一份由 plan_scan_batch 排出来的扫描计划:每一帧都按规划器为它"
                 "定好的那套参数采集,帧与帧之间有守卫(针尖事件 -> 中止整批;"
                 "质量差 -> 重扫一次;坏帧率高 -> 提前中止)。"
                 "把计划 JSON **原样**传进来 —— 不要手工去改里面的帧;"
-                "要改就重新排一次计划,好让用户看得见改了什么。"
+                "要改就重新排一次计划,好让用户看得见改了什么。",
+                "Execute a scan plan produced by plan_scan_batch: every frame is "
+                "acquired with the parameters the planner set for it, with guards "
+                "between frames (tip event -> abort the whole batch; poor quality -> "
+                "rescan once; high bad-frame rate -> abort early). Pass the plan JSON "
+                "**unchanged** - do not hand-edit its frames; to change it, plan again "
+                "so the user can see what changed."
             ),
             parameters=[
                 ParameterSpec(
                     name="plan_json",
                     type="str",
-                    description=(
+                    description=tr(
                         "plan_scan_batch 返回的那份计划(JSON)。里面装着逐帧的中心、"
                         "尺寸与已经定好的参数,外加它是在哪一代 coord_epoch 下排的。"
                         "**原样**传进来:计划的 coord_epoch 落后于当前代次时一律直接"
                         "拒绝(一次横向粗动已经让那些坐标指向了另一片表面)—— "
-                        "重新排计划,**绝不**去换算坐标。"
+                        "重新排计划,**绝不**去换算坐标。",
+                        "The plan (JSON) returned by plan_scan_batch. It holds each "
+                        "frame's centre, size and already-fixed parameters, plus the "
+                        "coord_epoch it was planned under. Pass it **unchanged**: a plan "
+                        "whose coord_epoch is behind the current epoch is always "
+                        "rejected outright (a lateral coarse motion has made those "
+                        "coordinates point at a different patch of surface) - plan "
+                        "again, **never** convert coordinates."
                     ),
                     required=True,
                 ),
                 ParameterSpec(
                     name="stop_on_bad_quality",
                     type="bool",
-                    description=(
+                    description=tr(
                         "某一帧重扫之后仍然差,就中止整批。默认关:一张坏帧通常是"
-                        "局部现象,而系统性问题已经由坏帧率那道守卫兜住了。"
+                        "局部现象,而系统性问题已经由坏帧率那道守卫兜住了。",
+                        "Abort the whole batch if a frame is still poor after its "
+                        "rescan. Off by default: one bad frame is usually a local "
+                        "effect, and systematic problems are already caught by the "
+                        "bad-frame-rate guard."
                     ),
                     required=False,
                     default=False,
@@ -129,7 +147,7 @@ class ExecuteScanPlan(BaseSkill):
                 ParameterSpec(
                     name="save_each",
                     type="bool",
-                    description="每采到一帧就保存。",
+                    description=tr("每采到一帧就保存。", "Save each frame as it is acquired."),
                     required=False,
                     default=True,
                 ),
@@ -172,13 +190,14 @@ class ExecuteScanPlan(BaseSkill):
         except (TypeError, ValueError, KeyError) as exc:
             return SkillResult(
                 skill_name="ExecuteScanPlan", success=False,
-                error=f"计划 JSON 解析失败: {exc}")
+                error=tr(f"计划 JSON 解析失败: {exc}",
+                         f"Failed to parse plan JSON: {exc}"))
 
         frames = plan.get("frames") if isinstance(plan, dict) else None
         if not isinstance(frames, list) or not frames:
             return SkillResult(
                 skill_name="ExecuteScanPlan", success=False,
-                error="计划里没有任何帧")
+                error=tr("计划里没有任何帧", "The plan contains no frames"))
 
         save_each = bool(params.get("save_each", True))
         stop_on_bad = bool(params.get("stop_on_bad_quality", False))
@@ -192,7 +211,8 @@ class ExecuteScanPlan(BaseSkill):
 
         # ── 坐标代次:开跑前核对一次 ─────────────────────────────────────
         stamped = plan.get("coord_epoch")
-        verdict0 = coord_epoch.verify(stamped, what="这份计划的坐标")
+        verdict0 = coord_epoch.verify(
+            stamped, what=tr("这份计划的坐标", "this plan's coordinates"))
         if verdict0.stale:
             # 一帧都不扫。拒绝里**不带任何坐标** —— 既不夹紧也不换算,给出去的
             # 每一个数字都得是能负责的数字。
@@ -206,8 +226,10 @@ class ExecuteScanPlan(BaseSkill):
                       "plan_coord_epoch": verdict0.stamped,
                       "current_coord_epoch": verdict0.current,
                       "frames_refused": len(frames)},
-                summary=(f"整批拒绝:计划是第 {verdict0.stamped} 代坐标,"
-                         f"当前第 {verdict0.current} 代"))
+                summary=tr(f"整批拒绝:计划是第 {verdict0.stamped} 代坐标,"
+                           f"当前第 {verdict0.current} 代",
+                           f"Whole batch refused: the plan is in coordinate epoch "
+                           f"{verdict0.stamped}, the current one is {verdict0.current}"))
         if verdict0.state != coord_epoch.MATCH:
             # 没盖章 / 查不到 —— 两种都不是「陈旧」,照常执行,但说出来。
             # 「读不到」被当成答案是本仓反复出事的那一类。
@@ -215,7 +237,7 @@ class ExecuteScanPlan(BaseSkill):
 
         for i, frame in enumerate(frames):
             if context.check_abort():
-                aborted_at, abort_reason = i, "用户中止"
+                aborted_at, abort_reason = i, tr("用户中止", "Aborted by user")
                 break
 
             # 每帧前再核对一次。批次中途本不该发生粗动,但绕行分支(detour)可能
@@ -224,7 +246,8 @@ class ExecuteScanPlan(BaseSkill):
             # 条件是「这份计划**盖过章**」而不是「开跑那次核对通过」:开跑时代次
             # 查不到、扫到一半又能查了 —— 那一刻正是最该核对的时候。
             if verdict0.stamped is not None:
-                v = coord_epoch.verify(stamped, what="这份计划的坐标")
+                v = coord_epoch.verify(
+                    stamped, what=tr("这份计划的坐标", "this plan's coordinates"))
                 if v.stale:
                     aborted_at = i
                     abort_reason = v.message
@@ -238,7 +261,7 @@ class ExecuteScanPlan(BaseSkill):
                 center_y = float(frame["center_y_m"])
                 size = float(frame["size_m"])
             except (KeyError, TypeError, ValueError):
-                bad.append({"index": i, "reason": "帧几何非法", "frame": frame})
+                bad.append({"index": i, "reason": tr("帧几何非法", "Invalid frame geometry"), "frame": frame})
                 continue
 
             # 规划器标记的大跳变:压电蠕变在大位移后要一段时间才安定,不等的话
@@ -270,8 +293,11 @@ class ExecuteScanPlan(BaseSkill):
                     if not getattr(res_bias, "success", False):
                         verdict = {"ok": False, "tip_event": False, "crash": False,
                                    "quality": None,
-                                   "reason": f"偏压变更被拒: "
-                                             f"{getattr(res_bias, 'error', '')}"}
+                                   "reason": tr(
+                                       f"偏压变更被拒: "
+                                       f"{getattr(res_bias, 'error', '')}",
+                                       f"Bias change refused: "
+                                       f"{getattr(res_bias, 'error', '')}")}
                         break
                     scan_params.pop("bias_v", None)   # 已经设好了
 
@@ -296,8 +322,9 @@ class ExecuteScanPlan(BaseSkill):
             if verdict and (verdict["tip_event"] or verdict["crash"]):
                 bad.append(record)
                 aborted_at = i
-                abort_reason = ("扫描中检测到针尖事件" if verdict["tip_event"]
-                                else "检测到撞针")
+                abort_reason = (tr("扫描中检测到针尖事件", "Tip event detected during scan")
+                                if verdict["tip_event"]
+                                else tr("检测到撞针", "Tip crash detected"))
                 break
 
             if verdict and verdict["ok"]:
@@ -305,7 +332,9 @@ class ExecuteScanPlan(BaseSkill):
             else:
                 bad.append(record)
                 if stop_on_bad:
-                    aborted_at, abort_reason = i, "帧质量不合格且已设为遇差即停"
+                    aborted_at, abort_reason = i, tr(
+                        "帧质量不合格且已设为遇差即停",
+                        "Frame quality unacceptable and stop-on-bad-quality is set")
                     break
 
             # 坏帧率:系统性问题不会因为多扫几张就自己好起来。
@@ -314,9 +343,14 @@ class ExecuteScanPlan(BaseSkill):
                     and len(bad) >= MIN_BAD_FOR_RATE
                     and len(bad) / total > BAD_FRAME_RATE_ABORT):
                 aborted_at = i
-                abort_reason = (f"坏帧率 {len(bad)}/{total} 超过 "
-                                f"{BAD_FRAME_RATE_ABORT:.0%} —— 多半是表面 / 针尖 / "
-                                f"参数的系统性问题,继续扫只是浪费机时")
+                abort_reason = tr(
+                    f"坏帧率 {len(bad)}/{total} 超过 "
+                    f"{BAD_FRAME_RATE_ABORT:.0%} —— 多半是表面 / 针尖 / "
+                    f"参数的系统性问题,继续扫只是浪费机时",
+                    f"Bad-frame rate {len(bad)}/{total} exceeds "
+                    f"{BAD_FRAME_RATE_ABORT:.0%} - most likely a systematic problem "
+                    f"with the surface / tip / parameters; scanning on only wastes "
+                    f"instrument time")
                 break
 
         planned = len(frames)
@@ -350,21 +384,28 @@ class ExecuteScanPlan(BaseSkill):
         if aborted_at is not None:
             return SkillResult(
                 skill_name="ExecuteScanPlan", success=False,
-                error=(f"批次在第 {aborted_at + 1}/{planned} 帧中止:{abort_reason}。"
-                       f"已完成 {len(done)} 帧,失败 {len(bad)} 帧。"),
+                error=tr(
+                    f"批次在第 {aborted_at + 1}/{planned} 帧中止:{abort_reason}。"
+                    f"已完成 {len(done)} 帧,失败 {len(bad)} 帧。",
+                    f"Batch aborted at frame {aborted_at + 1}/{planned}: {abort_reason}. "
+                    f"{len(done)} frames done, {len(bad)} failed."),
                 data=data,
-                summary=f"批次中止 @{aborted_at + 1}/{planned}:{abort_reason}")
+                summary=tr(f"批次中止 @{aborted_at + 1}/{planned}:{abort_reason}",
+                        f"Batch aborted @{aborted_at + 1}/{planned}: {abort_reason}"))
 
         if not done:
             return SkillResult(
                 skill_name="ExecuteScanPlan", success=False,
-                error=f"计划里 {planned} 帧一帧都没成功",
+                error=tr(f"计划里 {planned} 帧一帧都没成功",
+                         f"None of the {planned} frames in the plan succeeded"),
                 data=data)
 
         # 部分成功 = 成功,但缺口必须写进 summary。把 fail_count 埋在 data 里
         # 没人读 —— 这是 2026-07-27 修过的同一个坑。
-        summary = f"完成 {len(done)}/{planned} 帧"
+        summary = tr(f"完成 {len(done)}/{planned} 帧",
+                     f"Completed {len(done)}/{planned} frames")
         if bad:
-            summary += f",{len(bad)} 帧未达标(见 frames_bad)"
+            summary += tr(f",{len(bad)} 帧未达标(见 frames_bad)",
+                    f", {len(bad)} frames below standard (see frames_bad)")
         return SkillResult(skill_name="ExecuteScanPlan", success=True,
                            data=data, summary=summary)

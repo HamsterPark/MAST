@@ -40,6 +40,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -59,41 +60,48 @@ class QueryMonitorHistory(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "查长期监控历史：aux 辅助读数（Z/振幅/Δf/偏压，~0.25 s，留 7 天）"
+                tr("查长期监控历史：aux 辅助读数（Z/振幅/Δf/偏压，~0.25 s，留 7 天）"
                 "或环境历史（温度/真空/氦位，60 s 桶，永久）。返回统计摘要，"
-                "并说明这套数据的时间分辨率能回答什么频率。"
+                "并说明这套数据的时间分辨率能回答什么频率。", "Query the long-term monitoring history: aux readings (Z/amplitude/delta-f/bias, ~0.25 s, kept 7 days) "
+"or environment history (temperature/vacuum/helium level, 60 s buckets, permanent). Returns a statistical summary, "
+"and states which frequencies the time resolution of this data set can answer.")
             ),
             parameters=[
                 ParameterSpec(
                     name="source", type="str", required=False, default="aux",
-                    description=("aux = 辅助读数（秒~分钟尺度）；"
+                    description=(tr("aux = 辅助读数（秒~分钟尺度）；"
                                  "env = 环境历史（小时~天尺度，60 s 桶，"
-                                 "**看不见比 120 s 更快的东西**）"),
+                                 "**看不见比 120 s 更快的东西**）", "aux = auxiliary readings (seconds to minutes scale); "
+"env = environment history (hours to days scale, 60 s buckets, "
+"**cannot see anything faster than 120 s**)")),
                 ),
                 ParameterSpec(
                     name="column", type="str", required=False, default="z_m",
-                    description=("aux 列名（z_m / amp_m / df_hz / bias_v / didv）"
-                                 "或 env 传感器名（'sample_temperature' / 'vacuum' / "
-                                 "'helium_level' / 'noise_level'）"),
+                    description=(tr("aux 列名（z_m / amp_m / df_hz / bias_v / didv）"
+                                 "或 env 传感器名（'SPM (COMx)' / 'vacuum' / "
+                                 "'helium_level' / 'noise_level'）", "aux column name (z_m / amp_m / df_hz / bias_v / didv) "
+"or env sensor name ('SPM (COMx)' / 'vacuum' / "
+"'helium_level' / 'noise_level')")),
                 ),
                 ParameterSpec(
                     name="hours", type="float", unit="h", required=False,
                     default=1.0, min_value=0.01, max_value=8760.0,
-                    description="往回看多少小时",
+                    description=tr("往回看多少小时", "How many hours to look back"),
                 ),
                 ParameterSpec(
                     name="until_ts", type="float", required=False, default=None,
-                    description="窗口右端（Unix 秒）；不填就是现在。查过去某段用它",
+                    description=tr("窗口右端（Unix 秒）；不填就是现在。查过去某段用它", "Right end of the window (Unix seconds); default is now. Use it to query some past period"),
                 ),
                 ParameterSpec(
                     name="max_points", type="int", required=False, default=2000,
                     min_value=10, max_value=100000,
-                    description="返回的采样点上限（只影响返回，不影响统计）",
+                    description=tr("返回的采样点上限（只影响返回，不影响统计）", "Upper limit on returned sample points (affects only what is returned, not the statistics)"),
                 ),
                 ParameterSpec(
                     name="include_series", type="bool", required=False, default=False,
-                    description=("是否把序列本身返回。默认只回统计摘要 —— "
-                                 "几万个点塞进对话没有意义"),
+                    description=(tr("是否把序列本身返回。默认只回统计摘要 —— "
+                                 "几万个点塞进对话没有意义", "Whether to return the series itself. By default only the statistical summary is returned -- "
+"tens of thousands of points in the conversation make no sense")),
                 ),
             ],
             estimated_duration_s=5.0,
@@ -116,8 +124,9 @@ class QueryMonitorHistory(BaseSkill):
         if source not in ("aux", "env"):
             return SkillResult(
                 skill_name=name, success=False,
-                error="source 只能是 aux 或 env。想看秒~分钟尺度用 aux；"
-                      "想看小时~天尺度用 env。")
+                error=tr("source 只能是 aux 或 env。想看秒~分钟尺度用 aux；"
+                      "想看小时~天尺度用 env。", "source must be aux or env. For the seconds-to-minutes scale use aux; "
+"for the hours-to-days scale use env."))
 
         if source == "aux":
             out = self._aux(column, since, until, mp)
@@ -168,12 +177,13 @@ class QueryMonitorHistory(BaseSkill):
             from mast.monitoring.store import get_store_if_exists
             store = get_store_if_exists()
             if store is None:
-                return ("monitoring store 不可用 —— 电流监控没在跑，"
-                        "aux 历史也就没有。")
+                return (tr("monitoring store 不可用 —— 电流监控没在跑，"
+                        "aux 历史也就没有。", "The monitoring store is unavailable -- current monitoring is not running, "
+"so there is no aux history either."))
             rows, total, thinned = store.aux_query(
                 since=since, until=until, limit=200000, max_points=mp)
         except Exception as exc:  # noqa: BLE001
-            return "aux 查询失败: %s" % exc
+            return tr("aux 查询失败: %s", "aux query failed: %s") % exc
         t, v, sc = [], [], []
         for r in rows or []:
             x = r.get(column)
@@ -184,7 +194,7 @@ class QueryMonitorHistory(BaseSkill):
             sc.append(bool(r.get("ctx_scanning")))
         if not t:
             cols = sorted(set((rows or [{}])[0].keys())) if rows else []
-            return ("这段时间里没有 %r 这一列的数据。可用的列：%s"
+            return (tr("这段时间里没有 %r 这一列的数据。可用的列：%s", "No data for column %r in this period. Available columns: %s")
                     % (column, ", ".join(c for c in cols if not c.startswith("ctx_"))[:300]))
         st = self._stats(t, v)
         out = {"stats": st, "total_rows": int(total), "thinned": bool(thinned),
@@ -194,13 +204,16 @@ class QueryMonitorHistory(BaseSkill):
         out["notes"] = []
         if frac > 0.02:
             out["notes"].append(
-                "这段里有 %.0f%% 的样本处于**扫描中**。扫描时 Z 装的是形貌与慢轴"
+                tr("这段里有 %.0f%% 的样本处于**扫描中**。扫描时 Z 装的是形貌与慢轴"
                 "运动，不是环境起伏 —— 要做环境谱就换一段安静的，或用 "
-                "CharacteriseQuietDrift。" % (frac * 100))
+                "CharacteriseQuietDrift。", "%.0f%% of the samples in this period were taken **during a scan**. During a scan Z carries topography and slow-axis "
+"motion, not environmental fluctuation -- for an environmental spectrum pick a quiet period, or use "
+"CharacteriseQuietDrift.") % (frac * 100))
         if st and st.get("nyquist_period_s"):
             out["notes"].append(
-                "这套数据能回答的最快周期是 %.1f s（采样间隔 %.2f s 的两倍），"
-                "能分辨的最长周期约 %.0f s。"
+                tr("这套数据能回答的最快周期是 %.1f s（采样间隔 %.2f s 的两倍），"
+                "能分辨的最长周期约 %.0f s。", "The fastest period this data can answer is %.1f s (twice the sampling interval of %.2f s), "
+"and the longest resolvable period is about %.0f s.")
                 % (st["nyquist_period_s"], st["dt_median_s"], st["span_s"] / 10.0))
         return out
 
@@ -215,18 +228,18 @@ class QueryMonitorHistory(BaseSkill):
                 from mast.envhistory import get_store as _g  # type: ignore
                 store = _g()
             except Exception as exc:  # noqa: BLE001
-                return "环境历史 store 不可用: %s" % exc
+                return tr("环境历史 store 不可用: %s", "The environment history store is unavailable: %s") % exc
         try:
             d = store.series(str(sensor), since=since, until=until, max_points=mp)
         except Exception as exc:  # noqa: BLE001
-            return "环境历史查询失败: %s" % exc
+            return tr("环境历史查询失败: %s", "Environment history query failed: %s") % exc
         pts = (d or {}).get("points") or []
         if not pts:
             try:
                 names = [s.get("sensor") for s in (store.sensors() or [])]
             except Exception:  # noqa: BLE001
                 names = []
-            return ("传感器 %r 在这段时间里没有数据。可用的：%s"
+            return (tr("传感器 %r 在这段时间里没有数据。可用的：%s", "Sensor %r has no data in this period. Available: %s")
                     % (sensor, ", ".join(str(n) for n in names)[:300]))
         # 存在时间桶但全部读取被排除，与该时间窗没有记录是不同状态。
         # 前者需要检查传感器或连接，后者需要检查记录时间窗；必须明确报告，不能只返回空统计。
@@ -237,11 +250,14 @@ class QueryMonitorHistory(BaseSkill):
         n_kept = sum(int(p.get("n") or 0) for p in pts)
         statuses = {str(p.get("worst_status") or "") for p in pts}
         if not v:
-            worst = ", ".join(sorted(x for x in statuses if x)) or "未知"
-            return ("传感器 %r 在这段时间里有 %d 个统计桶，但**每一个都是空的**"
+            worst = ", ".join(sorted(x for x in statuses if x)) or tr("未知", "unknown")
+            return (tr("传感器 %r 在这段时间里有 %d 个统计桶，但**每一个都是空的**"
                     "（读到 0 次、排除 %d 次，状态：%s）—— 记录器在跑、也在采，"
                     "是**传感器本身读不到值**。这不是「没有数据」，"
-                    "该去查的是传感器与接线，不是换时间窗。"
+                    "该去查的是传感器与接线，不是换时间窗。", "Sensor %r has %d statistics bucket(s) in this period, but **every one of them is empty** "
+"(%d read(s) taken, %d excluded, status: %s) -- the recorder is running and sampling, "
+"and **the sensor itself cannot be read**. This is not \"no data\"; "
+"what to check is the sensor and its wiring, not another time window.")
                     % (sensor, len(pts), n_excluded, worst))
         st = self._stats(t, v)
         return {
@@ -253,12 +269,15 @@ class QueryMonitorHistory(BaseSkill):
             "n_readings_kept": n_kept, "n_readings_excluded": n_excluded,
             "worst_statuses": sorted(x for x in statuses if x),
             "notes": [
-                ("这段里有 %d 次读取被排除（传感器不可用），保留 %d 次 —— "
-                 "统计只基于保留的那些。" % (n_excluded, n_kept))
+                (tr("这段里有 %d 次读取被排除（传感器不可用），保留 %d 次 —— "
+                 "统计只基于保留的那些。", "%d read(s) in this period were excluded (sensor unavailable), %d kept -- "
+"statistics are based only on those kept.") % (n_excluded, n_kept))
                 if n_excluded else
-                "所有读取都可用（没有被排除的采样）。",
-                "环境历史是 **%.0f 秒统计桶**，Nyquist 因此是 %.0f 秒 —— 比这更快的"
+                tr("所有读取都可用（没有被排除的采样）。", "All reads were usable (no excluded samples)."),
+                tr("环境历史是 **%.0f 秒统计桶**，Nyquist 因此是 %.0f 秒 —— 比这更快的"
                 "东西在这套数据里根本不出现，而且不会有任何报错。要看秒~分钟尺度"
-                "请改用 source='aux'。" % (_ENV_BUCKET_S, 2 * _ENV_BUCKET_S),
+                "请改用 source='aux'。", "The environment history is **%.0f s statistics buckets**, so the Nyquist period is %.0f s -- anything faster "
+"does not appear in this data at all, and no error is raised. For the seconds-to-minutes scale "
+"use source='aux' instead.") % (_ENV_BUCKET_S, 2 * _ENV_BUCKET_S),
             ],
         }

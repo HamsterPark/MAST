@@ -1,4 +1,5 @@
 import type { components } from "@/api/schema";
+import { tr } from "@/lib/i18n";
 
 type Pulse = components["schemas"]["VisionPulseResponse"];
 
@@ -13,24 +14,24 @@ const ALERT_TONE: Record<Pulse["alert_level"], string> = {
 };
 
 const ALERT_LABEL: Record<Pulse["alert_level"], string> = {
-  idle: "空闲",
-  info: "正常",
-  warn: "注意",
-  critical: "严重",
+  idle: tr("空闲", "Idle"),
+  info: tr("正常", "Normal"),
+  warn: tr("注意", "Warning"),
+  critical: tr("严重", "Critical"),
 };
 
 const TREND_LABEL: Record<Pulse["trend"], string> = {
-  idle: "— 静止",
-  rising: "▲ 上升",
-  steady: "■ 平稳",
-  falling: "▼ 下降",
+  idle: tr("— 静止", "— Idle"),
+  rising: tr("▲ 上升", "▲ Rising"),
+  steady: tr("■ 平稳", "■ Steady"),
+  falling: tr("▼ 下降", "▼ Falling"),
 };
 
 const QUALITY_LABEL: Record<string, string> = {
-  good: "良好",
-  degraded: "退化",
-  bad: "差",
-  unknown: "未知",
+  good: tr("良好", "Good"),
+  degraded: tr("退化", "Degraded"),
+  bad: tr("差", "Bad"),
+  unknown: tr("未知", "Unknown"),
 };
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -56,11 +57,11 @@ export function PulseRibbon({ pulse }: { pulse: Pulse }) {
       </div>
 
       <Stat
-        label="针尖置信度"
+        label={tr("针尖置信度", "Tip confidence")}
         value={scorePct == null ? "—" : `${scorePct}%`}
       />
       <Stat
-        label="针尖质量"
+        label={tr("针尖质量", "Tip quality")}
         value={pulse.tip_quality ? QUALITY_LABEL[pulse.tip_quality] ?? pulse.tip_quality : "—"}
       />
       {/* SAFE mode rewrites every tip verdict to "good" at the source, so the two
@@ -68,16 +69,19 @@ export function PulseRibbon({ pulse }: { pulse: Pulse }) {
       {pulse.safe_mode && (
         <span
           className="rounded border border-mast-warn-border bg-mast-warn-bg px-2 py-1 text-[11px] font-medium text-mast-warn"
-          title="安全模式：针尖判定被统一覆写为「良好」，上面两项不是实测值。真实判定见视觉事件里的 safe_mode_raw。"
+          title={tr(
+            "安全模式：针尖判定被统一覆写为「良好」，上面两项不是实测值。真实判定见视觉事件里的 safe_mode_raw。",
+            "Safe mode: every tip verdict is overridden to \"good\", so the two values above are not measured. The raw verdict is in safe_mode_raw in the vision events.",
+          )}
         >
-          安全模式覆写中
+          {tr("安全模式覆写中", "Safe-mode override")}
         </span>
       )}
-      <Stat label="近期事件" value={String(pulse.recent_count)} />
-      <Stat label="严重事件" value={String(pulse.critical_count)} />
-      <Stat label="丢弃(最旧)" value={String(pulse.dropped_oldest)} />
-      <Stat label="累计发布" value={String(pulse.events_published)} />
-      <Stat label="速率 (/s)" value={pulse.rate_per_s.toFixed(3)} />
+      <Stat label={tr("近期事件", "Recent events")} value={String(pulse.recent_count)} />
+      <Stat label={tr("严重事件", "Critical events")} value={String(pulse.critical_count)} />
+      <Stat label={tr("丢弃(最旧)", "Dropped (oldest)")} value={String(pulse.dropped_oldest)} />
+      <Stat label={tr("累计发布", "Total published")} value={String(pulse.events_published)} />
+      <Stat label={tr("速率 (/s)", "Rate (/s)")} value={pulse.rate_per_s.toFixed(3)} />
     </div>
   );
 }

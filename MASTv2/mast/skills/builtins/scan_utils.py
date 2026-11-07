@@ -37,6 +37,7 @@ from mast.skills.composite.graph_executor import (
     abort_error_text,
     abort_facts,
 )
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ class GetScanFrame(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取当前扫描框（中心、尺寸、角度）。",
+            description=tr("读取当前扫描框（中心、尺寸、角度）。", "Read the current scan frame (center, size, angle)."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["scan", "frame", "read"],
@@ -124,12 +125,12 @@ class WaitScanComplete(CompositeSkillGraph):
             version="1.2.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="等待当前扫描结束，或等到超时。",
+            description=tr("等待当前扫描结束，或等到超时。", "Wait for the current scan to finish, or until timeout."),
             parameters=[
                 ParameterSpec(
                     name="timeout_ms",
                     type="int",
-                    description="超时时长，单位毫秒（-1 = 无限等待）",
+                    description=tr("超时时长，单位毫秒（-1 = 无限等待）", "Timeout in milliseconds (-1 = wait forever)"),
                     unit="ms",
                     required=False,
                     default=-1,
@@ -666,9 +667,11 @@ class WaitScanComplete(CompositeSkillGraph):
         # of them gaining a better error message from it.
         #
         # The error text used to be the literal "aborted by user" for EVERY
-        # early stop — including a CRITICAL tip-quality halt that no one had
-        # actually triggered. Blaming the wrong cause sent people chasing an
-        # "abort latch" that did not exist. abort_error_text() reports the
+        # early stop — including a CRITICAL tip-quality halt. The operator
+        # would be told that they had aborted a scan they never touched, and
+        # the agent, reading the same string, could spend the run trying to get
+        # the operator to "release the abort latch" that does not exist.
+        # abort_error_text() reports the
         # cause the executor already recorded.
         if aborted:
             return SkillResult(

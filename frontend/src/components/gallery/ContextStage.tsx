@@ -1,11 +1,15 @@
-// 谱 ↔ 前后帧对照（旧版兼容格式 context.js 的 panelHtml / ctxStage / paintSide）。
+// Spectrum <-> neighbouring-frame comparison.
 //
-// 打开一条谱（或网格谱）时，大图区依次是：谱 | 前一张帧 | 后一张帧。前一张 = 谱开始
-// 之前最后保存的帧；后一张 = 谱结束之后才开始扫描的第一张（跨着谱的帧、重复保存的帧
-// 跳过）。帧上画出谱的位置（网格画范围），视野外改黄色虚线。◀ 更早 / 更晚 ▶ 换帧，
-// 「⌖ 系于此帧」把位置记到那张帧上（大图里的 A / D 键同样生效）。
+// When a spectrum (or grid spectrum) is opened, the lightbox shows: spectrum | previous frame |
+// next frame. Previous = the last frame saved before the spectrum started; next = the first
+// frame whose scan began after the spectrum ended (frames spanning the spectrum and duplicate
+// saves are skipped). The spectrum position is drawn on the frame (a grid draws its extent);
+// positions outside the field of view are drawn as yellow dashes. "Earlier / Later" switch
+// frames; "Anchor to this frame" records the position against that frame (the A / D keys in
+// the lightbox do the same).
 //
-// 两侧当前摆的是哪张帧由 Lightbox 持有（键盘要用），这里只渲染。
+// Which frame each side currently shows is owned by Lightbox (the keyboard needs it); this
+// file only renders.
 
 import { Link } from "react-router-dom";
 import clsx from "clsx";
@@ -16,10 +20,11 @@ import { viewSearch } from "@/lib/gallery/route";
 import { SpectrumChart } from "@/components/records/SpectrumChart";
 import { FrameWithMarks } from "./FrameWithMarks";
 import { DARK_BTN, Kbd } from "./bits";
+import { tr } from "@/lib/i18n";
 
 export type Side = "prev" | "next";
 
-/** 一侧的帧面板。系列页（亮底）与大图（暗底）共用。 */
+/** One side's frame panel. Shared by the series page (light background) and the lightbox (dark). */
 export function FramePanel({
   side,
   frame,
@@ -42,22 +47,22 @@ export function FramePanel({
   pts: UV[];
   poly: UV[] | null;
   anchoredId: string | null | undefined;
-  /** 脚注里「帧内位置」那一截（单条谱给坐标，系列给「n/N 条在视野内」）。 */
+  /** The "position in frame" part of the footnote (a single spectrum gives coordinates, a series gives "n/N in view"). */
   posText: (frame: GalleryItem) => React.ReactNode;
   onStep: (side: Side, step: number) => void;
   onAnchor: ((side: Side) => void) | null;
   dark?: boolean;
 }) {
-  const lab = side === "prev" ? "前一张帧" : "后一张帧";
+  const lab = side === "prev" ? tr("前一张帧", "Previous frame") : tr("后一张帧", "Next frame");
   const btn = dark ? DARK_BTN : "rounded-[3px] border border-mast-border bg-mast-panel px-[7px] py-px text-[13px] hover:border-mast-accent";
   const stepButtons = (anchor: React.ReactNode) => (
     <div className="flex flex-wrap gap-1">
       <button type="button" className={btn} onClick={() => onStep(side, -1)}>
-        ◀ 更早
+        {tr("◀ 更早", "◀ Earlier")}
       </button>
       {anchor}
       <button type="button" className={btn} onClick={() => onStep(side, 1)}>
-        更晚 ▶
+        {tr("更晚 ▶", "Later ▶")}
       </button>
     </div>
   );
@@ -69,7 +74,7 @@ export function FramePanel({
           <b className={dark ? "text-white" : "text-mast-text"}>{lab}</b>
         </div>
         <div className={clsx("py-10 text-center", dark ? "text-[#9aa4af]" : "text-mast-muted")}>
-          {side === "prev" ? "之前" : "之后"}没有帧
+          {side === "prev" ? tr("之前没有帧", "No earlier frame") : tr("之后没有帧", "No later frame")}
         </div>
         {stepButtons(null)}
       </div>
@@ -93,8 +98,8 @@ export function FramePanel({
       </div>
       <FrameWithMarks key={frame.id} frame={frame} pts={pts} poly={poly} anchored={anchored} />
       <div className={clsx("font-mono text-[11.5px]", dark ? "text-[#9aa4af]" : "text-mast-muted")}>
-        扫描 {fmtTs(fStart(frame))}–{fmtTs(frame.mt)} · {nm(frame.w)} nm · {fmtB(frame.b)} ·{" "}
-        {Math.round(frame.sp || 0)} pA{frame.ang ? ` · 转角 ${frame.ang}°` : ""}
+        {tr("扫描", "Scan")} {fmtTs(fStart(frame))}–{fmtTs(frame.mt)} · {nm(frame.w)} nm · {fmtB(frame.b)} ·{" "}
+        {Math.round(frame.sp || 0)} pA{frame.ang ? tr(` · 转角 ${frame.ang}°`, ` · angle ${frame.ang}°`) : ""}
         {posText(frame)}
       </div>
       {stepButtons(
@@ -105,10 +110,10 @@ export function FramePanel({
             onClick={() => onAnchor(side)}
           >
             {anchored ? (
-              "✓ 已系于此帧（再点取消）"
+              tr("✓ 已系于此帧（再点取消）", "✓ Anchored to this frame (click to undo)")
             ) : (
               <>
-                ⌖ 系于此帧 <Kbd dark={dark}>{side === "prev" ? "A" : "D"}</Kbd>
+                {tr("⌖ 系于此帧", "⌖ Anchor to this frame")} <Kbd dark={dark}>{side === "prev" ? "A" : "D"}</Kbd>
               </>
             )}
           </button>
@@ -118,7 +123,7 @@ export function FramePanel({
   );
 }
 
-/** 大图里的对照区：谱 | 前一张 | 后一张。 */
+/** The comparison area in the lightbox: spectrum | previous | next. */
 export function ContextStage({
   it,
   frames,
@@ -132,7 +137,7 @@ export function ContextStage({
   frames: readonly GalleryItem[];
   sides: { prev: number; next: number };
   anchoredId: string | null | undefined;
-  /** 谱栏改用交互曲线（MAST 现有的 SpectrumChart）。 */
+  /** Use the interactive curve (MAST's existing SpectrumChart) in the spectrum column. */
   interactive: boolean;
   onStep: (side: Side, step: number) => void;
   onAnchor: (side: Side) => void;
@@ -148,7 +153,7 @@ export function ContextStage({
         frame={f}
         t0={t0}
         t1={t1}
-        noun="谱"
+        noun={tr("谱", "spectrum")}
         pts={geom.pts}
         poly={geom.poly}
         anchoredId={anchoredId}
@@ -160,8 +165,8 @@ export function ContextStage({
           if (!p) return null;
           return (
             <>
-              {` · 帧内 (${p.u.toFixed(2)}, ${p.v.toFixed(2)})`}
-              {!inside(p) && <span className="font-semibold text-[#fbbf24]"> {it.k === "g" ? "网格中心" : "谱位置"}在视野外</span>}
+              {tr(` · 帧内 (${p.u.toFixed(2)}, ${p.v.toFixed(2)})`, ` · in frame (${p.u.toFixed(2)}, ${p.v.toFixed(2)})`)}
+              {!inside(p) && <span className="font-semibold text-[#fbbf24]"> {it.k === "g" ? tr("网格中心在视野外", "grid center outside field of view") : tr("谱位置在视野外", "spectrum position outside field of view")}</span>}
             </>
           );
         }}
@@ -173,7 +178,7 @@ export function ContextStage({
     <div className="grid w-full grid-cols-3 items-start gap-3 self-start overflow-auto max-[760px]:grid-cols-1">
       <div className="flex min-w-0 flex-col gap-[5px] text-[12.5px] text-[#dde3ea]">
         <div>
-          <b className="text-white">{it.k === "g" ? "网格谱" : "谱"}</b> {num(it)} · {fmtTs(t0)}–{fmtTs(t1)}
+          <b className="text-white">{it.k === "g" ? tr("网格谱", "Grid spectrum") : tr("谱", "Spectrum")}</b> {num(it)} · {fmtTs(t0)}–{fmtTs(t1)}
         </div>
         {interactive && it.k === "s" ? (
           <div className="rounded bg-mast-panel p-2 text-mast-text">

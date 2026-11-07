@@ -49,7 +49,7 @@ class AgentRequest(BaseModel):
     created_at: Optional[str] = None
     resolved_at: Optional[str] = None
     note: Optional[str] = None
-    # The operator's answer to "where is the file?" — a field, not prose .
+    # The operator's answer to "where is the file?" — a field, not prose.
     # Surfaced back on the row so the operator can see exactly what the agent will
     # read via check_my_requests.
     path: Optional[str] = None

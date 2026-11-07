@@ -1,0 +1,21 @@
+{
+ "satellite_id": "sim1",
+ "hub": {
+  "url": "ws://127.0.0.1:7862/ws/satellite/v1",
+  "spki_sha256": "",
+  "token_file": "%TEMP%\\MAST-Satellite-sim\\token.dpapi",
+  "backoff_max_s": 5
+ },
+ "state_dir": "%TEMP%\\MAST-Satellite-sim",
+ "upload": {"max_bytes_per_s": 1048576, "chunk_bytes": 262144},
+ "log": {"level": "info"},
+ "devices": [
+  {"id": "ccd", "driver": "lightfield", "sim": true, "data_dir": "%TEMP%\\MAST-Satellite-sim\\Data", "readout_ms": 22.4},
+  {"id": "pol", "driver": "kinesis_kdc101", "sim": true, "min_deg": -360, "max_deg": 720},
+  {"id": "xyz", "driver": "motion_manipulator", "sim": true, "limits_mm": {"x": [-2, 13.3], "y": [0, 5], "z": [0, 9.6]}, "max_step_mm": 0.5},
+  {"id": "pico", "driver": "picomotor8742", "sim": true, "max_steps_per_cmd": 2000},
+  {"id": "aotf", "driver": "ds1", "sim": true},
+  {"id": "pmt", "driver": "spectrasense", "sim": true, "max_hv": 1000},
+  {"id": "spe", "driver": "spe_watcher", "root": "%TEMP%\\MAST-Satellite-sim\\Data", "backfill_hours": 24}
+ ]
+}

@@ -34,6 +34,8 @@ import threading
 import time
 from typing import Callable
 
+from mast.i18n import tr
+
 # Defaults (module constants so the whole system agrees; overridable per-instance
 # for tests). Kept conservative on the Nanonis-port-fragility side: a short
 # threshold trips fast, and the cooldown is long enough that we are not
@@ -175,10 +177,15 @@ class CommsCircuitBreaker:
 # Operator-facing message returned in a short-circuited call's record.error. The
 # agent reads this on the tool path — it must say plainly "stop retrying, hand
 # off", because the whole point is to end the one-tool-at-a-time march.
-COMMS_DOWN_MESSAGE = (
+COMMS_DOWN_MESSAGE = tr(
     "comms_circuit_open: Nanonis TCP 通信连续超时(≥{n} 次)已熔断,暂停发命令 "
     "~{cd:.0f}s 以免反复重连撞坏脆弱的 Nanonis 端口。通信已判定中断——请勿逐个工具"
-    "重试,应立即停止硬件操作、向用户/上层报告并 handoff,等待连接恢复后再继续。"
+    "重试,应立即停止硬件操作、向用户/上层报告并 handoff,等待连接恢复后再继续。",
+    "comms_circuit_open: Nanonis TCP communication timed out repeatedly (>= {n} times) and the "
+    "circuit breaker has opened; commands are paused for ~{cd:.0f}s so that repeated reconnects "
+    "do not damage the fragile Nanonis port. Communication is judged down -- do not retry tool by "
+    "tool; stop hardware operations immediately, report to the user / upstream and hand off, and "
+    "continue only after the connection recovers.",
 )
 
 

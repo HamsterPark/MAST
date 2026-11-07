@@ -26,6 +26,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 # Nanonis marker colour is a packed integer. These are the useful ones by name so
 # the model does not have to guess a magic number.
@@ -67,48 +68,53 @@ class DrawScanMarker(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "在 Nanonis 扫描帧上画一个**点**或一条**线**标记。用它记录你**在哪里**做过什么 —— 标出每一个 STS 位置、"
+                tr("在 Nanonis 扫描帧上画一个**点**或一条**线**标记。用它记录你**在哪里**做过什么 —— 标出每一个 STS 位置、"
                 "你选中的平坦区域、你发现的一个缺陷、你取剖面所沿的那条线。坐标是扫描器坐标系下的米（和 MoveToXY 及各谱学技能用的是同一套）"
                 "，所以你可以用测量时的精确坐标去标一条谱。\n"
                 "\n"
-                "画标记只碰显示 —— 它什么都不移动。"
+                "画标记只碰显示 —— 它什么都不移动。", "Draw a **point** or **line** marker on the Nanonis scan frame. Use it to record **where** you did what -- mark every STS position, "
+"the flat region you picked, a defect you found, the line you took a profile along. Coordinates are in metres in the scanner frame (the same one MoveToXY and the spectroscopy skills use)"
+", so you can mark a spectrum with the exact coordinates it was measured at.\n"
+"\n"
+"Drawing a marker touches only the display -- it moves nothing.")
             ),
             parameters=[
                 ParameterSpec(
                     name="kind", type="str",
-                    description="'point' 或 'line'",
+                    description=tr("'point' 或 'line'", "'point' or 'line'"),
                     required=True, allowed_values=["point", "line"],
                 ),
                 ParameterSpec(
                     name="x_m", type="float",
-                    description="点的 X，或线的**起点** X（m，扫描器坐标系）",
+                    description=tr("点的 X，或线的**起点** X（m，扫描器坐标系）", "X of the point, or X of the line **start** (m, scanner frame)"),
                     unit="m", required=True,
                 ),
                 ParameterSpec(
                     name="y_m", type="float",
-                    description="点的 Y，或线的**起点** Y（m，扫描器坐标系）",
+                    description=tr("点的 Y，或线的**起点** Y（m，扫描器坐标系）", "Y of the point, or Y of the line **start** (m, scanner frame)"),
                     unit="m", required=True,
                 ),
                 ParameterSpec(
                     name="x2_m", type="float",
-                    description="线的**终点** X（m）。kind='line' 时必填。",
+                    description=tr("线的**终点** X（m）。kind='line' 时必填。", "X of the line **end** (m). Required when kind='line'."),
                     unit="m", required=False, default=None,
                 ),
                 ParameterSpec(
                     name="y2_m", type="float",
-                    description="线的**终点** Y（m）。kind='line' 时必填。",
+                    description=tr("线的**终点** Y（m）。kind='line' 时必填。", "Y of the line **end** (m). Required when kind='line'."),
                     unit="m", required=False, default=None,
                 ),
                 ParameterSpec(
                     name="text", type="str",
-                    description="显示在标记旁边的标签（仅点标记有）",
+                    description=tr("显示在标记旁边的标签（仅点标记有）", "Label shown next to the marker (point markers only)"),
                     required=False, default="",
                 ),
                 ParameterSpec(
                     name="color", type="str",
                     description=(
-                        "red/green/blue/yellow/cyan/magenta/white/black/orange，"
-                        "或 0xRRGGBB"
+                        tr("red/green/blue/yellow/cyan/magenta/white/black/orange，"
+                        "或 0xRRGGBB", "red/green/blue/yellow/cyan/magenta/white/black/orange, "
+"or 0xRRGGBB")
                     ),
                     required=False, default="red",
                 ),
@@ -127,7 +133,7 @@ class DrawScanMarker(BaseSkill):
             x2, y2 = params.get("x2_m"), params.get("y2_m")
             if x2 is None or y2 is None:
                 return _fail("DrawScanMarker",
-                             "kind='line' 需要 x2_m 与 y2_m（线的终点）", [])
+                             tr("kind='line' 需要 x2_m 与 y2_m（线的终点）", "kind='line' needs x2_m and y2_m (the end of the line)"), [])
             rec = context.safe_call("Marks_LineDraw", x, y,
                                     float(x2), float(y2), col)
             if rec.error:
@@ -139,7 +145,7 @@ class DrawScanMarker(BaseSkill):
             )
 
         if kind != "point":
-            return _fail("DrawScanMarker", f"kind 必须是 'point' 或 'line'，收到 {kind!r}", [])
+            return _fail("DrawScanMarker", tr(f"kind 必须是 'point' 或 'line'，收到 {kind!r}", f"kind must be 'point' or 'line', got {kind!r}"), [])
         rec = context.safe_call("Marks_PointDraw", x, y,
                                 str(params.get("text", "") or ""), col)
         if rec.error:
@@ -162,7 +168,7 @@ class ListScanMarkers(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "列出 Nanonis 扫描帧上的点标记与线标记及其坐标。挑下一个位置之前，用它回想一下你已经在哪儿测过了。"
+                tr("列出 Nanonis 扫描帧上的点标记与线标记及其坐标。挑下一个位置之前，用它回想一下你已经在哪儿测过了。", "List the point and line markers on the Nanonis scan frame with their coordinates. Before picking the next position, use it to recall where you have already measured.")
             ),
             parameters=[],
             estimated_duration_s=0.3,
@@ -194,22 +200,22 @@ class EraseScanMarkers(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "擦掉一个标记（或者只隐藏、不删除）。index=-1 会擦掉该类型的**全部**标记。擦标记只碰显示。"
+                tr("擦掉一个标记（或者只隐藏、不删除）。index=-1 会擦掉该类型的**全部**标记。擦标记只碰显示。", "Erase a marker (or only hide it, not delete). index=-1 erases **all** markers of that type. Erasing markers touches only the display.")
             ),
             parameters=[
                 ParameterSpec(
                     name="kind", type="str",
-                    description="'point' 或 'line'",
+                    description=tr("'point' 或 'line'", "'point' or 'line'"),
                     required=True, allowed_values=["point", "line"],
                 ),
                 ParameterSpec(
                     name="index", type="int",
-                    description="标记序号；-1 = 该类型的全部",
+                    description=tr("标记序号；-1 = 该类型的全部", "Marker index; -1 = all of that type"),
                     required=True, min_value=-1, max_value=10000,
                 ),
                 ParameterSpec(
                     name="hide_only", type="bool",
-                    description="True = 隐藏但保留；False = 擦掉它",
+                    description=tr("True = 隐藏但保留；False = 擦掉它", "True = hide but keep; False = erase it"),
                     required=False, default=False,
                 ),
             ],
@@ -224,7 +230,7 @@ class EraseScanMarkers(BaseSkill):
         hide = bool(params.get("hide_only", False))
         if kind not in ("point", "line"):
             return _fail("EraseScanMarkers",
-                         f"kind 必须是 'point' 或 'line'，收到 {kind!r}", [])
+                         tr(f"kind 必须是 'point' 或 'line'，收到 {kind!r}", f"kind must be 'point' or 'line', got {kind!r}"), [])
         # Literal verbs — every safety tool MAST has (the post-abort allow-list
         # guard, the API coverage census) reads them back by grepping
         # `safe_call("…")`. A verb behind a variable is invisible to all of them.

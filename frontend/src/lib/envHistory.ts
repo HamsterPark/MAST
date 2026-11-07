@@ -1,5 +1,5 @@
 /**
- * 环境历史 — pure logic behind the 环境历史 page. `node --test`able.
+ * Environment history: pure logic behind the environment-history page. `node --test`able.
  *
  * Everything here is a transformation of what `/api/env-history/*` returns.
  * Nothing here fetches, and nothing here decides *when* to fetch — that lives
@@ -7,10 +7,11 @@
  *
  * The one import is `lib/seriesGaps.ts`, which used to be inlined below. It got
  * pulled out when the monitoring charts turned out to need the same rule and did
- * not have it — two copies of "where does a
- * series stop being continuous" is the shape this repo has already paid for.
+ * not have it (they joined across data gaps with a straight line). Two copies of
+ * "where does a series stop being continuous" is a maintenance trap.
  */
 import { spliceGaps } from "./seriesGaps.ts";
+import { tr } from "./i18n.ts";
 
 /** One aggregated bucket as the series endpoint returns it. */
 export interface EnvPointLike {
@@ -27,26 +28,25 @@ export interface EnvPointLike {
 /**
  * Named time ranges. `s` is seconds back from now; `null` = everything.
  *
- * 48 小时 was missing for no reason at all: the server takes `since` as
- * a bare epoch float with no window constraint whatsoever
- * (`api/routes/env_history.py:184`), and re-aggregates buckets by weight for any
- * span, so this list is a menu of convenient spans and nothing more. The jump it
- * fills was 24 小时 → 7 天, a factor of seven — an overnight-plus-a-day question
- * (did the cryostat hold overnight?) had no button.
+ * The 48-hour entry fills the jump from 24 hours to 7 days, a factor of seven: an
+ * overnight-plus-a-day question (did the cryostat hold overnight?) had no
+ * button. The server takes `since` as a bare epoch float with no window constraint
+ * (`api/routes/env_history.py`) and re-aggregates buckets by weight for any span, so
+ * this list is only a menu of convenient spans.
  *
  * Kept as ONE list rather than a free-form date picker on purpose: the aux and
- * live-current charts already switched windows this way , and a second
- * mechanism for "how far back am I looking" is the thing this repo keeps paying
- * for. Anything not on this menu is what 环境历史 → 全部 plus a drag-zoom is for.
+ * live-current charts already switch windows this way, and a second mechanism for
+ * "how far back am I looking" is a maintenance burden. Anything not on this menu is
+ * what the "All" range plus drag-zoom is for.
  */
 export const RANGES: ReadonlyArray<{ s: number | null; label: string }> = [
-  { s: 3600, label: "1 小时" },
-  { s: 86400, label: "24 小时" },
-  { s: 2 * 86400, label: "48 小时" },
-  { s: 7 * 86400, label: "7 天" },
-  { s: 30 * 86400, label: "30 天" },
-  { s: 365 * 86400, label: "1 年" },
-  { s: null, label: "全部" },
+  { s: 3600, label: tr("1 小时", "1 hour") },
+  { s: 86400, label: tr("24 小时", "24 hours") },
+  { s: 2 * 86400, label: tr("48 小时", "48 hours") },
+  { s: 7 * 86400, label: tr("7 天", "7 days") },
+  { s: 30 * 86400, label: tr("30 天", "30 days") },
+  { s: 365 * 86400, label: tr("1 年", "1 year") },
+  { s: null, label: tr("全部", "All") },
 ];
 
 /** `[since, until]` for a named range. `until` stays undefined so the server
@@ -157,14 +157,12 @@ export function worstOf(points: readonly EnvPointLike[]): string {
  * Badge tone for a bucket status — BY SEVERITY, which is the whole point.
  *
  * The page used to do `worst === "warning" ? "WARN" : "DANGEROUS"`, so
- * `unavailable` — severity 1, the *least* severe non-ok state — was painted in
- * exactly the same red as `alarm`, severity 4. On the rig that is not a corner
- * case: the two Lake Shore channels share one COM13 handle and only ONE of them
- * can hold it at a time — which one changes occasionally (4 handovers in the
- * 29 h to 2026-08-04, the two series exactly anti-phased, a perfect partition
- * of the same 43779 reading slots). So each channel is legitimately
- * `unavailable` for every bucket the other one owned the port. A red alarm
- * badge over that is the page crying wolf (operator ).
+ * `unavailable` (severity 1, the least severe non-ok state) was painted in exactly the
+ * same red as `alarm` (severity 4). That is not a corner case: two
+ * Lake Shore channels can share one COM port handle and only ONE of them can hold it at a
+ * time, with ownership changing occasionally, so the two series are exactly
+ * anti-phased. Each channel is therefore legitimately `unavailable` for every bucket
+ * the other one owned the port, and a red alarm badge over that is a false alarm.
  */
 export function statusTone(status: string): string {
   switch (status) {
@@ -186,15 +184,15 @@ export function statusTone(status: string): string {
 export function statusLabel(status: string): string {
   switch (status) {
     case "alarm":
-      return "报警";
+      return tr("报警", "Alarm");
     case "error":
-      return "读取错误";
+      return tr("读取错误", "Read error");
     case "warning":
-      return "告警";
+      return tr("告警", "Warning");
     case "unavailable":
-      return "部分时段无读数";
+      return tr("部分时段无读数", "No reading for part of the window");
     default:
-      return "正常";
+      return tr("正常", "OK");
   }
 }
 
@@ -212,12 +210,12 @@ export function excludedCount(points: readonly EnvPointLike[]): number {
  * Counted vs excluded readings over a window, plus how many buckets actually
  * have a value to draw.
  *
- * A bare "1521 条读数未计入" reads like data loss. It is only interpretable
+ * A bare "1521 readings excluded" reads like data loss. It is only interpretable
  * next to how many DID count: 1521-of-1800 is a sensor that is barely being
- * read, 1521-of-43779 is a normal duty cycle. `drawable` separates the third
- * case the page could not express at all — buckets exist, so the series is
- * offered in the dropdown, but every one of them is empty, and the chart
- * renders blank with no explanation (operator ).
+ * read, 1521-of-43779 is a normal duty cycle. `drawable` separates a third case
+ * the page could not express: buckets exist, so the series is offered in the
+ * dropdown, but every one of them is empty and the chart renders blank with no
+ * explanation.
  */
 export function coverageOf(points: readonly EnvPointLike[]): {
   counted: number;
@@ -252,16 +250,16 @@ export function fmtTs(epochS: number, withDate = true): string {
   return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${hm}`;
 }
 
-/** Human duration for "covers 3 天 4 小时". */
+/** Human duration, e.g. "3 d 4 h". */
 export function fmtSpan(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return "—";
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
   const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return h > 0 ? `${d} 天 ${h} 小时` : `${d} 天`;
-  if (h > 0) return m > 0 ? `${h} 小时 ${m} 分` : `${h} 小时`;
-  if (m > 0) return `${m} 分`;
-  return `${Math.round(seconds)} 秒`;
+  if (d > 0) return h > 0 ? tr(`${d} 天 ${h} 小时`, `${d} d ${h} h`) : tr(`${d} 天`, `${d} d`);
+  if (h > 0) return m > 0 ? tr(`${h} 小时 ${m} 分`, `${h} h ${m} min`) : tr(`${h} 小时`, `${h} h`);
+  if (m > 0) return tr(`${m} 分`, `${m} min`);
+  return tr(`${Math.round(seconds)} 秒`, `${Math.round(seconds)} s`);
 }
 
 /** Bytes → human. Local copy so this module keeps its zero-import property. */
@@ -279,8 +277,8 @@ export function fmtBytes(n: number | null | undefined): string {
 
 /** Channel label for a spectrum. */
 export function channelLabel(ch: string): string {
-  if (ch === "current") return "电流噪声谱";
-  if (ch === "z") return "Z 噪声谱";
+  if (ch === "current") return tr("电流噪声谱", "Current noise spectrum");
+  if (ch === "z") return tr("Z 噪声谱", "Z noise spectrum");
   return ch || "—";
 }
 
@@ -311,13 +309,13 @@ export function tunnellingLabel(c: SpectrumCtx): { label: string; tone: string }
   // Tone names are the Badge vocabulary (ui.tsx BADGE_TONE) — UPPERCASE, and an
   // unknown key silently falls back to `default`, so a lowercase "warn" here
   // would render as a neutral chip and quietly stop warning.
-  if (q === "no_tunnel") return { label: "未隧穿", tone: "WARN" };
-  if (q === "quiet") return { label: "隧穿中 · 安静", tone: "AUTO" };
-  if (q === "active") return { label: "隧穿中 · 有操作", tone: "INFO" };
+  if (q === "no_tunnel") return { label: tr("未隧穿", "Not tunnelling"), tone: "WARN" };
+  if (q === "quiet") return { label: tr("隧穿中 · 安静", "Tunnelling · quiet"), tone: "AUTO" };
+  if (q === "active") return { label: tr("隧穿中 · 有操作", "Tunnelling · active"), tone: "INFO" };
   if (q === "unknown" || q === "") {
-    if (c.ctx_zctrl_on === true) return { label: "Z 反馈开", tone: "INFO" };
-    if (c.ctx_zctrl_on === false) return { label: "未隧穿", tone: "WARN" };
-    return { label: "状态未知", tone: "default" };
+    if (c.ctx_zctrl_on === true) return { label: tr("Z 反馈开", "Z feedback on"), tone: "INFO" };
+    if (c.ctx_zctrl_on === false) return { label: tr("未隧穿", "Not tunnelling"), tone: "WARN" };
+    return { label: tr("状态未知", "State unknown"), tone: "default" };
   }
   return { label: q, tone: "default" };
 }
@@ -351,9 +349,14 @@ export function spectrumPickerLabel(
 
 export function ctxStabilityNote(c: SpectrumCtx): string {
   if (c.ctx_stable === false) {
-    return "攒谱期间偏压 / 设定点 / Z 反馈变过——下面的数是窗口起点的值，这条谱是混合的";
+    return tr(
+      "攒谱期间偏压 / 设定点 / Z 反馈变过——下面的数是窗口起点的值，这条谱是混合的",
+      "Bias / setpoint / Z feedback changed while this spectrum was accumulated. The values below are from the start of the window, so the spectrum is a mixture.",
+    );
   }
-  if (c.ctx_stable == null) return "这条谱记录时还没有跟踪工作点是否变化";
+  if (c.ctx_stable == null) {
+    return tr("这条谱记录时还没有跟踪工作点是否变化", "Working-point changes were not tracked when this spectrum was recorded");
+  }
   return "";
 }
 

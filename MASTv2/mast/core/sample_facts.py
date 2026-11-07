@@ -41,6 +41,8 @@ import logging
 import math
 from dataclasses import dataclass
 
+from mast.i18n import tr
+
 logger = logging.getLogger(__name__)
 
 #: fcc(111) 面上，扫描看到的原子行间距 = 最近邻距离 × √3/2。
@@ -162,8 +164,12 @@ def substrate_from_material(material: str, *, source: str = "explicit",
         return SubstrateFacts(
             available=False, source=source,
             sample_id=sample.get("sample_id"), sample_name=sample.get("name"),
-            reason=(f"认不出衬底 {material!r}（知识库里没有对应的洁净金属面）。"
-                    f"表面态与晶格常数都取不到，判据无从建立。"))
+            reason=tr(f"认不出衬底 {material!r}（知识库里没有对应的洁净金属面）。"
+                      f"表面态与晶格常数都取不到，判据无从建立。",
+                      f"Cannot identify the substrate {material!r} (the knowledge base has "
+                      f"no matching clean metal surface). Neither the surface state nor the "
+                      f"lattice constants can be obtained, so the criterion cannot be "
+                      f"built."))
     type_id, name = hit
     try:
         from mast.knowledge.lookups import get_constants
@@ -199,7 +205,9 @@ def substrate_from_material(material: str, *, source: str = "explicit",
         sample_id=sample.get("sample_id"),
         sample_name=sample.get("name"),
         reason=("" if onset is not None else
-                f"{name} 没有肖克利表面态 —— 这个面本来就没有，不是数据缺失。"),
+                tr(f"{name} 没有肖克利表面态 —— 这个面本来就没有，不是数据缺失。",
+                   f"{name} has no Shockley surface state - this surface simply has none; "
+                   f"it is not missing data.")),
     )
 
 
@@ -217,9 +225,13 @@ def resolve_substrate(explicit: str | None = None) -> SubstrateFacts:
     if not sample["available"]:
         return SubstrateFacts(
             available=False, source="unknown",
-            reason=("读不到当前样品记录，不知道台面上是什么衬底。"
-                    "请显式指定衬底（例如 Au(111)），或先用 start_sample 登记样品。"
-                    "注意：读不到 ≠ 可以按 Au(111) 处理。"))
+            reason=tr("读不到当前样品记录，不知道台面上是什么衬底。"
+                      "请显式指定衬底（例如 Au(111)），或先用 start_sample 登记样品。"
+                      "注意：读不到 ≠ 可以按 Au(111) 处理。",
+                      "Cannot read the current sample record, so the substrate on the stage "
+                      "is unknown. Specify the substrate explicitly (e.g. Au(111)), or "
+                      "register the sample with start_sample first. Note: being unable to "
+                      "read it does not mean you may treat it as Au(111)."))
 
     for key in ("sample_subtype", "sample_type"):
         val = sample.get(key)
@@ -233,8 +245,12 @@ def resolve_substrate(explicit: str | None = None) -> SubstrateFacts:
     return SubstrateFacts(
         available=False, source="unknown",
         sample_id=sample.get("sample_id"), sample_name=sample.get("name"),
-        reason=(f"当前样品登记为 {sample.get('sample_subtype') or sample.get('sample_type')!r}，"
-                f"知识库里没有对应的洁净金属面。请显式指定衬底。"))
+        reason=tr(f"当前样品登记为 {sample.get('sample_subtype') or sample.get('sample_type')!r}，"
+                  f"知识库里没有对应的洁净金属面。请显式指定衬底。",
+                  f"The current sample is registered as "
+                  f"{sample.get('sample_subtype') or sample.get('sample_type')!r}, and the "
+                  f"knowledge base has no matching clean metal surface. Specify the "
+                  f"substrate explicitly."))
 
 
 __all__ = ["SubstrateFacts", "current_sample_facts", "resolve_substrate",

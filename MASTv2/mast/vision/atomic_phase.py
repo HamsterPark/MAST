@@ -566,10 +566,14 @@ def assess_atomic_phase(
         # 不能在剔除全部脊峰后跳过判据，让只有方向集中而无局部峰的纹理得到通过。
         if (not _lat.ok) and _lat.reason == "too_few_peaks" and _lat.n_ridge >= 2:
             reasons.append("peaks_are_ridges")
-
-        # 半径散布必须使用所有局部极大，包括剔除的 ridge_peaks。
-        # 剔脊用于避免污染定标；结构判定仍需保留这些证据，否则一个过滤步骤可能
-        # 删除另一道判据的全部输入。
+        # ⚠️ **半径散布必须在「全部局部极大」上算,不能只看幸存的那些。**
+        #
+        # 剔脊是为了**定标**(混进去会污染 period_spread);而「这是不是一个晶格」
+        # 要看全部极大 —— 条纹的极大散布在各个半径上,那正是它的破绽。
+        #
+        # 脊判据放宽之后(见 ridge_peaks 的自述),对角条纹的 12 个极大可能被
+        # 剔光只剩一对 ±k,于是这条判据**拿不到输入**,条纹会被误放行。
+        # **一道过滤删掉了另一道判据赖以工作的证据**:两道各自都对,叠起来是错的。
         _all = tuple(_lat.peaks) + tuple(_lat.ridge_peaks)
         if len(_all) >= 3:
             _r = np.array([float(np.hypot(pk.kx, pk.ky)) for pk in _all])

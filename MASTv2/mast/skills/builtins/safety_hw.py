@@ -14,6 +14,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 
 
 class EnableSafeTip(BaseSkill):
@@ -25,19 +26,19 @@ class EnableSafeTip(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
-            description="启用或禁用 Nanonis 硬件 SafeTip 保护。",
+            description=tr("启用或禁用 Nanonis 硬件 SafeTip 保护。", "Enable or disable the Nanonis hardware SafeTip protection."),
             parameters=[
                 ParameterSpec(
                     name="enable",
                     type="bool",
                     description=(
-                        "True 为启用，False 为禁用。默认 True：不带参数、走默认的"
+                        tr("True 为启用，False 为禁用。默认 True：不带参数、走默认的"
                         "调用会**启用** SafeTip（硬件针尖保护应当保持开启，除非"
-                        "用户显式传 enable=False）。"
+                        "用户显式传 enable=False）。", "True enables, False disables. Default True: a call with no arguments **enables** SafeTip (hardware tip protection should stay on unless the user explicitly passes enable=False).")
                     ),
                     # Default ON (safety fix): a bare/defaulted call enables
                     # SafeTip. Disabling requires an explicit enable=False (the
-                    # disable path is intentionally NOT gated — see audit #2).
+                    # disable path is intentionally NOT gated).
                     required=False,
                     default=True,
                 ),
@@ -77,7 +78,7 @@ class GetSafeTipStatus(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取当前 SafeTip 保护状态。",
+            description=tr("读取当前 SafeTip 保护状态。", "Read the current SafeTip protection state."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["safety", "hardware", "read"],
@@ -118,7 +119,7 @@ class GetSafeTipProps(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取 SafeTip 配置：自动恢复、自动暂停扫描、阈值。",
+            description=tr("读取 SafeTip 配置：自动恢复、自动暂停扫描、阈值。", "Read the SafeTip configuration: auto recovery, auto pause scan, thresholds."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["safety", "hardware", "props", "read"],
@@ -167,7 +168,7 @@ class GetSafeTipSignal(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取当前 SafeTip 信号值。",
+            description=tr("读取当前 SafeTip 信号值。", "Read the current SafeTip signal value."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["safety", "hardware", "signal", "read"],

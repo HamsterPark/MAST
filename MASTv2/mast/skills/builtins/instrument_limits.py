@@ -48,6 +48,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,7 @@ class SetZLimits(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "设定 Z 控制器的位置上限与下限，单位**米**。\n"
+                tr("设定 Z 控制器的位置上限与下限，单位**米**。\n"
                 "\n"
                 "这两个界限规定了 Z 压电伸出与回缩都不得越过的边界 —— 是压电与针尖之间最后一道软件屏障。"
                 "把它们放宽是合法的（更高的样品、更长的针尖确实需要更多行程），并且会连同改动前后的取值一起**记入**诊断账本。"
@@ -105,19 +106,29 @@ class SetZLimits(BaseSkill):
                 "。请用 enable=true，或去核对 GetZControllerState.z_limits_enabled。"
                 "\n"
                 "\n"
-                "取值单位是**米**：500 nm 的限值要写成 500n，不是 500。"
+                "取值单位是**米**：500 nm 的限值要写成 500n，不是 500。", "Set the upper and lower position limits of the Z controller, in **metres**.\n"
+"\n"
+"These two bounds define the boundary that Z piezo extension and retraction must not cross -- the last software barrier between the piezo and the tip. "
+"Loosening them is legitimate (a taller sample or a longer tip really does need more travel), and it is **recorded** in the diagnostics ledger together with the values before and after the change."
+"\n"
+"\n"
+"**When the limits are not enabled, they do nothing** (Nanonis original: 'When the Z position limits are not enabled, this function has no effect')"
+". Use enable=true, or check GetZControllerState.z_limits_enabled."
+"\n"
+"\n"
+"Values are in **metres**: a 500 nm limit is written as 500n, not 500.")
             ),
             parameters=[
                 ParameterSpec(name="z_high_limit_m", type="float",
-                              description="Z 的上界，单位**米**（500 nm = 500n）",
+                              description=tr("Z 的上界，单位**米**（500 nm = 500n）", "Upper bound of Z, in **metres** (500 nm = 500n)"),
                               unit="m", required=True,
                               min_value=-1e-4, max_value=1e-4),
                 ParameterSpec(name="z_low_limit_m", type="float",
-                              description="Z 的下界，单位**米**",
+                              description=tr("Z 的下界，单位**米**", "Lower bound of Z, in **metres**"),
                               unit="m", required=True,
                               min_value=-1e-4, max_value=1e-4),
                 ParameterSpec(name="enable", type="bool",
-                              description="同时**启用**这两个限值（不启用它们就没有任何作用）",
+                              description=tr("同时**启用**这两个限值（不启用它们就没有任何作用）", "Also **enable** both limits (without enabling them they have no effect)"),
                               required=False, default=True),
             ],
             estimated_duration_s=1.5,
@@ -131,8 +142,9 @@ class SetZLimits(BaseSkill):
         lo = float(params["z_low_limit_m"])
         if lo >= hi:
             return _fail(name,
-                         f"z_low_limit_m ({lo:.3e} m) 必须小于 z_high_limit_m ({hi:.3e} m)"
-                         "——限值反了", [])
+                         tr(f"z_low_limit_m ({lo:.3e} m) 必须小于 z_high_limit_m ({hi:.3e} m)"
+                         "——限值反了", f"z_low_limit_m ({lo:.3e} m) must be less than z_high_limit_m ({hi:.3e} m)"
+" -- the limits are reversed"), [])
         calls: list = []
 
         # Read the CURRENT limits first. A limits change we cannot describe is a
@@ -160,8 +172,9 @@ class SetZLimits(BaseSkill):
             calls.append(rec_en)
             if rec_en.error:
                 return _fail(name,
-                             f"限值已写入但**未能启用**（ZCtrl_LimitsEnabledSet 失败："
-                             f"{rec_en.error}）——未启用的限值不起任何作用", calls)
+                             tr(f"限值已写入但**未能启用**（ZCtrl_LimitsEnabledSet 失败："
+                             f"{rec_en.error}）——未启用的限值不起任何作用", f"The limits were written but **could not be enabled** (ZCtrl_LimitsEnabledSet failed: "
+f"{rec_en.error}) -- limits that are not enabled have no effect"), calls)
 
         # enable=False is a legal request, and it used to produce a cheerful
         # success message for a write that does NOTHING. The docstring above
@@ -195,16 +208,18 @@ class SetZLimits(BaseSkill):
         if actual is not None and (abs(actual[0] - hi) > 1e-12 or abs(actual[1] - lo) > 1e-12):
             return SkillResult(
                 skill_name=name, success=False,
-                error=(f"Z 限值未按要求生效：要求 [{lo:.3e}, {hi:.3e}] m，"
-                       f"读回 [{actual[1]:.3e}, {actual[0]:.3e}] m"),
+                error=(tr(f"Z 限值未按要求生效：要求 [{lo:.3e}, {hi:.3e}] m，"
+                       f"读回 [{actual[1]:.3e}, {actual[0]:.3e}] m", f"The Z limits did not take effect as requested: requested [{lo:.3e}, {hi:.3e}] m, "
+f"read back [{actual[1]:.3e}, {actual[0]:.3e}] m")),
                 data={"requested": [lo, hi], "actual": [actual[1], actual[0]]},
                 nanonis_calls=calls)
 
         if enabled_now is False:
-            inert = ("；⚠ **限值当前未启用（z_limits_enabled = 0），这对数字不起任何"
-                     "作用** —— 要让它生效请以 enable=true 重新调用")
+            inert = (tr("；⚠ **限值当前未启用（z_limits_enabled = 0），这对数字不起任何"
+                     "作用** —— 要让它生效请以 enable=true 重新调用", "; ⚠ **the limits are currently not enabled (z_limits_enabled = 0), so this pair of numbers does nothing "
+"at all** -- to make them take effect, call again with enable=true"))
         elif enabled_now is None and not want_enable:
-            inert = "；⚠ 未能读回启用状态，无法确认这对限值是否真的在生效"
+            inert = tr("；⚠ 未能读回启用状态，无法确认这对限值是否真的在生效", "; ⚠ The enabled state could not be read back, so it cannot be confirmed that this pair of limits is actually in effect")
         else:
             inert = ""
 
@@ -214,9 +229,9 @@ class SetZLimits(BaseSkill):
                   "before": list(before) if before else None,
                   "widened": widened, "verified": actual is not None,
                   "enabled": enabled_now},
-            summary=(f"Z 限值 = [{lo:.3e}, {hi:.3e}] m"
-                     + ("（**已放宽**，已记入诊断台账）" if widened else "")
-                     + ("" if actual is not None else "（未能读回确认）")
+            summary=(tr(f"Z 限值 = [{lo:.3e}, {hi:.3e}] m", f"Z limits = [{lo:.3e}, {hi:.3e}] m")
+                     + (tr("（**已放宽**，已记入诊断台账）", "(**loosened**, recorded in the diagnostics ledger)") if widened else "")
+                     + ("" if actual is not None else tr("（未能读回确认）", "(could not be read back to confirm)"))
                      + inert),
         )
 
@@ -231,15 +246,19 @@ class SetWithdrawRate(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "设定 Z 的退针速率，单位米每秒 —— 也就是 Withdraw（或紧急退针、或 SafeTip）"
+                tr("设定 Z 的退针速率，单位米每秒 —— 也就是 Withdraw（或紧急退针、或 SafeTip）"
                 "触发时针尖回缩得有多快。\n"
                 "\n"
                 "这在两个方向上都是一个安全参数。太**慢**，紧急退针来不及把针尖撤离；太**快**，退针本身就可能把针尖抖松、"
-                "或者把扫描器激起振铃。Nanonis 的默认值是个合理的起点；要改就得有理由。"
+                "或者把扫描器激起振铃。Nanonis 的默认值是个合理的起点；要改就得有理由。", "Set the Z withdraw rate, in metres per second -- that is, how fast the tip retracts when Withdraw (or an emergency withdraw, or SafeTip) "
+"fires.\n"
+"\n"
+"This is a safety parameter in both directions. Too **slow**, and an emergency withdraw cannot get the tip away in time; too **fast**, and the withdraw itself can shake the tip loose "
+"or ring the scanner. The Nanonis default is a reasonable starting point; change it only with a reason.")
             ),
             parameters=[
                 ParameterSpec(name="rate_m_per_s", type="float",
-                              description="退针速率，单位 m/s",
+                              description=tr("退针速率，单位 m/s", "Withdraw rate, in m/s"),
                               unit="m/s", required=True,
                               min_value=1e-9, max_value=1e-2),
             ],
@@ -275,7 +294,7 @@ class SetWithdrawRate(BaseSkill):
             data={"rate_m_per_s": actual[0] if actual else rate,
                   "before": before[0] if before else None,
                   "verified": actual is not None},
-            summary=f"退针速率 = {rate:.3e} m/s",
+            summary=tr(f"退针速率 = {rate:.3e} m/s", f"Withdraw rate = {rate:.3e} m/s"),
         )
 
 
@@ -289,14 +308,21 @@ class HomeZController(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "把 Z 移到它配置好的 **HOME** 位置。\n"
+                tr("把 Z 移到它配置好的 **HOME** 位置。\n"
                 "\n"
                 "Home 是用户设定的一个安全／中性的停放点 —— 调用它之前先用 GetZControllerState.home 读一下，"
                 "因为这个位置不是 MAST 选的，而一个为另一块样品配的 home 就只是个普通的 Z 位置而已。"
                 "\n"
                 "\n"
                 "这会**移动**压电。若你想让针尖确定无疑地离开表面，请用 Withdraw，不要用 Home —— 退针去的是安全的极端位置，"
-                "而 home 去的是 home 碰巧在的地方。"
+                "而 home 去的是 home 碰巧在的地方。", "Move Z to its configured **HOME** position.\n"
+"\n"
+"Home is a safe / neutral parking point set by the user -- read it with GetZControllerState.home before calling this, "
+"because this position was not chosen by MAST, and a home configured for another sample is just an ordinary Z position."
+"\n"
+"\n"
+"This **moves** the piezo. If you want the tip to leave the surface for certain, use Withdraw, not Home -- a withdraw goes to the safe extreme position, "
+"while home goes to wherever home happens to be.")
             ),
             parameters=[],
             estimated_duration_s=3.0,
@@ -319,7 +345,7 @@ class HomeZController(BaseSkill):
             skill_name="HomeZController", success=True, nanonis_calls=calls,
             data={"home_props": None if home.error else _rv(home),
                   "z_m": z[0] if z else None},
-            summary=(f"Z 已回到 home（当前 Z = {z[0]:.3e} m）" if z else "Z 已回到 home"),
+            summary=(tr(f"Z 已回到 home（当前 Z = {z[0]:.3e} m）", f"Z is back at home (current Z = {z[0]:.3e} m)") if z else tr("Z 已回到 home", "Z is back at home")),
         )
 
 
@@ -333,14 +359,17 @@ class SetActiveZController(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "选定哪一个 Z 控制器处于**激活**状态。只有在装了不止一个的机器上才有意义 —— 先调 GetZControllerState / ListZControllers。"
+                tr("选定哪一个 Z 控制器处于**激活**状态。只有在装了不止一个的机器上才有意义 —— 先调 GetZControllerState / ListZControllers。"
                 "\n"
                 "\n"
-                "切换激活的控制器，会改变其余每一个 Z 技能所对话的是哪一个环。弄错了，就意味着你在给一个并没有托着针尖的环设设定值。"
+                "切换激活的控制器，会改变其余每一个 Z 技能所对话的是哪一个环。弄错了，就意味着你在给一个并没有托着针尖的环设设定值。", "Select which Z controller is **active**. Only meaningful on a machine with more than one -- call GetZControllerState / ListZControllers first."
+"\n"
+"\n"
+"Switching the active controller changes which loop every other Z skill talks to. Getting it wrong means setting a setpoint on a loop that is not holding the tip.")
             ),
             parameters=[
                 ParameterSpec(name="controller_index", type="int",
-                              description="Z 控制器序号（取自控制器列表）",
+                              description=tr("Z 控制器序号（取自控制器列表）", "Z controller index (from the controller list)"),
                               required=True, min_value=0, max_value=15),
             ],
             estimated_duration_s=1.0,
@@ -357,7 +386,7 @@ class SetActiveZController(BaseSkill):
                     reason="活动 Z 控制器被切换", controller_index=idx)
         return SkillResult(skill_name="SetActiveZController", success=True,
                            nanonis_calls=[rec], data={"controller_index": idx},
-                           summary=f"活动 Z 控制器 = {idx}")
+                           summary=tr(f"活动 Z 控制器 = {idx}", f"Active Z controller = {idx}"))
 
 
 class SetPiezoLimits(BaseSkill):
@@ -370,29 +399,35 @@ class SetPiezoLimits(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "设定压电的 X/Y/Z **电压**限值（并启用它们）。\n"
+                tr("设定压电的 X/Y/Z **电压**限值（并启用它们）。\n"
                 "\n"
                 "这些限值以伏特为单位框住扫描器能被驱动到多远，是在量程标定把它们换算成米之前起作用的。它们保护的既是针尖，"
                 "也同样是压电本身（过压会让它**永久**退极化）。\n"
                 "\n"
                 "把它们放宽会连同改动前后的取值一起记入诊断账本。当前值用 GetPiezoConfig 读 —— 并注意这些是**伏特**，"
-                "不是米；把两者连起来的是量程标定。"
+                "不是米；把两者连起来的是量程标定。", "Set the X/Y/Z **voltage** limits of the piezo (and enable them).\n"
+"\n"
+"These limits, in volts, bound how far the scanner can be driven, and act before the range calibration converts them to metres. They protect the tip "
+"and equally the piezo itself (overvoltage **permanently** depolarises it).\n"
+"\n"
+"Loosening them is recorded in the diagnostics ledger together with the values before and after the change. Read the current values with GetPiezoConfig -- and note these are **volts**, "
+"not metres; what connects the two is the range calibration.")
             ),
             parameters=[
-                ParameterSpec(name="x_low_v", type="float", description="X 下限（V）",
+                ParameterSpec(name="x_low_v", type="float", description=tr("X 下限（V）", "X lower limit (V)"),
                               unit="V", required=True, min_value=-300.0, max_value=300.0),
-                ParameterSpec(name="x_high_v", type="float", description="X 上限（V）",
+                ParameterSpec(name="x_high_v", type="float", description=tr("X 上限（V）", "X upper limit (V)"),
                               unit="V", required=True, min_value=-300.0, max_value=300.0),
-                ParameterSpec(name="y_low_v", type="float", description="Y 下限（V）",
+                ParameterSpec(name="y_low_v", type="float", description=tr("Y 下限（V）", "Y lower limit (V)"),
                               unit="V", required=True, min_value=-300.0, max_value=300.0),
-                ParameterSpec(name="y_high_v", type="float", description="Y 上限（V）",
+                ParameterSpec(name="y_high_v", type="float", description=tr("Y 上限（V）", "Y upper limit (V)"),
                               unit="V", required=True, min_value=-300.0, max_value=300.0),
-                ParameterSpec(name="z_low_v", type="float", description="Z 下限（V）",
+                ParameterSpec(name="z_low_v", type="float", description=tr("Z 下限（V）", "Z lower limit (V)"),
                               unit="V", required=True, min_value=-300.0, max_value=300.0),
-                ParameterSpec(name="z_high_v", type="float", description="Z 上限（V）",
+                ParameterSpec(name="z_high_v", type="float", description=tr("Z 上限（V）", "Z upper limit (V)"),
                               unit="V", required=True, min_value=-300.0, max_value=300.0),
                 ParameterSpec(name="enable", type="bool",
-                              description="启用这些限值（不启用它们就没有任何作用）",
+                              description=tr("启用这些限值（不启用它们就没有任何作用）", "Enable these limits (without enabling them they have no effect)"),
                               required=False, default=True),
             ],
             estimated_duration_s=1.5,
@@ -407,7 +442,7 @@ class SetPiezoLimits(BaseSkill):
             lo = float(params[f"{ax}_low_v"])
             hi = float(params[f"{ax}_high_v"])
             if lo >= hi:
-                return _fail(name, f"{ax}_low_v ({lo:g} V) 必须小于 {ax}_high_v ({hi:g} V)", [])
+                return _fail(name, tr(f"{ax}_low_v ({lo:g} V) 必须小于 {ax}_high_v ({hi:g} V)", f"{ax}_low_v ({lo:g} V) must be less than {ax}_high_v ({hi:g} V)"), [])
             axes[ax] = (lo, hi)
         calls: list = []
 
@@ -449,8 +484,8 @@ class SetPiezoLimits(BaseSkill):
             data={"limits_v": {k: list(v) for k, v in axes.items()},
                   "before": before, "widened": widened,
                   "verified": actual is not None},
-            summary=("压电电压限值已设置"
-                     + ("（**已放宽**，已记入诊断台账）" if widened else "")),
+            summary=(tr("压电电压限值已设置", "Piezo voltage limits have been set")
+                     + (tr("（**已放宽**，已记入诊断台账）", "(**loosened**, recorded in the diagnostics ledger)") if widened else "")),
         )
 
 
@@ -464,7 +499,7 @@ class SetSafeTipProps(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "配置 SafeTip —— 那套自动的针尖保护系统：它盯着一路信号，一旦越过阈值就退针。"
+                tr("配置 SafeTip —— 那套自动的针尖保护系统：它盯着一路信号，一旦越过阈值就退针。"
                 "\n"
                 "\n"
                 "MAST 从前只能**读**这份配置而设不了它，这意味着 agent 明明看得出阈值对当前这根针尖是错的，"
@@ -475,17 +510,28 @@ class SetSafeTipProps(BaseSkill):
                 "\n"
                 "\n"
                 "auto_recovery 会在一次 SafeTip 事件之后恢复 Z 控制器，**前提是它原本就是开着的**；"
-                "auto_pause_scan 则把扫描暂停下来，而不是让它在一个针尖刚被拉离的表面上继续磨下去。"
+                "auto_pause_scan 则把扫描暂停下来，而不是让它在一个针尖刚被拉离的表面上继续磨下去。", "Configure SafeTip -- the automatic tip-protection system: it watches a signal and withdraws the tip once it crosses a threshold."
+"\n"
+"\n"
+"MAST used to be able only to **read** this configuration and not set it, which meant an agent could see that the threshold was wrong for the current tip "
+"and could do nothing about it.\n"
+"\n"
+"**threshold is the number that matters.** Set too high, SafeTip never fires -- the protection becomes decoration. "
+"Set too low, it fires on noise and aborts a perfectly good scan. First use GetSafeTipProps / GetSafeTipSignal to read the current value and the signal being watched."
+"\n"
+"\n"
+"auto_recovery restores the Z controller after a SafeTip event, **provided it was on to begin with**; "
+"auto_pause_scan pauses the scan instead of letting it keep grinding on a surface the tip has just been pulled away from.")
             ),
             parameters=[
                 ParameterSpec(name="threshold", type="float",
-                              description="触发阈值，用被盯着那路信号自己的单位",
+                              description=tr("触发阈值，用被盯着那路信号自己的单位", "Trigger threshold, in the own unit of the signal being watched"),
                               required=True),
                 ParameterSpec(name="auto_recovery", type="bool",
-                              description="SafeTip 事件之后恢复 Z 控制器（前提是它原本开着）",
+                              description=tr("SafeTip 事件之后恢复 Z 控制器（前提是它原本开着）", "Restore the Z controller after a SafeTip event (provided it was on to begin with)"),
                               required=False, default=True),
                 ParameterSpec(name="auto_pause_scan", type="bool",
-                              description="发生 SafeTip 事件时暂停扫描",
+                              description=tr("发生 SafeTip 事件时暂停扫描", "Pause the scan when a SafeTip event occurs"),
                               required=False, default=True),
             ],
             estimated_duration_s=1.5,
@@ -527,5 +573,5 @@ class SetSafeTipProps(BaseSkill):
                   "auto_recovery": bool(params.get("auto_recovery", True)),
                   "auto_pause_scan": bool(params.get("auto_pause_scan", True)),
                   "before": before, "verified": actual is not None},
-            summary=f"SafeTip 阈值 = {thr:g}",
+            summary=tr(f"SafeTip 阈值 = {thr:g}", f"SafeTip threshold = {thr:g}"),
         )

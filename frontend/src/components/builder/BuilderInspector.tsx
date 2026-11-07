@@ -1,4 +1,5 @@
 import clsx from "clsx";
+import { getLang, tr } from "@/lib/i18n";
 import {
   type Spec,
   type SpecNode,
@@ -13,9 +14,8 @@ import {
 } from "./builderSpec";
 
 // Inspector: edits the selected node (or, when nothing is selected, the workflow
-// metadata + params + outputs + version history). Ports builder-ui.jsx's
-// Inspector / ParamForm / LlmPanel. `card` is the full skill card fetched on
-// demand from GET /api/skills/{name}.
+// metadata + params + outputs + version history). `card` is the full skill card
+// fetched on demand from GET /api/skills/{name}.
 
 export interface SkillCardParam {
   name: string;
@@ -42,11 +42,11 @@ const inputCls =
 const exprCls = clsx(inputCls, "font-mono");
 
 const AGENTS: [string, string][] = [
-  ["literature", "文献检索"],
-  ["data_processing", "数据分析"],
-  ["experiment_design", "实验设计"],
-  ["paper_writing", "论文写作"],
-  ["paper_review", "论文评审"],
+  ["literature", tr("文献检索", "literature search")],
+  ["data_processing", tr("数据分析", "data analysis")],
+  ["experiment_design", tr("实验设计", "experiment design")],
+  ["paper_writing", tr("论文写作", "paper writing")],
+  ["paper_review", tr("论文评审", "paper review")],
 ];
 
 export interface ValReport {
@@ -76,11 +76,11 @@ export function BuilderInspector({
   const reportBlock = report ? (
     <div className="mt-2 space-y-1 rounded-md border border-mast-border bg-mast-bg p-2">
       <div className="text-sm font-medium text-mast-text">
-        校验结果{" "}
+        {tr("校验结果", "Validation result")}{" "}
         {report.ok ? (
-          <span className="text-mast-auto">通过</span>
+          <span className="text-mast-auto">{tr("通过", "passed")}</span>
         ) : (
-          <span className="text-mast-danger">未通过</span>
+          <span className="text-mast-danger">{tr("未通过", "failed")}</span>
         )}
       </div>
       {(report.problems || []).map((p, i) => (
@@ -105,7 +105,7 @@ export function BuilderInspector({
           </div>
         ))}
       {report.ok && !(report.problems || []).length && (
-        <div className="text-xs text-mast-auto">✓ 全部检查通过</div>
+        <div className="text-xs text-mast-auto">{tr("✓ 全部检查通过", "✓ All checks passed")}</div>
       )}
     </div>
   ) : null;
@@ -115,12 +115,13 @@ export function BuilderInspector({
     return (
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-mast-text">
-          工作流 <span className="rounded bg-mast-bg px-1.5 text-xs">{spec.name || "未命名"}</span>
+          {tr("工作流", "Workflow")}{" "}
+          <span className="rounded bg-mast-bg px-1.5 text-xs">{spec.name || tr("未命名", "Untitled")}</span>
         </h3>
-        <Row label="名称（字母/数字/_/-/中文，≤81）">
+        <Row label={tr("名称（字母/数字/_/-/中文，≤81）", "Name (letters / digits / _ / - / CJK, ≤81)")}>
           <input className={inputCls} value={spec.name} onChange={(e) => setSpec({ ...spec, name: e.target.value })} />
         </Row>
-        <Row label="描述">
+        <Row label={tr("描述", "Description")}>
           <textarea
             rows={2}
             className={inputCls}
@@ -128,24 +129,24 @@ export function BuilderInspector({
             onChange={(e) => setSpec({ ...spec, description: e.target.value })}
           />
         </Row>
-        <Row label="safety_level（须 ≥ 子技能最高级）">
+        <Row label={tr("safety_level（须 ≥ 子技能最高级）", "safety_level (must be ≥ the highest sub-skill level)")}>
           <select
             className={inputCls}
             value={spec.safety_level}
             onChange={(e) => setSpec({ ...spec, safety_level: e.target.value })}
           >
-            <option value="auto">auto — 自动执行</option>
-            <option value="confirm">confirm — 需确认</option>
-            <option value="dangerous">dangerous — 需人工批准</option>
+            <option value="auto">{tr("auto — 自动执行", "auto — runs automatically")}</option>
+            <option value="confirm">{tr("confirm — 需确认", "confirm — needs confirmation")}</option>
+            <option value="dangerous">{tr("dangerous — 需人工批准", "dangerous — needs operator approval")}</option>
           </select>
         </Row>
 
-        <Row label="工作流参数（供调用方传入，$expr 中按名引用）">
+        <Row label={tr("工作流参数（供调用方传入，$expr 中按名引用）", "Workflow parameters (supplied by the caller; referenced by name in $expr)")}>
           {(spec.params || []).map((p, i) => (
             <div key={i} className="mb-1 flex gap-1">
               <input
                 className={clsx(inputCls, "w-20")}
-                placeholder="名"
+                placeholder={tr("名", "name")}
                 value={p.name}
                 onChange={(e) => {
                   const ps = deep(spec.params);
@@ -168,7 +169,7 @@ export function BuilderInspector({
               </select>
               <input
                 className={clsx(inputCls, "flex-1")}
-                placeholder="默认值"
+                placeholder={tr("默认值", "default")}
                 value={p.default == null ? "" : String(p.default)}
                 onChange={(e) => {
                   const ps = deep(spec.params);
@@ -200,16 +201,16 @@ export function BuilderInspector({
               })
             }
           >
-            ＋ 参数
+            {tr("＋ 参数", "＋ Parameter")}
           </MiniBtn>
         </Row>
 
-        <Row label="输出签名（工作流结束时按表达式求值，进结果与技能卡）">
+        <Row label={tr("输出签名（工作流结束时按表达式求值，进结果与技能卡）", "Output signature (expressions evaluated when the workflow ends; shown in the result and skill card)")}>
           {(spec.outputs || []).map((o, i) => (
             <div key={i} className="mb-1 flex gap-1">
               <input
                 className={clsx(exprCls, "w-24")}
-                placeholder="名"
+                placeholder={tr("名", "name")}
                 value={o.name || ""}
                 onChange={(e) => {
                   const os = deep(spec.outputs);
@@ -219,7 +220,7 @@ export function BuilderInspector({
               />
               <input
                 className={clsx(exprCls, "flex-1")}
-                placeholder="表达式，如 q['quality']"
+                placeholder={tr("表达式，如 q['quality']", "expression, e.g. q['quality']")}
                 value={o.expr || ""}
                 onChange={(e) => {
                   const os = deep(spec.outputs);
@@ -238,23 +239,23 @@ export function BuilderInspector({
               })
             }
           >
-            ＋ 输出
+            {tr("＋ 输出", "＋ Output")}
           </MiniBtn>
         </Row>
 
-        <Row label="最终裁决 success_when（可选；布尔表达式，决定工作流成功/失败）">
+        <Row label={tr("最终裁决 success_when（可选；布尔表达式，决定工作流成功/失败）", "Final verdict success_when (optional; boolean expression deciding workflow success / failure)")}>
           <input
             className={exprCls}
             value={String(spec.success_when ?? "")}
-            placeholder="如 succeeded >= 1、target_reached（留空=所有步骤跑完即成功）"
+            placeholder={tr("如 succeeded >= 1、target_reached（留空=所有步骤跑完即成功）", "e.g. succeeded >= 1, target_reached (empty = success once all steps finish)")}
             onChange={(e) => setSpec({ ...spec, success_when: e.target.value })}
           />
         </Row>
-        <Row label="fail_message（可选；success_when 为假时的失败原因表达式）">
+        <Row label={tr("fail_message（可选；success_when 为假时的失败原因表达式）", "fail_message (optional; failure-reason expression used when success_when is false)")}>
           <input
             className={exprCls}
             value={String(spec.fail_message ?? "")}
-            placeholder="如 'no point succeeded'"
+            placeholder={tr("如 'no point succeeded'", "e.g. 'no point succeeded'")}
             onChange={(e) => setSpec({ ...spec, fail_message: e.target.value })}
           />
         </Row>
@@ -273,7 +274,7 @@ export function BuilderInspector({
         <h3 className="text-sm font-semibold text-mast-text">
           step <span className="rounded bg-mast-accent/15 px-1.5 text-xs text-mast-accent">{String(n.skill)}</span>
         </h3>
-        <Row label="节点 id（$expr 中按此名引用本步结果；改名自动级联引用）">
+        <Row label={tr("节点 id（$expr 中按此名引用本步结果；改名自动级联引用）", "Node id (referenced by name in $expr; renaming updates references automatically)")}>
           <input
             className={exprCls}
             value={String(n.id)}
@@ -291,7 +292,7 @@ export function BuilderInspector({
           <p className="text-xs text-mast-muted">
             {card.description}
             {card.extra && (card.extra as any).when_use ? (
-              <span className="block">适用：{String((card.extra as any).when_use)}</span>
+              <span className="block">{tr("适用：", "Use when: ")}{String((card.extra as any).when_use)}</span>
             ) : null}
           </p>
         )}
@@ -302,23 +303,23 @@ export function BuilderInspector({
               checked={!!n.skill_version}
               onChange={(e) => patch({ skill_version: e.target.checked ? card.version : undefined })}
             />
-            钉住版本{" "}
+            {tr("钉住版本", "Pin version")}{" "}
             {n.skill_version ? (
               <span className="rounded bg-mast-accent/15 px-1 text-mast-accent">@{String(n.skill_version)}</span>
             ) : (
-              <span className="rounded bg-mast-bg px-1">当前 @{card.version}（随升级漂移）</span>
+              <span className="rounded bg-mast-bg px-1">{tr(`当前 @${card.version}（随升级漂移）`, `current @${card.version} (follows upgrades)`)}</span>
             )}
           </label>
         )}
         <ParamForm node={n} card={card} onPatch={patch} />
-        <Row label="optional（失败不中止整个工作流）">
+        <Row label={tr("optional（失败不中止整个工作流）", "optional (a failure does not abort the workflow)")}>
           <select
             className={inputCls}
             value={n.optional ? "true" : "false"}
             onChange={(e) => patch({ optional: e.target.value === "true" })}
           >
-            <option value="false">否（默认，失败即中止）</option>
-            <option value="true">是</option>
+            <option value="false">{tr("否（默认，失败即中止）", "No (default; a failure aborts)")}</option>
+            <option value="true">{tr("是", "Yes")}</option>
           </select>
         </Row>
         {reportBlock}
@@ -330,10 +331,10 @@ export function BuilderInspector({
     return (
       <div className="space-y-3">
         <Head kind="if" id={String(n.id)} />
-        <Row label="cond（布尔表达式；可引用节点 id / 工作流参数）">
+        <Row label={tr("cond（布尔表达式；可引用节点 id / 工作流参数）", "cond (boolean expression; may reference node ids / workflow parameters)")}>
           <input className={exprCls} value={String(n.cond ?? "")} onChange={(e) => patch({ cond: e.target.value })} />
         </Row>
-        <p className="text-xs text-mast-muted">{"例：q['quality'] > 0.6、attempt < max_tries、last['success']"}</p>
+        <p className="text-xs text-mast-muted">{tr("例：", "e.g. ") + "q['quality'] > 0.6, attempt < max_tries, last['success']"}</p>
         {reportBlock}
       </div>
     );
@@ -346,44 +347,44 @@ export function BuilderInspector({
       <div className="space-y-3">
         <Head kind="loop" id={String(n.id)} />
         <p className="text-xs text-mast-muted">
-          循环体（body）会重复执行。下面设定<strong>什么时候停</strong>：固定次数 / 遍历序列 / 满足条件。
+          {getLang() === "zh" ? <>循环体（body）会重复执行。下面设定<strong>什么时候停</strong>：固定次数 / 遍历序列 / 满足条件。</> : <>The loop body repeats. Set below <strong>when it stops</strong>: a fixed count / iterating a sequence / while a condition holds.</>}
         </p>
-        <Row label="模式">
+        <Row label={tr("模式", "Mode")}>
           <select className={inputCls} value={mode} onChange={(e) => patch({ mode: e.target.value })}>
-            <option value="repeat">repeat — 固定次数</option>
-            <option value="foreach">foreach — 遍历一个序列</option>
-            <option value="while">while — 满足条件就继续</option>
+            <option value="repeat">{tr("repeat — 固定次数", "repeat — fixed count")}</option>
+            <option value="foreach">{tr("foreach — 遍历一个序列", "foreach — iterate a sequence")}</option>
+            <option value="while">{tr("while — 满足条件就继续", "while — continue while the condition holds")}</option>
           </select>
         </Row>
         {mode === "repeat" && (
-          <Row label="count（重复几次，可填数字或表达式）">
-            <input className={exprCls} value={String(n.count ?? "")} placeholder="如 3 或 n_sites" onChange={(e) => patch({ count: e.target.value })} />
+          <Row label={tr("count（重复几次，可填数字或表达式）", "count (number of repeats; a number or an expression)")}>
+            <input className={exprCls} value={String(n.count ?? "")} placeholder={tr("如 3 或 n_sites", "e.g. 3 or n_sites")} onChange={(e) => patch({ count: e.target.value })} />
           </Row>
         )}
         {mode === "foreach" && (
           <>
-            <Row label="iterable（要遍历的序列表达式）">
-              <input className={exprCls} value={String(n.iterable ?? "")} placeholder="如 grid['points']" onChange={(e) => patch({ iterable: e.target.value })} />
+            <Row label={tr("iterable（要遍历的序列表达式）", "iterable (sequence expression to iterate)")}>
+              <input className={exprCls} value={String(n.iterable ?? "")} placeholder={tr("如 grid['points']", "e.g. grid['points']")} onChange={(e) => patch({ iterable: e.target.value })} />
             </Row>
-            <Row label="var（循环变量名，body 内按此名取当前元素）">
-              <input className={exprCls} value={String(n.var ?? "")} placeholder="如 pt" onChange={(e) => patch({ var: e.target.value })} />
+            <Row label={tr("var（循环变量名，body 内按此名取当前元素）", "var (loop variable name; the current element inside body)")}>
+              <input className={exprCls} value={String(n.var ?? "")} placeholder={tr("如 pt", "e.g. pt")} onChange={(e) => patch({ var: e.target.value })} />
             </Row>
           </>
         )}
         {mode === "while" && (
-          <Row label="cond（布尔表达式，为真就再跑一轮）">
-            <input className={exprCls} value={String(n.cond ?? "")} placeholder="如 q['quality'] < 0.6" onChange={(e) => patch({ cond: e.target.value })} />
+          <Row label={tr("cond（布尔表达式，为真就再跑一轮）", "cond (boolean expression; run another iteration while true)")}>
+            <input className={exprCls} value={String(n.cond ?? "")} placeholder={tr("如 q['quality'] < 0.6", "e.g. q['quality'] < 0.6")} onChange={(e) => patch({ cond: e.target.value })} />
           </Row>
         )}
-        <Row label="max_iter（硬上限；触达硬件的循环 ≤100）">
+        <Row label={tr("max_iter（硬上限；触达硬件的循环 ≤100）", "max_iter (hard cap; loops that touch hardware ≤100)")}>
           <input
             type="number"
             className={inputCls}
             value={maxIter || ""}
             onChange={(e) => patch({ max_iter: parseInt(e.target.value, 10) || undefined })}
           />
-          {maxIter > 100 && <span className="text-xs text-mast-warn">⚠ 超过 100 — 仅纯计算循环可接受</span>}
-          {!maxIter && <span className="text-xs text-mast-warn">⚠ 未设上限（默认过大，对硬件循环危险）</span>}
+          {maxIter > 100 && <span className="text-xs text-mast-warn">{tr("⚠ 超过 100 — 仅纯计算循环可接受", "⚠ Above 100 — acceptable only for pure-computation loops")}</span>}
+          {!maxIter && <span className="text-xs text-mast-warn">{tr("⚠ 未设上限（默认过大，对硬件循环危险）", "⚠ No cap set (the default is very large; dangerous for hardware loops)")}</span>}
         </Row>
         {reportBlock}
       </div>
@@ -396,7 +397,7 @@ export function BuilderInspector({
     return (
       <div className="space-y-3">
         <Head kind="agent" id={String(n.id)} />
-        <Row label="委托给（instrument_control 不可委托——仪器动作必须走 step）">
+        <Row label={tr("委托给（instrument_control 不可委托——仪器动作必须走 step）", "Delegate to (instrument_control cannot be delegated — instrument actions must be steps)")}>
           <select className={inputCls} value={String(n.agent ?? "literature")} onChange={(e) => patch({ agent: e.target.value })}>
             {AGENTS.map(([v, zh]) => (
               <option key={v} value={v}>
@@ -405,11 +406,11 @@ export function BuilderInspector({
             ))}
           </select>
         </Row>
-        <Row label="task（任务描述；{名} 插值 inputs）">
+        <Row label={tr("task（任务描述；{名} 插值 inputs）", "task (task description; {name} interpolates inputs)")}>
           <textarea rows={3} className={inputCls} value={String(n.task ?? "")} onChange={(e) => patch({ task: e.target.value })} />
         </Row>
         <InputsEditor n={n} patch={patch} />
-        <Row label="预算（硬上限 12 次模型调用）">
+        <Row label={tr("预算（硬上限 12 次模型调用）", "Budget (hard cap of 12 model calls)")}>
           <div className="flex gap-2">
             <input
               type="number"
@@ -421,13 +422,13 @@ export function BuilderInspector({
             <input
               type="number"
               className={clsx(inputCls, "w-28")}
-              title="timeout_s（秒）"
+              title={tr("timeout_s（秒）", "timeout_s (seconds)")}
               value={Number(n.timeout_s ?? 600)}
               onChange={(e) => patch({ timeout_s: parseInt(e.target.value, 10) || 600 })}
             />
           </div>
           <span className="text-xs text-mast-muted">
-            结果文本绑定为 {String(n.id)}['text']，失败/超时走画布 on_error 槽。
+            {tr(`结果文本绑定为 ${String(n.id)}['text']，失败/超时走画布 on_error 槽。`, `The result text is bound to ${String(n.id)}['text']; failure / timeout goes to the on_error slot on the canvas.`)}
           </span>
         </Row>
         {reportBlock}
@@ -440,11 +441,11 @@ export function BuilderInspector({
     return (
       <div className="space-y-3">
         <Head kind="human" id={String(n.id)} />
-        <Row label="message（展示给用户；{名} 插值 inputs）">
+        <Row label={tr("message（展示给用户；{名} 插值 inputs）", "message (shown to the operator; {name} interpolates inputs)")}>
           <textarea rows={2} className={inputCls} value={String(n.message ?? "")} onChange={(e) => patch({ message: e.target.value })} />
         </Row>
         <InputsEditor n={n} patch={patch} />
-        <Row label="用户可选出口（= 画布槽位；不设则单纯确认后继续）">
+        <Row label={tr("用户可选出口（= 画布槽位；不设则单纯确认后继续）", "Operator choices (= canvas slots; if none, the workflow just continues after confirmation)")}>
           {Object.keys(routes).map((rname) => (
             <div key={rname} className="mb-1 flex gap-1">
               <input
@@ -476,10 +477,10 @@ export function BuilderInspector({
               patch({ routes: { ...routes, [nm]: [] } });
             }}
           >
-            ＋ 出口
+            {tr("＋ 出口", "＋ Choice")}
           </MiniBtn>
           <p className="text-xs text-mast-muted">
-            运行到此节点时工作流暂停（HITL interrupt），用户选出口后从断点续跑。
+            {tr("运行到此节点时工作流暂停（HITL interrupt），用户选出口后从断点续跑。", "The workflow pauses at this node (HITL interrupt) and resumes from that point after the operator picks a choice.")}
           </p>
         </Row>
         {reportBlock}
@@ -492,13 +493,24 @@ export function BuilderInspector({
       <div className="space-y-3">
         <Head kind="try" id={String(n.id)} />
         <p className="text-xs text-mast-muted">
-          <strong>try / finally</strong>：body 里的步骤<strong>失败也不会中止整个工作流</strong>
-          （解释器强制其 optional；用 if 检查 <code>'_failed' in 节点id</code> 自行处理失败）；
-          finally 里的步骤<strong>无论 body 正常完成、失败、还是 break/succeed/fail 提前退出都会执行</strong>
-          （用于恢复 Z 反馈、复位扫描框等清理）。在画布里向 body / finally 槽添加步骤。
+          {getLang() === "zh" ? (
+            <>
+              <strong>try / finally</strong>：body 里的步骤<strong>失败也不会中止整个工作流</strong>
+              （解释器强制其 optional；用 if 检查 <code>'_failed' in 节点id</code> 自行处理失败）；
+              finally 里的步骤<strong>无论 body 正常完成、失败、还是 break/succeed/fail 提前退出都会执行</strong>
+              （用于恢复 Z 反馈、复位扫描框等清理）。在画布里向 body / finally 槽添加步骤。
+            </>
+          ) : (
+            <>
+              <strong>try / finally</strong>: steps in body <strong>do not abort the workflow when they fail</strong>
+              {" "}(the interpreter forces them optional; use an if with <code>'_failed' in node_id</code> to handle the failure);
+              steps in finally <strong>run whether body completes, fails, or exits early via break / succeed / fail</strong>
+              {" "}(for cleanup such as restoring Z feedback or resetting the scan frame). Add steps to the body / finally slots on the canvas.
+            </>
+          )}
         </p>
         <p className="text-xs text-mast-muted/80">
-          注：外部硬中止（E-stop / 看门狗）下 finally 不保证执行——那是硬停，靠 EmergencyRetract 兜底。
+          {tr("注：外部硬中止（E-stop / 看门狗）下 finally 不保证执行——那是硬停，靠 EmergencyRetract 兜底。", "Note: under an external hard abort (E-stop / watchdog) finally is not guaranteed to run — that is a hard stop, backed by EmergencyRetract.")}
         </p>
         {reportBlock}
       </div>
@@ -511,8 +523,8 @@ export function BuilderInspector({
         <Head kind={kind} id={String(n.id)} />
         <p className="text-xs text-mast-muted">
           {kind === "break"
-            ? "跳出最近的循环（loop）。只能放在循环体内。"
-            : "结束本轮、进入循环下一轮。只能放在循环体内。"}
+            ? tr("跳出最近的循环（loop）。只能放在循环体内。", "Exit the nearest loop. Only valid inside a loop body.")
+            : tr("结束本轮、进入循环下一轮。只能放在循环体内。", "End this iteration and start the next. Only valid inside a loop body.")}
         </p>
         {reportBlock}
       </div>
@@ -525,15 +537,15 @@ export function BuilderInspector({
         <Head kind={kind} id={String(n.id)} />
         <p className="text-xs text-mast-muted">
           {kind === "succeed"
-            ? "立即以「成功」结束整个工作流（覆盖默认裁决）。"
-            : "立即以「失败」结束整个工作流（即使所有步骤都成功）。"}
-          外层 try 的 finally 仍会执行。
+            ? tr("立即以「成功」结束整个工作流（覆盖默认裁决）。", "End the whole workflow immediately as a success (overrides the default verdict).")
+            : tr("立即以「失败」结束整个工作流（即使所有步骤都成功）。", "End the whole workflow immediately as a failure (even if every step succeeded).")}
+          {tr("外层 try 的 finally 仍会执行。", " The finally of an enclosing try still runs.")}
         </p>
-        <Row label="reason（原因表达式；字符串字面量要加引号，如 'done'）">
+        <Row label={tr("reason（原因表达式；字符串字面量要加引号，如 'done'）", "reason (reason expression; string literals need quotes, e.g. 'done')")}>
           <input
             className={exprCls}
             value={String(n.reason ?? "")}
-            placeholder="如 'target reached' 或 'after ' + str(attempt) + ' tries'"
+            placeholder={tr("如 'target reached' 或 'after ' + str(attempt) + ' tries'", "e.g. 'target reached' or 'after ' + str(attempt) + ' tries'")}
             onChange={(e) => patch({ reason: e.target.value })}
           />
         </Row>
@@ -546,13 +558,13 @@ export function BuilderInspector({
   return (
     <div className="space-y-3">
       <Head kind="set" id={String(n.id)} />
-      <Row label="var（变量名）">
+      <Row label={tr("var（变量名）", "var (variable name)")}>
         <input className={exprCls} value={String(n.var ?? "")} onChange={(e) => patch({ var: e.target.value })} />
       </Row>
-      <Row label="value（表达式）">
+      <Row label={tr("value（表达式）", "value (expression)")}>
         <input className={exprCls} value={String(n.value ?? "")} onChange={(e) => patch({ value: e.target.value })} />
       </Row>
-      <p className="text-xs text-mast-muted">例：attempt + 1、scan['file_path']</p>
+      <p className="text-xs text-mast-muted">{tr("例：", "e.g. ")}attempt + 1, scan['file_path']</p>
       {reportBlock}
     </div>
   );
@@ -578,9 +590,9 @@ function ParamForm({
   };
 
   if (!card) {
-    return <p className="text-xs text-mast-muted">技能卡加载中…（无法连接内核时不可编辑参数）</p>;
+    return <p className="text-xs text-mast-muted">{tr("技能卡加载中…（无法连接内核时不可编辑参数）", "Loading skill card… (parameters cannot be edited while the kernel is unreachable)")}</p>;
   }
-  if (!params.length) return <p className="text-xs text-mast-muted">该技能无参数。</p>;
+  if (!params.length) return <p className="text-xs text-mast-muted">{tr("该技能无参数。", "This skill has no parameters.")}</p>;
 
   return (
     <div className="space-y-2">
@@ -596,7 +608,7 @@ function ParamForm({
         } else if (p.allowed_values && p.allowed_values.length) {
           input = (
             <select className={inputCls} value={cur === undefined ? "" : String(cur)} onChange={(e) => setP(p.name, e.target.value === "" ? undefined : e.target.value)}>
-              <option value="">（默认{p.default != null ? `: ${String(p.default)}` : ""}）</option>
+              <option value="">{tr("（默认", "(default")}{p.default != null ? `: ${String(p.default)}` : ""}{tr("）", ")")}</option>
               {p.allowed_values.map((v) => (
                 <option key={String(v)} value={String(v)}>
                   {String(v)}
@@ -607,7 +619,7 @@ function ParamForm({
         } else if (p.type === "bool") {
           input = (
             <select className={inputCls} value={cur === undefined ? "" : String(cur)} onChange={(e) => setP(p.name, e.target.value === "" ? undefined : e.target.value === "true")}>
-              <option value="">（默认）</option>
+              <option value="">{tr("（默认）", "(default)")}</option>
               <option value="true">true</option>
               <option value="false">false</option>
             </select>
@@ -618,7 +630,7 @@ function ParamForm({
               type="number"
               step={p.type === "int" ? 1 : "any"}
               className={inputCls}
-              placeholder={p.default != null ? `默认 ${String(p.default)}` : ""}
+              placeholder={p.default != null ? tr(`默认 ${String(p.default)}`, `default ${String(p.default)}`) : ""}
               value={cur === undefined ? "" : (cur as number)}
               onChange={(e) => {
                 if (e.target.value === "") return setP(p.name, undefined);
@@ -639,7 +651,7 @@ function ParamForm({
           input = (
             <input
               className={inputCls}
-              placeholder={p.default != null ? `默认 ${String(p.default)}` : ""}
+              placeholder={p.default != null ? tr(`默认 ${String(p.default)}`, `default ${String(p.default)}`) : ""}
               value={cur === undefined ? "" : String(cur)}
               onChange={(e) => setP(p.name, e.target.value === "" ? undefined : e.target.value)}
             />
@@ -649,7 +661,7 @@ function ParamForm({
           <div key={p.name}>
             <div className={labelCls}>
               {p.name}
-              {p.unit ? <span className="text-mast-muted/70">（{p.unit}）</span> : null}
+              {p.unit ? <span className="text-mast-muted/70">({p.unit})</span> : null}
               {p.required ? <span className="text-mast-danger"> *</span> : null}
               {p.min != null ? <span className="text-mast-muted/70"> [{p.min}, {p.max}]</span> : null}
             </div>
@@ -657,7 +669,7 @@ function ParamForm({
               <div className="flex-1">{input}</div>
               {canExpr && (
                 <button
-                  title="表达式模式（引用上游节点 id / 工作流参数）"
+                  title={tr("表达式模式（引用上游节点 id / 工作流参数）", "Expression mode (reference upstream node ids / workflow parameters)")}
                   onClick={() => setP(p.name, exprMode ? undefined : { $expr: "" })}
                   className={clsx(
                     "rounded border px-1.5 py-1 font-mono text-xs",
@@ -667,7 +679,7 @@ function ParamForm({
                   ƒx
                 </button>
               )}
-              {cur !== undefined && <ClearBtn onClick={() => setP(p.name, undefined)} text="清除" />}
+              {cur !== undefined && <ClearBtn onClick={() => setP(p.name, undefined)} text={tr("清除", "Clear")} />}
             </div>
             {p.description ? <div className="text-[11px] text-mast-muted">{p.description}</div> : null}
           </div>
@@ -718,36 +730,36 @@ function LlmPanel({
   return (
     <div className="space-y-3">
       <Head kind="llm" id={String(n.id)} />
-      <Row label="职责（唯一需写的自然语言；prompt 由系统拼装）">
+      <Row label={tr("职责（唯一需写的自然语言；prompt 由系统拼装）", "Responsibility (the only natural language you write; the prompt is assembled by the system)")}>
         <textarea rows={2} className={inputCls} value={String(n.responsibility ?? "")} onChange={(e) => patch({ responsibility: e.target.value })} />
       </Row>
-      <Row label="模式">
+      <Row label={tr("模式", "Mode")}>
         <select className={inputCls} value={mode} onChange={(e) => patch({ mode: e.target.value })}>
-          <option value="route">route — 闭集分支选择（恰好点亮一个槽位）</option>
-          <option value="data">data — 类型化结构输出（失败走 on_error 槽）</option>
+          <option value="route">{tr("route — 闭集分支选择（恰好点亮一个槽位）", "route — closed-set branch choice (exactly one slot is taken)")}</option>
+          <option value="data">{tr("data — 类型化结构输出（失败走 on_error 槽）", "data — typed structured output (failure goes to the on_error slot)")}</option>
         </select>
       </Row>
-      <InputsEditor n={n} patch={patch} label="inputs（喂给决策的数据；$expr 引用上游节点 id / 变量）" />
+      <InputsEditor n={n} patch={patch} label={tr("inputs（喂给决策的数据；$expr 引用上游节点 id / 变量）", "inputs (data fed to the decision; $expr references upstream node ids / variables)")} />
       {mode === "route" ? (
-        <Row label="routes（闭集分支 = 画布槽位；⚑ = escape 安全出口）">
+        <Row label={tr("routes（闭集分支 = 画布槽位；⚑ = escape 安全出口）", "routes (closed-set branches = canvas slots; ⚑ = escape, the safe exit)")}>
           {Object.keys(routes).map((rname) => (
             <div key={rname} className="mb-1 flex items-center gap-1">
-              <input type="radio" name={`esc-${String(n.id)}`} title="设为 escape" checked={n.escape === rname} onChange={() => patch({ escape: rname })} />
+              <input type="radio" name={`esc-${String(n.id)}`} title={tr("设为 escape", "Set as escape")} checked={n.escape === rname} onChange={() => patch({ escape: rname })} />
               <input className={clsx(exprCls, "w-28")} defaultValue={rname} onBlur={(e) => e.target.value !== rname && renameRoute(rname, e.target.value.trim())} />
               <input
                 className={clsx(inputCls, "flex-1")}
-                placeholder="描述（拼进 prompt）"
+                placeholder={tr("描述（拼进 prompt）", "description (added to the prompt)")}
                 value={((n.route_descriptions as Record<string, string>) || {})[rname] || ""}
                 onChange={(e) => patch({ route_descriptions: { ...((n.route_descriptions as Record<string, string>) || {}), [rname]: e.target.value } })}
               />
               <ClearBtn onClick={() => delRoute(rname)} />
             </div>
           ))}
-          <MiniBtn onClick={addRoute}>＋ 分支</MiniBtn>
-          <p className="text-xs text-mast-muted">模型还可答 "uncertain"（弃权）→ 自动走 ⚑escape。</p>
+          <MiniBtn onClick={addRoute}>{tr("＋ 分支", "＋ Branch")}</MiniBtn>
+          <p className="text-xs text-mast-muted">{tr('模型还可答 "uncertain"（弃权）→ 自动走 ⚑escape。', 'The model may also answer "uncertain" (abstain) → takes ⚑escape automatically.')}</p>
         </Row>
       ) : (
-        <Row label="output_schema（类型化输出字段）">
+        <Row label={tr("output_schema（类型化输出字段）", "output_schema (typed output fields)")}>
           {Object.entries(schema).map(([k, t]) => (
             <div key={k} className="mb-1 flex gap-1">
               <input className={clsx(inputCls, "w-28")} value={k} readOnly />
@@ -767,11 +779,11 @@ function LlmPanel({
           ))}
           <MiniBtn
             onClick={() => {
-              const nm = window.prompt("字段名：");
+              const nm = window.prompt(tr("字段名：", "Field name:"));
               if (nm && !schema[nm]) patch({ output_schema: { ...schema, [nm]: "str" } });
             }}
           >
-            ＋ 字段
+            {tr("＋ 字段", "＋ Field")}
           </MiniBtn>
         </Row>
       )}
@@ -781,7 +793,7 @@ function LlmPanel({
 }
 
 // ── shared bits ──
-function InputsEditor({ n, patch, label = "inputs（$expr 绑定上游数据）" }: { n: SpecNode; patch: (p: Record<string, unknown>) => void; label?: string }) {
+function InputsEditor({ n, patch, label = tr("inputs（$expr 绑定上游数据）", "inputs ($expr binds upstream data)") }: { n: SpecNode; patch: (p: Record<string, unknown>) => void; label?: string }) {
   const inputs = (n.inputs as Record<string, unknown>) || {};
   const setInput = (name: string, expr: string | undefined) => {
     const next = { ...inputs };
@@ -800,11 +812,11 @@ function InputsEditor({ n, patch, label = "inputs（$expr 绑定上游数据）"
       ))}
       <MiniBtn
         onClick={() => {
-          const nm = window.prompt("输入名（prompt 中的字段名）：");
+          const nm = window.prompt(tr("输入名（prompt 中的字段名）：", "Input name (field name in the prompt):"));
           if (nm && !inputs[nm]) setInput(nm, "");
         }}
       >
-        ＋ 输入
+        {tr("＋ 输入", "＋ Input")}
       </MiniBtn>
     </Row>
   );

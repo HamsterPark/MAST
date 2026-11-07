@@ -230,6 +230,8 @@ _SINGLETON_LOCK = threading.Lock()
 def get_scorer() -> STMQualityScorer:
     """Process-wide scorer (the backbone is ~86 MB — load it once)."""
     global _SINGLETON
+    from mast.vision.module import require_vision_models
+    require_vision_models()
     if _SINGLETON is None:
         with _SINGLETON_LOCK:
             if _SINGLETON is None:

@@ -1,32 +1,31 @@
 import { useState } from "react";
 import { Button, OptionGroup } from "@/components/controls";
 import { Badge } from "@/components/ui";
+import { tr } from "@/lib/i18n";
 import { normalizeAsk, type AskQuestion, type Pending } from "./runTaskStore";
 
 // ════════════════════════════════════════════════════════════════════════════
 // ONE card for every paused interrupt, wherever it is shown.
 //
-// This used to be three near-identical copies — the group-chat inline card
-// (RunTaskPanel), the per-agent modal (InterruptsModal) and the private-chat
-// modal (HitlModal) — and all three shared a bug that made a whole interrupt
-// kind unanswerable:
+// It is shared by the group-chat inline card (RunTaskPanel), the per-agent modal
+// (InterruptsModal) and the private-chat modal (HitlModal), so a new interrupt
+// kind only needs handling here.
+//
+// Buttons are derived FROM what the interrupt says it accepts, not from a fixed
+// verb list filtered by it. A fixed list such as
 //
 //     const canApprove = decisions.includes("approve")   // …etc
 //
-// A composite `workflow_human` node advertises its ROUTE NAMES in
-// `allowed_decisions` (["继续", "换样品"]), so all three flags came out false
-// and the card rendered ZERO buttons. The operator could see the question and
-// had no way to answer it; the run then sat there until the 900 s timeout.
-// `ask_user` (allowed_decisions: ["answer"]) would have landed in the same hole.
-//
-// So the rule here is inverted: buttons are derived FROM what the interrupt
-// says it accepts, instead of a fixed verb list being filtered by it.
+// breaks for a composite `workflow_human` node, which advertises its ROUTE NAMES
+// in `allowed_decisions` (["继续", "换样品"]): every flag is false and the card
+// renders no buttons, leaving the run waiting until the 900 s timeout. `ask_user`
+// (allowed_decisions: ["answer"]) would hit the same hole.
 // ════════════════════════════════════════════════════════════════════════════
 
 const VERB_LABEL: Record<string, string> = {
-  approve: "批准",
-  reject: "拒绝",
-  edit: "编辑",
+  approve: tr("批准", "Approve"),
+  reject: tr("拒绝", "Reject"),
+  edit: tr("编辑", "Edit"),
 };
 
 export type ResolveArgs = {
@@ -71,9 +70,8 @@ export function fromPollRow(
 }
 
 /** The tone the kind badge carries. A question is INFO, not WARN: nothing is
- *  about to run and nothing is wrong — somebody is waiting on the operator's
- *  judgement, and dressing that as a hazard trains them to ignore the ones that
- *  really are. */
+ *  about to run and nothing is wrong; someone is waiting on the operator's
+ *  judgement, and styling that as a hazard desensitizes operators to real ones. */
 function kindTone(kind?: string | null): string {
   if (kind === "ask_user") return "INFO";
   if (kind === "buffer_hitl") return "DANGEROUS";
@@ -81,10 +79,10 @@ function kindTone(kind?: string | null): string {
 }
 
 function kindLabel(kind?: string | null): string {
-  if (kind === "ask_user") return "提问";
-  if (kind === "workflow_human") return "工作流选择";
-  if (kind === "buffer_hitl") return "关键事件";
-  if (kind === "dangerous") return "危险操作";
+  if (kind === "ask_user") return tr("提问", "Question");
+  if (kind === "workflow_human") return tr("工作流选择", "Workflow choice");
+  if (kind === "buffer_hitl") return tr("关键事件", "Critical event");
+  if (kind === "dangerous") return tr("危险操作", "Dangerous operation");
   return kind || "interrupt";
 }
 
@@ -146,7 +144,7 @@ export function InterruptCard({
       } catch {
         // Locally recoverable — say so next to the box the operator is typing
         // in and keep their text, rather than bouncing them out of the edit.
-        setEditErr("不是合法 JSON，未提交。");
+        setEditErr(tr("不是合法 JSON，未提交。", "Not valid JSON; not submitted."));
         return;
       }
     }
@@ -168,7 +166,7 @@ export function InterruptCard({
         {agentLabel && (
           <span className="text-xs text-mast-muted">@ {agentLabel(it.agent)}</span>
         )}
-        {done && <Badge tone="INFO">已处理</Badge>}
+        {done && <Badge tone="INFO">{tr("已处理", "Handled")}</Badge>}
         {!compact && (
           <span className="ml-auto font-mono text-xs text-mast-muted">{it.interrupt_id}</span>
         )}
@@ -210,12 +208,12 @@ export function InterruptCard({
               disabled={busy}
               onChange={(e) => setAnswer({ selected: [], customText: e.target.value })}
               rows={3}
-              placeholder="写下你的回答…"
+              placeholder={tr("写下你的回答…", "Write your answer…")}
               className="w-full resize-y rounded-md border border-mast-border bg-mast-bg px-3 py-2 text-sm text-mast-text outline-none focus:border-mast-accent"
             />
           )}
           {ask?.multi_select && (
-            <p className="text-xs text-mast-muted">可多选。</p>
+            <p className="text-xs text-mast-muted">{tr("可多选。", "Multiple selection allowed.")}</p>
           )}
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -230,24 +228,23 @@ export function InterruptCard({
                 })
               }
             >
-              {busy ? "提交中…" : "提交回答"}
+              {busy ? tr("提交中…", "Submitting…") : tr("提交回答", "Submit answer")}
             </Button>
             {answerEmpty && (
-              <span className="text-xs text-mast-muted">请先选择一项或写下你的回答。</span>
+              <span className="text-xs text-mast-muted">{tr("请先选择一项或写下你的回答。", "Select an option or write your answer first.")}</span>
             )}
           </div>
         </>
       )}
 
-      {/* workflow_human: each route is a real button. Before this it was a row
-          of read-only chips — see the header comment. */}
+      {/* workflow_human: each route is a real button (see the header comment). */}
       {!done && !isAsk && routeVerbs.length > 0 && (
         <>
           <input
             value={note}
             disabled={busy}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="给智能体的说明（可选）"
+            placeholder={tr("给智能体的说明（可选）", "Note to the agent (optional)")}
             className="w-full rounded-md border border-mast-border bg-mast-bg px-3 py-1.5 text-sm text-mast-text outline-none focus:border-mast-accent"
           />
           <div className="flex flex-wrap gap-2">
@@ -267,7 +264,7 @@ export function InterruptCard({
 
       {!done && editing && (
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-mast-muted">编辑工具参数 (JSON)</span>
+          <span className="text-mast-muted">{tr("编辑工具参数 (JSON)", "Edit tool arguments (JSON)")}</span>
           <textarea
             value={editText}
             onChange={(e) => setEditText(e.target.value)}
@@ -275,7 +272,7 @@ export function InterruptCard({
             className="w-full resize-y rounded-md border border-mast-border bg-mast-bg px-3 py-2 font-mono text-xs text-mast-text outline-none focus:border-mast-accent"
           />
           <span className="text-xs text-mast-muted/80">
-            提交后合并覆盖原参数，由核心 SafetyGate 重新校验。
+            {tr("提交后合并覆盖原参数，由核心 SafetyGate 重新校验。", "Merged over the original arguments on submit and re-validated by the core SafetyGate.")}
           </span>
           {editErr && <span className="text-xs text-mast-danger">{editErr}</span>}
         </label>
@@ -287,17 +284,17 @@ export function InterruptCard({
             <>
               {canApprove && (
                 <Button variant="primary" disabled={busy} onClick={() => onResolve({ decision: "approve" })}>
-                  {busy ? "处理中…" : "批准"}
+                  {busy ? tr("处理中…", "Processing…") : tr("批准", "Approve")}
                 </Button>
               )}
               {canReject && (
                 <Button variant="danger" disabled={busy} onClick={() => onResolve({ decision: "reject" })}>
-                  拒绝
+                  {tr("拒绝", "Reject")}
                 </Button>
               )}
               {canEdit && (
                 <Button variant="default" disabled={busy} onClick={startEdit}>
-                  编辑
+                  {tr("编辑", "Edit")}
                 </Button>
               )}
             </>
@@ -305,10 +302,10 @@ export function InterruptCard({
           {editing && (
             <>
               <Button variant="primary" disabled={busy} onClick={submitEdit}>
-                {busy ? "处理中…" : "编辑并批准"}
+                {busy ? tr("处理中…", "Processing…") : tr("编辑并批准", "Edit and approve")}
               </Button>
               <Button variant="ghost" disabled={busy} onClick={() => setEditing(false)}>
-                取消
+                {tr("取消", "Cancel")}
               </Button>
             </>
           )}

@@ -6,7 +6,8 @@
 //
 //     重复保存的帧默认隐藏 —— 但**自己带标记或在系列里的**照样显示
 //
-// 没有它，一张被操作员打过 ★ 的重复帧会在他下一次打开这个目录时凭空消失。
+// Without it, a duplicate frame that was starred would silently vanish the next time the
+// directory is opened.
 // ════════════════════════════════════════════════════════════════════════════
 
 import type { GalleryItem, Mark } from "./types.ts";
@@ -138,8 +139,9 @@ export function facets(base: readonly GalleryItem[]): Facets {
 /**
  * 选中值在当前列表里已经不存在时退回「全部」（原版 filterBar 开头那几行）。
  *
- * 不退的话：从 0910 带着「偏压 +2.00 V」进了一个根本没有 +2 V 的目录，列表是空的，
- * 而下拉框里又找不到那个值——看起来像这个目录没有数据。
+ * Without the reset, carrying a "bias +2.00 V" filter into a directory that has no +2 V frames
+ * gives an empty list while the dropdown no longer offers that value, so the directory looks
+ * like it has no data.
  */
 export function sanitizeFilters(F: Filters, fac: Facets, tags: readonly string[]): Filters {
   const has = (arr: [string, number][], key: string) => arr.some(([k]) => k === key);

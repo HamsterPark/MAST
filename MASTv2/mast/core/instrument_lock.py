@@ -82,7 +82,38 @@ import threading
 import time
 from typing import Any
 
+from mast.i18n import get_lang, tr
+
 logger = logging.getLogger(__name__)
+
+#: English display names for the built-in entry points. The owner string itself
+#: is an IDENTITY, not text: it scopes approach-refusal clearing
+#: (``approach._chain_scope``) and the frontend matches some values exactly. A
+#: language-dependent owner would make one chain look like two, so owners stay as
+#: written and only what people read is translated, here.
+_OWNER_EN: tuple[tuple[str, str], ...] = (
+    ("设置页 · Nanonis 保存目录", "Settings page · Nanonis save folder"),
+    ("新仪器初始化对账", "new-instrument initialisation check"),
+    ("主聊天/私聊", "main chat / private chat"),
+    ("信号采集 API", "signal acquisition API"),
+    ("技能直调 API", "direct skill API"),
+    ("手动/执行器", "manual / executor"),
+    ("光学台面板", "optics bench panel"),
+    ("群聊任务", "group-chat task"),
+    ("外部 agent", "external agent"),
+    ("未知入口", "unknown entry point"),
+    ("(未命名)", "(unnamed)"),
+)
+
+
+def owner_label(owner: object) -> str:
+    """The owner as people should read it, in the active language."""
+    text = str(owner or "")
+    if get_lang() == "zh":
+        return text
+    for zh, en in _OWNER_EN:
+        text = text.replace(zh, en)
+    return text
 
 #: How long a caller waits for the token before being refused. Short on
 #: purpose: it absorbs brief overlaps (one skill finishing as another starts)
@@ -95,10 +126,49 @@ DEFAULT_WAIT_S = 5.0
 BYPASS_TAGS: frozenset[str] = frozenset({"retract", "emergency", "withdraw"})
 
 #: Names that are remedies without carrying a tag for it.
+#:
+#: The optics stops are here because a
+#: TERS composite holds the token for its whole run: without the bypass, the
+#: stop for a satellite device or an optical stage would be refused as "busy"
+#: by the very run it is meant to stop. They stop motion/acquisition only —
+#: none of them can start anything.
 BYPASS_NAMES: frozenset[str] = frozenset({
     "StopScan", "StopSTS", "StopMotor", "StopAutoApproach",
     "SafeRetract", "EmergencyRetract", "WithdrawTip",
+    "StopOpticalStage", "StopSpectrometer", "StopSatelliteDevices",
+    # 手动控制面板：单台卫星设备的停、Picomotor 立即停
+    "StopSatelliteDevice", "PicomotorAbort",
+    # WITec optical station (docs/v2/design/optical_station_witec.md): a
+    # measurement protocol holds the token for its whole run, so these must not be
+    # refused as busy by the run they stop. They only make things safer (stop,
+    # close the shutter, hand COM write access back). Mirrors
+    # optics_witec.WITEC_STOP_SKILL_NAMES; a test pins the two together. The other
+    # WITec skills take the token: on that station the WITec is the instrument.
+    "StopWITec", "CloseWITecShutter", "ReleaseWITecWriteAccess",
 })
+
+#: Skills that drive a device which is NOT the Nanonis instrument and has its own
+#: exclusivity (the TERS alignment camera: its SDK lets one process
+#: open it at a time). They never take the token: a TERS composite holding it for a
+#: whole run must not blank the alignment view, and the camera must not hold up the
+#: STM. Listed by name, never by tag — a tag would let any skill exempt itself. Not
+#: a remedy either: nothing here gets BYPASS_NAMES' treatment (HITL remedy mirror,
+#: the panel's bypass_lock), so do not merge the two.
+OFF_INSTRUMENT_NAMES: frozenset[str] = frozenset({
+    "ConnectCamera", "DisconnectCamera", "CameraStartLive", "CameraStopLive",
+    "CameraSnapshot", "SetCameraExposure", "SetCameraGain", "SetCameraROI",
+    "GetCameraStatus",
+})
+
+
+def _optical_profile() -> bool:
+    """Whether this process serves the optical station (``mast.station``); unreadable = STM."""
+    try:
+        from mast import station
+
+        return bool(station.is_optical())
+    except Exception:  # noqa: BLE001
+        return False
 
 
 class InstrumentBusy(RuntimeError):
@@ -111,15 +181,24 @@ class InstrumentBusy(RuntimeError):
         super().__init__(self.message())
 
     def message(self) -> str:
-        who = self.holder.get("owner") or "另一个入口"
-        what = self.holder.get("skill") or "某个仪器动作"
+        who = owner_label(self.holder.get("owner")) or tr("另一个入口", "another entry point")
+        what = self.holder.get("skill") or tr("某个仪器动作", "an instrument action")
         held = self.holder.get("held_s")
-        held_txt = f"，已持有 {held:.0f}s" if isinstance(held, (int, float)) else ""
-        return (
+        held_txt = (tr(f"，已持有 {held:.0f}s", f", held for {held:.0f}s")
+                    if isinstance(held, (int, float)) else "")
+        # the optical station has no Nanonis: name the instrument neutrally there; an STM
+        # station keeps the exact text it always had
+        same_zh, inst_en = (("同一台仪器", "instrument") if _optical_profile()
+                            else ("同一台 Nanonis ", "Nanonis"))
+        return tr(
             f"仪器正被占用：{who} 正在执行 {what}{held_txt}。"
-            f"'{self.skill}' 未执行——同一台 Nanonis 不能被两条链路同时驱动。"
+            f"'{self.skill}' 未执行——{same_zh}不能被两条链路同时驱动。"
             f"请等对方结束后再试，或先中止对方的运行。"
-            f"Do NOT retry immediately — 重试不会让对方更快结束。"
+            f"Do NOT retry immediately — 重试不会让对方更快结束。",
+            f"Instrument is busy: {who} is running {what}{held_txt}. "
+            f"'{self.skill}' was not run: one {inst_en} cannot be driven by two chains at once. "
+            f"Wait for the other run to finish and try again, or abort the other run first. "
+            f"Do NOT retry immediately: retrying will not make the other run finish sooner.",
         )
 
 
@@ -249,7 +328,8 @@ class InstrumentLock:
                 from mast.core.diagnostics import record as _diag
 
                 _diag("instrument_busy", skill,
-                      "另一条链路正在驱动仪器，本次动作被拒绝（未下发任何命令）",
+                      tr("另一条链路正在驱动仪器，本次动作被拒绝（未下发任何命令）",
+                         "Another chain is driving the instrument; this action was refused (no command was sent)"),
                       requester=owner, holder=holder, waited_s=round(waited, 2))
             except Exception:  # noqa: BLE001
                 pass
@@ -279,14 +359,15 @@ def instrument_lock() -> InstrumentLock:
 def needs_token(meta: Any, skill_name: str = "") -> bool:
     """True iff running this skill should hold the instrument token.
 
-    False for reads/analysis (they must never queue behind a long write) and for
-    the stop/retract remedies (they must run *while* someone else holds it).
+    False for reads/analysis (they must never queue behind a long write), for
+    the stop/retract remedies (they must run *while* someone else holds it), and
+    for :data:`OFF_INSTRUMENT_NAMES` (they do not drive the Nanonis instrument).
     Unknown metadata → True: a skill we cannot classify is assumed to drive the
     instrument, because the fail-open direction here is two chains writing at
     once.
     """
     name = str(skill_name or getattr(meta, "name", "") or "")
-    if name in BYPASS_NAMES:
+    if name in BYPASS_NAMES or name in OFF_INSTRUMENT_NAMES:
         return False
     category = getattr(getattr(meta, "category", None), "value", None)
     if str(category).lower() in ("read", "analysis"):
@@ -322,4 +403,5 @@ __all__ = [
     "DEFAULT_WAIT_S",
     "BYPASS_NAMES",
     "BYPASS_TAGS",
+    "OFF_INSTRUMENT_NAMES",
 ]

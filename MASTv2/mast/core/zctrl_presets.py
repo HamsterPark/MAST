@@ -60,6 +60,7 @@ from typing import Any, Callable
 from mast.core import instrument_profile as _iprof
 from mast.core import scan_policy
 from mast.core.si_quantity import SIParseError, format_si, parse_si
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -115,9 +116,10 @@ _persist_sink: "Callable[[list[dict[str, Any]]], None] | None" = None
 def _clean_name(raw: object) -> str:
     name = str(raw or "").strip()
     if not name:
-        raise PresetRejected("参数组必须有名字。")
+        raise PresetRejected(tr("参数组必须有名字。", "A preset must have a name."))
     if len(name) > MAX_NAME_CHARS:
-        raise PresetRejected(f"参数组名最长 {MAX_NAME_CHARS} 字符。")
+        raise PresetRejected(tr(f"参数组名最长 {MAX_NAME_CHARS} 字符。",
+                                f"A preset name is at most {MAX_NAME_CHARS} characters."))
     return name
 
 
@@ -125,9 +127,13 @@ def _check_range(field: str, value: float) -> float:
     lo, hi = _BOUNDS[field]
     if not (lo <= value <= hi):
         raise PresetRejected(
-            f"{field} = {value!r}({format_si(value)}) 超出允许范围 "
-            f"[{format_si(lo)}, {format_si(hi)}]。**拒绝写入,不会自动夹到边界** —— "
-            "被悄悄改小的值会让你以为自己设的是原来那个数。"
+            tr(f"{field} = {value!r}({format_si(value)}) 超出允许范围 "
+               f"[{format_si(lo)}, {format_si(hi)}]。**拒绝写入,不会自动夹到边界** —— "
+               "被悄悄改小的值会让你以为自己设的是原来那个数。",
+               f"{field} = {value!r} ({format_si(value)}) is outside the allowed range "
+               f"[{format_si(lo)}, {format_si(hi)}]. **Write refused, not clamped to the "
+               "boundary** -- a value quietly changed would make you think you set the "
+               "original number.")
         )
     return value
 
@@ -143,9 +149,13 @@ def sanitize_preset(raw: "dict[str, Any]") -> "dict[str, Any]":
     lowered = name.lower()
     if lowered in RESERVED_NAMES:
         raise PresetRejected(
-            f"'{name}' 是保留名。'approach' 取自仪器档案的进针参数,"
-            f"'scan' 取自扫描档位表 —— 自定义组不能遮蔽它们"
-            f"(否则你在档位表里改了扫图增益,ApplyZCtrlPreset('scan') 却还用旧值)。"
+            tr(f"'{name}' 是保留名。'approach' 取自仪器档案的进针参数,"
+               f"'scan' 取自扫描档位表 —— 自定义组不能遮蔽它们"
+               f"(否则你在档位表里改了扫图增益,ApplyZCtrlPreset('scan') 却还用旧值)。",
+               f"'{name}' is a reserved name. 'approach' comes from the approach parameters "
+               "in the instrument profile and 'scan' from the scan tier table -- a custom "
+               "preset cannot shadow them (otherwise you change the scan gain in the tier "
+               "table and ApplyZCtrlPreset('scan') still uses the old value).")
         )
     try:
         tier_names = {t.lower() for t in scan_policy.tier_names()}
@@ -153,14 +163,18 @@ def sanitize_preset(raw: "dict[str, Any]") -> "dict[str, Any]":
         tier_names = set()
     if lowered in tier_names:
         raise PresetRejected(
-            f"'{name}' 与扫描档位表里的档名重名。档名已经可以直接当参数组名用,"
-            f"再建一个同名的自定义组只会让两者永远有一个是死的。"
+            tr(f"'{name}' 与扫描档位表里的档名重名。档名已经可以直接当参数组名用,"
+               f"再建一个同名的自定义组只会让两者永远有一个是死的。",
+               f"'{name}' duplicates a tier name in the scan tier table. Tier names can "
+               "already be used directly as preset names; creating a custom preset with the "
+               "same name would leave one of the two permanently dead.")
         )
 
     out: dict[str, Any] = {"name": name}
     for field in ("p_gain", "i_gain"):
         if field not in raw or raw[field] in (None, ""):
-            raise PresetRejected(f"参数组 '{name}' 缺少 {field}。")
+            raise PresetRejected(tr(f"参数组 '{name}' 缺少 {field}。",
+                                    f"Preset '{name}' is missing {field}."))
         out[field] = _si_field(field, raw[field])
 
     if raw.get("setpoint_a") not in (None, ""):
@@ -171,14 +185,18 @@ def sanitize_preset(raw: "dict[str, Any]") -> "dict[str, Any]":
     p = parse_si(out["p_gain"], what="p_gain")
     i = parse_si(out["i_gain"], what="i_gain")
     if i <= 0:
-        raise PresetRejected(f"参数组 '{name}' 的 i_gain 必须为正(T = P / I)。")
+        raise PresetRejected(tr(f"参数组 '{name}' 的 i_gain 必须为正(T = P / I)。",
+                                f"i_gain of preset '{name}' must be positive (T = P / I)."))
     t_const = p / i
     lo, hi = _TIME_CONSTANT_BOUNDS
     if not (lo <= t_const <= hi):
         raise PresetRejected(
-            f"参数组 '{name}' 的 P/I 组合导出的时间常数 T = P/I = "
-            f"{format_si(t_const)}s 不合理(应在 {format_si(lo)}s – {hi:g}s)。"
-            f"请检查 p_gain 与 i_gain 的量级。"
+            tr(f"参数组 '{name}' 的 P/I 组合导出的时间常数 T = P/I = "
+               f"{format_si(t_const)}s 不合理(应在 {format_si(lo)}s – {hi:g}s)。"
+               f"请检查 p_gain 与 i_gain 的量级。",
+               f"The time constant T = P/I = {format_si(t_const)}s derived from the P/I "
+               f"combination of preset '{name}' is not reasonable (should be within "
+               f"{format_si(lo)}s - {hi:g}s). Check the magnitudes of p_gain and i_gain.")
         )
 
     note = str(raw.get("note") or "").strip()
@@ -208,18 +226,19 @@ def sanitize(raw: object) -> "list[dict[str, Any]]":
     if isinstance(raw, dict):
         raw = raw.get("presets", [])
     if not isinstance(raw, (list, tuple)):
-        raise PresetRejected("参数组必须是一个列表。")
+        raise PresetRejected(tr("参数组必须是一个列表。", "Presets must be a list."))
     if len(raw) > MAX_PRESETS:
-        raise PresetRejected(f"参数组最多 {MAX_PRESETS} 组。")
+        raise PresetRejected(tr(f"参数组最多 {MAX_PRESETS} 组。", f"At most {MAX_PRESETS} presets."))
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for row in raw:
         if not isinstance(row, dict):
-            raise PresetRejected("每个参数组必须是一个对象。")
+            raise PresetRejected(tr("每个参数组必须是一个对象。", "Each preset must be an object."))
         item = sanitize_preset(row)
         key = item["name"].lower()
         if key in seen:
-            raise PresetRejected(f"参数组名重复: '{item['name']}'。")
+            raise PresetRejected(tr(f"参数组名重复: '{item['name']}'。",
+                                    f"Duplicate preset name: '{item['name']}'."))
         seen.add(key)
         out.append(item)
     return out
@@ -257,10 +276,13 @@ def upsert_preset(raw: "dict[str, Any]", *, overwrite: bool = False) -> "dict[st
                          if p["name"].lower() == key), None)
         if existing is not None and not overwrite:
             raise PresetRejected(
-                f"参数组 '{item['name']}' 已存在。要替换它请显式传 overwrite=true。"
+                tr(f"参数组 '{item['name']}' 已存在。要替换它请显式传 overwrite=true。",
+                   f"Preset '{item['name']}' already exists. To replace it, pass "
+                   "overwrite=true explicitly.")
             )
         if existing is None and len(_presets) >= MAX_PRESETS:
-            raise PresetRejected(f"参数组最多 {MAX_PRESETS} 组,请先删除不用的。")
+            raise PresetRejected(tr(f"参数组最多 {MAX_PRESETS} 组,请先删除不用的。",
+                                    f"At most {MAX_PRESETS} presets; delete unused ones first."))
         if existing is None:
             _presets.append(item)
         else:
@@ -326,7 +348,8 @@ class ResolvedPreset:
         rows = [
             f"p_gain = {format_si(self.p_gain)}m ← {self.sources.get('p_gain', '?')}",
             f"i_gain = {format_si(self.i_gain)}m/s ← {self.sources.get('i_gain', '?')}",
-            f"time_constant_s = {format_si(self.time_constant_s)}s ← 由 P/I 导出",
+            tr(f"time_constant_s = {format_si(self.time_constant_s)}s ← 由 P/I 导出",
+               f"time_constant_s = {format_si(self.time_constant_s)}s <- derived from P/I"),
         ]
         if self.setpoint_a is not None:
             rows.append(
@@ -334,7 +357,8 @@ class ResolvedPreset:
                 f"← {self.sources.get('setpoint_a', '?')}"
             )
         else:
-            rows.append("setpoint_a = 未配置(保持当前值,不下发)")
+            rows.append(tr("setpoint_a = 未配置(保持当前值,不下发)",
+                           "setpoint_a = not configured (keep the current value, not sent)"))
         return rows
 
 
@@ -359,23 +383,28 @@ def _from_profile() -> ResolvedPreset:
     p = _iprof.get_config("approach_p_gain_m", None)
     i = _iprof.get_config("approach_i_gain_m_per_s", None)
     sp = _iprof.get_config("approach_setpoint_a", None)
-    missing = [k for k, v in (("P 增益", p), ("I 增益", i)) if v in (None, "")]
+    missing = [k for k, v in ((tr("P 增益", "P gain"), p), (tr("I 增益", "I gain"), i)) if v in (None, "")]
     if missing:
         # Fail closed and say where to fix it. Silently doing nothing on an
         # explicit "apply the approach parameters" is a false success.
         raise PresetRejected(
-            f"进针参数组尚未配置({', '.join(missing)} 为空)。"
-            "请在「设置 → 仪器档案 → 进针参数」里填写 —— 这组数只由用户输入,"
-            "不经模型。"
+            tr(f"进针参数组尚未配置({', '.join(missing)} 为空)。"
+               "请在「设置 → 仪器档案 → 进针参数」里填写 —— 这组数只由用户输入,"
+               "不经模型。",
+               f"The approach preset is not configured yet ({', '.join(missing)} empty). "
+               "Fill it in under 'Settings -> Instrument profile -> Approach parameters' "
+               "-- these numbers are entered by the user only, never by the model.")
         )
     return ResolvedPreset(
         name=PRESET_APPROACH,
         p_gain=float(p), i_gain=float(i),
         setpoint_a=(float(sp) if sp not in (None, "") else None),
         sources={
-            "p_gain": "仪器档案 approach_p_gain_m",
-            "i_gain": "仪器档案 approach_i_gain_m_per_s",
-            "setpoint_a": "仪器档案 approach_setpoint_a",
+            "p_gain": tr("仪器档案 approach_p_gain_m", "instrument profile approach_p_gain_m"),
+            "i_gain": tr("仪器档案 approach_i_gain_m_per_s",
+                         "instrument profile approach_i_gain_m_per_s"),
+            "setpoint_a": tr("仪器档案 approach_setpoint_a",
+                             "instrument profile approach_setpoint_a"),
         },
     )
 
@@ -385,24 +414,30 @@ def _from_tier(tier: "dict[str, Any]", label: str) -> ResolvedPreset:
     t = tier.get("time_constant_s")
     if p in (None, "") or t in (None, ""):
         raise PresetRejected(
-            f"扫描档位 '{tier.get('name', label)}' 没有配置 P 增益/时间常数。"
-            "请在「设置 → 扫描档位表」里补上,或改用别的参数组。"
+            tr(f"扫描档位 '{tier.get('name', label)}' 没有配置 P 增益/时间常数。"
+               "请在「设置 → 扫描档位表」里补上,或改用别的参数组。",
+               f"Scan tier '{tier.get('name', label)}' has no P gain / time constant "
+               "configured. Add it under 'Settings -> Scan tier table', or use a different "
+               "preset.")
         )
     p = float(p)
     t = float(t)
     if t <= 0:
         raise PresetRejected(
-            f"扫描档位 '{tier.get('name', label)}' 的时间常数为 0,无法导出 I = P/T。"
+            tr(f"扫描档位 '{tier.get('name', label)}' 的时间常数为 0,无法导出 I = P/T。",
+               f"The time constant of scan tier '{tier.get('name', label)}' is 0, so "
+               "I = P/T cannot be derived.")
         )
     src = (SOURCE_TIER_OPERATOR if tier.get("source") == "operator"
            else SOURCE_TIER_FACTORY)
-    origin = f"扫描档位表 '{tier.get('name', label)}'({src})"
+    origin = tr(f"扫描档位表 '{tier.get('name', label)}'({src})",
+                f"scan tier table '{tier.get('name', label)}' ({src})")
     sp = tier.get("setpoint_a")
     return ResolvedPreset(
         name=str(tier.get("name", label)),
         p_gain=p, i_gain=p / t,
         setpoint_a=(float(sp) if sp not in (None, "") else None),
-        sources={"p_gain": origin, "i_gain": f"{origin},I = P/T 导出",
+        sources={"p_gain": origin, "i_gain": tr(f"{origin},I = P/T 导出", f"{origin}, I = P/T derived"),
                  "setpoint_a": origin},
     )
 
@@ -443,15 +478,20 @@ def resolve(name: str, *, context=None) -> ResolvedPreset:
         size = _current_frame_size_m(context)
         if size is None:
             raise PresetRejected(
-                "读不到当前扫描帧的尺寸,无法确定该用哪一档扫图参数。"
-                "请直接指定档名(见 ListZCtrlPresets),或先设置扫描范围。"
+                tr("读不到当前扫描帧的尺寸,无法确定该用哪一档扫图参数。"
+                   "请直接指定档名(见 ListZCtrlPresets),或先设置扫描范围。",
+                   "Cannot read the size of the current scan frame, so cannot decide which "
+                   "scan preset to use. Specify a tier name directly (see "
+                   "ListZCtrlPresets), or set the scan range first.")
             )
         tier = scan_policy.get_tier_for_size(size)
         if not tier:
-            raise PresetRejected(f"扫描档位表里没有匹配 {format_si(size)}m 的档。")
+            raise PresetRejected(tr(f"扫描档位表里没有匹配 {format_si(size)}m 的档。",
+                                    f"No tier in the scan tier table matches {format_si(size)}m."))
         res = _from_tier(tier, PRESET_SCAN)
         res.notes.append(
-            f"'scan' 按当前帧宽 {format_si(size)}m 选中档位 '{res.name}'"
+            tr(f"'scan' 按当前帧宽 {format_si(size)}m 选中档位 '{res.name}'",
+               f"'scan' picked tier '{res.name}' for the current frame width {format_si(size)}m")
         )
         return res
 
@@ -468,7 +508,7 @@ def resolve(name: str, *, context=None) -> ResolvedPreset:
             i = parse_si(item["i_gain"], what="i_gain")
             sp = (parse_si(item["setpoint_a"], what="setpoint_a")
                   if item.get("setpoint_a") else None)
-            origin = f"自定义参数组 '{item['name']}'"
+            origin = tr(f"自定义参数组 '{item['name']}'", f"custom preset '{item['name']}'")
             return ResolvedPreset(
                 name=item["name"], p_gain=p, i_gain=i, setpoint_a=sp,
                 sources={"p_gain": origin, "i_gain": origin,
@@ -482,9 +522,11 @@ def resolve(name: str, *, context=None) -> ResolvedPreset:
 def _unknown_message(wanted: str) -> str:
     names = available_names()
     return (
-        f"没有名为 '{wanted}' 的参数组。当前可用: "
+        tr(f"没有名为 '{wanted}' 的参数组。当前可用: ",
+           f"No preset named '{wanted}'. Currently available: ")
         + ", ".join(f"'{n}'" for n in names)
-        + "。(用 ListZCtrlPresets 查看每一组的具体数值。)"
+        + tr("。(用 ListZCtrlPresets 查看每一组的具体数值。)",
+             ". (Use ListZCtrlPresets to see the values of each preset.)")
     )
 
 

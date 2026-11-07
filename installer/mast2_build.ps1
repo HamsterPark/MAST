@@ -8,28 +8,40 @@
       1. (可选) 检测 Inno Setup 6，缺失则下载安装
       2. 清理 build\ dist\MAST\
       3. PyInstaller --onedir 打包（用 v2 venv .venv-v2-py313）
-      4. 清掉 dist 里的开发者 API key 文件
+      4. 清掉 dist 里的开发者 API key 文件；api key\ 里还剩任何文件就中止
+         4.8 拷入客户端集成（Claude Code 插件、Codex 配置工具、外部 agent 文档）
       5. 生成两份产物：
          - dist\MAST-v<version>-windows-x64.zip          (绿色版)
          - dist\MAST-Setup-v<version>-windows-x64.exe    (Inno Setup 安装包)
 
-    用法（在 repo 根目录）：
-      .\installer\mast2_build.ps1
-      .\installer\mast2_build.ps1 -SkipInstaller    # 只生成 zip
-      .\installer\mast2_build.ps1 -SkipPyInstaller  # 复用现有 dist\MAST\
-      .\installer\mast2_build.ps1 -SkipFrontend     # 不重建前端（自证 dist 最新）
-      .\installer\mast2_build.ps1 -Version 2.0.0    # 指定版本号
+    用法（在 repo 根目录；-Version 必填）：
+      .\installer\mast2_build.ps1 -Version 7.0.0
+      .\installer\mast2_build.ps1 -Version 7.0.0 -SkipInstaller    # 只生成 zip
+      .\installer\mast2_build.ps1 -Version 7.0.0 -SkipPyInstaller  # 复用现有 dist\MAST\（版本号须与它一致）
+      .\installer\mast2_build.ps1 -Version 7.0.0 -SkipFrontend     # 不重建前端（自证 dist 最新）
+      .\installer\mast2_build.ps1 -Version 7.0.0 -IncludeLiteratureIndex -IncludeVisionModels  # 带上大体积可选资产
 #>
 
 param(
-    # 缺省值必须跟着当前发布线走。它一度停在 "2.0.0"，而发布线已经到 6.x ——
-    # 忘了传 -Version 就会打出一个版本号倒退好几个大版本的包，而包本身构建成功、
+    # 必填，不给缺省值。缺省值只会过期：它停在 "2.0.0" 时发布线已经到 6.x，后来又停在
+    # "6.4.0" 而发布线已经过了 6.5 —— 忘了传 -Version 就打出一个版本号倒退的包，构建成功、
     # 没有任何告警，要到客户端比对更新清单时才暴露成「这个更新装不上」。
-    [string]$Version = "6.4.0",
+    # 也不从 _buildinfo.py 取：那是**上一次构建**写下的版本号（而且被 gitignore，干净检出里
+    # 根本没有），拿它当缺省 = 两个不同的包挂同一个版本号。漏传时 PowerShell 当场询问，
+    # 非交互运行直接失败。
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$')]
+    [string]$Version,
     [switch]$SkipPyInstaller,
     [switch]$SkipInstaller,
     [switch]$SkipFrontend,
-    [switch]$KeepDevKeys
+    [switch]$KeepDevKeys,
+    # 默认不打包两类大体积可选资产；需要时显式开启。
+    #   -IncludeLiteratureIndex  文献语义索引（MASTv2\artifacts\literature_index，约 280 MB）
+    #   -IncludeVisionModels     VIGIL 视觉模型 + 质量评分器 + DINOv3 主干缓存
+    # 不含时文献库与视觉功能优雅降级（视觉模型另受 legacy_features_enabled 控制）。
+    [switch]$IncludeLiteratureIndex,
+    [switch]$IncludeVisionModels
 )
 
 $ErrorActionPreference = "Stop"
@@ -52,6 +64,83 @@ function Find-Iscc {
         if ($p -and (Test-Path $p)) { return $p }
     }
     return $null
+}
+
+# 下面两个步骤写成函数，是为了让 tests/v2/unit/test_installer_7_0.py 能把它们从这份脚本里
+# 原样取出来、对着临时目录真跑一遍（整份脚本在没有 PyInstaller 的机器上跑不起来）。
+
+# Step 4.8：客户端集成拷进 dist。目录整棵拷，跳过 __pycache__ / .pytest_cache /
+# .mast-fetch 和 .pyc。返回拷完之后 dist 里**仍然缺**的必需文件（相对路径）；空 = 齐了。
+function Copy-ClientIntegrations([string]$RepoRoot, [string]$DistRoot) {
+    # 每一项在 repo 和安装目录里的相对位置相同。
+    $items = @(
+        ".claude-plugin\marketplace.json",
+        "integrations\claude-code\.claude-plugin",
+        "integrations\claude-code\.mcp.json",
+        "integrations\claude-code\server",
+        "integrations\claude-code\skills",
+        "integrations\claude-code\README.md",
+        "integrations\claude-code\README.zh.md",
+        "integrations\codex",
+        "integrations\setup_clients.py",
+        "docs\external"
+    )
+    # 少一个就让构建失败：市场清单、插件清单与 MCP 配置、桥的入口、操作规则、安装器 [Run]
+    # 要调的脚本、写进 Codex 工作区的规则、外部文档。核对的是拷完之后的 dist，不是源目录。
+    $required = @(
+        ".claude-plugin\marketplace.json",
+        "integrations\claude-code\.claude-plugin\plugin.json",
+        "integrations\claude-code\.mcp.json",
+        "integrations\claude-code\server\run_server.py",
+        "integrations\claude-code\server\mast_mcp\tools.py",
+        "integrations\claude-code\skills\mast-operator\SKILL.md",
+        "integrations\codex\AGENTS.md",
+        "integrations\setup_clients.py",
+        "docs\external\en\README.md",
+        "docs\external\zh\README.md"
+    )
+    # 先清掉上一次留下的：-SkipPyInstaller 复用旧 dist\MAST 时，旧版桥的文件不能混进新包。
+    foreach ($old in @("integrations", ".claude-plugin", "docs\external")) {
+        $p = Join-Path $DistRoot $old
+        if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force }
+    }
+    $n = 0
+    foreach ($rel in $items) {
+        $src = Join-Path $RepoRoot $rel
+        $dst = Join-Path $DistRoot $rel
+        if (-not (Test-Path -LiteralPath $src)) { continue }
+        if (Test-Path -LiteralPath $src -PathType Container) {
+            $base = (Get-Item -LiteralPath $src).FullName.TrimEnd('\')
+            $files = @(Get-ChildItem -LiteralPath $base -Recurse -File -Force | Where-Object {
+                $_.FullName -notmatch '\\(__pycache__|\.pytest_cache|\.mast-fetch)\\' -and
+                $_.Extension -notin @('.pyc', '.pyo')
+            })
+            foreach ($f in $files) {
+                $to = Join-Path $dst $f.FullName.Substring($base.Length + 1)
+                New-Item -ItemType Directory -Force -Path (Split-Path -Parent $to) | Out-Null
+                Copy-Item -LiteralPath $f.FullName -Destination $to -Force
+                $n++
+            }
+        } else {
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
+            Copy-Item -LiteralPath $src -Destination $dst -Force
+            $n++
+        }
+    }
+    Write-Host "  拷入 $n 个文件"
+    return @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $DistRoot $_)) })
+}
+
+# Step 4：.env 清理之后 api key\ 里还剩的文件。-KeepDevKeys 只放行顶层的 .env（那个开关
+# 的本意），证书、私钥照样算。不吞 Get-ChildItem 的错误：读不全就让构建失败，而不是当成空。
+function Get-ApiKeyStowaways([string]$KeyDir, [switch]$AllowDevEnv) {
+    if (-not (Test-Path -LiteralPath $KeyDir)) { return @() }
+    $root = (Get-Item -LiteralPath $KeyDir).FullName.TrimEnd('\')
+    $files = @(Get-ChildItem -LiteralPath $root -Recurse -File -Force)
+    if ($AllowDevEnv) {
+        $files = @($files | Where-Object { -not ($_.Extension -eq '.env' -and $_.DirectoryName -eq $root) })
+    }
+    return $files
 }
 
 # ─── Pre-flight ──────────────────────────────────────────────────────
@@ -301,6 +390,21 @@ if (-not $SkipPyInstaller) {
         Write-Error "dist\MAST\MAST.exe 不存在；不能跳过构建。"
         exit 1
     }
+    # 安装包的版本号必须是里面那棵树的版本号。-SkipPyInstaller 不重写 _buildinfo.py，
+    # 这里的 -Version 只决定安装包 / zip 的文件名和 Inno 的 AppVersion —— 传错了就是一个
+    # 名字写着 7.0.1、里面跑着 7.0.0 的安装包。用树自己的版本戳（Step 2.5 写的那行）核一遍。
+    $treeStamp = "dist\MAST\_internal\docs\release_notes_current.txt"
+    $treeVer = $null
+    if (Test-Path $treeStamp) {
+        $line = Get-Content -LiteralPath $treeStamp -TotalCount 1
+        if ($line -match '^MAST v(\S+)') { $treeVer = $Matches[1] }
+    }
+    if (-not $treeVer) {
+        Write-Warning "  dist\MAST 里没有版本戳 ($treeStamp)，无法核对 -Version $Version 是否就是这棵树的版本"
+    } elseif ($treeVer -ne $Version) {
+        Write-Error "-Version $Version 与 dist\MAST 的版本戳 v$treeVer 不一致。-SkipPyInstaller 不会重新构建，安装包会挂着错的版本号发出去。请传 -Version $treeVer，或去掉 -SkipPyInstaller 重新构建。"
+        exit 1
+    }
 }
 
 # ─── Step 4: clean dev keys ──────────────────────────────────────────
@@ -318,6 +422,33 @@ if (Test-Path $keyDir) {
     }
 }
 
+# .env 删完之后，api key\ 里**剩下的任何文件**都不许随包发出去。上面那句只认 *.env，
+# 而这个目录里还会有 LAN 证书和它的**私钥**（lan_cert.pem / lan_key.pem，启动器在 LAN
+# 模式下自动生成）、按机器钉的 update_server_ca.pem。
+#
+# 它们怎么进来：PyInstaller 不往这里放任何东西，但在 dist\MAST 里直接跑一次 MAST.exe
+# （构建手册第 7 步的冒烟测试就是这么跑的）会把 dist\MAST 当成数据根，建出 api key\；
+# 冒烟时开过 LAN 模式就有了证书和私钥，填过 key 就有了 .env。之后再用 -SkipPyInstaller
+# 复用这棵树出安装包，它们就随 [Files] 的通配装到每一台机器上 —— 每台仪器电脑共用同一把
+# TLS 私钥。
+#
+# 选「中止」而不是「全删」：删的是构建产物里的文件，但路径一旦解析错就是删真凭据；
+# 中止只会多一次红构建，并把要删什么、怎么删写清楚。与 Step 5.9 管覆写目录同一个做法。
+$keyStowaways = @(Get-ApiKeyStowaways -KeyDir (Join-Path $RepoRoot $keyDir) -AllowDevEnv:$KeepDevKeys)
+if ($keyStowaways.Count -gt 0) {
+    Write-Host ""
+    Write-Error @"
+dist\MAST\api key\ 里还有 $($keyStowaways.Count) 个文件:
+$($keyStowaways.ForEach({ "  " + $_.FullName }) -join "`n")
+
+api key\ 是操作员的凭据目录 (LAN 证书私钥、LAN 口令、更新令牌等)。这些文件会随安装包和
+绿色版 zip 装到每一台机器上。它们通常来自在 dist\MAST 里直接跑过的冒烟测试。
+删掉它们再重跑构建:
+    Remove-Item -Recurse -Force "$(Join-Path $RepoRoot $keyDir)\*"
+"@
+    exit 1
+}
+
 # ─── Step 4.5: bundle the literature semantic index INTO the package ──
 # The ~205 MB index (vectors.npy + metadata.parquet + classified.parquet) is
 # gitignored and NOT in the PYZ; copy it into dist\MAST\MASTv2\artifacts so the
@@ -327,24 +458,28 @@ if (Test-Path $keyDir) {
 # a FRESH install has semantic literature search out of the box, no out-of-band
 # provisioning step.
 
-Write-Step "打包文献语义索引到 dist\MAST\MASTv2\artifacts\literature_index"
-$idxSrc = Join-Path $RepoRoot "MASTv2\artifacts\literature_index"
-$idxDst = Join-Path $RepoRoot "dist\MAST\MASTv2\artifacts\literature_index"
-if (Test-Path (Join-Path $idxSrc "vectors.npy")) {
-    New-Item -ItemType Directory -Force -Path $idxDst | Out-Null
-    $idxTotal = 0
-    foreach ($f in @("vectors.npy", "metadata.parquet", "classified.parquet", "abstracts.parquet", "manifest.json")) {
-        $s = Join-Path $idxSrc $f
-        if (Test-Path $s) {
-            Copy-Item $s (Join-Path $idxDst $f) -Force
-            $sz = [math]::Round((Get-Item $s).Length / 1MB, 1)
-            $idxTotal += $sz
-            Write-Host "  + $f ($sz MB)"
+if ($IncludeLiteratureIndex) {
+    Write-Step "打包文献语义索引到 dist\MAST\MASTv2\artifacts\literature_index"
+    $idxSrc = Join-Path $RepoRoot "MASTv2\artifacts\literature_index"
+    $idxDst = Join-Path $RepoRoot "dist\MAST\MASTv2\artifacts\literature_index"
+    if (Test-Path (Join-Path $idxSrc "vectors.npy")) {
+        New-Item -ItemType Directory -Force -Path $idxDst | Out-Null
+        $idxTotal = 0
+        foreach ($f in @("vectors.npy", "metadata.parquet", "classified.parquet", "abstracts.parquet", "manifest.json")) {
+            $s = Join-Path $idxSrc $f
+            if (Test-Path $s) {
+                Copy-Item $s (Join-Path $idxDst $f) -Force
+                $sz = [math]::Round((Get-Item $s).Length / 1MB, 1)
+                $idxTotal += $sz
+                Write-Host "  + $f ($sz MB)"
+            }
         }
+        Write-Host "  文献索引已打包（$idxTotal MB；全新安装即自带跨语言语义检索）"
+    } else {
+        Write-Warning "  未找到 $idxSrc\vectors.npy — 安装包将不含文献索引（搜索会优雅降级，需后续 provision）"
     }
-    Write-Host "  文献索引已打包（$idxTotal MB；全新安装即自带跨语言语义检索）"
 } else {
-    Write-Warning "  未找到 $idxSrc\vectors.npy — 安装包将不含文献索引（搜索会优雅降级，需后续 provision）"
+    Write-Step "跳过文献语义索引（默认不打包；需要时加 -IncludeLiteratureIndex）"
 }
 
 # ─── Step 4.6: bundle the VIGIL v2.5 vision model (ckpt + DINOv3 backbone) ──
@@ -360,39 +495,43 @@ if (Test-Path (Join-Path $idxSrc "vectors.npy")) {
 # NOTE: v2.5 uses vits16 (small, ~165 MB) — the old M12 L/16 cache (~1.2 GB) is
 # no longer bundled (huge size saving).
 
-Write-Step "打包 VIGIL v2.5 视觉模型 (ckpt + DINOv3-vits16 主干缓存) 到 dist\MAST\MASTv2\artifacts"
-$artSrc = Join-Path $RepoRoot "MASTv2\artifacts"
-$artDst = Join-Path $RepoRoot "dist\MAST\MASTv2\artifacts"
-$v25Ckpt = Join-Path $artSrc "mast_vision_v25.pt"
-$bbSrc = Join-Path $artSrc "vision_backbone"
-if (Test-Path $v25Ckpt) {
-    New-Item -ItemType Directory -Force -Path $artDst | Out-Null
-    Copy-Item $v25Ckpt (Join-Path $artDst "mast_vision_v25.pt") -Force
-    $ckptMB = [math]::Round((Get-Item $v25Ckpt).Length / 1MB, 1)
-    Write-Host "  + mast_vision_v25.pt ($ckptMB MB)"
-    # stm_quality_v1 — the learned real-data quality scorer (Agent-B, 2026-07-23):
-    # a tiny (~23 KB) StandardScaler+Ridge head that REUSES the same vision_backbone
-    # below. Frozen app finds it at <exe-dir>\MASTv2\artifacts (quality_model._resolve).
-    # Absent → VisionModule.assess_quality / assess(use_learned) degrade gracefully.
-    $qmSrc = Join-Path $artSrc "stm_quality_v1_dino.joblib"
-    if (Test-Path $qmSrc) {
-        Copy-Item $qmSrc (Join-Path $artDst "stm_quality_v1_dino.joblib") -Force
-        Write-Host "  + stm_quality_v1_dino.joblib (学习质量评分器 Spearman 0.68, 复用同一主干)"
+if ($IncludeVisionModels) {
+    Write-Step "打包 VIGIL v2.5 视觉模型 (ckpt + DINOv3-vits16 主干缓存) 到 dist\MAST\MASTv2\artifacts"
+    $artSrc = Join-Path $RepoRoot "MASTv2\artifacts"
+    $artDst = Join-Path $RepoRoot "dist\MAST\MASTv2\artifacts"
+    $v25Ckpt = Join-Path $artSrc "mast_vision_v25.pt"
+    $bbSrc = Join-Path $artSrc "vision_backbone"
+    if (Test-Path $v25Ckpt) {
+        New-Item -ItemType Directory -Force -Path $artDst | Out-Null
+        Copy-Item $v25Ckpt (Join-Path $artDst "mast_vision_v25.pt") -Force
+        $ckptMB = [math]::Round((Get-Item $v25Ckpt).Length / 1MB, 1)
+        Write-Host "  + mast_vision_v25.pt ($ckptMB MB)"
+        # stm_quality_v1 — the learned real-data quality scorer:
+        # a tiny (~23 KB) StandardScaler+Ridge head that REUSES the same vision_backbone
+        # below. Frozen app finds it at <exe-dir>\MASTv2\artifacts (quality_model._resolve).
+        # Absent → VisionModule.assess_quality / assess(use_learned) degrade gracefully.
+        $qmSrc = Join-Path $artSrc "stm_quality_v1_dino.joblib"
+        if (Test-Path $qmSrc) {
+            Copy-Item $qmSrc (Join-Path $artDst "stm_quality_v1_dino.joblib") -Force
+            Write-Host "  + stm_quality_v1_dino.joblib (学习质量评分器 Spearman 0.68, 复用同一主干)"
+        } else {
+            Write-Warning "  未找到 $qmSrc — stm_quality_v1 学习评分器缺失(assess_quality 优雅降级)"
+        }
+        if (Test-Path (Join-Path $bbSrc "hub")) {
+            $bbDst = Join-Path $artDst "vision_backbone"
+            if (Test-Path $bbDst) { Remove-Item -Recurse -Force $bbDst }
+            Copy-Item $bbSrc $bbDst -Recurse -Force
+            $bbMB = [math]::Round(((Get-ChildItem -Recurse -File $bbSrc | Measure-Object -Property Length -Sum).Sum) / 1MB, 0)
+            Write-Host "  + vision_backbone\ ($bbMB MB, DINOv3-ViT-S/16, 离线)"
+            Write-Host "  VIGIL v2.5 视觉模型已打包（6 头 q/c/t/n/s/k，全新安装即权威视觉推理，全离线）"
+        } else {
+            Write-Warning "  未找到 $bbSrc\hub — 主干缺失;视觉将 fail-safe 到 legacy/mock"
+        }
     } else {
-        Write-Warning "  未找到 $qmSrc — stm_quality_v1 学习评分器缺失(assess_quality 优雅降级)"
-    }
-    if (Test-Path (Join-Path $bbSrc "hub")) {
-        $bbDst = Join-Path $artDst "vision_backbone"
-        if (Test-Path $bbDst) { Remove-Item -Recurse -Force $bbDst }
-        Copy-Item $bbSrc $bbDst -Recurse -Force
-        $bbMB = [math]::Round(((Get-ChildItem -Recurse -File $bbSrc | Measure-Object -Property Length -Sum).Sum) / 1MB, 0)
-        Write-Host "  + vision_backbone\ ($bbMB MB, DINOv3-ViT-S/16, 离线)"
-        Write-Host "  VIGIL v2.5 视觉模型已打包（6 头 q/c/t/n/s/k，全新安装即权威视觉推理，全离线）"
-    } else {
-        Write-Warning "  未找到 $bbSrc\hub — 主干缺失;视觉将 fail-safe 到 legacy/mock"
+        Write-Warning "  未找到 $v25Ckpt — 安装包不含 VIGIL v2.5 视觉模型（视觉 fail-safe 到 legacy/mock）"
     }
 } else {
-    Write-Warning "  未找到 $v25Ckpt — 安装包不含 VIGIL v2.5 视觉模型（视觉 fail-safe 到 legacy/mock）"
+    Write-Step "跳过视觉模型（默认不打包；需要时加 -IncludeVisionModels）"
 }
 
 # ─── Step 4.7: bundle the DP analysis runtime (embeddable CPython 3.13) ──
@@ -446,6 +585,26 @@ if (Test-Path $rtExe) {
 } else {
     Write-Warning "  未找到 $rtExe — 安装包将不含 DP 分析运行时。py_run 会如实报告「查了哪些位置都没有」并拒绝执行（不会静默降级）。要构建：.venv-v2-py313\Scripts\python.exe MASTv2\scripts\build_pyruntime.py"
 }
+
+# ─── Step 4.8: 客户端集成（Claude Code 插件 / Codex 配置工具 / 外部 agent 文档）────
+# 7.0 起外部 agent（Codex 为主、Claude Code 为辅）是正式的操作入口，而 6.5.0 的安装包里
+# 一个集成文件都没有 —— 组员得另找一份源码检出。现在随安装目录分发：
+#   <安装目录>\.claude-plugin\marketplace.json   /plugin marketplace add <安装目录>
+#   <安装目录>\integrations\claude-code\         插件本体（MCP 桥 + skills + .mcp.json）
+#   <安装目录>\integrations\codex\               AGENTS.md / README / 示例配置
+#   <安装目录>\integrations\setup_clients.py      安装器 [Run] 用它改插件的 python；
+#                                                 Codex 用户用它写 config.toml
+#   <安装目录>\docs\external\                     外部 agent 文档
+# 都在 [Files] 的 dist\MAST\* 通配之内；升级时由 [InstallDelete] 先清掉旧的。
+# 缺必需文件就让构建失败：一个带着空插件的安装包，要到组员第一次连仪器才会暴露。
+Write-Step "打包客户端集成到 dist\MAST (Claude Code 插件 / Codex 配置工具 / 外部 agent 文档)"
+$ciMissing = @(Copy-ClientIntegrations -RepoRoot $RepoRoot -DistRoot (Join-Path $RepoRoot "dist\MAST"))
+if ($ciMissing.Count -gt 0) {
+    Write-Error ("客户端集成缺必需文件 (拷完之后 dist\MAST 里没有):`n  " + ($ciMissing -join "`n  ") +
+                 "`n在 repo 里补齐 (git status 看看是否没检出)，再重跑构建。")
+    exit 1
+}
+Write-Host "  客户端集成已打包 (安装器会把插件的 python 指向安装目录里的随包运行时)"
 
 # ─── Step 5: zip ─────────────────────────────────────────────────────
 

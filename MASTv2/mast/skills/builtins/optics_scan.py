@@ -14,6 +14,13 @@ raster scan (replaces ``2D stage.vi`` / ``Stage control.vi``).
 Motion goes through the instruments registry; Nanonis through
 ``context.safe_call``. The per-point read/average/trigger machinery is shared
 with PumpProbeScan via :mod:`mast.skills.builtins.optics_acquire`.
+
+Live view (contract §7): every acquired point is also published to
+LiveHub — a 1D scan as an ``xy`` stream, a 2D raster as ``map2d`` (``ix`` is the
+physical column, so a serpentine row lands where it belongs), stream id
+``local/optics_scan/<run_id>``; AcquireSignalPoint feeds one ``scalar`` stream,
+``local/signal_point``. Publishing never fails a scan and changes nothing on disk.
+(``local/`` = streams this computer — the hub — produces, contract §7.)
 """
 
 from __future__ import annotations
@@ -33,20 +40,58 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.instruments.base import InstrumentError, InstrumentUnavailable
 from mast.instruments.registry import get_instrument_registry
 from mast.skills.base import BaseSkill
-from mast.skills.builtins.optics_acquire import PointAcquirer, parse_indices
+from mast.skills.builtins.optics_acquire import (
+    DEFAULT_TRIGGER_LINE,
+    DEFAULT_TRIGGER_PORT,
+    PointAcquirer,
+    parse_indices,
+    value_units,
+)
+from mast.skills.builtins.optics_common import (
+    LiveStream,
+    abort_probe,
+    new_run_id,
+    stage_tip_refusal,
+)
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["AcquireSignalPoint", "OpticalStageScan"]
+
+#: the one long-lived scalar stream every AcquireSignalPoint call appends to
+SIGNAL_POINT_STREAM = "local/signal_point"
 
 
 def _linspace(start: float, stop: float, n: int) -> list[float]:
     if n <= 1:
         return [start]
     return [start + (stop - start) * i / (n - 1) for i in range(n)]
+
+
+def live_values(row: dict, columns: list[str]) -> dict:
+    """The mean-value columns of one acquired row (``*_std`` stays in the CSV)."""
+    out = {}
+    for col in columns:
+        if col.endswith("_std"):
+            continue
+        v = row.get(col)
+        if isinstance(v, (int, float)):
+            out[col] = float(v)
+    return out
+
+
+def _signal_point_stream(columns: list[str]) -> LiveStream:
+    """Declared on every call: declare is idempotent (frames and seq are kept),
+    and a stream object cached across calls would keep pointing at whichever
+    LiveHub existed when it was made."""
+    return LiveStream(SIGNAL_POINT_STREAM, "scalar", title=tr("单点信号（AcquireSignalPoint）",
+                                                              "Single-point signal (AcquireSignalPoint)"),
+                      source="AcquireSignalPoint", y_label="Signal",
+                      meta={"units": value_units(columns)})
 
 
 # ── atomic: measure at the current point ──────────────────────────────────
@@ -62,32 +107,37 @@ class AcquireSignalPoint(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "在**当前**光学位置上读取 Nanonis 信号并做软件平均：隧道电流和／或任意信号槽位（0-127）"
+                tr("在**当前**光学位置上读取 Nanonis 信号并做软件平均：隧道电流和／或任意信号槽位（0-127）"
                 "，每一路各采 `samples` 次。这是最小粒度的「就在这儿测一下」—— 把它和 OpticalStageMove / DelayLineMoveTo 以及 PulseDigitalLine 搭起来可以手工拼出一次扫描，"
-                "或者直接用 OpticalStageScan 跑整幅光栅。纯读；不移动、也不触发。"
+                "或者直接用 OpticalStageScan 跑整幅光栅。纯读；不移动、也不触发。",
+                   "Read Nanonis signals at the **current** optical position and average them in software: tunneling current and/or any signal slots (0-127), "
+                   "each acquired `samples` times. This is the finest-grained 'just measure here': combine it with OpticalStageMove / DelayLineMoveTo and PulseDigitalLine to assemble a scan by hand, "
+                   "or use OpticalStageScan to run a whole raster. Read-only; does not move or trigger anything.")
             ),
             parameters=[
                 ParameterSpec(
                     name="read_current", type="bool",
-                    description="采集隧道电流（Current_Get）",
+                    description=tr("采集隧道电流（Current_Get）", "Acquire the tunneling current (Current_Get)"),
                     required=False, default=True,
                 ),
                 ParameterSpec(
                     name="signal_indices", type="str",
                     description=(
-                        "要读取并平均的 Nanonis 信号槽位，逗号分隔（例如 '0,14'）；范围 0-127。"
-                        "每加一路就多出 sig<idx>_mean/std。"
+                        tr("要读取并平均的 Nanonis 信号槽位，逗号分隔（例如 '0,14'）；范围 0-127。"
+                        "每加一路就多出 sig<idx>_mean/std。",
+                           "Nanonis signal slots to read and average, comma-separated (e.g. '0,14'); range 0-127. "
+                           "Each one adds sig<idx>_mean/std.")
                     ),
                     required=False, default="",
                 ),
                 ParameterSpec(
                     name="samples", type="int",
-                    description="每一路信号平均多少次读数",
+                    description=tr("每一路信号平均多少次读数", "How many readings to average per signal"),
                     required=False, default=10, min_value=1, max_value=10000,
                 ),
                 ParameterSpec(
                     name="sample_interval_s", type="float",
-                    description="两次读数之间的间隔",
+                    description=tr("两次读数之间的间隔", "Interval between two readings"),
                     unit="s", required=False, default=0.01,
                     min_value=0.0, max_value=1.0,
                 ),
@@ -120,6 +170,8 @@ class AcquireSignalPoint(BaseSkill):
                 nanonis_calls=nanonis_calls,
             )
         row["n_samples"] = acq.samples
+        _signal_point_stream(acq.value_columns).publish(
+            {"values": live_values(row, acq.value_columns)})
         bits = []
         if read_current and "current_a" in row:
             bits.append(f"I={row['current_a']:.4g} A")
@@ -145,80 +197,96 @@ class OpticalStageScan(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "用光栅方式扫一台光学台，并把一路 Nanonis 信号在其上成图。快轴（device1/axis1）"
+                tr("用光栅方式扫一台光学台，并把一路 Nanonis 信号在其上成图。快轴（device1/axis1）"
                 "从 start1→stop1 走 points1 步；再给一条第二（慢）轴就得到一张 2D 图。"
                 "每一点上它先稳定、可选地在触发线上打一个脉冲，然后对隧道电流和／或 signal_indices 取平均。"
                 "CSV 加一张 1D 折线／2D 热图 PNG 写到 artifacts/optics_scan/。"
-                "它涵盖 2D 台的 XY 成图、一维 Thorlabs 扫描，或者两台台子组成的网格。软行程限位由驱动强制执行。"
+                "它涵盖 2D 台的 XY 成图、一维 Thorlabs 扫描，或者两台台子组成的网格。软行程限位由驱动强制执行。",
+                   "Raster-scan an optical stage and map one Nanonis signal over it. The fast axis (device1/axis1) "
+                   "goes from start1 to stop1 in points1 steps; adding a second (slow) axis gives a 2D map. "
+                   "At each point it settles, optionally pulses a trigger line, then averages the tunneling current and/or signal_indices. "
+                   "A CSV plus a 1D line / 2D heat-map PNG are written to artifacts/optics_scan/. "
+                   "It covers XY mapping with a 2D stage, a 1D Thorlabs scan, or a grid made of two stages. Soft travel limits are enforced by the driver.")
             ),
             parameters=[
                 # fast (inner) axis — required
                 ParameterSpec(name="device1", type="str", required=True,
-                              description="快轴所在设备的 id（见 ListOpticalDevices）"),
+                              description=tr("快轴所在设备的 id（见 ListOpticalDevices）",
+                                             "Id of the device carrying the fast axis (see ListOpticalDevices)")),
                 ParameterSpec(name="axis1", type="str", required=True,
-                              description="该设备上快轴的轴名"),
+                              description=tr("该设备上快轴的轴名", "Axis name of the fast axis on that device")),
                 ParameterSpec(name="start1", type="float", required=True,
-                              description="快轴起点（原生单位）"),
+                              description=tr("快轴起点（原生单位）", "Fast axis start (native unit)")),
                 ParameterSpec(name="stop1", type="float", required=True,
-                              description="快轴终点（原生单位）"),
+                              description=tr("快轴终点（原生单位）", "Fast axis end (native unit)")),
                 ParameterSpec(name="points1", type="int", required=True,
                               min_value=2, max_value=10000,
-                              description="快轴点数"),
+                              description=tr("快轴点数", "Number of fast axis points")),
                 # slow (outer) axis — optional → 2D
                 ParameterSpec(name="device2", type="str", required=False, default="",
-                              description="慢轴所在设备的 id（'' = 做一维扫描）"),
+                              description=tr("慢轴所在设备的 id（'' = 做一维扫描）",
+                                             "Id of the device carrying the slow axis ('' = do a 1D scan)")),
                 ParameterSpec(name="axis2", type="str", required=False, default="",
-                              description="慢轴的轴名"),
+                              description=tr("慢轴的轴名", "Axis name of the slow axis")),
                 ParameterSpec(name="start2", type="float", required=False, default=0.0,
-                              description="慢轴起点"),
+                              description=tr("慢轴起点", "Slow axis start")),
                 ParameterSpec(name="stop2", type="float", required=False, default=0.0,
-                              description="慢轴终点"),
+                              description=tr("慢轴终点", "Slow axis end")),
                 ParameterSpec(name="points2", type="int", required=False, default=1,
                               min_value=1, max_value=10000,
-                              description="慢轴点数（1 = 1D）"),
+                              description=tr("慢轴点数（1 = 1D）", "Number of slow axis points (1 = 1D)")),
                 # acquisition
                 ParameterSpec(name="read_current", type="bool", required=False,
-                              default=True, description="采集隧道电流"),
+                              default=True, description=tr("采集隧道电流", "Acquire the tunneling current")),
                 ParameterSpec(name="signal_indices", type="str", required=False,
                               default="",
-                              description="要读取并平均的信号槽位（例如 '0,14'）"),
+                              description=tr("要读取并平均的信号槽位（例如 '0,14'）", "Signal slots to read and average (e.g. '0,14')")),
                 ParameterSpec(name="samples_per_point", type="int", required=False,
                               default=10, min_value=1, max_value=1000,
-                              description="每点平均多少次读数"),
+                              description=tr("每点平均多少次读数", "How many readings to average per point")),
                 ParameterSpec(name="sample_interval_s", type="float", required=False,
                               default=0.01, min_value=0.0, max_value=1.0, unit="s",
-                              description="两次读数之间的间隔"),
+                              description=tr("两次读数之间的间隔", "Interval between two readings")),
                 ParameterSpec(name="settle_extra_s", type="float", required=False,
                               default=0.05, min_value=0.0, max_value=10.0, unit="s",
-                              description="到位之后额外驻留的时间"),
+                              description=tr("到位之后额外驻留的时间", "Extra dwell time after reaching position")),
                 ParameterSpec(name="move_timeout_s", type="float", required=False,
                               default=60.0, min_value=0.1, max_value=600.0, unit="s",
-                              description="每次移动的时限"),
+                              description=tr("每次移动的时限", "Time limit per move")),
                 # trigger
                 ParameterSpec(name="trigger_enable", type="bool", required=False,
                               default=False,
-                              description="每一点上在一条 Nanonis 数字线上打脉冲"),
+                              description=tr("每一点上在一条 Nanonis 数字线上打脉冲", "Pulse a Nanonis digital line at every point")),
                 ParameterSpec(name="trigger_port", type="int", required=False,
-                              default=0, min_value=0, max_value=8,
-                              description="触发用的数字端口（0=A…）"),
+                              default=DEFAULT_TRIGGER_PORT, min_value=1, max_value=8,
+                              description=(tr("触发用的数字端口（1=B，2=C…）。Port A（0）被拒绝："
+                                           "PMD4 机器上它是粗动控制器的控制口",
+                                              "Digital port for the trigger (1=B, 2=C...). Port A (0) is refused: "
+                                              "on PMD4 machines it is the control port of the coarse-motion controller"))),
                 ParameterSpec(name="trigger_line", type="int", required=False,
-                              default=1, min_value=1, max_value=8,
-                              description="触发用的数字线 1-8"),
+                              default=DEFAULT_TRIGGER_LINE, min_value=1, max_value=8,
+                              description=tr("触发用的数字线 1-8",
+                                             "Digital line 1-8 for the trigger")),
                 ParameterSpec(name="trigger_width_s", type="float", required=False,
                               default=1e-4, min_value=1e-6, max_value=1.0, unit="s",
-                              description="触发脉冲宽度"),
+                              description=tr("触发脉冲宽度", "Trigger pulse width")),
                 # motion pattern
                 ParameterSpec(name="serpentine", type="bool", required=False,
                               default=True,
-                              description="让快轴蛇形走（每行反向），省掉长距离回扫"),
+                              description=tr("让快轴蛇形走（每行反向），省掉长距离回扫",
+                                             "Snake the fast axis (reverse every row) to save the long flyback")),
                 ParameterSpec(name="return_to_start", type="bool", required=False,
                               default=True,
-                              description="结束后把两条轴都移回起点"),
+                              description=(tr("结束后把两条轴都移回起点；被中止时不回（中止之后不再"
+                                           "发起新的运动），结果里 return_to_start 写明",
+                                              "Move both axes back to the start at the end; not done when aborted (no new "
+                                              "motion is started after an abort); return_to_start in the result says which"))),
                 ParameterSpec(name="dry_run", type="bool", required=False,
                               default=False,
-                              description="**试跑**：把整个网格走一遍并稳定，但什么都不采集、什么都不存盘"),
+                              description=tr("**试跑**：把整个网格走一遍并稳定，但什么都不采集、什么都不存盘",
+                                             "**Dry run**: step through the whole grid and settle, but acquire nothing and save nothing")),
                 ParameterSpec(name="tag", type="str", required=False, default="",
-                              description="附加在输出文件名上的标签"),
+                              description=tr("附加在输出文件名上的标签", "Label appended to the output file name")),
             ],
             estimated_duration_s=120.0,
             composition_level=0,
@@ -327,6 +395,12 @@ class OpticalStageScan(BaseSkill):
             except (InstrumentError, InstrumentUnavailable) as exc:
                 return SkillResult(skill_name="OpticalStageScan", success=False,
                                    error=f"slow axis unavailable: {exc}")
+        # the moved devices' tip_requirement (absent = none = no check), dry runs too:
+        # a dry run moves the stages just the same
+        why, tip_info = stage_tip_refusal(context, [params["device1"], dev2])
+        if why:
+            return SkillResult(skill_name="OpticalStageScan", success=False, error=why,
+                               data={"tip_requirement": tip_info})
 
         p1 = int(params["points1"])
         p2 = int(params.get("points2", 1)) if two_d else 1
@@ -340,8 +414,8 @@ class OpticalStageScan(BaseSkill):
         # per-point acquirer (skipped in dry run)
         trigger = None
         if bool(params.get("trigger_enable", False)) and not dry_run:
-            trigger = (int(params.get("trigger_port", 0)),
-                       int(params.get("trigger_line", 1)),
+            trigger = (int(params.get("trigger_port", DEFAULT_TRIGGER_PORT)),
+                       int(params.get("trigger_line", DEFAULT_TRIGGER_LINE)),
                        float(params.get("trigger_width_s", 1e-4)))
         acq = PointAcquirer(
             context, read_current=read_current, lockin_index=None,
@@ -360,14 +434,42 @@ class OpticalStageScan(BaseSkill):
                     nanonis_calls=nanonis_calls,
                 )
 
+        live: LiveStream | None = None
+        run_id = ""
+        if not dry_run:
+            run_id = new_run_id("scan")
+            u1 = ax1.config.unit
+            if two_d:
+                # LiveHub refuses a zero pixel pitch; a degenerate axis (one point,
+                # or start == stop) gets a nominal 1.0 — only the drawing uses it.
+                d1 = ((grid1[-1] - grid1[0]) / (p1 - 1) if p1 > 1 else 0.0) or 1.0
+                d2 = ((grid2[-1] - grid2[0]) / (p2 - 1) if p2 > 1 else 0.0) or 1.0
+                live = LiveStream(
+                    f"local/optics_scan/{run_id}", "map2d",
+                    title=tr(f"光学台扫描 {params['axis1']}×{axname2}", f"Optical stage scan {params['axis1']}×{axname2}"), source="OpticalStageScan",
+                    x_label=str(params["axis1"]), x_unit=u1, y_label=axname2,
+                    y_unit=ax2.config.unit,
+                    meta={"nx": p1, "ny": p2, "x0": grid1[0], "y0": grid2[0], "dx": d1,
+                          "dy": d2, "x_unit": u1, "y_unit": ax2.config.unit,
+                          "channels": [c for c in acq.value_columns if not c.endswith("_std")],
+                          "units": value_units(acq.value_columns)})
+            else:
+                live = LiveStream(
+                    f"local/optics_scan/{run_id}", "xy",
+                    title=tr(f"光学台扫描 {params['axis1']}", f"Optical stage scan {params['axis1']}"), source="OpticalStageScan",
+                    x_label=str(params["axis1"]), x_unit=u1, y_label="Signal",
+                    meta={"channels": [c for c in acq.value_columns if not c.endswith("_std")],
+                          "units": value_units(acq.value_columns)})
+
         rows: list[dict] = []
         aborted = ""
         idx = 0
+        probe = abort_probe(context)
         t0 = time.monotonic()
         try:
             for oi, y in enumerate(grid2):
                 if two_d and y is not None:
-                    ax2.move_abs(y, wait=True, timeout=move_timeout)
+                    ax2.move_abs(y, wait=True, timeout=move_timeout, check_abort=probe)
                     if settle_extra > 0:
                         time.sleep(settle_extra)
                 # snake the fast axis: reverse on odd rows to skip fly-back
@@ -378,7 +480,8 @@ class OpticalStageScan(BaseSkill):
                     if callable(check_abort) and check_abort():
                         aborted = f"aborted by operator after {len(rows)} points"
                         raise _Abort()
-                    st = ax1.move_abs(grid1[ii], wait=True, timeout=move_timeout)
+                    st = ax1.move_abs(grid1[ii], wait=True, timeout=move_timeout,
+                                      check_abort=probe)
                     if settle_extra > 0:
                         time.sleep(settle_extra)
                     row: dict = {
@@ -389,6 +492,10 @@ class OpticalStageScan(BaseSkill):
                         row["pos2"] = y
                     if not dry_run:
                         row.update(acq.acquire(nanonis_calls))
+                        if live is not None:
+                            vals = live_values(row, acq.value_columns)
+                            live.publish({"ix": ii, "iy": oi, "values": vals} if two_d
+                                         else {"x": st.position, "values": vals})
                     rows.append(row)
                     idx += 1
         except _Abort:
@@ -397,13 +504,22 @@ class OpticalStageScan(BaseSkill):
             aborted = f"{type(exc).__name__}: {exc}"
             logger.warning("optics scan interrupted at point %d: %s", len(rows), aborted)
         finally:
+            if live is not None:
+                live.end()
+            # No new motion once the operator has aborted (contract §10.3): the
+            # stage stays where the stop left it, and the result says so.
+            parked = "not requested"
             if params.get("return_to_start", True):
-                try:
-                    ax1.move_abs(grid1[0], wait=False)
-                    if two_d and grid2 and grid2[0] is not None:
-                        ax2.move_abs(grid2[0], wait=False)
-                except Exception:  # noqa: BLE001
-                    pass
+                if probe is not None and probe():
+                    parked = "skipped: aborted"
+                else:
+                    try:
+                        ax1.move_abs(grid1[0], wait=False)
+                        if two_d and grid2 and grid2[0] is not None:
+                            ax2.move_abs(grid2[0], wait=False)
+                        parked = "sent"
+                    except Exception as exc:  # noqa: BLE001
+                        parked = f"failed: {type(exc).__name__}: {exc}"
 
         if not rows:
             return SkillResult(skill_name="OpticalStageScan", success=False,
@@ -417,7 +533,7 @@ class OpticalStageScan(BaseSkill):
             data = {
                 "dry_run": True, "n_points": len(rows), "requested_points": total,
                 "shape": [p2, p1] if two_d else [p1],
-                "elapsed_s": round(elapsed, 3),
+                "elapsed_s": round(elapsed, 3), "return_to_start": parked,
             }
             if aborted:
                 data["interrupted_after_points"] = len(rows)
@@ -454,7 +570,10 @@ class OpticalStageScan(BaseSkill):
             "dimensions": 2 if two_d else 1,
             "samples_per_point": acq.samples,
             "elapsed_s": round(elapsed, 3),
+            "return_to_start": parked,
         }
+        if live is not None and live.active:
+            data["live_stream"] = live.stream_id
         if indices:
             data["signal_indices"] = indices
         if trigger:

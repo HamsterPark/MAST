@@ -37,6 +37,8 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
+from mast.i18n import tr
+
 logger = logging.getLogger(__name__)
 
 #: Substrings (case-insensitive) of skill names during which current excursions
@@ -61,7 +63,19 @@ SUPPRESS_SKILL_PATTERNS: frozenset[str] = frozenset({
     # and three segments later halts the very composite skill running it.
     "biasspectr", "spectroscopy", "spectrum", "sts", "sweep", "iv_curve",
     "setbias", "lockin",
+    # BiasSettleChange (7.0.1: mast_act set_bias goes through it for a zero crossing, a large
+    # change or a dead-band target). Its ramp is SetBiasRamp, already covered by "setbias",
+    # but the token names the OUTER skill — on the Mimea simulator the ramp through zero raised
+    # spike_warn / rtn_bistable / jump_burst / rms_high under "BiasSettleChange". Not
+    # "movetoxy": these patterns silence the CRITICAL rules too, and a lateral move under
+    # feedback is where a crash into a cluster would show.
+    "biassettle",
 })
+
+#: Skill categories (``SkillCategory`` values carried on SKILL_STEP) that never leave
+#: a wake: a read only reads instrument state, an analysis touches no hardware. The
+#: name patterns above cannot tell ``GetAutoApproachStatus`` from ``AutoApproach``.
+_NO_WAKE_CATEGORIES: frozenset[str] = frozenset({"read", "analysis"})
 
 #: States reported to the UI. Ordered roughly by how much attention they deserve.
 STATE_DISABLED = "disabled"
@@ -145,10 +159,16 @@ class CurrentMonitorService:
         self._gaps_total_s = 0.0
         self._last_segment_ts: float | None = None
         self._last_sweep = 0.0
+        self._sweeper: threading.Thread | None = None
         self._pin_until = 0.0
         #: 抑制的「余波期」——最近一个可抑制技能结束的时刻与名字(缺陷⑨)。
         self._afterglow_until = 0.0
         self._afterglow_name = ""
+        #: 最近一段被标成「在扫描」的段落的结束时刻,与最近一次看到持有仪器的技能
+        #: (名字, 那一段的结束时刻)。只进告警的上下文(``_alert_context``),不参与
+        #: 任何判据 —— 告警是不是扫描的尾巴,由读告警的人判断。
+        self._last_scanning_t_end: float | None = None
+        self._last_skill_seen: tuple[str, float] | None = None
 
     # ── lifecycle ───────────────────────────────────────────────────────────
 
@@ -211,7 +231,9 @@ class CurrentMonitorService:
         """
         logger.warning("current monitor: previous worker still winding down; "
                        "waiting for it before starting a new one")
-        self._set_state(STATE_PAUSED, "上一个采集线程仍在退出,监控暂未启动",
+        self._set_state(STATE_PAUSED,
+                        tr("上一个采集线程仍在退出,监控暂未启动",
+                           "The previous acquisition thread is still exiting, monitoring not started yet"),
                         retry_in_s=_RETIRING_MAX_WAIT_S)
         with self._lock:
             watcher = self._restart_watcher
@@ -240,8 +262,11 @@ class CurrentMonitorService:
                         "once that thread exits", _RETIRING_MAX_WAIT_S)
                     self._set_state(
                         STATE_PAUSED,
-                        "上一个采集线程长时间未退出;它退出后会自动恢复,"
-                        "若持续卡住需重启服务")
+                        tr("上一个采集线程长时间未退出;它退出后会自动恢复,"
+                           "若持续卡住需重启服务",
+                           "The previous acquisition thread has not exited for a long "
+                           "time; monitoring resumes automatically once it exits, "
+                           "restart the service if it stays stuck"))
                     return
             with self._lock:
                 # A stop() since we were armed means teardown (or an explicit
@@ -313,12 +338,28 @@ class CurrentMonitorService:
         cfg = self._pump.config if self._pump is not None else {}
         th = self._th()
         pool = self._pool_getter()
+        # 泵在空转（每份回包都不可用）时，服务这一层什么都看不到 —— 一段都交不上来，
+        # 状态停在「正在探测」。曾出现过这样一挂好几天的情况。原因由泵自己报。
+        trouble = getattr(self._pump, "trouble", "") if self._pump is not None else ""
+        detail = self._detail
+        if isinstance(trouble, str) and trouble:
+            from mast.monitoring.pump import scope_not_running
+            if scope_not_running(trouble):
+                detail = tr(
+                    "Nanonis 的示波器模块没在运行,MAST 正在自动启动它;如果一直这样,"
+                    f"请在 Nanonis 里打开 Oscilloscope 面板。仪器原话:{trouble}",
+                    "The Nanonis oscilloscope module is not running; MAST keeps trying to "
+                    "start it. If this persists, open the Oscilloscope panel in Nanonis. "
+                    f"Instrument said: {trouble}")
+            else:
+                detail = tr(f"示波器回包持续不可用:{trouble}",
+                            f"Oscilloscope replies keep failing: {trouble}")
         return {
             "running": bool(self._thread is not None and self._thread.is_alive()),
             "enabled_in_settings": bool(th.enabled),
             "alerts_enabled": bool(th.alerts_enabled),
             "state": self._state,
-            "detail": self._detail,
+            "detail": detail,
             "retry_in_s": round(self._retry_in_s, 1),
             # 策略从**泵实例**上取,不再是写死的字面量 "osci1t"。在此之前这个字段
             # 看起来是动态的,而任何时候都只会是那一个值 —— 于是「切到 2T 了吗」
@@ -364,25 +405,29 @@ class CurrentMonitorService:
             try:
                 th = self._th()
                 if not th.enabled:
-                    self._set_state(STATE_DISABLED, "监控已在设置中关闭")
+                    self._set_state(STATE_DISABLED, tr("监控已在设置中关闭", "Monitoring is turned off in settings"))
                     self._stop.wait(_DISABLED_POLL_S)
                     continue
 
                 pool = self._pool_getter()
                 if pool is None:
-                    self._set_state(STATE_NO_POOL, "尚未连接 Nanonis")
+                    self._set_state(STATE_NO_POOL,
+                                    tr("尚未连接 Nanonis", "Nanonis not connected yet"))
                     self._stop.wait(_PAUSED_POLL_S)
                     continue
                 if not _comms_healthy(pool):
                     # Breaker open: park with zero TCP until it closes.
-                    self._set_state(STATE_COMMS_DOWN, "TCP 通信已熔断,等待恢复")
+                    self._set_state(STATE_COMMS_DOWN,
+                                    tr("TCP 通信已熔断,等待恢复",
+                                       "TCP circuit breaker open, waiting for recovery"))
                     self._stop.wait(_PAUSED_POLL_S)
                     continue
 
                 self._pump_until_interrupted(th)
             except Exception:  # noqa: BLE001 — the loop must outlive any single fault
                 logger.debug("current monitor loop error (retrying)", exc_info=True)
-                self._set_state(STATE_PAUSED, "内部错误,稍后重试")
+                self._set_state(STATE_PAUSED,
+                                tr("内部错误,稍后重试", "Internal error, retrying later"))
                 self._stop.wait(_PAUSED_POLL_S)
 
     def _warm_up(self) -> None:
@@ -410,7 +455,8 @@ class CurrentMonitorService:
         from mast.monitoring.pump import PumpPaused, PumpUnavailable, make_pump
 
         if self._pump is None:
-            self._set_state(STATE_PROBING, "正在探测示波器模块")
+            self._set_state(STATE_PROBING,
+                            tr("正在探测示波器模块", "Probing the oscilloscope module"))
             self._warm_up()
             self._pump = make_pump(self._pool_getter,
                                    segment_s=th.cm_segment_s,
@@ -438,9 +484,15 @@ class CurrentMonitorService:
             # Expected on the bundled simulator, which loads neither scope.
             module = str(getattr(self._pump, "MODULE_NAME", "Osci1T"))
             self._pump = None
+            # 把仪器原话带上：这条也会出现在真机上（模块起不来、没授权），
+            # 只说「仿真器上正常」会让操作员以为不用管。
+            why = str(exc).strip()[:300]
             self._set_state(
                 STATE_UNAVAILABLE,
-                f"示波器模块({module})不可用——仿真器上属正常现象",
+                tr(f"示波器模块({module})不可用:{why}(内置仿真器上属正常现象;"
+                   "真机请检查 Nanonis 的 Oscilloscope 面板与授权)",
+                   f"Oscilloscope module ({module}) unavailable: {why} (normal on the bundled "
+                   "simulator; on an instrument, check the Oscilloscope panel and licence in Nanonis)"),
                 retry_in_s=_UNAVAILABLE_RETRY_S)
             logger.info("current monitor: %s unavailable (%s); re-probing in %.0fs",
                         module, exc, _UNAVAILABLE_RETRY_S)
@@ -457,8 +509,8 @@ class CurrentMonitorService:
         为什么辅助通道搬到这里来 —— 它原来只在 :meth:`_on_segment` 里有机会，
         而段边界一秒只来 0.75 次（1.024 s 采集 + 0.31 s 特征提取）。也就是说
         **把 ``cm_aux_interval_s`` 调到 0.2 秒并不会得到 5 Hz**：那个设置是节流的
-        上限，不是驱动采样的时钟，调到比段周期还短只等于「每段都采」。用户
-        要的提速，必须先有更多的采样机会才谈得上。
+        上限，不是驱动采样的时钟，调到比段周期还短只等于「每段都采」。要提速，
+        必须先有更多的采样机会。
 
         搬到这里之后，三条让 1 Hz 当初站得住的性质**一条都没变**：
 
@@ -530,8 +582,11 @@ class CurrentMonitorService:
         out: dict = {"active_id": self._baseline_id, "available": False}
         model = self._baseline_model
         if model is None:
-            out["detail"] = ("没有活跃基线，噪声判据用的是固定阈值 cm_rms_warn_a。"
-                             "跑一次 CharacteriseCurrentNoise 建立基线。")
+            out["detail"] = tr("没有活跃基线，噪声判据用的是固定阈值 cm_rms_warn_a。"
+                               "跑一次 CharacteriseCurrentNoise 建立基线。",
+                               "No active baseline; the noise rule uses the fixed "
+                               "threshold cm_rms_warn_a. Run CharacteriseCurrentNoise "
+                               "to create a baseline.")
             return out
         out.update(available=True, sigma_model=model.to_dict())
         try:
@@ -564,7 +619,8 @@ class CurrentMonitorService:
         except Exception:  # noqa: BLE001
             logger.debug("baseline_check features lookup failed", exc_info=True)
         if not latest:
-            return {"judged": False, "reason": "最近两分钟没有已落库的段"}
+            return {"judged": False, "reason": tr("最近两分钟没有已落库的段",
+                                           "No stored segment in the last two minutes")}
         row = None
         try:
             row = store.active_baseline() if store else None
@@ -633,7 +689,8 @@ class CurrentMonitorService:
         # 仪器自己会告诉我们前放满量程是多少 —— 只要它贴过一次轨。
         self._cross_check_rail(feats, th)
 
-        verdict = self._engine.evaluate(feats, ctx,
+        judging = self._judging_context(segment, ctx)
+        verdict = self._engine.evaluate(feats, judging,
                                         baseline=self._refresh_baseline(store))
         actionable = (th.alerts_enabled and not suppressed and not mostly_gap)
         if actionable:
@@ -673,14 +730,14 @@ class CurrentMonitorService:
         fired_rule = None
         if actionable:
             fired_rule = self._handle_alerts(store, th, segment, feats, verdict,
-                                             seg_id, confirmed)
+                                             seg_id, confirmed, ctx=ctx)
             if fired_rule:
                 level = "critical"
 
         # "照记不报": a rule we declined to judge is still written down, with the
         # reason. Without it a stored `suppressed` row cannot answer "suppressed
         # for WHAT", and the next person calibrating this rig would have to guess.
-        extra = self._suppression_extra(verdict, suppressed, ctx)
+        extra = self._suppression_extra(verdict, suppressed, judging)
         store.add_features(seg_id or 0, feats, ctx, level, extra=extra)
 
         self._segments_done += 1
@@ -691,6 +748,7 @@ class CurrentMonitorService:
         # 绝不能让一段电流丢掉。它自己吞异常，见 _handle_aux。
         self._handle_aux(store, th, ctx, seg_id, suppressed)
         self._last_seg_id = seg_id
+        self._note_alert_context(segment, ctx)
         self._maybe_sweep(store, th)
         self._offer_to_env_history(segment, feats, ctx)
 
@@ -706,7 +764,7 @@ class CurrentMonitorService:
         out: dict = {}
         if parked:
             out["suppressed_rules"] = parked
-            out["suppressed_by"] = "scanning"
+            out["suppressed_by"] = "scan_edge" if ctx.get("ctx_scan_edge") else "scanning"
         if skill_suppressed:
             # The skill gate wins on the row's level, so name it last — whoever
             # reads this row sees the reason that actually decided the verdict.
@@ -752,7 +810,7 @@ class CurrentMonitorService:
                                  segment_id=seg_id, verdict=sample.verdict,
                                  rules=sample.rules)
             if th.aux_alerts_enabled and sample.rules:
-                self._emit_aux_warns(store, aux, sample, seg_id)
+                self._emit_aux_warns(store, aux, sample, seg_id, ctx=ctx)
             self._publish_aux(sample)
         except Exception:  # noqa: BLE001 — 辅助通道绝不反噬电流采集
             logger.debug("aux sample handling failed (swallowed)", exc_info=True)
@@ -796,7 +854,7 @@ class CurrentMonitorService:
         except Exception:  # noqa: BLE001 — 对账绝不能反噬采集
             logger.debug("rail cross-check failed (swallowed)", exc_info=True)
 
-    def _emit_aux_warns(self, store, aux, sample, seg_id) -> None:
+    def _emit_aux_warns(self, store, aux, sample, seg_id, *, ctx: dict | None = None) -> None:
         """把 aux 的 WARN 落进**同一张** alerts 表（rule 名不同，历史 UI 免费显示）。
 
         故意全是 WARN，一条 CRITICAL 都没有：能 halt 正在跑的复合技能的规则必须是
@@ -805,6 +863,7 @@ class CurrentMonitorService:
         """
         from mast.monitoring.aux_channels import summarize_aux_zh
 
+        context = None
         for rule in sample.rules:
             if not aux.should_emit(rule):
                 continue
@@ -812,7 +871,10 @@ class CurrentMonitorService:
             alert_id = store.add_alert(ts=sample.ts, level="warn", rule=rule,
                                        summary_zh=summary, segment_id=seg_id,
                                        features=sample.detail)
-            self._publish_alert(alert_id, "warn", rule, summary, None, seg_id)
+            if context is None:
+                context = self._alert_context(ctx, at=sample.ts)
+            self._publish_alert(alert_id, "warn", rule, summary, None, seg_id,
+                                context=context)
 
     def _publish_aux(self, sample) -> None:
         """One scalar summary per aux sample (5 Hz at the factory interval).
@@ -874,7 +936,7 @@ class CurrentMonitorService:
             return None, 0
 
     def _handle_alerts(self, store, th, segment, feats, verdict, seg_id,
-                       rule: Optional[str]) -> Optional[str]:
+                       rule: Optional[str], *, ctx: dict | None = None) -> Optional[str]:
         """Act on an already-confirmed verdict.
 
         ``confirm()`` is called by the caller for every segment so the streak
@@ -882,6 +944,7 @@ class CurrentMonitorService:
         """
         from mast.monitoring.alerts import emit_critical, summarize_zh
 
+        context = self._alert_context(ctx, segment=segment, feats=feats)
         if rule:
             summary = summarize_zh(rule, feats, verdict.detail)
             emitted = emit_critical(rule, summary, feats, None, seg_id,
@@ -891,7 +954,8 @@ class CurrentMonitorService:
                                        evidence_png=None, features=verdict.detail,
                                        emitted_buffer=emitted)
             self._pin_event_window(store, th, segment.t_start, f"alert:{rule}")
-            self._publish_alert(alert_id, "critical", rule, summary, None, seg_id)
+            self._publish_alert(alert_id, "critical", rule, summary, None, seg_id,
+                                context=context)
             logger.warning("current monitor CRITICAL [%s]: %s", rule, summary)
             if alert_id and self._may_render_evidence(th):
                 self._render_evidence_async(store, segment, feats, rule, alert_id)
@@ -906,8 +970,122 @@ class CurrentMonitorService:
                                            rule=warn_rule, summary_zh=summary,
                                            segment_id=seg_id,
                                            features=verdict.detail)
-                self._publish_alert(alert_id, "warn", warn_rule, summary, None, seg_id)
+                self._publish_alert(alert_id, "warn", warn_rule, summary, None, seg_id,
+                                    context=context)
         return None
+
+    def _alert_context(self, ctx: dict | None, *, segment=None, feats: dict | None = None,
+                       at: float | None = None) -> dict:
+        """Flat scalars that let whoever reads an alert judge it without the UI.
+
+        Motivating case (the Mimea simulator, one external agent session): all ten WARN
+        alerts sat on the agent's own action boundaries — the first segment after
+        three of four scans ended (``ctx_scanning`` is read at the segment's END from
+        the 1 Hz state cache, while the samples still hold the scan's last line), a
+        lateral tip move, an STS sweep, a withdraw. Each alert said only "41σ spike —
+        watch for a discharge or a contact" plus a segment id. These keys carry what
+        settles it: the window the rule judged (``seg_t_start`` / ``seg_t_end``), what
+        it measured there (pA and σ), and what the instrument was doing — scanning or
+        not, how long since the last segment labelled scanning, the skill holding the
+        instrument, the last skill seen and how long ago, bias, setpoint. The monitor
+        still only measures: nothing here feeds a rule or changes when an alert fires.
+
+        ``at`` stands in for the segment start when there is no segment (aux warns).
+        Scalars and short strings only (the bus contract). Never raises."""
+        out: dict = {}
+        try:
+            ctx = ctx or {}
+            if segment is not None:
+                out["seg_t_start"] = float(segment.t_start)
+                out["seg_t_end"] = float(segment.t_end)
+                ref = float(segment.t_start)
+            else:
+                ref = float(at) if at is not None else time.time()
+            f = feats or {}
+            for key, src, factor in (("spike_sigma", "spike_max_sigma", 1.0),
+                                     ("jump_rate_hz", "jump_rate_hz", 1.0),
+                                     ("max_step_pa", "max_step_a", 1e12),
+                                     ("mean_pa", "mean_a", 1e12),
+                                     ("rms_pa", "rms_detrended_a", 1e12),
+                                     ("rtn_score", "rtn_score", 1.0),
+                                     ("rtn_gap_pa", "rtn_gap_a", 1e12),
+                                     ("rtn_rate_hz", "rtn_rate_hz", 1.0)):
+                v = _opt(f.get(src))
+                if v is not None:
+                    out[key] = v * factor
+            scanning = ctx.get("ctx_scanning")
+            if scanning is not None:
+                out["ctx_scanning"] = bool(scanning)
+            last_scan = getattr(self, "_last_scanning_t_end", None)
+            if scanning is not None and bool(scanning):
+                out["scanning_s_ago"] = 0.0
+            elif last_scan is not None:
+                out["scanning_s_ago"] = round(max(0.0, ref - last_scan), 3)
+            zctrl = ctx.get("ctx_zctrl_on")
+            if zctrl is not None:
+                out["ctx_zctrl_on"] = bool(zctrl)
+            skill = str(ctx.get("ctx_skill") or "")
+            if skill:
+                out["ctx_skill"] = skill
+            after = str(ctx.get("ctx_afterglow_skill") or "")
+            if after:
+                out["ctx_afterglow_skill"] = after
+            seen = getattr(self, "_last_skill_seen", None)
+            if skill:
+                out["last_skill"], out["last_skill_s_ago"] = skill, 0.0
+            elif seen is not None:
+                out["last_skill"] = seen[0]
+                out["last_skill_s_ago"] = round(max(0.0, ref - seen[1]), 3)
+            bias = _opt(ctx.get("ctx_bias_v"))
+            if bias is not None:
+                out["ctx_bias_v"] = bias
+            setpoint = _opt(ctx.get("ctx_setpoint_a"))
+            if setpoint is not None:
+                out["ctx_setpoint_pa"] = setpoint * 1e12
+            scan_id = str(self._scan_id_getter() or "")
+            if scan_id:
+                out["scan_id"] = scan_id
+        except Exception:  # noqa: BLE001 — the context is a nicety; the alert is not
+            logger.debug("alert context failed (swallowed)", exc_info=True)
+        return out
+
+    #: How soon after the end of a segment labelled scanning the next one still counts as the
+    #: scan's edge: one segment (``cm_segment_s`` 1 s) plus the 1 Hz state cache's lag.
+    _SCAN_EDGE_S = 1.5
+
+    def _judging_context(self, segment, ctx: dict) -> dict:
+        """The context the rules judge with: ``ctx``, except that the first segment after a
+        scanning one is judged as scanning (``ctx_scan_edge``) for the scan-suppressed rules.
+
+        Mimea simulator: three of four scans ended in a spike_warn + jump_burst pair from
+        exactly that segment (segments 589 / 1066 / 1257: the previous segment was scanning,
+        this one is labelled 0 because the label is read at its END from the 1 Hz cache, and
+        its samples still hold the scan's last line — jump rates 452 / 65 / 46 per second).
+        Same physics as :data:`SCAN_SUPPRESSED_RULES`; the CRITICAL rules are untouched, and
+        the stored ``ctx_scanning`` stays what was measured (only the verdict and the row's
+        ``suppressed_by: scan_edge`` change)."""
+        try:
+            scanning = ctx.get("ctx_scanning")
+            last = getattr(self, "_last_scanning_t_end", None)
+            if (scanning is not None and not bool(scanning) and last is not None
+                    and 0.0 <= float(segment.t_start) - last <= self._SCAN_EDGE_S):
+                return {**ctx, "ctx_scanning": True, "ctx_scan_edge": True}
+        except Exception:  # noqa: BLE001
+            logger.debug("scan-edge context failed (swallowed)", exc_info=True)
+        return ctx
+
+    def _note_alert_context(self, segment, ctx: dict) -> None:
+        """Remember the last scanning segment and the last skill seen (for
+        :meth:`_alert_context`). Cheap, never raises."""
+        try:
+            scanning = ctx.get("ctx_scanning")
+            if scanning is not None and bool(scanning):
+                self._last_scanning_t_end = float(segment.t_end)
+            skill = str(ctx.get("ctx_skill") or "")
+            if skill:
+                self._last_skill_seen = (skill, float(segment.t_end))
+        except Exception:  # noqa: BLE001
+            logger.debug("alert context bookkeeping failed (swallowed)", exc_info=True)
 
     def _render_evidence_async(self, store, segment, feats: dict, rule: str,
                                alert_id: int) -> None:
@@ -949,21 +1127,40 @@ class CurrentMonitorService:
             logger.debug("pin_range failed (swallowed)", exc_info=True)
 
     def _maybe_sweep(self, store, th) -> None:
+        """滚动清理，**不在采集线程上做**。
+
+        与 :meth:`_render_evidence_async` 同一个理由：这里一停，示波器缓冲就在
+        没人取的情况下一屏屏被覆盖。清理平时只有几百个文件，但停采超过一天之后
+        恢复的第一段，会把停采前那一整天的文件一次删完 —— 曾出现过：
+        恢复后的第一段紧接着在这个调用里删了约 2.8 万个 .npy，采集线程停了
+        十几分钟（日志全程无声），醒来时示波器已经变了样。
+        同一时刻最多一个清理线程；上一轮没删完就等它。
+        """
         now = time.time()
         if now - self._last_sweep < _RETENTION_INTERVAL_S:
             return
+        if self._sweeper is not None and self._sweeper.is_alive():
+            return
         self._last_sweep = now
-        try:
-            store.retention_sweep(th.cm_keep_hours, th.cm_keep_gb)
-        except Exception:  # noqa: BLE001
-            logger.debug("retention sweep failed (swallowed)", exc_info=True)
-        try:
-            # aux 行按年龄单独滚删。刻意不并进上面的字节预算 —— 一行 aux 是二十个数，
-            # 一年也才几十 MB，而段落是 288 MB/**小时**。合在一起会让磁盘满的时候
-            # 删掉便宜的那个而不是贵的那个。
-            store.sweep_aux(th.cm_aux_keep_hours)
-        except Exception:  # noqa: BLE001
-            logger.debug("aux sweep failed (swallowed)", exc_info=True)
+        keep_hours, keep_gb = th.cm_keep_hours, th.cm_keep_gb
+        aux_keep_hours = th.cm_aux_keep_hours
+
+        def _work() -> None:
+            try:
+                store.retention_sweep(keep_hours, keep_gb)
+            except Exception:  # noqa: BLE001
+                logger.debug("retention sweep failed (swallowed)", exc_info=True)
+            try:
+                # aux 行按年龄单独滚删。刻意不并进上面的字节预算 —— 一行 aux 是二十个数，
+                # 一年也才几十 MB，而段落是 288 MB/**小时**。合在一起会让磁盘满的时候
+                # 删掉便宜的那个而不是贵的那个。
+                store.sweep_aux(aux_keep_hours)
+            except Exception:  # noqa: BLE001
+                logger.debug("aux sweep failed (swallowed)", exc_info=True)
+
+        self._sweeper = threading.Thread(target=_work, daemon=True,
+                                         name="cm-retention")
+        self._sweeper.start()
 
     # ── context ─────────────────────────────────────────────────────────────
 
@@ -1087,14 +1284,17 @@ class CurrentMonitorService:
         })
 
     def _publish_alert(self, alert_id, level: str, rule: str, summary: str,
-                       png: str | None, seg_id) -> None:
-        self._publish({
+                       png: str | None, seg_id, *, context: dict | None = None) -> None:
+        payload = {
             "kind": "alert",
             "alert_id": int(alert_id) if alert_id else 0,
             "level": level, "rule": rule, "summary_zh": summary,
             "evidence_png": png or "",
             "seg_id": int(seg_id) if seg_id else 0,
-        })
+        }
+        # The context never overrides the alert's own keys (see _alert_context).
+        payload.update({k: v for k, v in (context or {}).items() if k not in payload})
+        self._publish(payload)
 
     def _set_state(self, state: str, detail: str = "",
                    retry_in_s: float = 0.0) -> None:
@@ -1144,6 +1344,14 @@ class CurrentMonitorService:
             data = getattr(event, "data", None) or {}
             name = str(data.get("skill") or data.get("skill_name") or "").lower()
             if not name or not any(p in name for p in SUPPRESS_SKILL_PATTERNS):
+                return
+            # A pure read never touches the junction, so it has no wake to pin or
+            # to mute: ``GetAutoApproachStatus`` matches "autoapproach"
+            # by name, and an external watcher polling it every 5-10 s issued a
+            # pin_range UPDATE on the monitor store and restarted the afterglow
+            # each time. Only events that SAY they are a read are skipped —
+            # name-only events (legacy publishers) keep the old behaviour.
+            if str(data.get("category") or "").lower() in _NO_WAKE_CATEGORIES:
                 return
             # Same event, two jobs. Pinning keeps the segment as training data;
             # the afterglow keeps the NEXT few seconds from popping a

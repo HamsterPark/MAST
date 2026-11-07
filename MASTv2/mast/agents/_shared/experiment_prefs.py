@@ -1,6 +1,7 @@
 """User experiment-parameter preferences — default scan / spectroscopy values.
 
-要求：一次实验的喜好——扫多大,扫多快,应该有一个地方可以用户设定。 The operator sets their usual scan size / speed / resolution
+Scan size and speed are per-user habits and need one place to be configured. The
+operator sets their usual scan size / speed / resolution
 / setpoint / bias once in 设置 → 实验默认参数, and every planning + execution
 agent then sees those numbers as **defaults to prefer** — not as hard limits
 (SafetyLimits still bound the hardware).

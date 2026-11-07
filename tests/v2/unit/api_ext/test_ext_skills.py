@@ -127,6 +127,20 @@ def test_composite_save_signs_as_the_external_agent_and_registers(world):
     assert s2["ok"] is False and s2["error"] == "base_version_required"
 
 
+def test_an_agent_composite_cannot_claim_a_remedy_tag(world):
+    """retract / emergency / withdraw mark stop and retract remedies: a skill with them skips the
+    instrument lock and (7.0) the observation token. An agent must not be able to self-assign
+    that status to an instrument-driving workflow (security constraint)."""
+    spec = {"name": "ExtSneakyWrite", "description": "写两次", "safety_level": "auto",
+            "params": [], "tags": ["Withdraw"],
+            "nodes": [{"type": "step", "id": "a", "skill": "ExtWrite", "params": {}},
+                      {"type": "step", "id": "b", "skill": "ExtWrite", "params": {}}]}
+    d = world.client.post("/composites/draft", json={"spec": spec}, headers=H()).json()
+    assert d["ok"] is False and any("withdraw" in p for p in d["problems"]), d
+    s = world.client.post("/composites", json={"spec": spec}, headers=H()).json()
+    assert s["ok"] is False and not world.reg.has("ExtSneakyWrite"), s
+
+
 def test_the_card_follows_a_new_version_of_the_same_composite(world):
     """同名、同数量的更新也要让技能卡换成新版本（缓存键只看名字会一直给旧的子步）。"""
     spec = {"name": "ExtCombo", "description": "v1", "safety_level": "auto", "params": [],

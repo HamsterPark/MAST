@@ -449,7 +449,7 @@ def read_paper_section(paper_id: str, section: str) -> str:
     text, kind, detail = _paper_text(paper_id)
     if not text:
         # "failed:" is reserved for machinery faults — extract_protocol and the
-        # agent both key off the distinction ().
+        # agent both key off the distinction.
         if kind == "error":
             return f"read_paper_section failed: {detail}"
         return f"read_paper_section: {detail}."
@@ -646,15 +646,19 @@ def search_local_corpus(
     except Exception as e:
         return f"search_local_corpus failed: {type(e).__name__}: {e}"
 
+    if status.get("retrieval") == "unavailable":
+        return (
+            "search_local_corpus: 本机没有文献语义索引（安装包默认不含），"
+            "本地语料检索不可用。可改用 web_search 联网检索。"
+        )
     if not hits:
         return f"search_local_corpus: no matches for '{query}' in the local corpus."
 
-    # ── honesty gate () ──────────────────────
-    # The semantic embedder was down for a whole session; every search silently
-    # degraded to keyword matching. The rows still LOOKED like search results —
-    # title, year, DOI, citation count — so this agent read a slice of 50k
-    # papers tied at score 3.000 and reported "第一批结果较相关". Nothing in the
-    # tool output had told it otherwise. Two rules now:
+    # ── honesty gate ──────────────────────────────────────────────────
+    # When the semantic embedder is down, search silently degrades to keyword
+    # matching. The rows still look like search results (title, year, DOI,
+    # citation count) even when a slice of 50k papers is tied at score 3.000,
+    # so the degraded state has to be stated explicitly. Two rules:
     #   1. a degraded result set always says so, in the FIRST line;
     #   2. a ranking that carries no information is not dressed up as one —
     #      we withhold the list and say retrieval is unavailable.
@@ -685,8 +689,11 @@ def search_local_corpus(
         lines.append(
             f"  ({n}) [{h['score']:.3f}] {h['year']} {title}"
         )
-        # Always expose work_id: fetch_paper_abstract requires the index id.
-        # A DOI alone is not a substitute for that identifier.
+        # work_id FIRST, and always present. fetch_paper_abstract takes a
+        # work_id, not a DOI; a listing that printed only the DOI left the
+        # caller with nothing valid to pass (calls of the form
+        # fetch_paper_abstract('https://doi.org/10.1103/…') fail with
+        # "not found in the literature index").
         lines.append(
             f"        work_id={h.get('work_id', '?')}  cited={h['cited']}  "
             f"journal={h['journal'][:50]}  doi={doi}"
@@ -1074,7 +1081,7 @@ def lib_search(query: str, library_id: str | None = None, k: int = 8) -> str:
     except Exception as e:  # pragma: no cover — defensive
         return f"lib_search failed: {type(e).__name__}: {e}"
 
-    # Same honesty gate as search_local_corpus (): never hand back an
+    # Same honesty gate as search_local_corpus: never hand back an
     # information-free ranking that reads like a relevance ranking.
     if status.get("degraded") and not status.get("trustworthy"):
         return (
@@ -1813,9 +1820,9 @@ _UNAVAILABLE_BUFFER_TOOLS: list = [
 # Dead-tool detection: a tool whose hard dependency is missing
 # is dead for the WHOLE session. Probe once at build time, tell the agent up
 # front, and swap the dead tool for a same-named placeholder that fail-fasts with
-# one clear "known constraint — do not retry" line. In the field, web_search
-# (no TAVILY_API_KEY) failed 10× and search_papers (empty PDF corpus) 9×, because
-# nothing told the agent the tool was permanently unavailable — it kept trying.
+# one clear "known constraint — do not retry" line. Without this, web_search
+# (no TAVILY_API_KEY) and search_papers (empty PDF corpus) are retried repeatedly,
+# because nothing says the tool is permanently unavailable.
 # ─────────────────────────────────────────────────────────────────────
 
 def tool_availability() -> dict[str, str]:
@@ -1823,7 +1830,8 @@ def tool_availability() -> dict[str, str]:
     right now (missing hard dependency). An available tool is absent from the map.
 
     Probed at agent-build time only. Currently covers the dependency-gated
-    tools from the * ``web_search``  — needs a Tavily API key
+    tools:
+      * ``web_search``  — needs a Tavily API key
       * ``search_papers`` — needs a non-empty local PDF corpus
       * ``fetch_fulltext_oa`` — needs an HTTP stack (httpx)
     The offline tools (search_local_corpus / lib_* / priors) are never gated here.

@@ -30,6 +30,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from mast.i18n import tr
+
 logger = logging.getLogger(__name__)
 
 
@@ -123,7 +125,8 @@ def rebuild_from_folders(*, storage: Any, repos: Any = None,
         meta = folder["meta"]
         eid = str(meta.get("id") or "")
         if not eid:
-            res["errors"].append(f"{folder['dir_name']}: experiment.json 没有 id")
+            res["errors"].append(tr(f"{folder['dir_name']}: experiment.json 没有 id",
+                                    f"{folder['dir_name']}: experiment.json has no id"))
             continue
         try:
             existing = storage.get_experiment(eid)
@@ -197,7 +200,8 @@ def _rebuild_documents(storage: Any, res: dict, *, root: Path | None = None,
     try:
         from mast.documents.store import _scan_all, reset_caches
     except Exception as exc:  # noqa: BLE001
-        res["errors"].append(f"documents 模块不可用：{exc!r}")
+        res["errors"].append(tr(f"documents 模块不可用：{exc!r}",
+                                f"documents module unavailable: {exc!r}"))
         return
     if root is not None:
         # 显式传 root 时清缓存，否则 doc_id → 目录 的进程内缓存会给出旧根的结果。
@@ -213,7 +217,7 @@ def _rebuild_documents(storage: Any, res: dict, *, root: Path | None = None,
         # 这里补的是索引的完整性。
         entries = _scan_all(include_discarded=True, root=root)
     except Exception as exc:  # noqa: BLE001
-        res["errors"].append(f"文档扫描失败：{exc!r}")
+        res["errors"].append(tr(f"文档扫描失败：{exc!r}", f"Document scan failed: {exc!r}"))
         return
     for e in entries:
         if dry_run:
@@ -253,7 +257,7 @@ def _rebuild_libraries(res: dict, *, root: Path | None = None,
     try:
         res["libraries_rebuilt"] = int(rebuild_registry_from_folders(root=root) or 0)
     except Exception as exc:  # noqa: BLE001
-        res["errors"].append(f"文献库重建失败：{exc!r}")
+        res["errors"].append(tr(f"文献库重建失败：{exc!r}", f"Library rebuild failed: {exc!r}"))
 
 
 def _insert_experiment(storage: Any, eid: str, meta: dict, dir_name: str) -> None:

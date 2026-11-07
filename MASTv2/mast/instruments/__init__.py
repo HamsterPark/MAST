@@ -16,6 +16,16 @@ Layering:
   (Benchtop Piezo et al.) via pythonnet, lazily imported.
 - :mod:`mast.instruments.delay_line` — pump-probe delay line wrapper
   (stage mm ↔ optical delay ps).
+- :mod:`mast.instruments.rotation` — ``RotationAxis`` (degrees; optional wrap
+  and shortest path; soft limits stay Layer-0).
+- :mod:`mast.instruments.openloop` — ``OpenLoopAxis`` (step interface, soft
+  limits on the cumulative step counter, no position feedback).
+- :mod:`mast.instruments.spectrometer` — ``Spectrometer`` + ``AcquisitionResult``
+  with Layer-0 setting limits.
+- :mod:`mast.instruments.remote` — satellite devices through the hub (§6):
+  remote XYZ / rotation / open-loop stages and the remote spectrometer.
+- :mod:`mast.instruments.motor_groups` — Nanonis motor groups
+  (``nanonis_motor_groups.json``): the STM coarse group and the optical groups.
 - :mod:`mast.instruments.registry` — declarative device inventory from
   config; the single lookup point used by skills.
 
@@ -35,19 +45,29 @@ from mast.instruments.base import (
     AxisStatus,
     InstrumentError,
     InstrumentUnavailable,
+    MotionAborted,
     MotionAxis,
     MotionController,
     MotionTimeout,
     TravelLimitError,
 )
 from mast.instruments.delay_line import DelayLine, DelayLineConfig
+from mast.instruments.openloop import OpenLoopAxis
 from mast.instruments.registry import (
     InstrumentRegistry,
     get_instrument_registry,
     reset_instrument_registry,
 )
+from mast.instruments.rotation import RotationAxis, RotationConfig
+from mast.instruments.spectrometer import (
+    AcquisitionResult,
+    Spectrometer,
+    SpectrometerLimitError,
+    SpectrometerLimits,
+)
 
 __all__ = [
+    "AcquisitionResult",
     "AxisConfig",
     "AxisStatus",
     "DelayLine",
@@ -55,9 +75,16 @@ __all__ = [
     "InstrumentError",
     "InstrumentRegistry",
     "InstrumentUnavailable",
+    "MotionAborted",
     "MotionAxis",
     "MotionController",
     "MotionTimeout",
+    "OpenLoopAxis",
+    "RotationAxis",
+    "RotationConfig",
+    "Spectrometer",
+    "SpectrometerLimitError",
+    "SpectrometerLimits",
     "TravelLimitError",
     "get_instrument_registry",
     "reset_instrument_registry",

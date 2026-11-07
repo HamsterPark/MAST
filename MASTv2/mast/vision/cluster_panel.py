@@ -1,12 +1,9 @@
 """把「判据对这个团簇做了什么」画成一张图,落盘,给旁白当配图。
 
-## 出处
+## 背景
 
-「另外旁白会不会返回对团簇的各种分析图?」
-
-在此之前(08-15)他要求过一份离线版本,原话是:
-「我想看的是,一个团簇图,这个团簇的**识别图**,这个团簇被做了什么计算,结果如何?」
-那一版做成了 HTML 报告(``artifacts/cluster_criterion_explained.html``)。
+需求:旁白应附带团簇判据的分析图 —— 团簇识别图、对它做了哪些计算、结果如何。
+离线版是一份 HTML 报告(``artifacts/cluster_criterion_explained.html``)。
 这里是它的**在线版**:每扎一针,旁白右边就挂着这一张。
 
 ## 为什么必须落盘,而不是让端点现渲染
@@ -191,7 +188,7 @@ def render_cluster_panel(scan_path: str, result: dict,
         d = (out_dir or (project_root() / "artifacts" / "cluster_panels"))
         d.mkdir(parents=True, exist_ok=True)
         # 文件名带源帧名 + 内容指纹:同一张帧重判不会互相覆盖,
-        # 而历史里每一条旁白仍然指向**它自己当时那一张**(#76/#78 的教训)。
+        # 而历史里每一条旁白仍然指向**它自己当时那一张**(见 scan_monitor 的里程碑图说明)。
         stem = re.sub(r"[^\w.-]", "_", p.stem)[:60] or "cluster"
         # ⚠️ 用 hashlib 而**不是内置 ``hash()``**。
         #

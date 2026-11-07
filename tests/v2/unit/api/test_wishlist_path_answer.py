@@ -63,7 +63,7 @@ class TestTheAnswerReachesTheAgent:
         rid = _ask("data_processing")
         r = client.post(f"/api/wishlist/requests/{rid}/resolve", json={
             "action": "done",
-            "path": r"D:\Data\fsSTM\Au111_mica_001.sxm",
+            "path": r"D:\Data\stm\Au111_mica_001.sxm",
             "note": "就是这张",
         }).json()
         assert r["ok"] is True
@@ -74,7 +74,7 @@ class TestTheAnswerReachesTheAgent:
             lambda: {"agent_id": "data_processing"})}
         out = tools["check_my_requests"].invoke({})
 
-        assert r"D:\Data\fsSTM\Au111_mica_001.sxm" in out, (
+        assert r"D:\Data\stm\Au111_mica_001.sxm" in out, (
             "the agent cannot read the path the operator gave it — which is the "
             "entire complaint")
         assert "就是这张" in out

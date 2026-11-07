@@ -5,23 +5,23 @@ import { Badge, Card, DegradedNote, EmptyNote, ErrorNote, Spinner } from "@/comp
 import { Button, Field, TextField, useToast } from "@/components/controls";
 import { DeviceScanButton, InstrumentStateCard } from "@/components/admin/DeviceScanner";
 import { settingsWriteProblem, type SettingsPatch } from "@/lib/settingsWrite";
+import { tr } from "@/lib/i18n";
 
-/** 硬件 — Nanonis connection (editable host + 4 TCP ports + reconnect) and
- *  environment sensors (CRUD + rescan), mirroring the old dashboard hardware
- *  surface. Host/ports persist via POST /api/settings; reconnect via
+/** Hardware: Nanonis connection (editable host + 4 TCP ports + reconnect) and
+ *  environment sensors (CRUD + rescan). Host/ports persist via POST /api/settings; reconnect via
  *  POST /api/nanonis/connect (graceful, 202 + poll GET /api/nanonis/connection).
  *  Sensors: POST /api/environment/sensors (add/update),
  *  DELETE /api/environment/sensors/{id}, GET /api/environment/sensors/rescan.
  *
- *  ITEM 13 — `readOnly`: when true (the 设置 → 硬件连接 surface) the port/host
- *  editors and sensor CRUD are presented read-only. Ports are edited ONLY in
- *  「高级管理 → 硬件」 (PIN-gated). In read-only mode the host + 4 ports are
- *  prefilled from GET /api/nanonis/connection (now 6501-6504) alongside live
- *  connection status, plus a note pointing to 高级管理. */
+ *  `readOnly`: when true (the Settings → Hardware connection surface) the port/host
+ *  editors and sensor CRUD are presented read-only. Ports are edited only in
+ *  Advanced → Hardware connection (PIN-gated). In read-only mode the host + 4 ports
+ *  are prefilled from GET /api/nanonis/connection (6501-6504) alongside live
+ *  connection status, plus a note pointing to the Advanced tab. */
 
-/** 设置键名不是 `string` 而是这四个字面量：body 现在是 `SettingsPatch`（从后端
- *  schema 生成），写错一个名字会在 typecheck 当场红，而不是在真机上变成一次
- *  422 —— 或者在 2026-08-10 之前那样，变成一句绿色的「已保存」。 */
+/** Setting names are these four literals, not `string`: the body is `SettingsPatch`
+ *  (generated from the backend schema), so a misspelt name fails typecheck instead of
+ *  becoming a 422 on the instrument. */
 type PortSetting =
   | "nanonis_port_main"
   | "nanonis_port_monitor"
@@ -29,10 +29,10 @@ type PortSetting =
   | "nanonis_port_emergency";
 
 const PORT_ROLES: { key: "main" | "monitor" | "data" | "emergency"; label: string; setting: PortSetting }[] = [
-  { key: "main", label: "主端口", setting: "nanonis_port_main" },
-  { key: "monitor", label: "监控端口", setting: "nanonis_port_monitor" },
-  { key: "data", label: "数据端口", setting: "nanonis_port_data" },
-  { key: "emergency", label: "急停端口", setting: "nanonis_port_emergency" },
+  { key: "main", label: tr("主端口", "Main port"), setting: "nanonis_port_main" },
+  { key: "monitor", label: tr("监控端口", "Monitor port"), setting: "nanonis_port_monitor" },
+  { key: "data", label: tr("数据端口", "Data port"), setting: "nanonis_port_data" },
+  { key: "emergency", label: tr("急停端口", "Emergency-stop port"), setting: "nanonis_port_emergency" },
 ];
 
 /** Static read-only value box (visual parity with TextField, not editable). */
@@ -100,9 +100,9 @@ function NanonisCard({ readOnly = false }: { readOnly?: boolean }) {
 
   const save = useMutation({
     mutationFn: async () => {
-      // SettingsPatch（由后端 schema 生成）而不是 Record<string, unknown>：
-      // 后端 2026-08-10 起是 extra='forbid'，多送一个键会让整笔 422，所以
-      // 「键名对不对」必须在 typecheck 就答完，不能等到运行时。
+      // SettingsPatch (generated from the backend schema) rather than
+      // Record<string, unknown>: the backend uses extra='forbid', so one unknown key
+      // makes the whole write a 422. Key names must be checked at typecheck time.
       const body: SettingsPatch = {};
       if (host != null && host.trim()) body.nanonis_host = host.trim();
       for (const r of PORT_ROLES) {
@@ -114,20 +114,17 @@ function NanonisCard({ readOnly = false }: { readOnly?: boolean }) {
       return data;
     },
     onSuccess: (res) => {
-      // The old check read only `degraded`, so every refusal (`ok:false,
-      // degraded:false` — port out of range, PIN) produced the green 「已保存」
-      // toast. That is the same lie this button was already telling for a
-      // different reason: the five keys were missing from the write schema
-      // entirely, so every save was a silent no-op.
-      // The edits are cleared ONLY on success — dropping them after a refusal
-      // would refill the form with the old values as if nothing had happened.
+      // Checking only `degraded` would show a success toast for every refusal
+      // (`ok:false, degraded:false`, e.g. port out of range or PIN), so use the shared
+      // write-problem predicate. Edits are cleared only on success; dropping them after
+      // a refusal would refill the form with the old values as if nothing had happened.
       const problem = settingsWriteProblem(res);
       if (problem) { toast(problem, "err"); return; }
       setHost(null); setPorts({});
       queryClient.invalidateQueries({ queryKey: ["settings"] });
-      toast("已保存 Nanonis 连接配置。", "ok");
+      toast(tr("已保存 Nanonis 连接配置。", "Nanonis connection settings saved."), "ok");
     },
-    onError: (e) => toast(`保存失败：${String((e as Error)?.message ?? e)}`, "err"),
+    onError: (e) => toast(`${tr("保存失败：", "Save failed: ")}${String((e as Error)?.message ?? e)}`, "err"),
   });
 
   const reconnect = useMutation({
@@ -144,9 +141,9 @@ function NanonisCard({ readOnly = false }: { readOnly?: boolean }) {
     },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["nanonis", "connection"] });
-      res?.degraded ? toast("重连未触发（内核未接入）。", "err") : toast("已发起重连（后台优雅连接）。", "ok");
+      res?.degraded ? toast(tr("重连未触发（内核未接入）。", "Reconnect not triggered (core not attached)."), "err") : toast(tr("已发起重连（后台优雅连接）。", "Reconnect started (graceful, in the background)."), "ok");
     },
-    onError: (e) => toast(`重连失败：${String((e as Error)?.message ?? e)}`, "err"),
+    onError: (e) => toast(`${tr("重连失败：", "Reconnect failed: ")}${String((e as Error)?.message ?? e)}`, "err"),
   });
 
   const portStatus = (key: string): boolean | undefined =>
@@ -155,19 +152,19 @@ function NanonisCard({ readOnly = false }: { readOnly?: boolean }) {
   return (
     <Card>
       <div className="mb-2 flex items-center gap-2">
-        <span className="text-sm font-medium text-mast-text">Nanonis 连接</span>
+        <span className="text-sm font-medium text-mast-text">{tr("Nanonis 连接", "Nanonis connection")}</span>
         {connQ.data && !connQ.data.degraded &&
-          (connQ.data.connected ? <Badge tone="AUTO">在线</Badge> : <Badge tone="WARN">离线</Badge>)}
+          (connQ.data.connected ? <Badge tone="AUTO">{tr("在线", "Online")}</Badge> : <Badge tone="WARN">{tr("离线", "Offline")}</Badge>)}
         {connQ.data?.host && <span className="text-xs text-mast-muted">{connQ.data.host}</span>}
       </div>
       {settingsQ.isPending && !readOnly && <Spinner />}
       {settingsQ.error && !readOnly && <ErrorNote error={settingsQ.error} />}
-      {connQ.data?.degraded && <DegradedNote what="Nanonis 连接" />}
-      {/* In read-only (设置) mode render from whatever is available (connection
+      {connQ.data?.degraded && <DegradedNote what={tr("Nanonis 连接", "Nanonis connection")} />}
+      {/* In read-only (Settings) mode render from whatever is available (connection
           ports are prefilled 6501-6504); editing requires the settings query. */}
       {(readOnly ? connQ.data || settingsQ.data : settingsQ.data) && (
         <div className="space-y-3">
-          <Field label="主机地址">
+          <Field label={tr("主机地址", "Host address")}>
             {readOnly ? (
               <ReadOnlyValue value={hostVal || "—"} mono />
             ) : (
@@ -188,7 +185,7 @@ function NanonisCard({ readOnly = false }: { readOnly?: boolean }) {
                         onChange={(v) => setPorts((p) => ({ ...p, [r.setting]: v }))}
                       />
                     )}
-                    {st != null && (st ? <Badge tone="AUTO">已连</Badge> : <Badge tone="DANGEROUS">未连</Badge>)}
+                    {st != null && (st ? <Badge tone="AUTO">{tr("已连", "Connected")}</Badge> : <Badge tone="DANGEROUS">{tr("未连", "Disconnected")}</Badge>)}
                   </div>
                 </Field>
               );
@@ -196,15 +193,15 @@ function NanonisCard({ readOnly = false }: { readOnly?: boolean }) {
           </div>
           {readOnly ? (
             <p className="rounded-md border border-mast-border bg-mast-bg/40 px-2 py-1.5 text-xs text-mast-muted">
-              端口在「高级管理 → 硬件」中修改。
+              {tr("端口在「高级管理 → 硬件」中修改。", "Ports are changed under Advanced → Hardware connection.")}
             </p>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
               <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate()}>
-                {save.isPending ? "保存中…" : "保存配置"}
+                {save.isPending ? tr("保存中…", "Saving…") : tr("保存配置", "Save settings")}
               </Button>
               <Button variant="default" disabled={reconnect.isPending} onClick={() => reconnect.mutate()}>
-                {reconnect.isPending ? "重连中…" : "重新连接"}
+                {reconnect.isPending ? tr("重连中…", "Reconnecting…") : tr("重新连接", "Reconnect")}
               </Button>
             </div>
           )}
@@ -250,9 +247,9 @@ function SensorsCard({ readOnly = false }: { readOnly?: boolean }) {
     onSuccess: (res) => {
       setEditing(null);
       queryClient.invalidateQueries({ queryKey: ["environment", "sensors"] });
-      res?.degraded ? toast("写入未生效（内核未接入）。", "err") : toast("已保存传感器。", "ok");
+      res?.degraded ? toast(tr("写入未生效（内核未接入）。", "Write not applied (core not attached)."), "err") : toast(tr("已保存传感器。", "Sensor saved."), "ok");
     },
-    onError: (e) => toast(`保存失败：${String((e as Error)?.message ?? e)}`, "err"),
+    onError: (e) => toast(`${tr("保存失败：", "Save failed: ")}${String((e as Error)?.message ?? e)}`, "err"),
   });
 
   const del = useMutation({
@@ -265,9 +262,9 @@ function SensorsCard({ readOnly = false }: { readOnly?: boolean }) {
     },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["environment", "sensors"] });
-      res?.degraded ? toast("删除未生效（内核未接入）。", "err") : toast("已删除传感器。", "ok");
+      res?.degraded ? toast(tr("删除未生效（内核未接入）。", "Delete not applied (core not attached)."), "err") : toast(tr("已删除传感器。", "Sensor deleted."), "ok");
     },
-    onError: (e) => toast(`删除失败：${String((e as Error)?.message ?? e)}`, "err"),
+    onError: (e) => toast(`${tr("删除失败：", "Delete failed: ")}${String((e as Error)?.message ?? e)}`, "err"),
   });
 
   const rescan = useMutation({
@@ -278,9 +275,9 @@ function SensorsCard({ readOnly = false }: { readOnly?: boolean }) {
     },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["environment", "sensors"] });
-      res?.degraded ? toast("重新探测未执行（内核未接入）。", "err") : toast(`重新探测完成：${res.count ?? 0} 个传感器。`, "ok");
+      res?.degraded ? toast(tr("重新探测未执行（内核未接入）。", "Rescan not run (core not attached)."), "err") : toast(tr(`重新探测完成：${res.count ?? 0} 个传感器。`, `Rescan complete: ${res.count ?? 0} sensors.`), "ok");
     },
-    onError: (e) => toast(`重新探测失败：${String((e as Error)?.message ?? e)}`, "err"),
+    onError: (e) => toast(`${tr("重新探测失败：", "Rescan failed: ")}${String((e as Error)?.message ?? e)}`, "err"),
   });
 
   const sensors = q.data?.sensors ?? [];
@@ -289,40 +286,40 @@ function SensorsCard({ readOnly = false }: { readOnly?: boolean }) {
     <Card>
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-mast-text">环境传感器</span>
+          <span className="text-sm font-medium text-mast-text">{tr("环境传感器", "Environment sensors")}</span>
           {q.data && !q.data.degraded && (
-            <Badge tone={q.data.autodetect ? "AUTO" : "INFO"}>{q.data.autodetect ? "自动探测" : "手动"}</Badge>
+            <Badge tone={q.data.autodetect ? "AUTO" : "INFO"}>{q.data.autodetect ? tr("自动探测", "Auto-detect") : tr("手动", "Manual")}</Badge>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {/* Scan is offered on BOTH surfaces: it is read-only until the user
-              confirms in the dialog, and the 设置 page is where people look for
-              "接上我的温度计". Sensor row CRUD stays admin-only. */}
+          {/* Scan is offered on both surfaces: it is read-only until the user
+              confirms in the dialog, and the Settings page is where people look to
+              attach a new thermometer. Sensor row CRUD stays admin-only. */}
           <DeviceScanButton />
           {!readOnly && (
             <Button variant="default" disabled={rescan.isPending} onClick={() => rescan.mutate()}>
-              {rescan.isPending ? "探测中…" : "重新探测"}
+              {rescan.isPending ? tr("探测中…", "Scanning…") : tr("重新探测", "Rescan")}
             </Button>
           )}
         </div>
       </div>
       {q.isPending && <Spinner />}
       {q.error && <ErrorNote error={q.error} />}
-      {q.data?.degraded && <DegradedNote what="传感器配置" />}
+      {q.data?.degraded && <DegradedNote what={tr("传感器配置", "Sensor configuration")} />}
       {q.data && !q.data.degraded && (
         <div className="space-y-3">
           {sensors.length === 0 ? (
-            <EmptyNote label="暂无已配置传感器" />
+            <EmptyNote label={tr("暂无已配置传感器", "No sensors configured")} />
           ) : (
             <div className="overflow-auto rounded-md border border-mast-border">
               <table className="w-full text-sm">
                 <thead className="text-mast-muted">
                   <tr className="border-b border-mast-border">
                     <th className="px-2 py-1 text-left">ID</th>
-                    <th className="px-2 py-1 text-left">名称</th>
-                    <th className="px-2 py-1 text-left">类型</th>
-                    <th className="px-2 py-1 text-left">端口</th>
-                    <th className="px-2 py-1 text-left">单位</th>
+                    <th className="px-2 py-1 text-left">{tr("名称", "Name")}</th>
+                    <th className="px-2 py-1 text-left">{tr("类型", "Type")}</th>
+                    <th className="px-2 py-1 text-left">{tr("端口", "Port")}</th>
+                    <th className="px-2 py-1 text-left">{tr("单位", "Unit")}</th>
                     {!readOnly && <th className="px-2 py-1" />}
                   </tr>
                 </thead>
@@ -339,8 +336,8 @@ function SensorsCard({ readOnly = false }: { readOnly?: boolean }) {
                           <div className="flex justify-end gap-1">
                             <Button variant="ghost" onClick={() => setEditing({
                               id: s.id, name: s.name ?? "", type: s.type ?? "", port: s.port ?? "", unit: s.unit ?? "",
-                            })}>编辑</Button>
-                            <Button variant="danger" onClick={() => del.mutate(s.id)}>删除</Button>
+                            })}>{tr("编辑", "Edit")}</Button>
+                            <Button variant="danger" onClick={() => del.mutate(s.id)}>{tr("删除", "Delete")}</Button>
                           </div>
                         </td>
                       )}
@@ -353,24 +350,24 @@ function SensorsCard({ readOnly = false }: { readOnly?: boolean }) {
 
           {readOnly ? null : editing ? (
             <div className="rounded-md border border-mast-accent/40 p-3">
-              <div className="mb-2 text-sm font-medium text-mast-text">编辑 / 新增传感器</div>
+              <div className="mb-2 text-sm font-medium text-mast-text">{tr("编辑 / 新增传感器", "Edit / add sensor")}</div>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <Field label="ID"><TextField value={editing.id} mono onChange={(v) => setEditing({ ...editing, id: v })} /></Field>
-                <Field label="名称"><TextField value={editing.name} onChange={(v) => setEditing({ ...editing, name: v })} /></Field>
-                <Field label="类型"><TextField value={editing.type} onChange={(v) => setEditing({ ...editing, type: v })} /></Field>
-                <Field label="端口"><TextField value={editing.port} onChange={(v) => setEditing({ ...editing, port: v })} /></Field>
-                <Field label="单位"><TextField value={editing.unit} onChange={(v) => setEditing({ ...editing, unit: v })} /></Field>
+                <Field label={tr("名称", "Name")}><TextField value={editing.name} onChange={(v) => setEditing({ ...editing, name: v })} /></Field>
+                <Field label={tr("类型", "Type")}><TextField value={editing.type} onChange={(v) => setEditing({ ...editing, type: v })} /></Field>
+                <Field label={tr("端口", "Port")}><TextField value={editing.port} onChange={(v) => setEditing({ ...editing, port: v })} /></Field>
+                <Field label={tr("单位", "Unit")}><TextField value={editing.unit} onChange={(v) => setEditing({ ...editing, unit: v })} /></Field>
               </div>
               <div className="mt-2 flex gap-2">
                 <Button variant="primary" disabled={upsert.isPending || !editing.id.trim()} onClick={() => upsert.mutate(editing)}>
-                  {upsert.isPending ? "保存中…" : "保存"}
+                  {upsert.isPending ? tr("保存中…", "Saving…") : tr("保存", "Save")}
                 </Button>
-                <Button variant="ghost" onClick={() => setEditing(null)}>取消</Button>
+                <Button variant="ghost" onClick={() => setEditing(null)}>{tr("取消", "Cancel")}</Button>
               </div>
             </div>
           ) : (
             <Button variant="default" onClick={() => setEditing({ id: "", name: "", type: "", port: "", unit: "" })}>
-              + 新增传感器
+              {tr("+ 新增传感器", "+ Add sensor")}
             </Button>
           )}
         </div>
@@ -380,18 +377,18 @@ function SensorsCard({ readOnly = false }: { readOnly?: boolean }) {
   );
 }
 
-/** `readOnly` (设置 → 硬件连接) renders host + 4 ports prefilled from the live
- *  connection (6501-6504) + status as read-only, with a note pointing edits to
- *  「高级管理 → 硬件」; sensors become view-only. Admin passes the default
- *  (editable). */
+/** `readOnly` (Settings → Hardware connection) renders host + 4 ports prefilled from
+ *  the live connection (6501-6504) + status as read-only, with a note pointing edits
+ *  to Advanced → Hardware connection; sensors become view-only. The admin tab passes
+ *  the default (editable). */
 export function HardwareManager({ readOnly = false }: { readOnly?: boolean }) {
   return (
     <div className="grid grid-cols-1 gap-4">
       <NanonisCard readOnly={readOnly} />
       <SensorsCard readOnly={readOnly} />
       {/* Read-only instrument readout (inputs + heater state). Shown on both
-          surfaces — it is pure reference, and「加热器现在是不是开着」is exactly
-          the thing someone walks over to the settings page to check. */}
+          surfaces: it is pure reference, and whether the heater is on is something
+          people check from the settings page. */}
       <InstrumentStateCard />
     </div>
   );

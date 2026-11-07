@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
+from mast.i18n import tr
+
 logger = logging.getLogger(__name__)
 
 #: ``Signals_NamesGet`` 里 Z 与电流的写法（小写比对）。
@@ -72,11 +74,12 @@ def resolve_readout(context, calls: list, *,
     rec_buf = context.safe_call("Scan_BufferGet")
     calls.append(rec_buf)
     if getattr(rec_buf, "error", ""):
-        out.why = "读不到扫描缓冲：%s" % rec_buf.error
+        out.why = tr("读不到扫描缓冲：%s", "Cannot read the scan buffer: %s") % rec_buf.error
         return out
     buf = parse_buffer_get(getattr(rec_buf, "return_value", None))
     if not buf or not buf.get("channel_indexes"):
-        out.why = ("扫描缓冲的回包读不懂 —— 不去猜通道号。原始回包：%s"
+        out.why = (tr("扫描缓冲的回包读不懂 —— 不去猜通道号。原始回包：%s",
+                      "Cannot parse the scan buffer reply -- not guessing the channel number. Raw reply: %s")
                    % str(getattr(rec_buf, "return_value", None))[:200])
         return out
     out.channels = [int(c) for c in buf["channel_indexes"]]
@@ -84,7 +87,7 @@ def resolve_readout(context, calls: list, *,
     out.lines = buf.get("lines")
 
     if forced_channel >= 0:
-        out.z_index, out.z_source = int(forced_channel), "参数指定"
+        out.z_index, out.z_source = int(forced_channel), tr("参数指定", "set by parameter")
     else:
         rec_names = context.safe_call("Signals_NamesGet")
         calls.append(rec_names)
@@ -94,17 +97,20 @@ def resolve_readout(context, calls: list, *,
                     for n in names]
             for c in out.channels:
                 if 0 <= c < len(flat) and flat[c] in Z_NAME_HINTS:
-                    out.z_index, out.z_source = c, "按信号名 Z 解出"
+                    out.z_index, out.z_source = c, tr("按信号名 Z 解出", "resolved from the signal named Z")
                     break
         if out.z_index is None:
             # 兜底：缓冲里**不是**电流的那一路。会在结果里说明是兜底来的 ——
             # 一个不说自己是兜底的兜底值，正是最难发现的那种错。
             non_cur = [c for c in out.channels if c != 0]
             if non_cur:
-                out.z_index, out.z_source = non_cur[0], "兜底：缓冲里非电流的那一路"
+                out.z_index, out.z_source = non_cur[0], tr("兜底：缓冲里非电流的那一路",
+                                                           "fallback: the non-current channel in the buffer")
     if out.z_index is None:
-        out.why = ("扫描缓冲里找不到 Z 通道，缓冲里只有 %s。"
-                   "把 Z 加进扫描通道，或者显式指定通道号。" % out.channels)
+        out.why = (tr("扫描缓冲里找不到 Z 通道，缓冲里只有 %s。"
+                      "把 Z 加进扫描通道，或者显式指定通道号。",
+                      "No Z channel in the scan buffer; the buffer has only %s. "
+                      "Add Z to the scan channels, or specify the channel number explicitly.") % out.channels)
         return out
 
     rec_fr = context.safe_call("Scan_FrameGet")
@@ -116,8 +122,10 @@ def resolve_readout(context, calls: list, *,
         except (TypeError, ValueError):
             out.width_m = None
     if not out.width_m or not out.pixels:
-        out.why = ("算不出 nm/px：视野 %s、像素 %s —— 宁可拒绝，"
-                   "也不按一个猜的尺度做判读。" % (out.width_m, out.pixels))
+        out.why = (tr("算不出 nm/px：视野 %s、像素 %s —— 宁可拒绝，"
+                      "也不按一个猜的尺度做判读。",
+                      "Cannot compute nm/px: field of view %s, pixels %s -- refusing rather than "
+                      "interpreting at a guessed scale.") % (out.width_m, out.pixels))
         return out
     out.nm_per_px = float(out.width_m) * 1e9 / float(out.pixels)
     return out
@@ -131,5 +139,5 @@ def grab_frame(context, channel_index: int, direction: int, calls: list):
                                    shape_2d=True)
     calls.append(rec)
     if arr is None:
-        return None, (getattr(rec, "error", "") or "回包读不懂")
+        return None, (getattr(rec, "error", "") or tr("回包读不懂", "cannot parse the reply"))
     return arr, ""

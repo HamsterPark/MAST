@@ -18,6 +18,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from mast.api import ws
+from mast.api.access import AccessGate
+from mast.api.compression import MediaAwareGZipMiddleware
 from mast.api.context import AppContext, set_context
 from mast.api.routes import (
     admin,
@@ -26,6 +28,7 @@ from mast.api.routes import (
     agents_topology,
     artifacts_edit,
     builder,
+    camera,
     conducts,
     chat_narration,
     chat_stream,
@@ -48,19 +51,24 @@ from mast.api.routes import (
     literature_cognition,
     literature_ext2,
     literature_scope,
+    live,
+    manual,
     monitoring,
     prompts,
+    optical_layout,
     optics,
     orchestrator,
     qa,
     records,
     records_export,
     remote_access,
+    satellites,
     scope,
     safety,
     settings,
     settings_admin_write,
     signals,
+    site_marking,
     skill_market,
     skill_overlay,
     skills,
@@ -74,6 +82,8 @@ from mast.api.routes import (
     voice_ws,
     wishlist,
 )
+# 操作员端点（结构化提示的回答、手动光学状态）。别名：避免与标准库 operator 同名。
+from mast.api.routes import operator as operator_routes
 from mast.api.version import get_version
 
 logger = logging.getLogger(__name__)
@@ -84,33 +94,10 @@ _DEV_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
-
-
-def _add_basic_auth(app: FastAPI, username: str, password: str) -> None:
-    """HTTP Basic auth for LAN binding (replaces Gradio's plaintext basic auth).
-
-    NOTE: Basic auth is only safe over TLS — run_service warns + should supply
-    ssl_certfile/keyfile when binding non-loopback (the LAN-TLS P0)."""
-    import base64
-    import secrets
-
-    from starlette.middleware.base import BaseHTTPMiddleware
-    from starlette.responses import Response
-
-    expected = "Basic " + base64.b64encode(f"{username}:{password}".encode()).decode()
-
-    class _BasicAuth(BaseHTTPMiddleware):
-        async def dispatch(self, request, call_next):
-            hdr = request.headers.get("authorization", "")
-            if not (hdr and secrets.compare_digest(hdr, expected)):
-                return Response(
-                    status_code=401,
-                    headers={"WWW-Authenticate": 'Basic realm="MAST"'},
-                    content="Unauthorized",
-                )
-            return await call_next(request)
-
-    app.add_middleware(_BasicAuth)
+# 开发态浏览器 WS 与写请求还认的源：Vite dev / preview 把 /api、/ws 代理过来时 changeOrigin 把 Host
+# 改成了后端地址，Origin 仍是页面自己的。端口不写死：vite.config.ts 没开 strictPort，5173 被占时
+# Vite 自动换 5174、5175……（preview 是 4173）。只认本机回环名；生产（dev_cors=False）一个都不认。
+_DEV_WS_ORIGINS = ("http://localhost:*", "http://127.0.0.1:*", "http://[::1]:*")
 
 
 def create_app(
@@ -132,6 +119,18 @@ def create_app(
     )
     app.state.ctx = ctx
 
+    # The internal LLM is off while legacy features are off (mast/legacy_gate.py).
+    # Routes that would use it refuse up front by raising LegacyFeaturesDisabled;
+    # anything raised deeper surfaces the same way instead of as a bare 500.
+    # 403 + a detail string that starts with "legacy_features_disabled:".
+    from fastapi.responses import JSONResponse
+
+    from mast.legacy_gate import LegacyFeaturesDisabled
+
+    @app.exception_handler(LegacyFeaturesDisabled)
+    async def _legacy_features_disabled(_request, exc):  # noqa: ANN001
+        return JSONResponse(status_code=403, content={"detail": str(exc)})
+
     if dev_cors:
         app.add_middleware(
             CORSMiddleware,
@@ -141,8 +140,24 @@ def create_app(
             allow_headers=["*"],
         )
 
-    if auth is not None:
-        _add_basic_auth(app, auth[0], auth[1])
+    # 压缩：前端主包约 2.2 MB，经 Tailscale 中继远程打开时首屏要等几十秒。Starlette 的 GZip 跳过
+    # text/event-stream（本服务的流式响应全是 SSE），WebSocket 不经过它；只在客户端声明
+    # Accept-Encoding: gzip 时才压 —— urllib 写的启动器、MCP 插件不带这个头，拿到的响应不变。
+    # 级别 6：几 MB 的 JSON（实时流回看）压起来不至于把 CPU 占满，体积和 9 级差不了几个百分点。
+    # 图像（相机画面、帧缩略图）本来就是压缩格式，不再 gzip（mast/api/compression.py）。
+    app.add_middleware(MediaAwareGZipMiddleware, minimum_size=1024, compresslevel=6)
+
+    # 访问闸门（mast/api/access.py）：纯 ASGI，http 与 websocket 都过它。LAN 模式要 Basic 或它签发的
+    # 会话 cookie；浏览器发起的 WS 与跨站写请求不论什么模式都要同源；/ws/satellite/ 交给卫星端点验令牌。
+    # 最后加 = 最外层（先于 GZip / CORS）。挂载的外部面子应用同样在它后面。
+    # NOTE: Basic 只有在 TLS 上才安全 —— run_service 在非回环绑定时配 ssl_certfile/keyfile。
+    app.add_middleware(AccessGate, credentials=auth,
+                       dev_origins=_DEV_WS_ORIGINS if dev_cors else ())
+
+    # Response language (mast/i18n.py): the outermost layer, so even the access gate's
+    # refusals come back in the language of the browser that asked.
+    from mast.i18n import LanguageMiddleware
+    app.add_middleware(LanguageMiddleware)
 
     # All /api routes. Order matters where paths overlap: exact-path routers
     # (skills /skills/catalog) MUST precede path-param routers (skills_ext
@@ -211,9 +226,9 @@ def create_app(
         skill_market,
         # ── 光学台 (TERS/THz 位移台手动控制 + 泵浦探测空跑) ──
         optics,
-        # ── 报告/评审浏览 (autonomous-run outputs; ) ──
+        # ── 报告/评审浏览 (autonomous-run outputs) ──
         documents,
-        # ── 拒绝台账 (why nothing happened; ) ──
+        # ── 拒绝台账 (why nothing happened) ──
         diagnostics,
         # ── 跨网远程访问就绪状态 (Tailscale; 设置 → 远程访问) ──
         remote_access,
@@ -252,6 +267,21 @@ def create_app(
         # supervised=agent 可批+撤销窗 / autonomous=即批即跑),见
         # mast/conduct/autonomy.py —— 把关在服务端,不靠「不给工具」。
         conducts,
+        # ── 实时数据流 (LiveHub) ──
+        # 独立前缀 /live,只有 /live/streams 与 /live/streams/{stream_id:path}。
+        live,
+        # ── 手动控制面板的设备描述（GET /api/manual/devices）──
+        manual,
+        # ── 对光相机的画面与光斑统计（/camera/{camera_id}/frame.jpg|stats）──
+        camera,
+        # ── 位点标注页（服务填好的 HTML + 补丁式 /doc 文档端点；include_in_schema=False）──
+        site_marking,
+        # ── 操作员端点（光学站）：/operator/prompts*、/operator/optical-state*。
+        #    给人用的（网页、启动器弹窗），不在 /api/ext/v1 里，也不在 MCP 里 ──
+        operator_routes,
+        # ── 光路图（docs/v2/design/optical_layout.md）：/optical-layouts*。网页编辑器用；
+        #    外部 agent 只经 /api/ext/v1/optical-layouts 读 + 评论，不能改几何 / 注释 / 解决评论 ──
+        optical_layout,
     ):
         app.include_router(module.router, prefix="/api")
 
@@ -261,6 +291,8 @@ def create_app(
     # Realtime channels use full paths (/ws/*, /sse/*, /api/buffer/*) — no prefix.
     app.include_router(ws.router)
     app.include_router(voice_ws.router)  # /ws/voice — full-duplex voice
+    app.include_router(live.ws_router)   # /ws/live — 实时数据流（LiveHub）
+    app.include_router(satellites.router)  # /ws/satellite/v1（自验令牌）+ /api/satellites* + /api/port-guard
 
     # ── 外部 agent 网关 (/api/ext/v1；docs/v2/design/external_agent_gateway.md) ──
     # 独立的子应用：自己的 JSON 错误体与 OpenAPI（/api/ext/v1/openapi.json），主

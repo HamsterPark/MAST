@@ -5,21 +5,21 @@ import type { components } from "@/api/schema";
 import { DegradedNote, EmptyNote, ErrorNote, Spinner } from "@/components/ui";
 import { displayPath, fileName, groupBySample, groupSummary } from "@/lib/scanAttribution";
 import { isUnattributed } from "@/lib/scanCopies";
+import { tr } from "@/lib/i18n";
 import { ScanGridCard } from "./ScanGridCard";
 import type { FlattenMode } from "./scanPreviewQuery";
 
-// 按实验 / 样品分组浏览。
+// Browse by experiment / sample.
 //
-// The 数据 tab lists what is on disk, mtime-desc, and a path alone cannot say
-// which experiment a file belongs to — so a tab full of `unnamed0007.sxm` gave
-// no way to ask "what did THIS experiment produce". That question is answered by
-// the v2 `file_locations` table, which the ingest writes as it copies files into
-// each experiment folder; `/api/scans/attribution` reads it.
+// The Data tab lists what is on disk, newest first, and a path alone cannot say
+// which experiment a file belongs to. That question is answered by the v2
+// `file_locations` table, which the ingest writes as it copies files into each
+// experiment folder; `/api/scans/attribution` reads it.
 //
-// The 未归属 section at the bottom is not a leftovers bin to be tidied away: raw
-// session data that no experiment has claimed is normal (a scan taken before an
-// experiment was started, or with the ingest off), and hiding it would make this
-// view show less than the disk holds.
+// The "unassigned" section at the bottom is not a leftovers bin to be tidied
+// away: raw session data that no experiment has claimed is normal (a scan taken
+// before an experiment was started, or with the ingest off), and hiding it would
+// make this view show less than the disk holds.
 
 type ScanFileEntry = components["schemas"]["ScanFileEntry"];
 type AttributionEntry = components["schemas"]["FileAttributionEntry"];
@@ -59,9 +59,8 @@ function asScanEntry(row: AttributionEntry): ScanFileEntry | null {
     path,
     name,
     ext: dot >= 0 ? name.slice(dot).toLowerCase() : "",
-    // Ingest time, not the file's mtime: this row came from the ledger, and
-    // stat-ing every file to fill the other number would be a directory walk
-    // per render. `null` here means "not read", which is what it is.
+    // No mtime: this row came from the ledger, and stat-ing every file would be
+    // a directory walk per render. `null` means "not read".
     mtime: null,
     size_bytes: row.size_bytes ?? 0,
     kind: row.root_kind === "quarantine" ? "quarantine" : "experiment",
@@ -77,7 +76,7 @@ export function ScanGroupBrowser({
   selected,
   onSelect,
 }: {
-  /** The flat listing, for the 未归属 section. */
+  /** The flat listing, for the "unassigned" section. */
   scans: ScanFileEntry[];
   scansDegraded: boolean;
   flatten: FlattenMode;
@@ -106,10 +105,15 @@ export function ScanGroupBrowser({
     <div className="space-y-4">
       {exps.isPending && <Spinner />}
       {exps.isError && <ErrorNote error={exps.error} />}
-      {exps.data?.degraded && <DegradedNote what="实验列表" />}
+      {exps.data?.degraded && <DegradedNote what={tr("实验列表", "experiment list")} />}
 
       {!unreadable && experiments.length === 0 && (
-        <EmptyNote label="还没有实验。数据仍然可以在「网格」「列表」视图里按时间浏览。" />
+        <EmptyNote
+          label={tr(
+            "还没有实验。数据仍然可以在「网格」「列表」视图里按时间浏览。",
+            "No experiments yet. Data can still be browsed by time in the Grid and List views.",
+          )}
+        />
       )}
 
       {experiments.length > 0 && (
@@ -137,19 +141,21 @@ export function ScanGroupBrowser({
         <div className="space-y-3">
           {shown.isPending && <Spinner />}
           {shown.isError && <ErrorNote error={shown.error} />}
-          {shown.data?.degraded && <DegradedNote what="文件归属" />}
+          {shown.data?.degraded && <DegradedNote what={tr("文件归属", "file attribution")} />}
           {shown.data && !shown.data.degraded && groups.length === 0 && (
             <EmptyNote
-              label={
-                "这个实验名下没有登记文件。自动拷贝把文件收进实验文件夹时才会登记；" +
-                "拷贝关掉、或文件是拷贝功能之前采的，就不会出现在这里。"
-              }
+              label={tr(
+                "这个实验名下没有登记文件。自动拷贝把文件收进实验文件夹时才会登记；拷贝关掉、或文件是拷贝功能之前采的，就不会出现在这里。",
+                "No files are registered under this experiment. Files are registered when automatic copying moves them into the experiment folder; if copying is off, or the files predate the copy feature, they do not appear here.",
+              )}
             />
           )}
           {groups.map((g) => (
             <div key={g.sampleId ?? "__none__"}>
               <div className="mb-1 flex items-baseline gap-2 text-xs font-medium text-mast-muted">
-                {g.sampleId ? `样品 ${g.sampleId.slice(0, 8)}` : "未指明样品"}
+                {g.sampleId
+                  ? `${tr("样品", "Sample")} ${g.sampleId.slice(0, 8)}`
+                  : tr("未指明样品", "No sample specified")}
                 <span className="font-normal text-mast-faint tabular-nums">
                   {groupSummary(g)}
                 </span>
@@ -176,13 +182,13 @@ export function ScanGroupBrowser({
 
       <div>
         <div className="mb-1 flex items-baseline gap-2 text-xs font-medium text-mast-muted">
-          未归属（原始会话数据）
+          {tr("未归属（原始会话数据）", "Unassigned (raw session data)")}
           <span className="font-normal text-mast-faint tabular-nums">{orphans.length}</span>
         </div>
         {scansDegraded ? (
-          <DegradedNote what="磁盘文件列表" />
+          <DegradedNote what={tr("磁盘文件列表", "disk file list")} />
         ) : orphans.length === 0 ? (
-          <EmptyNote label="当前这一页里的文件都已经收进实验文件夹。" />
+          <EmptyNote label={tr("当前这一页里的文件都已经收进实验文件夹。", "All files on this page have been moved into experiment folders.")} />
         ) : (
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
             {orphans.map((s) => (

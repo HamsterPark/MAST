@@ -12,6 +12,7 @@ import threading
 
 from mast.gallery import build as _build
 from mast.gallery import paths as _paths
+from mast.i18n import tr
 
 _LOCK = threading.Lock()
 
@@ -39,7 +40,7 @@ def _run(lay: _paths.Layout, force: bool, prog: _build.Progress, cancel: threadi
         _build.run_build(force=force, progress=prog, cancel=cancel, state=lay.state)
     except Exception as exc:  # noqa: BLE001 — run_build 自己不抛，这里只是兜底
         prog.update(running=False, phase="error", finished=_build.now_str(),
-                    message=f"构建失败：{exc}", detail=str(exc))
+                    message=tr(f"构建失败：{exc}", f"Build failed: {exc}"), detail=str(exc))
 
 
 def start_build(force: bool = False) -> dict:
@@ -50,7 +51,7 @@ def start_build(force: bool = False) -> dict:
         lay = _paths.layout()
         cancel = threading.Event()
         prog = _build.Progress()
-        prog.update(running=True, phase="inventory", started=_build.now_str(), message="准备中…")
+        prog.update(running=True, phase="inventory", started=_build.now_str(), message=tr("准备中…", "Preparing..."))
         th = threading.Thread(target=_run, args=(lay, bool(force), prog, cancel),
                               name="gallery-build", daemon=True)
         th.start()
@@ -63,7 +64,7 @@ def cancel_build() -> dict:
         th, ev, prog = _SLOT
         if _alive(th) and ev is not None:
             ev.set()
-            prog.update(message="正在取消…（已经在跑的几个任务会跑完）")
+            prog.update(message=tr("正在取消…（已经在跑的几个任务会跑完）", "Cancelling... (the tasks already running will finish)"))
     return get_status()
 
 

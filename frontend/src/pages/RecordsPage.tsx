@@ -23,21 +23,26 @@ import {
   FeedbackButton,
 } from "@/components/records/ExperimentLifecycle";
 import { useStickyTab } from "@/hooks/useStickyTab";
+import { useLegacyFeatures } from "@/hooks/useLegacyFeatures";
+import { RECORDS_LIST_POLL_MS } from "@/lib/pollRates";
+import { tr } from "@/lib/i18n";
 
-// Domain D — 实验记录 (Records). Full-parity rebuild of the freeze-prone old
-// Gradio Records tab. Flat in-page SubTabs (no nested gr.Tabs → no freeze).
+// Records page. Flat in-page SubTabs (no nested tab containers, which froze the
+// old Gradio build).
 //
-// Sub-tabs match the OLD Gradio build verbatim, same names + order:
-//   实验记录  records list (GET /api/experiments) → detail → action detail;
-//             + 新建/结束实验 + 反馈. (OLD = Provenance iframe over this data.)
-//   数据      recent .sxm/.dat/.3ds scans + Load Latest + base64 PNG preview
-//             (GET /api/scans/latest + /api/scans/preview).
-//   日志      experiment + sample dropdowns → action timeline incl. per-action
-//             TCP calls + state diff (GET /api/experiments/{id}/timeline).
-//   训练日志  JSONL / SFT / DPO / 失败挖掘 (POST /api/trajectories/export).
-//   导出全部  full-history ZIP manifest (POST /api/experiments/export).
+// Sub-tabs:
+//   Experiments  list (GET /api/experiments) -> detail -> action detail,
+//                with switch-to-experiment and feedback actions.
+//   Data         recent .sxm/.dat/.3ds scans with a PNG preview
+//                (GET /api/scans/latest + /api/scans/preview).
+//   Log          experiment + sample selectors -> action timeline incl. per-action
+//                TCP calls and state diff (GET /api/experiments/{id}/timeline).
+//   Feedback     what was sent through the feedback float (always on).
+//   Group chats, Training log: built-in agent features, shown only when legacy
+//                features are enabled.
+//   Export all   full-history ZIP (POST /api/experiments/export).
 //
-// Every read renders loading / error / degraded / empty; edits toast.
+// Every read renders loading / error / degraded / empty states; edits toast.
 
 type ExperimentSummary = components["schemas"]["ExperimentSummary"];
 
@@ -52,16 +57,18 @@ type TopTab =
   | "training"
   | "export";
 
-const TABS: { id: TopTab; label: string }[] = [
-  { id: "experiments", label: "实验记录" },
-  { id: "data", label: "数据" },
-  { id: "timeline", label: "日志" },
-  { id: "groupchats", label: "群聊记录" },
-  { id: "diagnostics", label: "诊断" },
-  { id: "documents", label: "报告" },
-  { id: "feedback", label: "反馈" },
-  { id: "training", label: "训练日志" },
-  { id: "export", label: "导出全部" },
+// `legacy` tabs belong to the built-in agents and are hidden unless legacy
+// features are enabled.
+const TABS: { id: TopTab; label: string; legacy?: boolean }[] = [
+  { id: "experiments", label: tr("实验记录", "Experiments") },
+  { id: "data", label: tr("数据", "Data") },
+  { id: "timeline", label: tr("日志", "Log") },
+  { id: "groupchats", label: tr("群聊记录", "Group chats"), legacy: true },
+  { id: "diagnostics", label: tr("诊断", "Diagnostics") },
+  { id: "documents", label: tr("报告", "Reports") },
+  { id: "feedback", label: tr("反馈", "Feedback") },
+  { id: "training", label: tr("训练日志", "Training log"), legacy: true },
+  { id: "export", label: tr("导出全部（仅限实验室内部）", "Export all (lab-internal only)") },
 ];
 
 // Selection state machine for the experiments drill-down.
@@ -71,15 +78,19 @@ type Selection =
   | { kind: "action"; experimentId: string; actionId: string };
 
 export default function RecordsPage() {
-  // 大栏目要记住上次停在哪个子页。九个子页里「导出全部」「训练日志」
-  // 都是回去接着看的地方,每次回来被打回「实验记录」等于每次重新找一遍。
-  const [tab, setTab] = useStickyTab<TopTab>(
+  // Remember the last sub-tab: several of them are places people return to, and
+  // resetting to the first one on every visit means searching for them again.
+  const [stickyTab, setTab] = useStickyTab<TopTab>(
     "records", TABS.map((t) => t.id), "experiments");
   const [sel, setSel] = useState<Selection>({ kind: "list" });
+  const { enabled: legacy } = useLegacyFeatures();
+  const tabs = TABS.filter((t) => legacy || !t.legacy);
+  // A remembered tab that is currently hidden falls back to the first one.
+  const tab: TopTab = tabs.some((t) => t.id === stickyTab) ? stickyTab : "experiments";
 
   return (
     <div className="space-y-6">
-      <SubTabs tabs={TABS} value={tab} onChange={setTab} />
+      <SubTabs tabs={tabs} value={tab} onChange={setTab} />
 
       {tab === "experiments" && <ExperimentsView sel={sel} setSel={setSel} />}
       {tab === "data" && <ScanDataPane />}
@@ -113,9 +124,8 @@ function ExperimentsView({
     return (
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
-          {/* 「结束实验」已移除 (2026-07-28)：实验没有终态，永远可以继续做。
-              取而代之的是「切换到此实验」—— 回到一个旧实验继续，才是这里真正
-              需要的动作。 */}
+          {/* Experiments have no terminal state, so there is no "end experiment"
+              action; the primary action is switching back to an older one. */}
           <ActivateExperimentButton experimentId={sel.experimentId} />
           <FeedbackButton experimentId={sel.experimentId} />
         </div>
@@ -142,23 +152,24 @@ function useExperiments() {
       if (error) throw error;
       return data;
     },
+    refetchInterval: RECORDS_LIST_POLL_MS,
   });
 }
 
-/** 相对时间。「上次活动」比「开始时间」更能回答"我要切回哪个"。 */
+/** Relative time; last activity answers "which one do I switch back to" better than start time. */
 function relTime(iso?: string | null): string {
   if (!iso) return "—";
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return "—";
   const s = Math.max(0, (Date.now() - t) / 1000);
-  if (s < 90) return "刚刚";
-  if (s < 3600) return `${Math.round(s / 60)} 分钟前`;
-  if (s < 86400) return `${Math.round(s / 3600)} 小时前`;
-  return `${Math.round(s / 86400)} 天前`;
+  if (s < 90) return tr("刚刚", "just now");
+  if (s < 3600) return tr(`${Math.round(s / 60)} 分钟前`, `${Math.round(s / 60)} min ago`);
+  if (s < 86400) return tr(`${Math.round(s / 3600)} 小时前`, `${Math.round(s / 3600)} h ago`);
+  return tr(`${Math.round(s / 86400)} 天前`, `${Math.round(s / 86400)} d ago`);
 }
 
 
-/** 「切换到此实验」——记录页详情的主动作，取代原来的「结束实验」。 */
+/** Primary action of the experiment detail view: make this experiment the active one. */
 function ActivateExperimentButton({ experimentId }: { experimentId: string }) {
   const scope = useCurrentScope();
   const switchExp = useSwitchExperiment();
@@ -166,7 +177,7 @@ function ActivateExperimentButton({ experimentId }: { experimentId: string }) {
   if (isCurrent) {
     return (
       <span className="rounded-mast-badge bg-mast-accent-soft px-2 py-1 text-xs text-mast-accent">
-        当前实验
+        {tr("当前实验", "Current experiment")}
       </span>
     );
   }
@@ -176,18 +187,18 @@ function ActivateExperimentButton({ experimentId }: { experimentId: string }) {
       loading={switchExp.isPending}
       onClick={() => switchExp.mutate({ experimentId })}
     >
-      切换到此实验
+      {tr("切换到此实验", "Switch to this experiment")}
     </Button>
   );
 }
 
-/** 新建实验（带重名检测的确认弹窗）。 */
+/** New experiment (confirmation dialog with duplicate-name detection). */
 function NewExperimentLauncher() {
   const [open, setOpen] = useState(false);
   const scope = useCurrentScope();
   return (
     <>
-      <Button onClick={() => setOpen(true)}>新建实验</Button>
+      <Button onClick={() => setOpen(true)}>{tr("新建实验", "New experiment")}</Button>
       <NewExperimentDialog
         open={open}
         onClose={() => setOpen(false)}
@@ -206,28 +217,28 @@ function ExperimentsList({ onSelect }: { onSelect: (id: string) => void }) {
   const columns: ColumnDef<ExperimentSummary, any>[] = [
     {
       accessorKey: "name",
-      header: "名称",
+      header: tr("名称", "Name"),
       cell: (c) => (
         <span className="flex items-center gap-2">
           <button
             className="text-mast-accent hover:underline"
             onClick={() => onSelect(c.row.original.id)}
           >
-            {c.getValue() || "(未命名)"}
+            {c.getValue() || tr("(未命名)", "(unnamed)")}
           </button>
           {c.row.original.id === currentId && (
             <span className="rounded-mast-badge bg-mast-accent-soft px-1.5 py-px text-[10.5px] text-mast-accent">
-              当前
+              {tr("当前", "Current")}
             </span>
           )}
         </span>
       ),
     },
-    { accessorKey: "goal", header: "目标", cell: (c) => c.getValue() || "—" },
+    { accessorKey: "goal", header: tr("目标", "Goal"), cell: (c) => c.getValue() || "—" },
     {
-      // 「状态」列换成「切换」。experiments.status 已经是历史遗留的展示列
-      // （2026-07-28）：实验没有生命周期状态，「哪个是当前」由服务端的单一
-      // 指针回答。历史 status 值降级到详情页展示。
+      // Replaces the former status column: experiments have no lifecycle state;
+      // which one is current is answered by the server's single scope pointer.
+      // Legacy status values are shown on the detail page only.
       id: "switch",
       header: "",
       cell: (c) =>
@@ -239,18 +250,18 @@ function ExperimentsList({ onSelect }: { onSelect: (id: string) => void }) {
             disabled={switchExp.isPending}
             onClick={() => switchExp.mutate({ experimentId: c.row.original.id })}
           >
-            切换到此实验
+            {tr("切换到此实验", "Switch to this experiment")}
           </button>
         ),
     },
     {
       accessorKey: "start_time",
-      header: "开始时间",
+      header: tr("开始时间", "Started"),
       cell: (c) => fmtTime(c.getValue() as string | null),
     },
     {
       id: "last_active",
-      header: "最近活动",
+      header: tr("最近活动", "Last active"),
       cell: (c) => (
         <span className="text-xs text-mast-muted">
           {relTime(
@@ -271,38 +282,33 @@ function ExperimentsList({ onSelect }: { onSelect: (id: string) => void }) {
 
   return (
     <>
-      {/* OLD Records header markdown (verbatim) restored for parity. */}
       <p className="mb-3 text-sm text-mast-muted">
-        <strong className="text-mast-text">实验记录 Provenance</strong> — campaigns / actions /
-        observations / claims 溯源图。数据来自 <code className="font-mono">mast_experiments_v2.db</code>
-        ；运行实验后点「刷新数据」拉取最新记录。
+        <strong className="text-mast-text">
+          {tr("实验记录 Provenance", "Experiment records (provenance)")}
+        </strong>{" "}
+        {tr(
+          "— campaigns / actions / observations / claims 溯源图。数据来自 ",
+          "— provenance graph of campaigns / actions / observations / claims. Data comes from ",
+        )}
+        <code className="font-mono">mast_experiments_v2.db</code>
+        {tr("；列表自动更新。", "; the list updates by itself.")}
       </p>
     <Section
-      title={`实验列表${q.data?.count ? ` (${q.data.count})` : ""}`}
+      title={`${tr("实验列表", "Experiment list")}${q.data?.count ? ` (${q.data.count})` : ""}`}
       actions={
         <div className="flex items-center gap-2">
-          {/* Old Records iframe had a 刷新数据 button to re-pull live records
-              after running experiments; restored for parity. */}
-          <button
-            type="button"
-            disabled={q.isFetching}
-            onClick={() => q.refetch()}
-            className="rounded border border-mast-border px-3 py-1 text-sm text-mast-muted hover:text-mast-text disabled:opacity-50"
-          >
-            {q.isFetching ? "刷新中…" : "刷新数据"}
-          </button>
           <NewExperimentLauncher />
         </div>
       }
     >
       {q.isPending && <Spinner />}
       {q.isError && <ErrorNote error={q.error} />}
-      {q.data?.degraded && <DegradedNote what="实验记录" />}
+      {q.data?.degraded && <DegradedNote what={tr("实验记录", "experiment records")} />}
       {q.data && !q.data.degraded && (
         <DataTable
           data={q.data.experiments ?? []}
           columns={columns}
-          empty="暂无实验记录"
+          empty={tr("暂无实验记录", "No experiment records yet")}
         />
       )}
     </Section>

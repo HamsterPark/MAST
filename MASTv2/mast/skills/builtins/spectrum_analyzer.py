@@ -31,6 +31,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 # SpectrumAnlzr_CursorPosSet(instance, Cursor_type, X1_Hz, X2_Hz): cursor_type
 # 0 = the pair that bound the RMS band.
@@ -61,7 +62,7 @@ class ConfigureSpectrumAnalyzer(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "配置频谱分析仪：FFT 窗、平均、以及 AC 耦合。只读 —— 分析仪只是把信号数字化，"
+                tr("配置频谱分析仪：FFT 窗、平均、以及 AC 耦合。只读 —— 分析仪只是把信号数字化，"
                 "它不驱动任何东西。\n"
                 "\n"
                 "这三项决定了一条谱值不值得看：\n"
@@ -72,26 +73,26 @@ class ConfigureSpectrumAnalyzer(BaseSkill):
                 "• **ac_coupling** —— DC 耦合下，一个大的偏置会主导整条谱，"
                 "有意思的那几个数量级会被压在它底下。\n"
                 "\n"
-                "然后调用 GetSpectrumAnalyzerData。"
+                "然后调用 GetSpectrumAnalyzerData。", "Configure the spectrum analyzer: FFT window, averaging, and AC coupling. Read-only in effect - the analyzer only digitizes the signal, it drives nothing.\n\nThese three decide whether a spectrum is worth looking at:\n- **averaging**: with count=1 every bin is a single noisy sample, and every \"peak\" is a coincidence. Average 10-50x before trusting a peak.\n- **fft_window**: a rectangular window (0) smears every tone into the neighbouring bins. The default to use when looking at noise is Hann (usually 1).\n- **ac_coupling**: with DC coupling a large offset dominates the whole spectrum and buries the interesting orders of magnitude under it.\n\nThen call GetSpectrumAnalyzerData.")
             ),
             parameters=[
                 ParameterSpec(name="instance", type="int",
-                              description="用哪一个分析仪实例（从 1 开始，Nanonis 编号）",
+                              description=tr("用哪一个分析仪实例（从 1 开始，Nanonis 编号）", "Which analyzer instance (starting from 1, Nanonis numbering)"),
                               required=False, default=1, min_value=1, max_value=8),
                 ParameterSpec(name="fft_window", type="int",
-                              description="FFT 窗索引（0 = 矩形窗；通常该用 Hann）",
+                              description=tr("FFT 窗索引（0 = 矩形窗；通常该用 Hann）", "FFT window index (0 = rectangular; Hann should normally be used)"),
                               required=False, default=1, min_value=0, max_value=8),
                 ParameterSpec(name="averaging_count", type="int",
-                              description="平均多少条谱（1 = 不平均 —— 每个峰都是噪声）",
+                              description=tr("平均多少条谱（1 = 不平均 —— 每个峰都是噪声）", "How many spectra to average (1 = no averaging - every peak is noise)"),
                               required=False, default=20, min_value=1, max_value=10_000),
                 ParameterSpec(name="averaging_mode", type="int",
-                              description="平均模式索引（0 = 不平均，1 = 线性，2 = 指数…）",
+                              description=tr("平均模式索引（0 = 不平均，1 = 线性，2 = 指数…）", "Averaging mode index (0 = none, 1 = linear, 2 = exponential...)"),
                               required=False, default=1, min_value=0, max_value=4),
                 ParameterSpec(name="weighting_mode", type="int",
-                              description="加权模式索引",
+                              description=tr("加权模式索引", "Weighting mode index"),
                               required=False, default=0, min_value=0, max_value=4),
                 ParameterSpec(name="ac_coupling", type="bool",
-                              description="对输入做 AC 耦合（剥掉 DC 偏置）",
+                              description=tr("对输入做 AC 耦合（剥掉 DC 偏置）", "AC-couple the input (strip the DC offset)"),
                               required=False, default=True),
             ],
             estimated_duration_s=1.5,
@@ -129,9 +130,9 @@ class ConfigureSpectrumAnalyzer(BaseSkill):
             data={"instance": inst,
                   "averaging_count": int(params.get("averaging_count", 20) or 20),
                   "ac_coupling": bool(params.get("ac_coupling", True))},
-            summary=(f"频谱分析仪 #{inst} 已配置："
+            summary=(tr(f"频谱分析仪 #{inst} 已配置："
                      f"平均 {params.get('averaging_count', 20)} 次，"
-                     f"{'AC' if params.get('ac_coupling', True) else 'DC'} 耦合"),
+                     f"{'AC' if params.get('ac_coupling', True) else 'DC'} 耦合", f"Spectrum analyzer #{inst} configured: averaging {params.get('averaging_count', 20)} times, {'AC' if params.get('ac_coupling', True) else 'DC'} coupling")),
         )
 
 
@@ -145,20 +146,20 @@ class SetSpectrumAnalyzerBand(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "设置频谱分析仪上报 band RMS 所用的频段（那一对游标），单位是 HERTZ。\n"
+                tr("设置频谱分析仪上报 band RMS 所用的频段（那一对游标），单位是 HERTZ。\n"
                 "\n"
                 "band RMS 是回答「到底有多少噪声」的那一个数 —— 例如电流信号上 1 Hz 到 1 kHz，"
-                "告诉你反馈环实际要与之共处的噪声。先设频段，再读 GetSpectrumAnalyzerData.band_rms。"
+                "告诉你反馈环实际要与之共处的噪声。先设频段，再读 GetSpectrumAnalyzerData.band_rms。", "Set the frequency band (the pair of cursors) over which the spectrum analyzer reports band RMS, in HERTZ.\n\nBand RMS is the one number that answers \"how much noise is there, really\" - for example 1 Hz to 1 kHz on the current signal tells you the noise the feedback loop actually has to live with. Set the band first, then read GetSpectrumAnalyzerData.band_rms.")
             ),
             parameters=[
                 ParameterSpec(name="f_low_hz", type="float",
-                              description="频段下边界，单位 HERTZ",
+                              description=tr("频段下边界，单位 HERTZ", "Lower band edge, in HERTZ"),
                               unit="Hz", required=True, min_value=0.0, max_value=1e7),
                 ParameterSpec(name="f_high_hz", type="float",
-                              description="频段上边界，单位 HERTZ",
+                              description=tr("频段上边界，单位 HERTZ", "Upper band edge, in HERTZ"),
                               unit="Hz", required=True, min_value=0.0, max_value=1e7),
                 ParameterSpec(name="instance", type="int",
-                              description="用哪一个分析仪实例（从 1 开始）",
+                              description=tr("用哪一个分析仪实例（从 1 开始）", "Which analyzer instance (starting from 1)"),
                               required=False, default=1, min_value=1, max_value=8),
             ],
             estimated_duration_s=1.0,
@@ -171,14 +172,14 @@ class SetSpectrumAnalyzerBand(BaseSkill):
         lo = float(params["f_low_hz"])
         hi = float(params["f_high_hz"])
         if lo >= hi:
-            return _fail(name, f"f_low_hz ({lo:g}) 必须小于 f_high_hz ({hi:g})", [])
+            return _fail(name, tr(f"f_low_hz ({lo:g}) 必须小于 f_high_hz ({hi:g})", f"f_low_hz ({lo:g}) must be less than f_high_hz ({hi:g})"), [])
         inst = int(params.get("instance", 1) or 1)
         rec = context.safe_call("SpectrumAnlzr_CursorPosSet", inst, _CURSOR_BAND, lo, hi)
         if rec.error:
             return _fail(name, f"SpectrumAnlzr_CursorPosSet failed: {rec.error}", [rec])
         return SkillResult(skill_name=name, success=True, nanonis_calls=[rec],
                            data={"instance": inst, "f_low_hz": lo, "f_high_hz": hi},
-                           summary=f"频谱 RMS 频带 = [{lo:g}, {hi:g}] Hz")
+                           summary=tr(f"频谱 RMS 频带 = [{lo:g}, {hi:g}] Hz", f"Spectrum RMS band = [{lo:g}, {hi:g}] Hz"))
 
 
 class GetSpectrumAnalyzerData(BaseSkill):
@@ -191,7 +192,7 @@ class GetSpectrumAnalyzerData(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读频谱分析仪：谱本身、BAND RMS（由 SetSpectrumAnalyzerBand 设定的频段内的噪声 —— "
+                tr("读频谱分析仪：谱本身、BAND RMS（由 SetSpectrumAnalyzerBand 设定的频段内的噪声 —— "
                 "值得拿出来说的就是这一个数）、DC 值，以及当前设置，好让你判断这条谱可不可信。\n"
                 "\n"
                 "诊断读法：50 Hz 处的峰及其谐波是市电串入 / 地环路；"
@@ -199,11 +200,11 @@ class GetSpectrumAnalyzerData(BaseSkill):
                 "增益或走线。\n"
                 "\n"
                 "相信任何一个峰之前，先看 `averaging` —— count=1 时每个 bin "
-                "都只是一次带噪的单点采样。"
+                "都只是一次带噪的单点采样。", "Read the spectrum analyzer: the spectrum itself, BAND RMS (the noise within the band set by SetSpectrumAnalyzerBand - the one number worth quoting), the DC value, and the current settings, so you can judge whether the spectrum can be trusted.\n\nDiagnostic reading: a peak at 50 Hz and its harmonics is mains pickup / a ground loop; a broad hump at a few hundred hertz is the building or the vibration isolation stage; a rise towards DC is drift; a simply too-high floor is the preamplifier, gain or wiring.\n\nBefore trusting any peak, look at `averaging` first - with count=1 every bin is a single noisy sample.")
             ),
             parameters=[
                 ParameterSpec(name="instance", type="int",
-                              description="用哪一个分析仪实例（从 1 开始）",
+                              description=tr("用哪一个分析仪实例（从 1 开始）", "Which analyzer instance (starting from 1)"),
                               required=False, default=1, min_value=1, max_value=8),
             ],
             estimated_duration_s=2.0,

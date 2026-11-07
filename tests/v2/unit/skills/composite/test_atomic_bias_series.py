@@ -445,7 +445,7 @@ def test_a_failed_tip_check_does_not_rescan_that_bias(tmp_path):
     assert scans == 1, f"复核没过之后又重扫了那个偏压:{scans} 帧"
     assert res.data["series_exit"] == L.EXIT_ABORTED_TIP
     assert read.rows[-1]["outcome"] == L.OUTCOME_TIP_ABORT
-    assert "S1" in read.rows[-1]["note"]
+    assert "绕道" in read.rows[-1]["note"]
     # 代次一 bump，这一段证据整体作废 —— 那才是「重做这个偏压」的入口。
     bumped = L.read_ledger(L.ledger_path(tmp_path), current_evidence_epoch=4)
     assert all(r["stale"] is True for r in bumped.rows)

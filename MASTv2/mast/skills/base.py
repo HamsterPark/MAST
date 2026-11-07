@@ -27,7 +27,7 @@ from mast.core.types import (
 # Module-level constants — avoid recreating per call
 _VALIDATE_TYPE_MAP: dict[str, type] = {"float": float, "int": int, "str": str, "bool": bool}
 
-# 审查 [#86]: the precondition vocabulary now lives in ONE place —
+# The precondition vocabulary now lives in ONE place —
 # mast.core.preconditions.PRECONDITION_CHECKS — the single source of truth shared
 # with SafetyGuard / SafetyGate, so the exact-key (here) and substring (safety)
 # layers can no longer drift. It still maps each precondition string to a
@@ -72,7 +72,7 @@ class BaseSkill(ABC):
                 errors.append(f"Unknown parameter: '{key}'")
                 continue
 
-            # 审查 HIGH [#31]: the LangChain tool path
+            # The LangChain tool path
             # (skill_adapter._schema_from_metadata) builds the pydantic args
             # schema with `default = None` for any optional ParameterSpec whose
             # `default` is None. When the LLM omits such a param, pydantic
@@ -91,7 +91,7 @@ class BaseSkill(ABC):
             expected_type = _VALIDATE_TYPE_MAP.get(spec.type)
             if expected_type is not None:
                 # Allow int where float is expected.
-                # 审查 [#145]: previously this wrote the coerced
+                # Previously this wrote the coerced
                 # float back into the *caller's* dict (`params[key] = value`),
                 # a hidden side-effect in a method whose contract is "return a
                 # list of errors". Callers that validate the same dict against
@@ -164,7 +164,7 @@ class BaseSkill(ABC):
 
         # WRITE DOWN WHY IT WAS REFUSED (2026-07-12).
         #
-        # 「进针功能调用失败」  was reported with no cause, and we could not
+        # An approach failure was reported with no cause, and we could not
         # supply one afterwards: an unmet precondition produced a ToolMessage to
         # the model and then vanished. The operator saw a failure; nothing on disk
         # said which condition, on which state field, with what actual value. This
@@ -227,7 +227,7 @@ class BaseSkill(ABC):
         composite 的写法调了 ``self.abortable_sleep`` —— 而它继承的是本类，
         于是运行时抛 ``AttributeError``。**抛异常的 skill 到不了 agent 的错误
         处理路径**：没有 SkillResult、没有诊断记录、没有 HITL、没有恢复，
-        只有一个死掉的回合（``test_all_skills_execute`` 的原话）。
+        只有一个死掉的回合（见 ``test_all_skills_execute``）。
 
         ``CompositeSkill`` 继承本类，所以它原来那一份已经删掉 —— 同一个动作
         两份实现，早晚只有一份是对的。

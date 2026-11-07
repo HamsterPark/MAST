@@ -10,7 +10,7 @@
 
 1. **每个函数懒调用** :func:`mast._runtime_paths.project_root` / :func:`experiment_root`，
    绝不在 import 时把路径冻结成模块常量。冻结的启动器和测试都会在 import 之后
-   才改 env / 注入设置（``data_paths.py`` 的同一条注释记的是 ，
+   才改 env / 注入设置（``data_paths.py`` 的同一条注释记的是 同一问题，
    那次就是因为 import 时冻结导致打包版所有数据路径指向不存在的目录）。
 
 2. **目录名创建时冻结，改名只改 DB**。理由是硬的：``logging/v2/schema.py`` 把

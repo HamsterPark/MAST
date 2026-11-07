@@ -64,6 +64,13 @@ def _summarize_generic(kind: str, payload: dict, model_id: str = KIMI_K3) -> str
     Falls back to a deterministic non-LLM template if the LLM call fails
     so the buffer pipeline never blocks on network errors.
     """
+    # Vision listeners call this on their own (no one asked): while legacy
+    # features are off the internal LLM is disabled — answer with the template,
+    # build no client, and do NOT cache it, so turning them on gets real
+    # summaries for the same payloads (mast/legacy_gate.py).
+    from mast.legacy_gate import internal_llm_enabled
+    if not internal_llm_enabled():
+        return _fallback_summary(kind, payload)
     key = _hash_payload(kind, payload)
     with _CACHE_LOCK:
         if key in _CACHE:

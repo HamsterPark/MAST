@@ -1,6 +1,6 @@
 """Bundled DINOv3 backbone cache — path resolution + offline weight handoff.
 
-WHY THIS MODULE EXISTS (the rig)
+WHY THIS MODULE EXISTS
 -----------------------------------------------------------
 ``huggingface_hub`` freezes its cache location into MODULE-LEVEL CONSTANTS at
 import time (``huggingface_hub.constants.HF_HUB_CACHE``). Setting ``HF_HOME``

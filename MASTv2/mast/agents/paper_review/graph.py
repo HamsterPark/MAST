@@ -131,7 +131,7 @@ def build(
                 "AnthropicPromptCachingMiddleware not available; skipping cache middleware."
             )
 
-    # F5 residual (2026-06-08): guard no-prefill Claude models — see prefill_guard_mw.
+    # Guard (2026-06-08): no-prefill Claude models — see prefill_guard_mw.
     from mast.agents._shared.prefill_guard_mw import ClaudePrefillGuardMiddleware
     from mast.agents._shared.tool_pair_guard_mw import ToolPairGuardMiddleware
     from mast.agents._shared.vision_mw import SkillImageMiddleware

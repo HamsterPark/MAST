@@ -21,6 +21,7 @@ from mast.core.types import (
     NanonisCallRecord,
     SkillResult,
 )
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -293,18 +294,21 @@ class SkillExecutor:
         # the sample — regardless of the skill's baseline safety_level (MotorMove
         # is CONFIRM for x/y/retract). 2026-06-11.
         if is_coarse_sample_approach(skill_name, params):
-            hard_gate = "开环粗动 Z 向样品进针（没有反馈能让它停下来）"
+            hard_gate = tr("开环粗动 Z 向样品进针（没有反馈能让它停下来）",
+                           "open-loop coarse Z approach toward the sample (no feedback can stop it)")
         # The coarse stepper's DRIVE voltage: unrecoverable if wrong (some stacks
         # fail at 300 V on a controller that offers 400), and nothing reads back
         # which rig this is. The per-rig ceiling is the operator's to declare, so
         # the operator is who sets it. 2026-07-31.
         elif is_coarse_drive_change(skill_name, params):
-            hard_gate = "设置粗动马达驱动电压/频率"
+            hard_gate = tr("设置粗动马达驱动电压/频率",
+                           "setting the coarse motor drive voltage/frequency")
         # A RAW lateral coarse step. The guarded composite (RelocateCoarseXY)
         # stays autonomous; the bare motor command — no coarse-Z clearance, no
         # vacuum check, no drive readback, no odometer — needs a human.
         elif is_unguarded_lateral_coarse_move(skill_name, params):
-            hard_gate = "裸横向粗动（未走 RelocateCoarseXY 的防护路径）"
+            hard_gate = tr("裸横向粗动（未走 RelocateCoarseXY 的防护路径）",
+                           "bare lateral coarse motion (not via the guarded RelocateCoarseXY path)")
         if hard_gate is not None and approval_source != "human":
             logger.info(
                 "Skill '%s' refused: %s (source=%s)",
@@ -313,10 +317,14 @@ class SkillExecutor:
             return SkillResult(
                 skill_name=skill_name,
                 success=False,
-                error=(
+                error=tr(
                     f"硬闸拒绝：'{skill_name}' 属于「{hard_gate}」，"
                     "自主路径上一律不执行——这不是等待审批，没有任何批准会到来。"
-                    "STOP retrying。确实需要时请用户在 GUI 手动执行。"
+                    "STOP retrying。确实需要时请用户在 GUI 手动执行。",
+                    f"Hard gate refused: '{skill_name}' is classed as: {hard_gate}. "
+                    "It is never executed on autonomous paths -- this is not waiting for approval, "
+                    "no approval will ever come. "
+                    "STOP retrying. If it is really needed, ask the user to run it manually in the GUI.",
                 ),
                 elapsed_s=time.perf_counter() - t0,
                 state_before=current_state,
@@ -327,8 +335,10 @@ class SkillExecutor:
 
                 _reason = would_have_asked(meta, tool_name=skill_name, args=params)
                 notify(skill_name,
-                       f"{_reason or 'DANGEROUS 技能'} —— 已直接执行并通知，"
-                       "不再等待人工批准",
+                       tr(f"{_reason or 'DANGEROUS 技能'} —— 已直接执行并通知，"
+                          "不再等待人工批准",
+                          f"{_reason or 'DANGEROUS skill'} -- executed directly and notified; "
+                          "no human approval is pending"),
                        args=params, approval_source=approval_source,
                        path="executor")
             except Exception:  # noqa: BLE001 — 通知坏了绝不能让技能失败
@@ -357,7 +367,7 @@ class SkillExecutor:
             # The manual/GUI path is one of the drivers of the one instrument
             # (inventory: instrument_lock docstring). Same re-entrant token; reads and
             # stop/retract remedies skip it (审计 致命一).
-            with hold_for_skill(meta, skill_name, "手动/执行器"):
+            with hold_for_skill(meta, skill_name, "手动/执行器"):  # identity, not display text: see instrument_lock.owner_label
                 result: SkillResult = skill_instance.execute(ctx, params)
             result.state_before = state_before
         except InstrumentBusy as busy:
@@ -392,7 +402,7 @@ class SkillExecutor:
                 state_before=state_before,
             )
 
-        # 7. Snapshot state_after + post-execution anomaly detection 
+        # 7. Snapshot state_after + post-execution anomaly detection
         try:
             state_after = self._state.refresh()
         except Exception:
@@ -547,7 +557,7 @@ class _LegacyExecutionContext:
     (registry-backed). This class is kept only for ``SkillExecutor`` — the v1
     pipeline still imported by gui/app.py, llm/planner.py and llm/quickask.py —
     and is intentionally private so nothing re-introduces the ``ExecutionContext``
-    name collision (). Provides access to executor, pool, state.
+    name collision. Provides access to executor, pool, state.
     """
 
     def __init__(

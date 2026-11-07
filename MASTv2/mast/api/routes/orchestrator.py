@@ -39,6 +39,7 @@ Frames: see schemas_orchestrator.py module docstring.
 from __future__ import annotations
 
 import contextlib as _contextlib
+from mast.i18n import tr
 import json
 import logging
 import re
@@ -54,13 +55,13 @@ _MAX_HOLD_S = 600.0
 # How long a published HITL approval waits for an operator verdict before the
 # run gives up. Same order as _MAX_HOLD_S and for the same reason: nothing that
 # blocks a stream worker may block it forever. Times out fail-CLOSED (reject) —
-# see _await_resolution. .
+# see _await_resolution.
 _MAX_APPROVAL_WAIT_S = 900.0
 
 # How often the approval wait emits a status frame. Doubles as the SSE keep-alive
 # for this stream: a silent connection is what idle-TCP reapers (WireGuard
 # keepalive, gateway idle timeouts, Wi-Fi roaming, sleep) kill — which is how a
-# network blip turned into "对话卡住" . ws.py pings every 15 s for the same
+# network blip leaves the conversation stuck. ws.py pings every 15 s for the same
 # reason; matching it here.
 _APPROVAL_BEAT_S = 15.0
 
@@ -68,7 +69,7 @@ _APPROVAL_BEAT_S = 15.0
 # aborting previous stream to wind down before bouncing the operator (the old
 # stream honours abort at super-step boundaries, so most LLM steps clear well
 # inside this window; a long hardware wait may not — then we re-signal abort
-# and ask the operator to retry shortly). Feedback 2026-07-10 #41.
+# and ask the operator to retry shortly).
 _ABORT_HANDOVER_GRACE_S = 12.0
 
 # LangGraph super-step budget for one orchestrator run (counts EVERY step incl.
@@ -175,7 +176,7 @@ def _current_experiment_id() -> "str | None":
 
 def _current_sample_id() -> "str | None":
     """Best-effort current sample id — the MIDDLE level of the hierarchy the
-    operator actually works in: 一个实验若干样品，一个样品若干群聊. Without it every 群聊 hung straight off the experiment, so
+    operator actually works in: 一个实验若干样品，一个样品若干群聊 ). Without it every 群聊 hung straight off the experiment, so
     the sample level did not exist in the data and could not exist in the UI.
 
     Same contract as :func:`_current_experiment_id`: a where-it-started tag, not
@@ -333,7 +334,7 @@ def _drive_v2(app, instruction: str, task_id: str, targets, persist, abort,
         except StopIteration as stop:
             result = stop.value
             break
-    yield {"_final_text": result.final_text or "（本次运行没有产出文本）",
+    yield {"_final_text": result.final_text or tr("（本次运行没有产出文本）", "(this run produced no text)"),
            "_completed": result.outcome == "completed",
            "_stop_reason": result.stop_reason}
 
@@ -438,9 +439,8 @@ def _clip(text: str, limit: int) -> str:
     """Truncate to ``limit``, and SAY SO when it happens.
 
     The old code did ``txt[:2000]`` in both the SSE frame and the persisted row,
-    with nothing marking the cut. 2026-07-27 forensics: 68 of 340 stored
-    messages sat exactly at that cap, including experiment_design's 28-step
-    ExperimentPlan, which ends mid-JSON inside step 3::
+    with nothing marking the cut. Stored messages then sat exactly at that cap,
+    including a 28-step ExperimentPlan that ended mid-JSON inside step 3::
 
         {"skill_name": "FullScan", "params": {"center_x_m": 0.0, "width_m": 5e-7, "he
 
@@ -459,14 +459,16 @@ def _clip(text: str, limit: int) -> str:
         return text
     dropped = len(text) - limit
     return (text[:limit] +
-            f"\n…[内容过长，此处截断，省略 {dropped} 字符（完整 {len(text)} 字符）]")
+            tr(f"\n…[内容过长，此处截断，省略 {dropped} 字符（完整 {len(text)} 字符）]", f"\n...[content too long, truncated here; omitted {dropped} characters ({len(text)} in total)]"))
 
 
 def _terminal_label(completed: bool, stop_reason: "str | None") -> str:
-    """Persist a terminal marker that distinguishes completion, error and abort.
+    """The terminal marker persisted for a run.
 
-    A backend exception or unanswered approval must not be replayed as an
-    operator-requested abort. The stored label must reflect the actual cause.
+    Three outcomes, three labels. Persisting everything that was not
+    "完成" as "已中止" would make a numpy crash, an unanswered approval and an
+    actual operator abort indistinguishable on replay — and attribute every
+    failure to the operator.
     """
     if completed:
         return "完成"
@@ -549,7 +551,7 @@ _COMPACTION_META_KEY = "mast_compaction"
 def _compaction_event(msgs) -> "dict | None":
     """The compaction facts carried by this state update, or None.
 
-    (2026-07-27)「群聊内的压缩功能并未显性体现」. Compaction
+    Compaction visibility. Compaction
     was always running in 群聊 — ``_chat_agent_middleware`` attaches it to every
     orchestrator agent — but the update it emits is
     ``[RemoveMessage(ALL), summary, *preserved]``, and this bridge classified the
@@ -585,18 +587,18 @@ def _compaction_line(event: dict) -> str:
     removed = event.get("removed")
     kept = event.get("kept")
     if event.get("mode") == "parent_prune":
-        head = ("群聊主线整理：较早的路由/交接消息已移除"
+        head = (tr("群聊主线整理：较早的路由/交接消息已移除", "Group-chat main thread tidied: older routing/handoff messages removed")
                 if not isinstance(removed, int) or removed <= 0
-                else f"群聊主线整理：较早的 {removed} 条路由/交接消息已移除")
+                else tr(f"群聊主线整理：较早的 {removed} 条路由/交接消息已移除", f"Group-chat main thread tidied: {removed} older routing/handoff messages removed"))
         if isinstance(kept, int) and kept > 0:
-            head += f"，最近 {kept} 条保留"
-        return head + "（没有摘要，也没有影响各智能体的产物）"
+            head += tr(f"，最近 {kept} 条保留", f", most recent {kept} kept")
+        return head + tr("（没有摘要，也没有影响各智能体的产物）", " (no summary, and no agent artifacts affected)")
     if isinstance(removed, int) and removed > 0 and isinstance(kept, int):
-        return (f"上下文压缩：较早的 {removed} 条消息已被摘要替代，"
-                f"最近 {kept} 条保留原文")
+        return (tr(f"上下文压缩：较早的 {removed} 条消息已被摘要替代，"
+                f"最近 {kept} 条保留原文", f"Context compaction: {removed} older messages replaced by a summary, most recent {kept} kept verbatim"))
     if isinstance(removed, int) and removed > 0:
-        return f"上下文压缩：较早的 {removed} 条消息已被摘要替代"
-    return "上下文压缩：此处较早的对话已被摘要替代"
+        return tr(f"上下文压缩：较早的 {removed} 条消息已被摘要替代", f"Context compaction: {removed} older messages replaced by a summary")
+    return tr("上下文压缩：此处较早的对话已被摘要替代", "Context compaction: older conversation here was replaced by a summary")
 
 
 def _msg_text(m) -> str:
@@ -709,9 +711,9 @@ def _honor_holds(st, agent_id: str, abort):
     if task is not None:
         task["active_agent_id"] = agent_id
         task.setdefault("events", []).append(
-            {"t": t0, "kind": "held", "text": f"{agent_id} 已被用户暂停 — 等待恢复"})
+            {"t": t0, "kind": "held", "text": tr(f"{agent_id} 已被用户暂停 — 等待恢复", f"{agent_id} was paused by the user, waiting to resume")})
     yield _sse({"kind": "status", "agent": agent_id, "held": True,
-                "text": f"{agent_id} 已被用户暂停 — 等待恢复"})
+                "text": tr(f"{agent_id} 已被用户暂停 — 等待恢复", f"{agent_id} was paused by the user, waiting to resume")})
     timed_out = False
     while _is_held():
         if abort is not None and abort.is_set():
@@ -743,11 +745,13 @@ def _honor_holds(st, agent_id: str, abort):
             from mast.core.diagnostics import record as _diag
 
             _diag("hold_timeout", agent_id,
-                  "用户暂停超时，已自动恢复并清除暂停标志", waited_s=round(waited, 1))
+                  tr("用户暂停超时，已自动恢复并清除暂停标志",
+                     "User pause timed out; auto-resumed and the pause flag cleared"),
+                  waited_s=round(waited, 1))
         except Exception:  # noqa: BLE001
             pass
-    note = (f"{agent_id} hold 超时自动恢复 ({waited:.0f}s)" if timed_out
-            else f"{agent_id} 已恢复 (暂停 {waited:.1f}s)")
+    note = (tr(f"{agent_id} hold 超时自动恢复 ({waited:.0f}s)", f"{agent_id} hold timed out, auto-resumed ({waited:.0f}s)") if timed_out
+            else tr(f"{agent_id} 已恢复 (暂停 {waited:.1f}s)", f"{agent_id} resumed (paused {waited:.1f}s)"))
     if task is not None:
         task.setdefault("events", []).append(
             {"t": _time.time(), "kind": "resumed", "text": note})
@@ -845,11 +849,11 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
     threadpool via StreamingResponse). ``conversation_id`` resumes a GROUP thread."""
     def gen():
         if not instruction:
-            yield _sse({"kind": "error", "message": "缺少 'task' 字段", "degraded": True})
+            yield _sse({"kind": "error", "message": tr("缺少 'task' 字段", "Missing 'task' field"), "degraded": True})
             yield _sse({"kind": "done", "final_text": "", "aborted": False})
             return
         if app is None:
-            yield _sse({"kind": "error", "message": "编排器未接入（独立开发模式）",
+            yield _sse({"kind": "error", "message": tr("编排器未接入（独立开发模式）", "Orchestrator not attached (standalone dev mode)"),
                         "degraded": True})
             yield _sse({"kind": "done", "final_text": "", "aborted": False})
             return
@@ -881,7 +885,7 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
                 else:
                     # No (or unknown / non-group) id → fresh durable group row,
                     # filed under the experiment AND the sample it was started on
-                    # (#17: 实验 → 样品 → 群聊). Tags only — the chat is never
+                    # (实验 → 样品 → 群聊). Tags only — the chat is never
                     # scoped/filtered by them, so it still spans experiments.
                     row = conv_store.create(
                         "_supervisor", kind="group",
@@ -900,7 +904,7 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
             a transcript write must NEVER break the live stream (degrade-safe).
 
             ``meta`` is the JSON sidecar for rows whose ``text`` is a summary
-            (tool calls and JSON tool returns, #12) — it holds what the summary
+            (tool calls and JSON tool returns) — it holds what the summary
             left out, so a shorter transcript is never a lossier one."""
             if not conv_id_out or conv_store is None:
                 return
@@ -949,7 +953,7 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
                 _aborting = _abort_now.is_set()
                 if _aborting:
                     yield _sse({"kind": "status",
-                                "text": "上一次运行正在中止收尾——等待其停止后自动继续"})
+                                "text": tr("上一次运行正在中止收尾——等待其停止后自动继续", "Previous run is still aborting; will continue automatically once it stops")})
                     _t_wait = _time.time()
                     while (_time.time() - _t_wait) < _ABORT_HANDOVER_GRACE_S:
                         _lt = _st_now.get("task")
@@ -961,11 +965,11 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
                 if (isinstance(_lt, dict) and _lt.get("active")
                         and _lt.get("conversation_id") == conv_id_out):
                     msg = (
-                        "该群聊的上一次运行仍在中止收尾（可能卡在一个长工具调用，"
-                        "如等待扫描完成）——已再次发出中止信号，请稍候几秒再点继续。"
+                        tr("该群聊的上一次运行仍在中止收尾（可能卡在一个长工具调用，"
+                        "如等待扫描完成）——已再次发出中止信号，请稍候几秒再点继续。", "The previous run of this group chat is still aborting (it may be stuck in a long tool call, such as waiting for a scan to finish). The abort signal was sent again; wait a few seconds and click continue.")
                         if _aborting else
-                        "该群聊正在后端运行中——请先中止或等待完成"
-                        "（已避免并发开第二条流，防止线程状态损坏）。"
+                        tr("该群聊正在后端运行中——请先中止或等待完成"
+                        "（已避免并发开第二条流，防止线程状态损坏）。", "This group chat is already running in the backend. Abort it or wait for it to finish first (this avoids opening a second concurrent stream, which could corrupt thread state).")
                     )
                     if _aborting and _abort_now is not None:
                         try:
@@ -991,12 +995,12 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
         if abort is not None:
             if getattr(app, "_orch_abort_emergency", False) and abort.is_set():
                 yield _sse({"kind": "error", "degraded": True, "message": (
-                    "急停仍处于生效状态——本次任务不会启动。急停会同时冻结群聊/私聊"
+                    tr("急停仍处于生效状态——本次任务不会启动。急停会同时冻结群聊/私聊"
                     "/信号采集三条链路的仪器写命令；请先在界面上解除急停（确认针尖与"
-                    "样品状态后），再重新下发任务。")})
+                    "样品状态后），再重新下发任务。", "The emergency stop is still in effect, so this task will not start. It freezes instrument write commands on the group-chat, private-chat and signal-acquisition paths together. Release it in the UI first (after checking the tip and sample state), then dispatch the task again."))})
                 yield _sse({"kind": "done", "final_text": "", "aborted": True,
                             "failed": True,
-                            "stop_reason": "急停生效中，任务未启动",
+                            "stop_reason": tr("急停生效中，任务未启动", "Emergency stop in effect, task not started"),
                             "conversation_id": conv_id_out})
                 return
             try:
@@ -1066,8 +1070,8 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
                     "conversation_id": conv_id_out, "step_limit": rec_limit,
                     **_progress(0, rec_limit)})
         # Open a training/usage trajectory for this task so the skill/agent-turn
-        # recorders persist (#8 P1; the sink went un-wired in the TS rewrite —
-        # 审查). Best-effort.
+        # recorders persist (the sink went un-wired in the TS rewrite).
+        # Best-effort.
         try:
             begin_traj = getattr(app, "begin_trajectory", None)
             if callable(begin_traj):
@@ -1076,7 +1080,7 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
             pass
         # Persist the operator turn first so a reconnect shows what was asked.
         _persist("operator", role="user", text=instruction)
-        yield _sse({"kind": "status", "text": "SUP 接收任务，准备分发", "backend": backend})
+        yield _sse({"kind": "status", "text": tr("SUP 接收任务，准备分发", "SUP received the task, preparing to dispatch"), "backend": backend})
 
         # The live Agents-API task slot (GET /api/agents/snapshot overlay) is set up
         # AFTER the langgraph import guard below, so an import failure can't leave a
@@ -1090,10 +1094,13 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
         last_node = "_supervisor"
         final_text = ""
         completed = True
-        # Persist why a run did not complete, distinguishing a backend error,
-        # unreadable interrupt and unanswered approval from an operator abort.
-        # A reason shown only in the live error frame would be lost on replay.
-        # None denotes an actual operator abort.
+        # WHY the run stopped, when it did not complete. `completed = False` has
+        # four distinct causes — operator abort, a backend exception, an
+        # unparseable interrupt, and an unanswered approval. Persisting the single
+        # word "已中止" for all four would attribute crashes to the operator. The
+        # real reason is computed (the error frame carries it to the UI) but must
+        # also reach the database, so a replay can tell a crash from an
+        # abort. None = genuine operator abort.
         stop_reason: str | None = None
         # Did the supervisor actually route to END? See the latch in _drive: a
         # subgraph branch that never hands back dies silently, and without this
@@ -1110,7 +1117,7 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
             from langgraph.types import Command
         except Exception as exc:
             yield _sse({"kind": "error",
-                        "message": f"langgraph 未安装: {type(exc).__name__}",
+                        "message": tr(f"langgraph 未安装: {type(exc).__name__}", f"langgraph is not installed: {type(exc).__name__}"),
                         "degraded": True})
             yield _sse({"kind": "done", "final_text": "", "aborted": False})
             return
@@ -1173,12 +1180,12 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
                 if isinstance(_held, dict) and _held.get("active"):
                     _same = _held.get("conversation_id") == conv_id_out
                     _msg = (
-                        "该群聊正在后端运行中——请先中止或等待完成"
-                        "（已避免并发开第二条流，防止线程状态损坏）。"
+                        tr("该群聊正在后端运行中——请先中止或等待完成"
+                        "（已避免并发开第二条流，防止线程状态损坏）。", "This group chat is already running in the backend. Abort it or wait for it to finish first (this avoids opening a second concurrent stream, which could corrupt thread state).")
                         if _same else
-                        f"另一个群聊任务仍在运行（{_held.get('description', '')[:40]}）"
+                        tr(f"另一个群聊任务仍在运行（{_held.get('description', '')[:40]}）"
                         "——前台编排器一次只跑一个任务，因为它驱动的是同一台仪器。"
-                        "请等它结束或先中止；需要真并行请用「后台运行」。"
+                        "请等它结束或先中止；需要真并行请用「后台运行」。", f"Another group-chat task is still running ({_held.get('description', '')[:40]}). The foreground orchestrator runs only one task at a time because it drives the same instrument. Wait for it to finish or abort it first; for true parallelism use \"Run in background\".")
                     )
                     _busy_claim = _msg
                 else:
@@ -1203,7 +1210,7 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
                         # /api/artifacts now enumerates them from the real stores
                         # (agents._shared.artifacts.list_existing).
                         "events": [{"t": _t0, "kind": "start",
-                                    "text": "SUP 接收任务"}],
+                                    "text": tr("SUP 接收任务", "SUP received the task")}],
                     }
                     # Drop anything left in the interjection queue from an
                     # earlier task. Belt-and-braces with the task_id filter in
@@ -1246,8 +1253,8 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
             _n_reset = reset_all_gates(f"new run {task_id}")
             if _n_reset:
                 yield _sse({"kind": "status",
-                            "text": (f"注意：本次运行清除了 {_n_reset} 个仍未解决的"
-                                     f"关键事件闸门（上一次运行遗留）")})
+                            "text": (tr(f"注意：本次运行清除了 {_n_reset} 个仍未解决的"
+                                     f"关键事件闸门（上一次运行遗留）", f"Note: this run cleared {_n_reset} unresolved critical-event gates (left over from the previous run)"))})
         except Exception as exc:  # noqa: BLE001 — never block a run on this
             logger.debug("run-task: buffer HITL gate reset skipped: %s", exc)
 
@@ -1276,7 +1283,7 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
                     if not published:
                         logger.error("run-task: unparseable __interrupt__: %r", chunk)
                         completed = False
-                        stop_reason = "内部错误：无法解析审批请求（__interrupt__）"
+                        stop_reason = tr("内部错误：无法解析审批请求（__interrupt__）", "Internal error: could not parse the approval request (__interrupt__)")
                         return
                     decisions = []
                     for p in published:
@@ -1302,7 +1309,7 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
                         # Relay the wait's heartbeats straight to the client so
                         # the UI can show "等待人工审批 · 已等 Ns" instead of a
                         # dead stream, and so idle-TCP reapers keep their hands
-                        # off this connection .
+                        # off this connection.
                         for _what, _payload in _await_resolution(
                                 app, p["event_id"], p["kind"], abort):
                             if _what == "beat":
@@ -1321,12 +1328,12 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
                                     # IS the requested outcome — not a failure to
                                     # get an approval. The checkpoint stands.
                                     stop_reason = (
-                                        f"提问未得到答复，已按提问方要求停下等待"
-                                        f"（{p.get('rationale', '')}）".strip("（）"))
+                                        tr(f"提问未得到答复，已按提问方要求停下等待"
+                                        f"（{p.get('rationale', '')}）", f"The question went unanswered; stopped and waiting as the asker required ({p.get('rationale', '')})").strip("（）"))
                                 else:
                                     stop_reason = (
-                                        f"等待人工审批未得到答复（{p.get('skill', '')} "
-                                        f"— {p.get('rationale', '')}）".strip(" —"))
+                                        tr(f"等待人工审批未得到答复（{p.get('skill', '')} "
+                                        f"— {p.get('rationale', '')}）", f"Human approval went unanswered ({p.get('skill', '')} - {p.get('rationale', '')})").strip(" —"))
                             return
                         decisions.append(resume_val)
                         if p["kind"] == "buffer_hitl":
@@ -1356,12 +1363,12 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
                                 except Exception as exc:  # noqa: BLE001
                                     logger.debug("gate resolve skipped: %s", exc)
                                 yield _sse({"kind": "status",
-                                            "text": "关键事件已确认处理 — 恢复运行"})
+                                            "text": tr("关键事件已确认处理 — 恢复运行", "Critical event acknowledged, resuming run")})
                             else:
                                 yield _sse({
                                     "kind": "status",
-                                    "text": ("关键事件未获批准 — 工具闸门保持关闭，"
-                                             "本次运行只能读取/停止/退针"),
+                                    "text": (tr("关键事件未获批准 — 工具闸门保持关闭，"
+                                             "本次运行只能读取/停止/退针", "Critical event not approved; the tool gate stays closed and this run can only read/stop/withdraw")),
                                 })
                     # Resume the SAME thread — ADDRESSED BY INTERRUPT ID.
                     #
@@ -1522,14 +1529,15 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
                                         _mgr.spawn(instruction=instruction,
                                                    conversation_id=conv_id_out,
                                                    agents=(_ag,),
-                                                   title=f"[后台] {instruction[:30]}")
+                                                   title=tr(f"[后台] {instruction[:30]}",
+                                                            f"[background] {instruction[:30]}"))
                                         _ok = True
                                     except Exception as _exc:  # noqa: BLE001
                                         logger.warning("auto-background spawn failed (%s): %s",
                                                        _ag, _exc)
-                                _txt = (f"已自动将 {_ag} 转入后台运行——前台仪器不被阻塞，结果稍后带回本群聊"
+                                _txt = (tr(f"已自动将 {_ag} 转入后台运行——前台仪器不被阻塞，结果稍后带回本群聊", f"{_ag} was moved to the background automatically; the foreground instrument is not blocked and the result will be brought back to this group chat later")
                                         if _ok else
-                                        f"尝试将 {_ag} 转入后台失败，已退回前台由编排器处理")
+                                        tr(f"尝试将 {_ag} 转入后台失败，已退回前台由编排器处理", f"Failed to move {_ag} to the background; fell back to the foreground orchestrator"))
                                 yield _sse({"kind": "status", "agent": _ag, "text": _txt,
                                             "t": _time.time(), "step": step_count,
                                             "step_limit": rec_limit,
@@ -1586,7 +1594,7 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
                         # A tool RETURN is written for the model, not for a person
                         # watching: {"seqno": 1036, "progress": {"seqno": 1036,
                         # "line_idx": 2, …}} glued into the feed says nothing at a
-                        # glance . Lead with a MECHANICAL digest of the
+                        # glance. Lead with a MECHANICAL digest of the
                         # top-level scalars — every token in it appears verbatim in
                         # the payload — and keep the full text one click away.
                         digest = narrate_tool_result(txt) if role == "tool" else ""
@@ -1611,8 +1619,8 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
                         # is for immediate rendering and stays small. Both mark
                         # a clip explicitly: silent truncation is why a 28-step
                         # ExperimentPlan looked complete while ending mid-JSON
-                        # at step 3 ( 68 of 340
-                        # stored messages sat exactly at the old 2000 cap).
+                        # at step 3 (stored messages sat exactly at the
+                        # old 2000 cap).
                         yield _sse({
                             "kind": "message", "agent": resolved, "role": role,
                             "text": _clip(txt, _SSE_TEXT_MAX), "t": _time.time(),
@@ -1654,19 +1662,18 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
                                 # with "IndexError: list index out of range" —
                                 # after the work was done, after the
                                 # "[SUPERVISOR → __end__]" note was already on
-                                # screen. The operator saw 「运行出错，已停止」on
-                                # runs that had actually succeeded, three times in
-                                # one night (2026-07-28 #40/#41/#42/#48), and the
+                                # screen. The UI showed 「运行出错，已停止」on
+                                # runs that had actually succeeded, and the
                                 # log held one line with no frame.
                                 #
                                 # Unit tests missed it because they run without a
                                 # live `_agents_api_state`, so `st` is None and
                                 # this whole block is skipped.
                                 if not fanned:
-                                    kind, text = "end", "_supervisor → 结束"
+                                    kind, text = "end", tr("_supervisor → 结束", "_supervisor -> end")
                                 elif len(fanned) > 1:
                                     kind = "dispatch"
-                                    text = f"并行下发 → {' ‖ '.join(fanned)}"
+                                    text = tr(f"并行下发 → {' ‖ '.join(fanned)}", f"Parallel dispatch -> {' | '.join(fanned)}")
                                 else:
                                     kind, text = "handoff", f"_supervisor → {fanned[0]}"
                                 task["handoffs"].append({
@@ -1782,7 +1789,7 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
                     logger.warning("v2 group orchestration failed (%s); falling "
                                    "back to the LangGraph path", exc)
                     yield _sse({"kind": "status",
-                                "text": f"（v2 编排失败已回退：{type(exc).__name__}: {exc}）"})
+                                "text": tr(f"（v2 编排失败已回退：{type(exc).__name__}: {exc}）", f"(v2 orchestration failed and fell back: {type(exc).__name__}: {exc})")})
                     _v2_ran = False
             else:
                 _v2_ran = False
@@ -1817,9 +1824,9 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
             if completed and not saw_end:
                 completed = False
                 stop_reason = (
-                    "任务未正常结束：某个智能体没有交回控制权就停了（模型直接作答未调用"
+                    tr("任务未正常结束：某个智能体没有交回控制权就停了（模型直接作答未调用"
                     " handoff、空转保护终止、或调用次数达上限）。这一分支的工作可能已"
-                    "丢失——请查看上面各智能体的最后一条消息，必要时重新下发任务。")
+                    "丢失——请查看上面各智能体的最后一条消息，必要时重新下发任务。", "Task did not end normally: an agent stopped without handing control back (the model answered directly without calling handoff, the stall guard terminated it, or the call limit was reached). Work on this branch may have been lost; check the last message of each agent above and re-dispatch the task if needed."))
                 logger.warning(
                     "run-task %s: stream exhausted with no [SUPERVISOR → __end__] "
                     "— fail-silent branch termination", task_id)
@@ -1832,12 +1839,12 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
                     pass
                 yield _sse({"kind": "status", "degraded": True,
                             "text": stop_reason, "t": _time.time()})
-            # Cross-check the answer against what this run actually did. The
-            # missing half of on 2026-07-27 the IC agent reported a
+            # Cross-check the answer against what this run actually did. An
+            # agent once reported a
             # finished 5-point STS grid and named a per-point summary file, the
             # run ended 「完成」, and nothing in the system could contradict it —
             # no skill had run, no action row existed, the file was never
-            # written. The operator believed it.
+            # written.
             #
             # Only ever ADDS a warning: audit_run_claim never raises, and
             # returns ok=True whenever it has no ledger to judge against, so a
@@ -1847,7 +1854,7 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
                 _audit = getattr(app, "audit_run_claim", None)
                 _res = _audit(final_text) if (callable(_audit) and final_text) else None
                 if _res and not _res.get("ok", True):
-                    _warn = "⚠ 本次回答与运行记录不一致：" + "；".join(
+                    _warn = tr("⚠ 本次回答与运行记录不一致：", "Warning: this answer does not match the run record: ") + tr("；", "; ").join(
                         str(p) for p in (_res.get("problems") or []))
                     logger.warning("run-task claim audit: %s", _warn)
                     yield _sse({"kind": "status", "text": _warn,
@@ -1862,15 +1869,15 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
             is_recursion = type(exc).__name__ == "GraphRecursionError" or (
                 "recursion limit" in str(exc).lower())
             if is_recursion:
-                msg = ("任务步数达到上限——可能某个智能体在预条件或安全门上反复失败而空转。"
-                       "已停止本次运行。建议把任务拆细，或先检查/满足仪器预条件后重试。")
+                msg = (tr("任务步数达到上限——可能某个智能体在预条件或安全门上反复失败而空转。"
+                       "已停止本次运行。建议把任务拆细，或先检查/满足仪器预条件后重试。", "Task step limit reached: an agent may be failing repeatedly on a precondition or safety gate and spinning. This run was stopped. Consider splitting the task, or check/satisfy the instrument preconditions and retry."))
                 logger.warning("run-task hit recursion limit: %s", exc)
             else:
                 msg = f"{type(exc).__name__}: {exc}"
                 # logger.exception, NOT .warning — this branch catches ANY
                 # exception out of the whole graph stream, and the message alone
-                # is often useless. The field saw a run die three times with
-                # "IndexError: list index out of range" (2026-07-28 #40/#41/#48)
+                # is often useless. A run died with
+                # "IndexError: list index out of range"
                 # and the log held exactly that one line: no frame, no file, no
                 # agent. An unlocatable crash in the one path that drives the
                 # instrument is not a diagnosable system.
@@ -1916,7 +1923,7 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
             except Exception:  # noqa: BLE001
                 pass
             # Close the training trajectory on EVERY exit path (done/abort/raise/
-            # client-disconnect) so it doesn't leak open (#8 P1).
+            # client-disconnect) so it doesn't leak open.
             try:
                 end_traj = getattr(app, "end_trajectory", None)
                 if callable(end_traj):
@@ -1963,13 +1970,13 @@ def _run_task_stream(app, instruction: str, task_id: str, conversation_id: str =
             # Persist the terminal marker as a SHORT status, NOT a copy of
             # final_text — the agent's last 'message' row (persisted above) already
             # carries the answer, so re-persisting it here duplicated the final
-            # answer on transcript replay ("第二次刷屏", 2026-07-06 feedback). The
+            # answer on transcript replay (2026-07-06). The
             # live 'done' SSE frame still carries final_text and the conversation
             # preview below still uses it; only this persisted row is a marker now.
             # The persisted terminal row is the ONLY record a replay sees — the
             # error frame above goes to the live client and is gone. Writing
-            # "已中止" for a crash made nine of eleven runs indistinguishable
-            # from an operator abort ().
+            # "已中止" for a crash makes it indistinguishable
+            # from an operator abort.
             _persist("done", role="assistant",
                      text=_terminal_label(completed, stop_reason))
             if conv_id_out and conv_store is not None:
@@ -2006,6 +2013,8 @@ def run_task(body: RunTaskRequest, request: Request) -> StreamingResponse:
     absent. HITL ``__interrupt__`` chunks are published into the live
     ``_orch_interrupts`` store and surfaced as ``interrupt`` frames; resolve them
     via the existing agents_control resolve endpoint. Honours ``_orch_abort``."""
+    from mast.legacy_gate import require_internal_llm
+    require_internal_llm("run-task")   # → 403 while legacy features are off
     ctx = request.app.state.ctx
     app = _live_app(ctx)
     instruction = (body.task or "").strip()
@@ -2022,11 +2031,11 @@ def run_task(body: RunTaskRequest, request: Request) -> StreamingResponse:
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(
                 status_code=503,
-                detail=f"目标判据模块不可用：{exc}") from exc
+                detail=tr(f"目标判据模块不可用：{exc}", f"Goal-criterion module unavailable: {exc}")) from exc
         _spec, _errs = normalise_done_when(body.done_when)
         if _errs:
             raise HTTPException(status_code=422, detail={
-                "error": f"done_when 有 {len(_errs)} 条不合法 —— 没有开始运行",
+                "error": tr(f"done_when 有 {len(_errs)} 条不合法 —— 没有开始运行", f"done_when has {len(_errs)} invalid entries; the run did not start"),
                 "problems": _errs,
                 "done_when_catalog": catalog_json(),
                 "example": EXAMPLE,
@@ -2181,6 +2190,8 @@ def run_task_background(body: BackgroundSpawnRequest, request: Request) -> Backg
     conversation's durable transcript, tagged 「后台」. instrument_control cannot be
     backgrounded (it is the foreground hardware agent). LIVE-ONLY; degrades to a
     typed body, never a 500."""
+    from mast.legacy_gate import require_internal_llm
+    require_internal_llm("background run")   # → 403 while legacy features are off
     app = _live_app(request.app.state.ctx)
     mgr = _bg_manager(app)
     if mgr is None:
@@ -2300,7 +2311,7 @@ def run_task_transcript(conversation_id: str, request: Request) -> TranscriptRes
 def _scope_names(ctx, rows: list) -> "tuple[dict[str, str], dict[str, str]]":
     """Resolve {experiment_id: name} and {sample_id: name} for a batch of
     conversation rows, so the client renders 实验 → 样品 → 群聊 with real names
-    instead of UUID prefixes  and without an N+1 round-trip per row.
+    instead of UUID prefixes and without an N+1 round-trip per row.
 
     Reads the EXPERIMENT DB (conversations live in their own file, so this is a
     join we have to do here). Degrade-safe on every axis: no storage wired, a
@@ -2338,7 +2349,7 @@ def run_task_conversations(request: Request) -> GroupConversationsResponse:
     """Durable group-conversation history (newest first) so a prior multi-agent
     run can be resumed. READ-ONLY relay onto ``ConversationStore.list(kind=
     'group')``, enriched with experiment/sample NAMES so the client can render the
-    实验 → 样品 → 群聊 tree ; degrades to empty when no store is wired."""
+    实验 → 样品 → 群聊 tree; degrades to empty when no store is wired."""
     ctx = request.app.state.ctx
     store = _conv_store(ctx)
     if store is None:
@@ -2349,7 +2360,7 @@ def run_task_conversations(request: Request) -> GroupConversationsResponse:
         conversations = [
             GroupConversation(
                 conversation_id=str(r.get("conversation_id", "")),
-                title=str(r.get("title") or "新任务"),
+                title=str(r.get("title") or tr("新任务", "New task")),
                 thread_id=str(r.get("thread_id", "")),
                 created_at=(str(r["created_at"]) if r.get("created_at") else None),
                 updated_at=(str(r["updated_at"]) if r.get("updated_at") else None),

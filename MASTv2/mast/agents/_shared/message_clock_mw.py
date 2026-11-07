@@ -126,10 +126,27 @@ class MessageClockMiddleware(AgentMiddleware):  # type: ignore[misc,valid-type]
         #: 跑的时候,共用一个计数会让其中一个的基线永远偏。
         self._seen: dict[str, int] = {}
 
-    # 必须使用 wrap_model_call / awrap_model_call，不新增 before_model 或 after_model 节点。
-    # recursion_limit 计数 super-step；独立节点会增加每轮预算消耗，而 wrap 钩子不增加节点。
-    # 同步与异步钩子都需实现，避免基类异步默认实现拒绝调用。
-    # 无额外步数的契约由 test_the_clock_middleware_costs_no_super_steps 验证。
+    # ── hooks ────────────────────────────────────────────────────────
+    #
+    # ⚠️ **必须是 ``wrap_model_call``，不能是 ``after_model``。**
+    #
+    # 私聊的 ``recursion_limit`` 数的是 **super-step**，而每一个实现了
+    # ``before_model`` / ``after_model`` 的 middleware 都会变成**自己的一个
+    # 节点** —— 也就是每次模型调用多花一步。汇率是 ``len(nodes) - 2``，
+    # 中间件多了会把一回合的价钱从 5 步推到 11 步，而写死的预算不会跟着变：
+    # **同样的预算只买得到 3 次工具调用**（会触发
+    # ``GraphRecursionError``，见 ``tests/.../test_chat_recursion_budget.py``）。
+    #
+    # 用 ``after_model`` 会让预算闸门失败（多出的 super-step 会撑大递归预算）。
+    # 而同一个文件也写着该照抄的形状：``wrap_*`` 是包在既有节点**外面**的装饰，
+    # **一步都不要**。所以这个中间件对预算的成本是 **0**，
+    # 由 ``test_message_clock.py::test_the_clock_middleware_costs_no_super_steps``
+    # 钉住。
+    #
+    # 两个钩子都要实现：LangChain 的基类 ``awrap_model_call`` 在只定义了同步
+    # 版时会抛，于是每一次异步 dispatch 都会崩（与 prefill_guard / tool_pair_guard
+    # 同一条教训）。
+
     def wrap_model_call(self, request: Any, handler: Callable[[Any], Any]) -> Any:
         self._stamp_request(request)
         result = handler(request)
@@ -147,13 +164,46 @@ class MessageClockMiddleware(AgentMiddleware):  # type: ignore[misc,valid-type]
 
     @staticmethod
     def _thread_of(runtime: Any) -> str:
-        """取得当前转录的计数键；无法取得时返回空串。
-        
-        优先兼容 runtime 上可能存在的 config.configurable.thread_id 或 configurable。
-        真实 Runtime 未必提供这些属性；turn_context 的可用字段是 conversation_id，
-        不能把不存在的 thread_id 当成有效来源。按 conversation_id 隔离 _seen 基线，
-        避免新会话继承其他会话的消息计数而遗漏首条消息时间戳。
-        时间戳还用于把上下文注入与对应模型请求关联，不能用全局计数替代会话键。"""
+        """这一轮记在**哪一条转录**的账上。取不到就用空串。
+
+        ═══════════════════════════════════════════════════════════════════
+        为什么不用 thread_id:真实运行时下这个函数**取不到非空串**
+        ═══════════════════════════════════════════════════════════════════
+
+        三条路一条都不通:
+
+        * ``runtime.config.configurable.thread_id`` —— ``langgraph.runtime.
+          Runtime`` 是个 ``__slots__`` dataclass,字段只有 ``(context, store,
+          stream_writer, previous, execution_info, server_info)``,
+          **没有 ``config``**;
+        * ``runtime.configurable`` —— 同上,没有;
+        * ``current_turn()["thread_id"]`` —— ``turn_context.current_turn()``
+          返回的是 ``{conversation_id, run_id, agent_id}`` 三个键,
+          **``thread_id`` 这个键不存在**,``.get`` 恒为 None。
+
+        于是 ``_seen`` 退化成**一个全局计数**,而它本该是每条转录一个。
+        后果不是异常,是:一条**新**会话开头,``_seen[""]`` 里躺着的是上一条
+        会话结束时的条数(几十),``start = min(seen, len(msgs))`` 直接跳到
+        列表末尾 ⇒ ``msgs[start:]`` 是空的 ⇒ **用户自己刚发的那句话没有
+        时间戳**。第一条之后的每一条都正常(基线那时已经变小)。
+
+        现象:助手消息都有戳,而**每条会话的第一句用户消息都没有戳**。
+
+        而缺这一个戳的代价不只是不显示时间:``InjectedContext`` 折叠块按
+        ``t`` 把用户消息对上那一轮的模型请求,没有 ``t`` 就永远对不上,
+        面板显示「这条消息没有时间戳(多半是重启前就在存档里的历史)」——
+        一句**错的**解释(它明明是刚发生的),
+        表现为「部分上下文注入显示不出来」。
+
+        ⇒ 用 ``conversation_id`` 当账本键。它**确实**取得到(整个旁白子系统
+        就靠它,见 ``chat/narration.py``),粒度也正好是「一条转录一个基线」。
+        ``runtime`` 那两条留着:上游哪天真把 config 挂上来,它优先。
+
+        为什么之前没被测出来:``test_message_clock.py`` 的 ``_Req`` 替身**自己
+        造了** ``runtime.config.configurable.thread_id``,而真的 ``Runtime``
+        没有这个属性 —— 替身比真货多一层。钉住真形状的那条是
+        ``test_the_baseline_key_survives_the_real_runtime_object``。
+        """
         for path in (("config", "configurable", "thread_id"),
                      ("configurable", "thread_id")):
             cur: Any = runtime

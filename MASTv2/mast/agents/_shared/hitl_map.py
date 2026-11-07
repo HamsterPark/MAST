@@ -28,7 +28,7 @@ gate/ungate a skill, and a parity test pins the two together.
 「拦住等人」变成了「照跑并通知」。真正在运行时判的是
 ``mast.core.auto_approval.would_have_asked``（同一个 ``safety_level`` 判据）；这个
 函数现在只用于**启动时把名单打进日志** —— 「有几个技能进了这条通道」是验收
-那次改动的第一个问题，而一条启动日志比翻代码便宜。
+那次改动时最先要核对的问题，而一条启动日志比翻代码便宜。
 """
 from __future__ import annotations
 
@@ -76,8 +76,8 @@ logger = logging.getLogger(__name__)
 # CreateZCtrlPreset (2026-08-03) is the newest, and it is DANGEROUS for a reason
 # worth stating: it touches no hardware at all. What it writes is a value every
 # future ApplyZCtrlPreset of that group will trust, so the blast radius is every
-# later use, not this call. The approval card is also a build-then-verify step —
-# it renders the arguments AS PARSED, so a number
+# later use, not this call. The approval card is also the review-after-creation step:
+# the card renders the arguments AS PARSED, so a number
 # that arrived corrupted is visible there and can be edited or rejected before it
 # is ever stored.
 #

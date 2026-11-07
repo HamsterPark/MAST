@@ -17,6 +17,7 @@ from mast.core.types import (
 )
 from mast.io.nanonis_files import decode_reply, parse_buffer_get
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 
 class GetScanSpeed(BaseSkill):
@@ -28,7 +29,7 @@ class GetScanSpeed(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取当前的扫描速度参数。",
+            description=tr("读取当前的扫描速度参数。", "Read the current scan speed parameters."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["scan", "speed", "read"],
@@ -73,7 +74,7 @@ class GetScanBuffer(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取当前的 scan buffer（通道、像素数、行数）。",
+            description=tr("读取当前的 scan buffer（通道、像素数、行数）。", "Read the current scan buffer (channels, pixels, lines)."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["scan", "buffer", "read"],
@@ -120,12 +121,12 @@ class SaveScan(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
-            description="把当前的扫描数据缓冲存成文件。",
+            description=tr("把当前的扫描数据缓冲存成文件。", "Save the current scan data buffer to a file."),
             parameters=[
                 ParameterSpec(
                     name="timeout_ms",
                     type="int",
-                    description="保存的超时，单位 ms（-1 = 永远等待）",
+                    description=tr("保存的超时，单位 ms（-1 = 永远等待）", "Save timeout in ms (-1 = wait forever)"),
                     unit="ms",
                     required=False,
                     default=-1,
@@ -159,7 +160,7 @@ class SaveScan(BaseSkill):
         latest = _find_latest_sxm(_candidate_save_dirs(context), max_age_s=120)
         if latest is not None:
             # Publish where scans actually land so context-less searches
-            # (data_processing's file tools) can find them (2026-07-10 #92/#93).
+            # (data_processing's file tools) can find them.
             try:
                 from mast.core.scan_registry import record_scan_path
                 record_scan_path(latest)
@@ -343,17 +344,17 @@ class GetLatestScanFile(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "定位最近写入的那个 .sxm 扫描文件。先查 Nanonis 报出来的 "
+                tr("定位最近写入的那个 .sxm 扫描文件。先查 Nanonis 报出来的 "
                 "session 路径，再查数据目录下的 working-sessions/，"
                 "最后查历史遗留的开发目录。返回 "
                 "{path: str, age_s: float}；若在 max_age_s 秒内一个都"
-                "没找到，则返回 {path: null}。"
+                "没找到，则返回 {path: null}。", "Locate the most recently written .sxm scan file. Checks the session path reported by Nanonis first, then working-sessions/ under the data directory, and finally the legacy development directory. Returns {path: str, age_s: float}; if none is found within max_age_s seconds, returns {path: null}.")
             ),
             parameters=[
                 ParameterSpec(
                     name="max_age_s",
                     type="int",
-                    description="只考虑最近 N 秒内被修改过的 .sxm 文件",
+                    description=tr("只考虑最近 N 秒内被修改过的 .sxm 文件", "Only consider .sxm files modified within the last N seconds"),
                     unit="s",
                     required=False,
                     default=300,

@@ -1,0 +1,275 @@
+{
+  "name": "aperture_edge_hits",
+  "description": "The end points of the working surface belong to the aperture: a 20 mm mirror (half aperture 10) is hit by beams exactly 10 mm above and below its centre (offset -10 and +10, normal incidence, reflected straight back) and missed by a beam 10.01 mm above it, which goes on to a detector. expected_misses lists that near miss (0.01 mm outside the edge).",
+  "layout": {
+    "schema": 1,
+    "id": "edge",
+    "title": "Aperture end points",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las_hi",
+        "type": "laser",
+        "label": "L_HI",
+        "x_mm": 0.0,
+        "y_mm": 110.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "las_lo",
+        "type": "laser",
+        "label": "L_LO",
+        "x_mm": 0.0,
+        "y_mm": 90.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "las_miss",
+        "type": "laser",
+        "label": "L_MISS",
+        "x_mm": 0.0,
+        "y_mm": 110.01,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "m1",
+        "type": "mirror",
+        "label": "M1",
+        "x_mm": 100.0,
+        "y_mm": 100.0,
+        "angle_deg": 180.0,
+        "aperture_mm": 20.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det1",
+        "type": "detector",
+        "label": "D1",
+        "x_mm": 300.0,
+        "y_mm": 110.01,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las_hi",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 0.0,
+              "y0": 110.0,
+              "x1": 100.0,
+              "y1": 110.0
+            },
+            {
+              "x0": 100.0,
+              "y0": 110.0,
+              "x1": -1000.0,
+              "y1": 110.0
+            }
+          ],
+          "events": [
+            {
+              "component": "m1",
+              "action": "reflect",
+              "x": 100.0,
+              "y": 110.0,
+              "offset_mm": -10.0,
+              "incidence_deg": 0.0,
+              "path_mm": 100.0
+            }
+          ],
+          "end": "left_table"
+        }
+      ]
+    },
+    {
+      "source": "las_lo",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 0.0,
+              "y0": 90.0,
+              "x1": 100.0,
+              "y1": 90.0
+            },
+            {
+              "x0": 100.0,
+              "y0": 90.0,
+              "x1": -1000.0,
+              "y1": 90.0
+            }
+          ],
+          "events": [
+            {
+              "component": "m1",
+              "action": "reflect",
+              "x": 100.0,
+              "y": 90.0,
+              "offset_mm": 10.0,
+              "incidence_deg": 0.0,
+              "path_mm": 100.0
+            }
+          ],
+          "end": "left_table"
+        }
+      ]
+    },
+    {
+      "source": "las_miss",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 0.0,
+              "y0": 110.01,
+              "x1": 300.0,
+              "y1": 110.01
+            }
+          ],
+          "events": [
+            {
+              "component": "det1",
+              "action": "stop",
+              "x": 300.0,
+              "y": 110.01,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 300.0
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ],
+  "expected_misses": [
+    {
+      "component": "m1",
+      "source": "las_miss",
+      "wavelength_nm": 532.0,
+      "branch": "0",
+      "x": 100.0,
+      "y": 110.01,
+      "offset_mm": -10.01,
+      "outside_mm": 0.01
+    }
+  ]
+}

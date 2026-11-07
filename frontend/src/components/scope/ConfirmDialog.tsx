@@ -1,18 +1,20 @@
-// 确认弹窗基元。controls.tsx 只有 Modal，每个调用方都在手写「取消 / 确认」。
+// Confirmation dialog primitive on top of Modal, so callers do not hand-roll
+// Cancel / Confirm buttons.
 //
-// 核心契约（取自 RunTaskPanel 的注释）：**失败时弹窗不关闭**，把服务端返回的
-// 错误就地红字渲染。toast 不够 —— 它会飘走，而「原先以为成功了」是这类操作最贵的
-// 失败模式。一个没说自己失败了的确认框，比没有确认框更糟。
+// Core contract: on failure the dialog stays open and renders the server's error
+// inline. A toast is not enough: it disappears, and "believing it succeeded" is the
+// costliest failure mode for these operations.
 
 import type { ReactNode } from "react";
 import { Button, Modal } from "../controls";
+import { tr } from "@/lib/i18n";
 
 export function ConfirmDialog({
   open,
   title,
   children,
-  confirmLabel = "确认",
-  cancelLabel = "取消",
+  confirmLabel = tr("确认", "Confirm"),
+  cancelLabel = tr("取消", "Cancel"),
   tone = "primary",
   busy = false,
   busyLabel,
@@ -31,13 +33,13 @@ export function ConfirmDialog({
   tone?: "primary" | "danger";
   busy?: boolean;
   busyLabel?: string;
-  /** 服务端原话。非空时红字就地显示，且弹窗保持打开。 */
+  /** Server error text. When non-empty it is shown inline and the dialog stays open. */
   error?: string | null;
   disabled?: boolean;
   wide?: boolean;
   onConfirm: () => void;
   onClose: () => void;
-  /** 可选的第三个动作（如「先中止任务」）。 */
+  /** Optional third action (e.g. "abort the task first"). */
   extraAction?: ReactNode;
 }) {
   return (
@@ -63,7 +65,7 @@ export function ConfirmDialog({
             loading={busy}
             disabled={busy || disabled}
           >
-            {busy ? (busyLabel ?? "处理中…") : confirmLabel}
+            {busy ? (busyLabel ?? tr("处理中…", "Working…")) : confirmLabel}
           </Button>
         </div>
       </div>

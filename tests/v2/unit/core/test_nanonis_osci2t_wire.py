@@ -278,3 +278,88 @@ def test_a_decoded_level_fake_cannot_tell_the_two_specs_apart():
     assert err == "" and vals[1] == len(TIMEBASES)
     # 它「通过」了 —— 而且是拿第一个候选通过的，无论那个候选对不对。
     assert len(fake.specs_seen) == 1
+
+
+# ── 第三种回包形状：全部声明字段照给、表长 0，后跟错误段 ──────
+#
+# Nanonis V5e（UI/RT 15016）日志，每次启动都一样：
+#
+#     response layout mismatch: parseError at offset 8 produced 105 bytes that
+#     are not an error section (the reply is 119 bytes …) — the declared
+#     ResponseTypes ['i', 'i', '*f'] are misaligned
+#
+# 119 = 2（H 索引）+ 4（个数=0）+ 0（空表）+ 8（错误段头）+ 105（描述）。
+# 描述的原文没抓到（冻结版的 stdout 被吞掉，日志里只有这句诊断），下面用等长的
+# 占位文本；**结构**由下一条测试逐字复现那行日志来证明。
+
+RIG2_LIKE_NOTE = (b"Oscilloscope 2-Channels: placeholder for the 105-byte text "
+                   b"the instrument sent; the real wording was lost.")[:105].ljust(105, b".")
+
+
+def full_structure_rejection(*, status: int = 1, note: bytes = RIG2_LIKE_NOTE) -> bytes:
+    return struct.pack(">H", 0) + struct.pack(">i", 0) + _error_section(status, note)
+
+
+@pytest.mark.parametrize("status", [1, 0])
+def test_the_rig2_log_line_is_reproduced_from_bytes(status):
+    """反推出来的布局必须能逐字复现现场那行日志，否则它只是一个故事。
+
+    用的是生产那套解析器，包括从尾部倒推的 ``parseError``。status 取 0 或非 0
+    都复现得出来 —— 所以这行日志本身分不出仪器是「拒绝」还是「带话的正常」。
+    """
+    import types
+
+    from mast.core import nanonis_patch
+
+    body = full_structure_rejection(status=status)
+    assert len(body) == 119
+    nano = _instance(_real_nanonis_class(patched=True))
+    nano.parseError = types.MethodType(nanonis_patch._patched_parseError, nano)
+    err, _raw, _vals = nano.parseGeneralResponse(body, ["i", "i", "*f"])
+    assert "parseError at offset 8 produced 105 bytes" in err
+    assert "the reply is 119 bytes" in err
+
+
+@pytest.mark.parametrize("status", [1, 0])
+def test_a_full_structure_rejection_hands_back_the_instruments_words(status):
+    """第一个候选读出了仪器的原话，第二个候选只读出「布局不符」——交出去的必须
+    是前者。在此之前交的是后者，detail 写着「回包解不开」，让人去查规格。"""
+    from mast.core import nanonis_patch
+    from mast.core.nanonis_patch import LAYOUT_MISMATCH_PREFIX
+
+    client = _WireClient(full_structure_rejection(status=status))
+    err, _raw, _vals = nanonis_patch._patched_Osci2T_TimebaseGet(client)
+    assert LAYOUT_MISMATCH_PREFIX not in err
+    assert RIG2_LIKE_NOTE.decode().strip(".") in err
+    assert getattr(client, "_mast_osci2t_tb_spec", None) is None, "空表的规格被记住了"
+
+
+def test_the_probe_reports_the_instruments_words_not_a_spec_problem():
+    """一路走到 ``Osci2TProbe``：detail 里不能出现「解码规格与实际布局不符」。"""
+    from mast.core import nanonis_patch
+    from mast.core.types import NanonisCallRecord
+    from mast.monitoring.pump import Osci2TProbe
+
+    client = _WireClient(full_structure_rejection())
+
+    class _Pool:
+        def safe_call(self, method, *args, **kw):
+            assert method == "Osci2T_TimebaseGet"
+            rv = nanonis_patch._patched_Osci2T_TimebaseGet(client)
+            return NanonisCallRecord(method=method, return_value=rv,
+                                     error=rv[0] if rv[0] else "")
+
+    ok, why = Osci2TProbe.available(_Pool())
+    assert ok is False
+    assert RIG2_LIKE_NOTE.decode().strip(".") in why
+    assert "layout" not in why and "布局" not in why
+
+
+def test_trailing_error_section_reads_the_tail_whatever_came_before():
+    from mast.core.nanonis_patch import trailing_error_section
+
+    assert trailing_error_section(timebase_body("H")) == (0, "")
+    assert trailing_error_section(rejected_body()) == (1, NEED_MODULE.decode())
+    assert trailing_error_section(
+        full_structure_rejection(status=7, note=b"panel closed")) == (7, "panel closed")
+    assert trailing_error_section(b"\x00\x01") is None

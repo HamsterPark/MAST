@@ -2,21 +2,19 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "@/api/client";
 import { fmtCurrent } from "@/lib/units";
+import { tr } from "@/lib/i18n";
 import { CURVE_BOX, curveGeometry } from "@/lib/curvePath";
 
-// 电流监控事件的缩略曲线 — the waveform an alert was actually judged on.
+// Thumbnail curve for a current-monitor event — the waveform an alert was actually judged on.
 //
-// a `tip_quality_drop` from the current monitor showed「无图像」.
-// That was CORRECT and not a bug — the event comes from a 1 kHz current segment
-// and there is no scan frame anywhere near it. But it is also not the whole
-// truth: the segment IS stored, and drawing it is the one picture that belongs
-// next to this judgement. (Borrowing a nearby scan image, which an earlier build
-// did for a different event type, is the falsified history of #76/#78 and stays
-// forbidden.)
+// A `tip_quality_drop` from the current monitor has no scan frame near it: the
+// event comes from a 1 kHz current segment. The segment itself is stored, though,
+// and drawing it is the one picture that belongs next to this judgement. Borrowing
+// a nearby scan image instead would misrepresent the history and must not be done.
 //
 // The segment id rides in `cause_ref` as `current_monitor#<seg_id>`, and that id
 // is the same one /api/monitoring/segments/{seg_id}/data takes — both come from
-// MonitoringService's `seg_id`, verified 2026-08-04.
+// MonitoringService's `seg_id`.
 //
 // Sizing: an SVG with a viewBox scales to its container by itself, so this needs
 // no ResizeObserver — that machinery (hooks/useElementWidth + lib/chartSize)
@@ -83,21 +81,25 @@ export function SegmentCurveThumb({
   if (q.isPending) {
     return (
       <Frame title={hint} wide={wide}>
-        <div className="text-center text-[10px] text-mast-faint">载入第 {segId} 段波形…</div>
+        <div className="text-center text-[10px] text-mast-faint">
+          {tr(`载入第 ${segId} 段波形…`, `Loading segment ${segId} waveform…`)}
+        </div>
       </Frame>
     );
   }
 
   const d = q.data;
   if (q.isError || !d?.ok) {
-    // Say which of the two it is. "波形不可用" over a swept segment and over a
-    // broken backend read the same, and only one of them is worth chasing.
+    // Say which of the two it is: "waveform unavailable" over a swept segment and
+    // over a broken backend read the same, and only one of them is worth chasing.
     return (
       <Frame title={hint} wide={wide}>
         <div className="px-1 text-center text-[10px] leading-snug text-mast-muted">
-          电流监控 · 第 {segId} 段
+          {tr(`电流监控 · 第 ${segId} 段`, `Current monitor · segment ${segId}`)}
           <div className="mt-0.5 text-mast-faint">
-            {q.isError ? "波形读取失败" : d?.detail || "该段波形已不可用"}
+            {q.isError
+              ? tr("波形读取失败", "Failed to read the waveform")
+              : d?.detail || tr("该段波形已不可用", "The waveform for this segment is no longer available")}
           </div>
         </div>
       </Frame>
@@ -111,7 +113,10 @@ export function SegmentCurveThumb({
     return (
       <Frame title={hint} wide={wide}>
         <div className="text-center text-[10px] text-mast-muted">
-          第 {segId} 段只有 {geo.n} 个采样点，画不出曲线
+          {tr(
+            `第 ${segId} 段只有 ${geo.n} 个采样点，画不出曲线`,
+            `Segment ${segId} has only ${geo.n} sample point(s); cannot draw a curve`,
+          )}
         </div>
       </Frame>
     );
@@ -119,12 +124,11 @@ export function SegmentCurveThumb({
 
   return (
     <Link
-      // 指到**具体那一段**，不是组根。2026-08-06(#34)合并之后 `/monitoring`
-      // 只是个中转，它会把人送到「上次停的那一段」—— 如果那是环境历史，这个
-      // 链接就带着一个 `?seg=` 落在一张读不懂它的页面上。链接照样打得开，
-      // 所以没人会意识到定位丢了。
+      // Point at the specific sub-page, not the group root: `/monitoring` is only a
+      // redirect to the last-visited sub-page, which may be environment history and
+      // would receive `?seg=` on a page that ignores it.
       to={`/monitoring/current?seg=${segId}`}
-      title={`${hint}\n点击打开第 ${segId} 段的完整波形与频谱`}
+      title={`${hint}\n${tr(`点击打开第 ${segId} 段的完整波形与频谱`, `Click to open the full waveform and spectrum of segment ${segId}`)}`}
       className="block"
     >
       <Frame title="" wide={wide}>
@@ -133,7 +137,7 @@ export function SegmentCurveThumb({
           preserveAspectRatio="none"
           className="h-full w-full"
           role="img"
-          aria-label={`第 ${segId} 段电流波形`}
+          aria-label={tr(`第 ${segId} 段电流波形`, `Current waveform of segment ${segId}`)}
         >
           <polyline
             points={geo.points}
@@ -146,8 +150,8 @@ export function SegmentCurveThumb({
         </svg>
       </Frame>
       <Caption>
-        第 {segId} 段 · {fmtCurrent(geo.min)} ～ {fmtCurrent(geo.max)}
-        {envelope ? " · 包络" : ""}
+        {tr(`第 ${segId} 段`, `Segment ${segId}`)} · {fmtCurrent(geo.min)} ～ {fmtCurrent(geo.max)}
+        {envelope ? tr(" · 包络", " · envelope") : ""}
       </Caption>
     </Link>
   );

@@ -21,6 +21,7 @@ from mast.skills.composite.graph_executor import (
     CompositeStep,
     GraphExecutor,
 )
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -98,91 +99,142 @@ class ScanUntilAtomicResolution(CompositeSkillGraph):
             category=SkillCategory.COMPOSITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "反复扫同一区域并逐帧判定，直到出现原子分辨或次数用完。"
+                tr("反复扫同一区域并逐帧判定，直到出现原子分辨或次数用完。"
                 "不改参数、不动针尖 —— 这是代价最低的那一档，先试它。"
                 "**这是阶梯里的一档，不是入口。**用户只说「我想要原子分辨」"
                 "而没有指名要重扫时，调 AchieveAtomicResolution —— 它会先量"
-                "现状、决定从哪一档起步，并在这一档不够时自己升级。"
+                "现状、决定从哪一档起步，并在这一档不够时自己升级。",
+                   "Scan the same area repeatedly and judge each frame, until atomic resolution "
+                   "appears or the attempts run out. Changes no parameter and does not touch the "
+                   "tip: this is the cheapest rung, try it first. **This is one rung of the ladder, "
+                   "not the entry point.** When the user only says 'I want atomic resolution' "
+                   "without asking for a rescan, call AchieveAtomicResolution: it first measures the "
+                   "current state, decides which rung to start from, and escalates by itself when "
+                   "this rung is not enough.")
             ),
             parameters=[
                 ParameterSpec(
                     name="max_attempts", type="int", required=False, default=6,
                     min_value=1, max_value=50,
-                    description="最多扫几帧",
+                    description=tr("最多扫几帧", "Maximum number of frames to scan"),
                 ),
                 ParameterSpec(
                     name="center_x_m", type="float", unit="m", required=False,
-                    default=None, description="扫描中心 X；不填就用当前扫描框",
+                    default=None, description=tr("扫描中心 X；不填就用当前扫描框",
+                                                 "Scan centre X; if omitted, use the current scan "
+                                                 "frame"),
                 ),
                 ParameterSpec(
                     name="center_y_m", type="float", unit="m", required=False,
-                    default=None, description="扫描中心 Y；不填就用当前扫描框",
+                    default=None, description=tr("扫描中心 Y；不填就用当前扫描框",
+                                                 "Scan centre Y; if omitted, use the current scan "
+                                                 "frame"),
                 ),
                 ParameterSpec(
                     name="scan_size_m", type="float", unit="m", required=False,
                     default=None, min_value=1e-10, max_value=1e-6,
-                    description="视场边长；不填就用当前扫描框",
+                    description=tr("视场边长；不填就用当前扫描框",
+                                   "Field-of-view edge length; if omitted, use the current scan frame"),
                 ),
                 ParameterSpec(
                     name="line_time_s", type="float", unit="s", required=False,
                     default=None, min_value=1e-4, max_value=600.0,
-                    description="每线时间；不填走出厂档位表（8 nm → atomic 档 1.2 s）",
+                    description=tr("每线时间；不填走出厂档位表（8 nm → atomic 档 1.2 s）",
+                                   "Time per line; if omitted, use the factory tier table (8 nm -> "
+                                   "atomic tier 1.2 s)"),
                 ),
                 ParameterSpec(
                     name="concentration_min", type="float", required=False,
                     default=60.0, min_value=1.0, max_value=1e5,
-                    description=("角向集中度下限，仅用于粗筛；"
-                                 "完整判定还必须通过 peaks_not_one_lattice 检查。"),
+                    description=(tr("角向集中度下限。**这个数分不开好坏帧，别指望它** ——"
+                                 "它只是一道粗筛，真正的把关是 peaks_not_one_lattice"
+                                 "（好帧与坏帧的集中度完全交错）",
+                                    "Lower limit of angular concentration. **This number cannot "
+                                    "separate good frames from bad ones, do not rely on it**: it is "
+                                    "only a coarse screen, and the real gate is "
+                                    "peaks_not_one_lattice (the two "
+                                    "populations interleave completely)")),
                 ),
                 ParameterSpec(
                     name="require_full_frame", type="bool", required=False,
                     default=True,
-                    description=("残帧不参与判定。**默认 True**：残帧上 NaN 区域会被"
+                    description=(tr("残帧不参与判定。**默认 True**：残帧上 NaN 区域会被"
                                  "当成常数，在谱上造出与扫描无关的结构，"
-                                 "而判据照样给分"),
+                                 "而判据照样给分",
+                                    "Incomplete frames take no part in the judgement. **Default "
+                                    "True**: on an incomplete frame the NaN region is treated as a "
+                                    "constant, which creates structure in the spectrum unrelated to "
+                                    "the scan, while the criterion still gives a score")),
                 ),
                 ParameterSpec(
                     name="allow_reduced_scale", type="bool", required=False,
                     default=False,
-                    description=("允许「采样不足但周期清楚」的帧算作原子分辨。"
+                    description=(tr("允许「采样不足但周期清楚」的帧算作原子分辨。"
                                  "8 nm/256 px = 0.031 nm/px 时每周期只有 7 个点，"
                                  "判据默认判 undetermined —— 那对「成像质量」是对的，"
                                  "但对「晶格测量」过严：FFT 峰位精度取决于视场里有"
-                                 "多少个周期，不取决于每周期多少像素。做定标时开它"),
+                                 "多少个周期，不取决于每周期多少像素。做定标时开它",
+                                    "Allow a frame that is 'undersampled but with a clear period' to "
+                                    "count as atomic resolution. At 8 nm/256 px = 0.031 nm/px there "
+                                    "are only 7 points per period, so the criterion defaults to "
+                                    "undetermined: right for 'imaging quality', but too strict for "
+                                    "'lattice measurement', since the FFT peak position precision "
+                                    "depends on how many periods fit in the field of view, not on "
+                                    "pixels per period. Turn it on when calibrating")),
                 ),
                 ParameterSpec(
                     name="keep_current_speed", type="bool", required=False,
                     default=True,
-                    description=("按仪器**当前**的线速度算每线时间，而不是走档位表。"
-                                 "档位表给 5 nm 帧 4 s/线 = 34 分钟一帧；这台机器"
-                                 "实际出过原子分辨的是 6.51 nm/s = 0.77 s/线。"
-                                 "显式给了 line_time_s 时这一项不起作用"),
+                    description=(tr("按仪器**当前**的线速度算每线时间，而不是走档位表。"
+                                 "档位表给 5 nm 帧 4 s/线 = 34 分钟一帧；而仪器当前的线速度"
+                                 "可能已经是出过原子分辨的那个值，快得多。"
+                                 "显式给了 line_time_s 时这一项不起作用",
+                                    "Compute the line time from the instrument's **current** line "
+                                    "speed instead of the tier table. The tier table gives a 5 nm "
+                                    "frame 4 s/line = 34 minutes per frame; the instrument's current "
+                                    "line speed may already be one that produced atomic resolution, "
+                                    "and much faster. Has no effect when line_time_s is given explicitly")),
                 ),
                 ParameterSpec(
                     name="prefer_full_scale_gate", type="bool", required=False,
                     default=True,
-                    description=("必要时缩小视场，让 nm/px 进判据的 full 档"
+                    description=(tr("必要时缩小视场，让 nm/px 进判据的 full 档"
                                  "（< 0.02）。8 nm/256 px = 0.0313 落在过渡带里，"
                                  "判据只会给 undetermined；缩到 5 nm 就进 full 档，"
-                                 "结论不用开逃生门。显式给了 scan_size_m 时不动"),
+                                 "结论不用开逃生门。显式给了 scan_size_m 时不动",
+                                    "Shrink the field of view when needed so that nm/px enters the "
+                                    "'full' tier of the criterion (< 0.02). 8 nm/256 px = 0.0313 "
+                                    "lies in the transition band, where the criterion only gives "
+                                    "undetermined; shrinking to 5 nm enters the full tier and the "
+                                    "conclusion needs no escape hatch. Left alone when scan_size_m "
+                                    "is given explicitly")),
                 ),
                 ParameterSpec(
                     name="relocate_after_attempts", type="int", required=False,
                     default=0, min_value=0, max_value=50,
-                    description=("连续这么多帧没出原子分辨就**换一块地方**"
+                    description=(tr("连续这么多帧没出原子分辨就**换一块地方**"
                                  "（0 = 从不换，保持「原地多扫几帧」的原意）。"
                                  "扎过针/打过脉冲之后原地重扫多少帧都还是那个坑，"
-                                 "这时候要换地方"),
+                                 "这时候要换地方",
+                                    "After this many consecutive frames without atomic resolution, "
+                                    "**move to a different spot** (0 = never move, keeping the "
+                                    "original meaning of 'scan a few more frames in place'). After "
+                                    "poking the tip or pulsing, rescanning in place any number of "
+                                    "times still shows the same pit, so move")),
                 ),
                 ParameterSpec(
                     name="relocate_step_m", type="float", unit="m", required=False,
                     default=3e-8, min_value=1e-9, max_value=1e-6,
-                    description="每次换区沿对角线移动的距离，默认 30 nm，可按任务配置",
+                    description=tr("每次换地方沿对角线移动多远。默认 30 nm",
+                                   "How far to move along the diagonal each time. Default 30 nm"
+                                   ""),
                 ),
                 ParameterSpec(
                     name="save_every_frame", type="bool", required=False,
                     default=True,
-                    description="每帧都存盘（失败的帧也是数据 —— 它们是「没出来」的证据）",
+                    description=tr("每帧都存盘（失败的帧也是数据 —— 它们是「没出来」的证据）",
+                                   "Save every frame to disk (failed frames are data too: they are "
+                                   "evidence of 'did not appear')"),
                 ),
             ],
             preconditions=["z_controller_on"],
@@ -194,8 +246,18 @@ class ScanUntilAtomicResolution(CompositeSkillGraph):
     def plan_dynamic(self, params: dict,
                      executor: GraphExecutor) -> Iterator[CompositeStep]:
         n_max = int(params.get("max_attempts") or 6)
-        # 集中度只用于粗筛，不能独立区分晶格与其他周期结构。
-        # 最终检查还使用起伏与一阶峰半径散布，避免用单个阈值代替形貌证据。
+        # ⚠️ **这个阈值分不开好坏帧。别再试图靠调它来把关。**
+        #
+        # 曾把它抬高到某个「真晶格带下沿」，理由是当时手头的真晶格样本都在其上。
+        # 用独立的判据逐帧复核后发现：好帧与坏帧/假阳性的集中度**完全交错**，
+        # 抬高阈值既挡不住高集中度的坏帧，又会把集中度较低的**真成功**挡在门外
+        # —— 针尖其实已经修出了晶格，却因为这道闸门而没能宣布成功。
+        # **假阴性的代价是真实的。**
+        #
+        # 真正分得开的是 ``peaks_not_one_lattice``（起伏 + 一阶峰半径散布）。
+        # 所以这里只当一道粗筛（60）；把关交给那条判据。
+        #
+        # 教训：**在一个分不开两个族群的量上调阈值，只会换一种方式犯错。**
         conc_min = float(params.get("concentration_min") or 60.0)
         require_full = bool(params.get("require_full_frame", True))
         save_every = bool(params.get("save_every_frame", True))
@@ -236,7 +298,9 @@ class ScanUntilAtomicResolution(CompositeSkillGraph):
             new_size = _shrink_into_full_gate(float(size), int(pixels))
             if new_size is not None:
                 plan_notes.append(
-                    "视场 %.1f → %.1f nm，让 nm/px 从 %.4f 降到 %.4f（进 full 档）"
+                    tr("视场 %.1f → %.1f nm，让 nm/px 从 %.4f 降到 %.4f（进 full 档）",
+                       "View %.1f -> %.1f nm, so that nm/px drops from %.4f to %.4f (entering the "
+                       "full tier)")
                     % (size * 1e9, new_size * 1e9,
                        size * 1e9 / pixels, new_size * 1e9 / pixels))
                 size = new_size
@@ -246,7 +310,9 @@ class ScanUntilAtomicResolution(CompositeSkillGraph):
             if v and v > 0:
                 line_time = float(size) / float(v)
                 plan_notes.append(
-                    "每线 %.3f s（按仪器当前线速度 %.3g m/s 算，不走档位表）"
+                    tr("每线 %.3f s（按仪器当前线速度 %.3g m/s 算，不走档位表）",
+                       "%.3f s per line (from the instrument's current line speed %.3g m/s, not the "
+                       "tier table)")
                     % (line_time, v))
         for _n in plan_notes:
             logger.info("ScanUntilAtomicResolution 成帧计划：%s", _n)
@@ -289,7 +355,8 @@ class ScanUntilAtomicResolution(CompositeSkillGraph):
             scan_res = executor.sub_results.get(f"{tag}:scan")
             if scan_res is None:
                 why = str(executor.progress.failed_reasons.get(f"{tag}:scan")
-                          or "扫描这一步没有留下结果（失败或被断点跳过）")
+                          or tr("扫描这一步没有留下结果（失败或被断点跳过）",
+                                "The scan step left no result (failed or skipped by a breakpoint)"))
                 n_scan_fail += 1
                 # ⚠️ verdict 用 ``no_scan``,**不是** ``absent``/``undetermined``。
                 # 「没扫成」既不是「没有原子分辨」也不是「判不了」—— 后两者都是
@@ -379,7 +446,7 @@ class ScanUntilAtomicResolution(CompositeSkillGraph):
                 # 升级去修针。同一个形状本仓一天里出现过五次,而它就在上面那个
                 # bug 往下三行。
                 why = str(executor.progress.failed_reasons.get(f"{tag}:assess")
-                          or "判定这一步没有留下结果")
+                          or tr("判定这一步没有留下结果", "The judgement step left no result"))
                 n_assess_fail += 1
                 history.append({"attempt": i + 1, "verdict": "no_verdict",
                                 "path": str(path), "error": why})
@@ -492,23 +559,35 @@ class ScanUntilAtomicResolution(CompositeSkillGraph):
             # 是两回事,而以前两者在报告里长得一模一样。
             n_nosample = out["scans_failed"] + out["repeat_frames"]
             if pd.get("aborted_reason") == "no_scan_frame":
-                out["advice"] = "读不到扫描框，一帧都没扫。给 center_x_m/center_y_m/scan_size_m。"
+                out["advice"] = tr("读不到扫描框，一帧都没扫。给 center_x_m/center_y_m/scan_size_m。",
+                                   "Cannot read the scan frame, no frame was scanned. Give "
+                                   "center_x_m/center_y_m/scan_size_m.")
             elif not judged and out["assess_failed"]:
                 # 采到了帧,但**一帧都没判成**。这同样不是关于针尖的证据。
                 out["advice"] = (
-                    "采到了 %d 帧,但**判据一次都没跑成**（%d 次）—— "
+                    tr("采到了 %d 帧,但**判据一次都没跑成**（%d 次）—— "
                     "所以这里**没有任何关于针尖的证据**，别据此去修针。"
                     "先查判定这一步为什么失败（文件读不了？依赖缺了？），"
-                    "那几帧还在盘上，修好之后可以直接重判。"
+                    "那几帧还在盘上，修好之后可以直接重判。",
+                       "Acquired %d frames, but **the criterion never ran successfully** (%d times): "
+                       "so there is **no evidence at all about the tip** here, do not repair the tip "
+                       "on this basis. First find out why the judgement step failed (file "
+                       "unreadable? dependency missing?); those frames are still on disk and can be "
+                       "re-judged directly once fixed.")
                     % (out["scans_ok"], out["assess_failed"]))
             elif not judged and n_nosample:
                 # **一帧都没采到。**这不是关于针尖的任何证据 —— 说成「没有原子
                 # 分辨」会让上层去修一根可能本来就好的针。
                 out["advice"] = (
-                    "**一帧都没有真的采到**（扫描失败 %d 次、交回已判过的帧 %d 次），"
+                    tr("**一帧都没有真的采到**（扫描失败 %d 次、交回已判过的帧 %d 次），"
                     "所以这里**没有任何关于针尖的证据** —— 别据此去修针。"
                     "先查扫描这一步为什么没成（超时？被停？落点被 crash_guard 拒了？），"
-                    "再谈原子分辨。" % (out["scans_failed"], out["repeat_frames"]))
+                    "再谈原子分辨。",
+                       "**Not one frame was really acquired** (scan failed %d times, an "
+                       "already-judged frame returned %d times), so there is **no evidence at all "
+                       "about the tip** here: do not repair the tip on this basis. First find out "
+                       "why the scan step did not succeed (timeout? stopped? landing point refused "
+                       "by crash_guard?), then talk about atomic resolution.") % (out["scans_failed"], out["repeat_frames"]))
             elif n_undet and n_undet == len(judged):
                 # 全是「判不了」时说「没有原子分辨」是错的 —— 那是采集没完成。
                 #
@@ -517,23 +596,40 @@ class ScanUntilAtomicResolution(CompositeSkillGraph):
                 # 拿它当分母时只要发生过一次换地方,这条判定就永远不成立 ——
                 # 一道**看着在防护、其实从没触发过**的分支。
                 out["advice"] = (
-                    "%d 帧全部**判不了**（多半是残帧）。这不是「没有原子分辨」，"
-                    "是每一帧都没扫完 —— 先查扫描为什么中断，再谈针尖。" % n_undet)
+                    tr("%d 帧全部**判不了**（多半是残帧）。这不是「没有原子分辨」，"
+                    "是每一帧都没扫完 —— 先查扫描为什么中断，再谈针尖。",
+                       "All %d frames **could not be judged** (mostly incomplete frames). This is "
+                       "not 'no atomic resolution': every frame was left unfinished. First find out "
+                       "why the scan was interrupted, then talk about the tip.") % n_undet)
             else:
                 tail = ""
                 if not out["relocations"]:
-                    tail = ("这一轮未换区。可设置 relocate_after_attempts=2，"
-                            "移到未被处理扰动的位置后重新评估。")
+                    tail = (tr("**这一轮没换过地方**。扎过针/打过脉冲之后原地重扫"
+                            "多少帧都还是那个坑 —— 传 relocate_after_attempts=2 "
+                            "再试一次。",
+                               "**No relocation happened in this round.** After poking the tip or "
+                               "pulsing, rescanning in place any number of times still shows the "
+                               "same pit: pass relocate_after_attempts=2 and try again."
+                               ""))
                 if n_nosample:
                     tail += (
-                        "⚠️ 这一轮有 **%d 次 attempt 没有产出新的一帧**"
+                        tr("⚠️ 这一轮有 **%d 次 attempt 没有产出新的一帧**"
                         "（扫描失败 %d 次、没给出新样本 %d 次）—— 下面那个帧数是"
                         "**真判过的互不相同的帧**，不是 attempt 数。"
                         "这一档的全部理由是「针尖构型会自发变化，这一帧没有不代表"
-                        "下一帧没有」，判同一帧两次兑现不了那条理由。"
+                        "下一帧没有」，判同一帧两次兑现不了那条理由。",
+                           "WARNING: in this round **%d attempts produced no new frame** (scan "
+                           "failed %d times, no new sample %d times); the frame count below is of "
+                           "**really judged, mutually different frames**, not the attempt count. The "
+                           "whole rationale of this rung is 'the tip configuration changes "
+                           "spontaneously, so not having it in this frame does not mean not having "
+                           "it in the next', and judging the same frame twice cannot deliver that.")
                         % (n_nosample, out["scans_failed"], out["repeat_frames"]))
                 out["advice"] = (
-                    "扫了 %d 帧仍无原子分辨。%s下一档代价：OptimizeResolution_BO "
-                    "（搜索 bias/setpoint，会离开当前工作点）；再下一档才是修针。"
+                    tr("扫了 %d 帧仍无原子分辨。%s下一档代价：OptimizeResolution_BO "
+                    "（搜索 bias/setpoint，会离开当前工作点）；再下一档才是修针。",
+                       "Scanned %d frames without atomic resolution. %sCost of the next rung: "
+                       "OptimizeResolution_BO (searches bias/setpoint, leaves the current working "
+                       "point); only the rung after that is tip repair.")
                     % (out["frames_judged"], tail))
         return out

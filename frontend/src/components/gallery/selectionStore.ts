@@ -1,8 +1,8 @@
-// selectionStore —— 数据图库里「选中了哪些」（旧版兼容格式 series.js 的 SEL）。
+// selectionStore: which items are selected in the data gallery.
 //
-// 纯逻辑在 lib/gallery/selection.ts；这里只是 zustand 绑定。选中集合每次变都换新
-// Set，卡片按 id 订阅 `s.ids.has(id)`，于是只有状态真的变了的卡片重渲。
-// 视图切换时由 GalleryApp 清空（原版 route() 里的 selClear）。
+// The pure logic is in lib/gallery/selection.ts; this is only the zustand binding. The selection
+// set is replaced with a new Set on every change and cards subscribe to `s.ids.has(id)`, so only
+// cards whose state really changed re-render. GalleryApp clears it on view change.
 
 import { create } from "zustand";
 import { pickClick, pickKey, type HasId, type SelectionState } from "@/lib/gallery/selection";

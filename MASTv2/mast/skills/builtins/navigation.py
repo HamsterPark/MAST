@@ -14,6 +14,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 
 #: 读不到 FolMe 速度时的兜底等待上限。**它是兜底,不是估算** ——
@@ -55,12 +56,12 @@ class MoveToXY(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="用 Follow Me 把针尖移到指定的 XY 位置。",
+            description=tr("用 Follow Me 把针尖移到指定的 XY 位置。", "Move the tip to the given XY position with Follow Me."),
             parameters=[
                 ParameterSpec(
                     name="x_m",
                     type="float",
-                    description="目标 X 位置，单位米",
+                    description=tr("目标 X 位置，单位米", "Target X position, in metres"),
                     unit="m",
                     required=True,
                     min_value=-1.5e-6,
@@ -69,7 +70,7 @@ class MoveToXY(BaseSkill):
                 ParameterSpec(
                     name="y_m",
                     type="float",
-                    description="目标 Y 位置，单位米",
+                    description=tr("目标 Y 位置，单位米", "Target Y position, in metres"),
                     unit="m",
                     required=True,
                     min_value=-1.5e-6,
@@ -78,7 +79,7 @@ class MoveToXY(BaseSkill):
                 ParameterSpec(
                     name="wait",
                     type="bool",
-                    description="返回前先等待移动完成",
+                    description=tr("返回前先等待移动完成", "Wait for the move to complete before returning"),
                     required=False,
                     default=True,
                 ),
@@ -86,13 +87,19 @@ class MoveToXY(BaseSkill):
                     name="coord_epoch",
                     type="int",
                     description=(
-                        "目标 x/y 所属的坐标代次。**只有**当这对坐标来自某个"
+                        tr("目标 x/y 所属的坐标代次。**只有**当这对坐标来自某个"
                         "自带代次的存储源（地图 marker、扫描计划、已保存的位点）"
                         "时才传它。传了之后，若期间发生过横向粗动（lateral coarse "
                         "move），这次移动就会"
                         "被**拒绝** —— 那些米数如今指向的是另一块表面，而两个代次"
                         "之间没有任何换算关系。对于你刚从仪器回读出来的坐标请"
-                        "**省略（OMIT）**它：它们按构造就是当前代次。"
+                        "**省略（OMIT）**它：它们按构造就是当前代次。", "The coordinate generation that the target x/y belong to. Pass it **only** when this pair of coordinates comes from a "
+"store that carries its own generation (map marker, scan plan, saved site). "
+"Once passed, if a lateral coarse "
+"move has happened in the meantime, this move is "
+"**refused** -- those metres now point to a different surface, and there is no conversion between the two generations. "
+"For coordinates you have just read back from the instrument **OMIT** it: "
+"by construction they are the current generation.")
                     ),
                     required=False,
                     # 刻意 None(同 full_scan.line_time_s / imaging.angle_deg 那两条
@@ -126,7 +133,7 @@ class MoveToXY(BaseSkill):
         # 只会把好路径也堵上。
         if params.get("coord_epoch") is not None:
             from mast.core import coord_epoch as _ce
-            v = _ce.verify(params["coord_epoch"], what="这对目标坐标")
+            v = _ce.verify(params["coord_epoch"], what=tr("这对目标坐标", "this pair of target coordinates"))
             if v.stale:
                 return SkillResult(
                     skill_name="MoveToXY", success=False,
@@ -153,7 +160,7 @@ class MoveToXY(BaseSkill):
                 skill_name="MoveToXY", success=True,
                 data={"x_m": x_m, "y_m": y_m, "wait": False,
                       "arrived": None,
-                      "note": "已下发移动指令,未等待到位(wait=false)。"},
+                      "note": tr("已下发移动指令,未等待到位(wait=false)。", "Move command sent, did not wait for arrival (wait=false).")},
                 nanonis_calls=calls,
             )
 
@@ -215,24 +222,28 @@ class MoveToXY(BaseSkill):
 
         return SkillResult(
             skill_name="MoveToXY", success=False,
-            error=(f"移动指令已下发,但 {budget:.0f} s 内没看到针尖到位"
-                   + (f"(预算由距离 ÷ FolMe 速度 {speed * 1e9:.1f} nm/s 派生)"
+            error=(tr(f"移动指令已下发,但 {budget:.0f} s 内没看到针尖到位", f"The move command was sent, but the tip was not seen arriving within {budget:.0f} s")
+                   + (tr(f"(预算由距离 ÷ FolMe 速度 {speed * 1e9:.1f} nm/s 派生)", f" (budget derived from distance / FolMe speed {speed * 1e9:.1f} nm/s)")
                       if derived else
-                      "(**读不到 FolMe 速度,这是兜底值不是算出来的**)")
-                   + f"。目标 ({x_m:.3e}, {y_m:.3e}) m"
-                   + (f",最后读到 ({last[0]:.3e}, {last[1]:.3e}) m" if last
-                      else ",而且**一次位置都没读到**")
+                      tr("(**读不到 FolMe 速度,这是兜底值不是算出来的**)", " (**FolMe speed could not be read; this is a fallback value, not a computed one**)"))
+                   + tr(f"。目标 ({x_m:.3e}, {y_m:.3e}) m", f". Target ({x_m:.3e}, {y_m:.3e}) m")
+                   + (tr(f",最后读到 ({last[0]:.3e}, {last[1]:.3e}) m", f", last read ({last[0]:.3e}, {last[1]:.3e}) m") if last
+                      else tr(",而且**一次位置都没读到**", ", and **no position was read at all**"))
                    + (
                        # 连续多个采样点位置完全不变时，区分停滞与仍在移动。
                        # 目标不可达或输出受限可能导致停滞，不能继续声称针尖正在接近目标。
                        # 返回明确原因并让调用方核对当前范围，而不是等待不会发生的到达事件。
-                       "。**针尖停住了,不是还在走**:位置连续 %d 拍逐位不变。"
+                       tr("。**针尖停住了,不是还在走**:位置连续 %d 拍逐位不变。"
                        "最可能是目标越过了压电范围 —— 先读 GetPiezoConfig 的 range"
                        "(半程 = range/2),确认目标在范围内;这台仪器的实际半程"
-                       "可能小于 config 里的 xy_max_m。**重试不会有帮助。**" % frozen
+                       "可能小于 config 里的 xy_max_m。**重试不会有帮助。**", ". **The tip has stopped, it is not still moving**: the position was bit-for-bit unchanged for %d consecutive polls. "
+"Most likely the target is beyond the piezo range -- first read the range of GetPiezoConfig "
+"(half range = range/2) and confirm the target is within range; the actual half range of this instrument "
+"may be smaller than xy_max_m in the config. **Retrying will not help.**") % frozen
                        if frozen >= 5 else
-                       "。**这不是「没动」**:指令已经发出去了,针尖可能仍在移动中 ——"
-                       "下一步之前先读一次位置,别假定它还在原处。"
+                       tr("。**这不是「没动」**:指令已经发出去了,针尖可能仍在移动中 ——"
+                       "下一步之前先读一次位置,别假定它还在原处。", ". **This is not \"it did not move\"**: the command has been sent, and the tip may still be moving -- "
+"read the position once before the next step, and do not assume it is still where it was.")
                    )),
             data={"requested_x_m": x_m, "requested_y_m": y_m,
                   # 给**代码**看的那一半:光有文案,调用方没法分支。

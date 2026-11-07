@@ -20,6 +20,7 @@ from mast.core.types import (
 )
 from mast.io.nanonis_files import decode_reply, channel_ids_from_buffer, scalar_int
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 _log = logging.getLogger(__name__)
 
@@ -86,12 +87,12 @@ class ConfigureBiasSweep(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="配置 bias sweep 的上下限、步数与记录通道。",
+            description=tr("配置 bias sweep 的上下限、步数与记录通道。", "Configure the limits, number of steps and recorded channels of a bias sweep."),
             parameters=[
                 ParameterSpec(
                     name="lower_v",
                     type="float",
-                    description="bias 下限，单位伏特",
+                    description=tr("bias 下限，单位伏特", "Lower bias limit, in volts"),
                     unit="V",
                     required=True,
                     min_value=-10.0,
@@ -100,7 +101,7 @@ class ConfigureBiasSweep(BaseSkill):
                 ParameterSpec(
                     name="upper_v",
                     type="float",
-                    description="bias 上限，单位伏特",
+                    description=tr("bias 上限，单位伏特", "Upper bias limit, in volts"),
                     unit="V",
                     required=True,
                     min_value=-10.0,
@@ -109,7 +110,7 @@ class ConfigureBiasSweep(BaseSkill):
                 ParameterSpec(
                     name="num_steps",
                     type="int",
-                    description="扫描的步数",
+                    description=tr("扫描的步数", "Number of sweep steps"),
                     required=True,
                     min_value=2,
                     max_value=10000,
@@ -117,7 +118,7 @@ class ConfigureBiasSweep(BaseSkill):
                 ParameterSpec(
                     name="period_ms",
                     type="float",
-                    description="每一步的积分周期，单位毫秒",
+                    description=tr("每一步的积分周期，单位毫秒", "Integration period of each step, in milliseconds"),
                     unit="ms",
                     required=False,
                     default=4.0,
@@ -133,7 +134,7 @@ class ConfigureBiasSweep(BaseSkill):
         lower_v = params["lower_v"]
         upper_v = params["upper_v"]
         num_steps = params["num_steps"]
-        # 审查 [#138]: the execute() fallback (20.0) diverged from
+        # The execute() fallback (20.0) diverged from
         # the ParameterSpec default (4.0). On the composite path params are
         # resolved from the spec/context WITHOUT the registry back-filling
         # metadata defaults, so an omitted period_ms silently took 20.0 here
@@ -227,7 +228,7 @@ class AcquireBiasSweep(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="在当前针尖位置采一条 bias sweep。",
+            description=tr("在当前针尖位置采一条 bias sweep。", "Acquire one bias sweep at the current tip position."),
             preconditions=["z_controller_on"],
             estimated_duration_s=30.0,
             composition_level=1,
@@ -334,12 +335,12 @@ class ConfigureLockInSweep(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="配置 lock-in 扫频的上下限与各项参数。",
+            description=tr("配置 lock-in 扫频的上下限与各项参数。", "Configure the limits and parameters of a lock-in frequency sweep."),
             parameters=[
                 ParameterSpec(
                     name="lower_hz",
                     type="float",
-                    description="频率下限，单位 Hz",
+                    description=tr("频率下限，单位 Hz", "Lower frequency limit, in Hz"),
                     unit="Hz",
                     required=True,
                     min_value=0.0,
@@ -347,7 +348,7 @@ class ConfigureLockInSweep(BaseSkill):
                 ParameterSpec(
                     name="upper_hz",
                     type="float",
-                    description="频率上限，单位 Hz",
+                    description=tr("频率上限，单位 Hz", "Upper frequency limit, in Hz"),
                     unit="Hz",
                     required=True,
                     min_value=0.0,
@@ -355,7 +356,7 @@ class ConfigureLockInSweep(BaseSkill):
                 ParameterSpec(
                     name="num_steps",
                     type="int",
-                    description="扫描的步数",
+                    description=tr("扫描的步数", "Number of sweep steps"),
                     required=True,
                     min_value=2,
                     max_value=10000,
@@ -363,7 +364,7 @@ class ConfigureLockInSweep(BaseSkill):
                 ParameterSpec(
                     name="integration_periods",
                     type="int",
-                    description="每一步的积分周期数",
+                    description=tr("每一步的积分周期数", "Number of integration periods per step"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -371,7 +372,7 @@ class ConfigureLockInSweep(BaseSkill):
                 ParameterSpec(
                     name="settling_periods",
                     type="int",
-                    description="每一步的建立（settling）周期数",
+                    description=tr("每一步的建立（settling）周期数", "Number of settling periods per step"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -386,7 +387,7 @@ class ConfigureLockInSweep(BaseSkill):
         lower_hz = params["lower_hz"]
         upper_hz = params["upper_hz"]
         num_steps = params["num_steps"]
-        # 审查 [#138]: execute() fallbacks (3 / 3) diverged from the
+        # The execute() fallbacks (3 / 3) diverged from the
         # ParameterSpec defaults (1 / 1). On the composite path defaults are NOT
         # back-filled, so an omitted integration_periods/settling_periods took 3
         # here instead of the advertised 1. Align with the ParameterSpec default.
@@ -450,7 +451,7 @@ class AcquireLockInSweep(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="采一条 lock-in 扫频。",
+            description=tr("采一条 lock-in 扫频。", "Acquire one lock-in frequency sweep."),
             estimated_duration_s=60.0,
             composition_level=1,
             tags=["sweep", "lockin", "frequency", "write"],
@@ -516,7 +517,7 @@ class GetLockInSweepLimits(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读 lock-in 扫频的频率下限与上限。",
+            description=tr("读 lock-in 扫频的频率下限与上限。", "Read the lower and upper frequency limits of the lock-in frequency sweep."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["sweep", "lockin", "frequency", "limits", "read"],
@@ -553,7 +554,7 @@ class GetLockInSweepProps(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读 lock-in 扫频的属性（步数、积分、建立）。",
+            description=tr("读 lock-in 扫频的属性（步数、积分、建立）。", "Read the properties of the lock-in frequency sweep (steps, integration, settling)."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["sweep", "lockin", "frequency", "props", "read"],
@@ -601,7 +602,7 @@ class GetLockInSweepSignal(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读 lock-in 扫频所用的扫描信号索引。",
+            description=tr("读 lock-in 扫频所用的扫描信号索引。", "Read the sweep signal index used by the lock-in frequency sweep."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["sweep", "lockin", "frequency", "signal", "read"],
@@ -635,7 +636,7 @@ class GenSwpAcqChsGet(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="取 Generic Sweeper 记录的采集通道列表。",
+            description=tr("取 Generic Sweeper 记录的采集通道列表。", "Get the list of acquisition channels recorded by the Generic Sweeper."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["sweep", "generic", "channels", "read"],
@@ -678,7 +679,7 @@ class GenSwpPropsGet(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="取 Generic Sweeper 的配置属性。",
+            description=tr("取 Generic Sweeper 的配置属性。", "Get the configuration properties of the Generic Sweeper."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["sweep", "generic", "props", "read"],
@@ -727,7 +728,7 @@ class GenSwpStop(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="停止当前正在运行的 Generic Sweeper 扫描。",
+            description=tr("停止当前正在运行的 Generic Sweeper 扫描。", "Stop the Generic Sweeper sweep that is currently running."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["sweep", "generic", "stop", "write"],
@@ -755,7 +756,7 @@ class GenSwpSwpSignalGet(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="取 Generic Sweeper 的扫描信号名。",
+            description=tr("取 Generic Sweeper 的扫描信号名。", "Get the sweep signal name of the Generic Sweeper."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["sweep", "generic", "signal", "read"],

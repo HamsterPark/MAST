@@ -1,0 +1,315 @@
+{
+  "name": "beam_splitter_both_faces",
+  "description": "A beam splitter acts on both faces: L1 arrives on the front (d.n < 0), L2 from the other side (d.n > 0). Both give a reflected (.r) and a transmitted (.t) branch of fraction 0.5.",
+  "layout": {
+    "schema": 1,
+    "id": "bs2",
+    "title": "Beam splitter, both faces",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 50.0,
+        "y_mm": 300.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "las2",
+        "type": "laser",
+        "label": "L2",
+        "x_mm": 150.0,
+        "y_mm": 150.0,
+        "angle_deg": 90.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "bs1",
+        "type": "beam_splitter",
+        "label": "BS1",
+        "x_mm": 150.0,
+        "y_mm": 300.0,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.4,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det_up",
+        "type": "detector",
+        "label": "D_UP",
+        "x_mm": 150.0,
+        "y_mm": 450.0,
+        "angle_deg": 270.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det_right",
+        "type": "detector",
+        "label": "D_RIGHT",
+        "x_mm": 350.0,
+        "y_mm": 300.0,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 300.0,
+              "x1": 150.0,
+              "y1": 300.0
+            }
+          ],
+          "events": [
+            {
+              "component": "bs1",
+              "action": "split",
+              "x": 150.0,
+              "y": 300.0,
+              "offset_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 100.0
+            }
+          ],
+          "end": "split"
+        },
+        {
+          "branch": "0.r",
+          "fraction": 0.5,
+          "segments": [
+            {
+              "x0": 150.0,
+              "y0": 300.0,
+              "x1": 150.0,
+              "y1": 450.0
+            }
+          ],
+          "events": [
+            {
+              "component": "det_up",
+              "action": "stop",
+              "x": 150.0,
+              "y": 450.0,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 250.0
+            }
+          ],
+          "end": "stop"
+        },
+        {
+          "branch": "0.t",
+          "fraction": 0.5,
+          "segments": [
+            {
+              "x0": 150.0,
+              "y0": 300.0,
+              "x1": 350.0,
+              "y1": 300.0
+            }
+          ],
+          "events": [
+            {
+              "component": "det_right",
+              "action": "stop",
+              "x": 350.0,
+              "y": 300.0,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 300.0
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "las2",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 150.0,
+              "y0": 150.0,
+              "x1": 150.0,
+              "y1": 300.0
+            }
+          ],
+          "events": [
+            {
+              "component": "bs1",
+              "action": "split",
+              "x": 150.0,
+              "y": 300.0,
+              "offset_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 150.0
+            }
+          ],
+          "end": "split"
+        },
+        {
+          "branch": "0.r",
+          "fraction": 0.5,
+          "segments": [
+            {
+              "x0": 150.0,
+              "y0": 300.0,
+              "x1": 350.0,
+              "y1": 300.0
+            }
+          ],
+          "events": [
+            {
+              "component": "det_right",
+              "action": "stop",
+              "x": 350.0,
+              "y": 300.0,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 350.0
+            }
+          ],
+          "end": "stop"
+        },
+        {
+          "branch": "0.t",
+          "fraction": 0.5,
+          "segments": [
+            {
+              "x0": 150.0,
+              "y0": 300.0,
+              "x1": 150.0,
+              "y1": 450.0
+            }
+          ],
+          "events": [
+            {
+              "component": "det_up",
+              "action": "stop",
+              "x": 150.0,
+              "y": 450.0,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 300.0
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ]
+}

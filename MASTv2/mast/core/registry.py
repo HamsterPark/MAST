@@ -76,7 +76,7 @@ class SkillRegistry:
             self._metadata_cache[skill_class] = meta
             if meta.name not in self._skills:
                 self._skills[meta.name] = {}
-            # 审查 [#144]: a (name, version) collision previously
+            # A (name, version) collision previously
             # overwrote the prior class SILENTLY — two distinct skills sharing a
             # name (e.g. a copy-paste error, or a paper skill re-using a builtin
             # name) would leave only the last-discovered one reachable with no

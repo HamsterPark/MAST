@@ -35,6 +35,7 @@ handlers in try/except. NO business logic / safety here — the core owns it.
 
 from __future__ import annotations
 
+from mast.i18n import tr
 import logging
 import time as _time
 
@@ -360,7 +361,7 @@ def get_artifacts(request: Request) -> ArtifactsResponse:
     nothing has been produced yet — which is a true statement, not a broken one.
 
     Also returns ``groups`` — the per-CLASS status of all nine artifacts
-    (2026-07-28, ). The class rows are the answer to "has this been
+    (2026-07-28). The class rows are the answer to "has this been
     produced yet?", and they must come from the backend: the UI used to derive
     them by subtracting produced ids from class ids, two id spaces that never
     intersect, so every class read as 待产出 forever — on a machine where six of
@@ -421,7 +422,7 @@ def get_artifacts(request: Request) -> ArtifactsResponse:
 def get_artifact_permissions(request: Request) -> ArtifactPermissionsResponse:
     """The artifact DATA-FLOW graph: who writes each artifact, who reads it.
 
-    DERIVED, not declared (2026-07-11, ). The edges come from
+    DERIVED, not declared (2026-07-11). The edges come from
     ``agents._shared.artifacts.derive_flow()``, which asks each agent which tools
     it actually holds and maps those tools to the artifacts they touch. Give an
     agent a tool and its edge appears here; take the tool away and the edge goes.
@@ -562,7 +563,7 @@ def acknowledge_pending_activation(park_id: str,
         if rec.get("error"):
             return AcknowledgeParkResponse(ok=False, park_id=park_id,
                                            message=str(rec["error"]))
-        return AcknowledgeParkResponse(ok=True, park_id=park_id, message="已确认")
+        return AcknowledgeParkResponse(ok=True, park_id=park_id, message=tr("已确认", "Acknowledged"))
     except Exception as exc:  # noqa: BLE001
         logger.warning("acknowledge park %s failed: %s", park_id, exc)
         return AcknowledgeParkResponse(ok=False, park_id=park_id, message=str(exc))

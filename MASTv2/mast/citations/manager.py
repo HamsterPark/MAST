@@ -53,9 +53,8 @@ class CitationManager:
             # (skills fill `SkillResult.nanonis_calls`; the records layer copies
             # it up to the action). Checking only the action-level list made this
             # condition permanently false for the whole agent path — the recorder
-            # dropped both copies, so 0 of 27 actions in a real session carried
-            # any calls and MAST never cited Nanonis for a session that had run
-            # hundreds of TCP commands ().
+            # dropped both copies, so actions carried no calls and MAST never
+            # cited Nanonis for a session that had run hundreds of TCP commands.
             if action.nanonis_calls or getattr(action.result, "nanonis_calls", None):
                 had_nanonis_calls = True
             if action.context and "MissionPlanner" in action.context:

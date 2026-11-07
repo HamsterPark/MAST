@@ -38,6 +38,7 @@ import re
 import numpy as np
 
 from mast.gallery import paths as _paths
+from mast.i18n import tr
 from mast.gallery.figures import common as C
 from mast.gallery.figures import spectra as SP
 
@@ -96,7 +97,7 @@ def infer_stations(blocks: list[dict], *, match_frac: float = MATCH_FRAC, shifts
            "blocks": [_empty_block(b) for b in blocks], "warnings": warnings}
     usable = [(bi, b) for bi, b in enumerate(blocks) if b.get("spectra")]
     if not usable:
-        warnings.append("这些系列里没有带位置的偏压谱")
+        warnings.append(tr("这些系列里没有带位置的偏压谱", "None of these series contain positioned bias spectra"))
         return out
     P = np.array([[float(s["x"]), float(s["y"])] for _bi, b in usable for s in b["spectra"]])
     center = P.mean(axis=0)
@@ -132,7 +133,7 @@ def infer_stations(blocks: list[dict], *, match_frac: float = MATCH_FRAC, shifts
 
     if not step or step <= 0:
         # 只有一个位置：全部归站位 0。
-        warnings.append("参照系列只有一个位置 —— 当成单站位")
+        warnings.append(tr("参照系列只有一个位置 —— 当成单站位", "The reference series has only one position -- treated as a single station"))
         m = float(np.mean(s_ref))
         blocks_out = []
         for b in blocks:
@@ -201,8 +202,12 @@ def infer_stations(blocks: list[dict], *, match_frac: float = MATCH_FRAC, shifts
             else:
                 assigned.append({"id": str(x["id"]), "k": int(k), "residual_nm": float(r), "order": int(x["order"])})
         if not unique and not shift:
-            warnings.append("「%s」只落在参照的一部分站位上，整步偏移靠位置定不下来（取漂移最小的 %+.3f nm）"
-                            "—— 站位号不对就用 station_shift 平移" % (b.get("label") or b.get("sid"), delta))
+            warnings.append(tr("「%s」只落在参照的一部分站位上，整步偏移靠位置定不下来（取漂移最小的 %+.3f nm）"
+                               "—— 站位号不对就用 station_shift 平移",
+                               "'%s' covers only some of the reference stations, so the whole-step offset cannot "
+                               "be fixed from positions (taking the smallest drift, %+.3f nm) "
+                               "-- if the station numbers are wrong, shift them with station_shift")
+                            % (b.get("label") or b.get("sid"), delta))
         blocks_out.append({"series": str(b.get("sid", "")), "label": str(b.get("label", "")), "n": len(sp),
                            "offset_nm": round(float(delta), 4), "_assigned": assigned, "unmatched": unmatched})
     ks = [a["k"] for bo in blocks_out for a in bo.get("_assigned", [])]
@@ -212,7 +217,9 @@ def infer_stations(blocks: list[dict], *, match_frac: float = MATCH_FRAC, shifts
                            "order": a["order"]} for a in bo.pop("_assigned", [])]
     n_unmatched = sum(len(bo["unmatched"]) for bo in blocks_out)
     if n_unmatched:
-        warnings.append("%d 条谱离最近的站位超过 %.2f 个步长，没有归入任何站位" % (n_unmatched, match_frac))
+        warnings.append(tr("%d 条谱离最近的站位超过 %.2f 个步长，没有归入任何站位",
+                           "%d spectra are more than %.2f steps from the nearest station and were not assigned to any station")
+                        % (n_unmatched, match_frac))
     out.update(ok=bool(ks), direction=[round(float(u[0]), 6), round(float(u[1]), 6)],
                step_nm=round(float(step), 5), n_stations=int(kmax - kmin + 1) if ks else 0,
                reference=str(ref.get("sid", "")), blocks=blocks_out)
@@ -231,7 +238,7 @@ def blocks_from_store(doc: dict, marks: dict, series_ids: list[str]) -> tuple[li
     for sid in series_ids:
         sv = ser.get(sid)
         if not isinstance(sv, dict):
-            warnings.append(f"系列 {sid} 不存在")
+            warnings.append(tr(f"系列 {sid} 不存在", f"Series {sid} does not exist"))
             continue
         sp, skipped = [], 0
         for i in sv.get("ids") or []:
@@ -243,7 +250,8 @@ def blocks_from_store(doc: dict, marks: dict, series_ids: list[str]) -> tuple[li
                 continue
             sp.append(it)
         if skipped:
-            warnings.append("「%s」里 %d 条不是带位置的偏压谱，跳过" % (sv.get("name") or sid, skipped))
+            warnings.append(tr("「%s」里 %d 条不是带位置的偏压谱，跳过", "'%s': %d spectra are not positioned bias spectra; skipped")
+                            % (sv.get("name") or sid, skipped))
         sp.sort(key=lambda it: (it.get("t") or 0, it["id"]))
         blocks.append({"sid": sid, "name": str(sv.get("name") or sid), "rating": sv.get("r") or 0,
                        "spectra": [{"id": it["id"], "x": float(it["x"]), "y": float(it["y"]), "order": o,
@@ -278,7 +286,7 @@ def plan_from_store(series: list[str], options: dict | None = None, lay: _paths.
             "reference": "", "blocks": [], "warnings": [], "degraded": False, "detail": None}
     doc = _index.read_index(lay)
     if not doc or not doc.get("items"):
-        return dict(base, detail="图库还没有索引 —— 先构建一次")
+        return dict(base, detail=tr("图库还没有索引 —— 先构建一次", "The gallery has no index yet -- build once first"))
     marks = _marks.load_marks(lay)
     blocks, line, warns = blocks_from_store(doc, marks, list(series))
     plan = infer_stations(blocks, shifts=station_shifts(options))
@@ -362,7 +370,7 @@ def _heat(ax, M, V, n, cmap, vmin, vmax, labels=None):
         ax.tick_params(labelleft=False)
     else:
         ax.set_yticklabels(labels, fontproperties=C.fp(8))
-    ax.set_xlabel("偏压 (V)", color=C.INK_HEX, fontproperties=C.fp(9.5))
+    ax.set_xlabel(tr("偏压 (V)", "Bias (V)"), color=C.INK_HEX, fontproperties=C.fp(9.5))
     return im
 
 
@@ -413,9 +421,10 @@ class _Ctx:
         parts = []
         for b in sorted({r["blk"] for r in self.drop}):
             rows = [r for r in self.drop if r["blk"] == b]
-            why = "针尖在变" if all(r["bad"] for r in rows) else "系列评为排除"
+            why = (tr("针尖在变", "tip changing") if all(r["bad"] for r in rows)
+                   else tr("系列评为排除", "series rated excluded"))
             if not any(r["blk"] == b for r in self.G):
-                parts.append("%s 整组 %d 条（%s）" % (self.blabel[b], len(rows), why))
+                parts.append(tr("%s 整组 %d 条（%s）", "%s whole group, %d spectra (%s)") % (self.blabel[b], len(rows), why))
                 continue
             ids = sorted({r["idx"] for r in rows})
             seg, a = [], ids[0]
@@ -423,8 +432,8 @@ class _Ctx:
                 if q != p + 1:
                     seg.append("#%d" % a + ("–#%d" % p if p != a else ""))
                     a = q
-            parts.append("%s 的 %s（%s）" % (self.blabel[b], "、".join(seg), why))
-        return "已删去 " + "；".join(parts)
+            parts.append(tr("%s 的 %s（%s）", "%s: %s (%s)") % (self.blabel[b], tr("、", ", ").join(seg), why))
+        return tr("已删去 ", "Removed: ") + tr("；", "; ").join(parts)
 
     def head2(self) -> str:
         note = self.drop_note()
@@ -462,10 +471,14 @@ def _fig_compare_heat(x: _Ctx):
                 log_cbar(cb, sc["x0"], *sc["log"])
             if row == 0:
                 heads.append((axs[0].get_position().x0, axs[-1].get_position().x1, axs[0].get_position().y1))
-    for (xa, xb, y), txt in zip(heads, ("线性色标（同一行各区组共用，截在 99% 分位）",
-                                     "对数色标 sign(x)·log₁₀(1+|x|/x₀) · " + "，".join(x0s))):
+    for (xa, xb, y), txt in zip(heads, (tr("线性色标（同一行各区组共用，截在 99% 分位）",
+                                         "Linear colour scale (shared by the blocks in a row, clipped at the 99th percentile)"),
+                                     tr("对数色标 sign(x)·log₁₀(1+|x|/x₀) · ", "Log colour scale sign(x)·log₁₀(1+|x|/x₀) · ")
+                                     + tr("，", ", ").join(x0s))):
         fig.text((xa + xb) / 2, y + 0.034, txt, ha="center", va="bottom", color=C.TEAL, fontproperties=_bold(10.5))
-    _suptitle(fig, "%s · 热图（各区组并排比较；灰行＝删去或没测）\n%s" % (x.line_name, x.head2()), 13, 0.978)
+    _suptitle(fig, tr("%s · 热图（各区组并排比较；灰行＝删去或没测）\n%s",
+                      "%s · heatmap (blocks compared side by side; grey rows = removed or not measured)\n%s")
+              % (x.line_name, x.head2()), 13, 0.978)
     return fig
 
 
@@ -492,14 +505,16 @@ def _fig_compare_fall(x: _Ctx):
         ax.set_ylim(-2.5 * step, (x.n + 1.5) * step)          # 冲出范围的大峰看热图
         ax.invert_xaxis()
         ax.grid(alpha=0.2, axis="x")
-        ax.set_xlabel("偏压 (V)", color=C.INK_HEX, fontproperties=C.fp(10))
-        _title(ax, "%s · 每条按站位抬高 %.3g %s（灰线＝各自零点）" % (lab, step, unit))
+        ax.set_xlabel(tr("偏压 (V)", "Bias (V)"), color=C.INK_HEX, fontproperties=C.fp(10))
+        _title(ax, tr("%s · 每条按站位抬高 %.3g %s（灰线＝各自零点）", "%s · each offset by station %.3g %s (grey lines = respective zeros)") % (lab, step, unit))
     hs = [Line2D([], [], color=x.color(b), lw=2, label=x.blabel[b]) for b in x.blks]
     leg = fig.legend(handles=hs, loc="lower center", ncol=len(hs), frameon=False, bbox_to_anchor=(0.6, 0.005),
                      prop=C.fp(10.5))
     for t in leg.get_texts():
         t.set_color(C.INK_HEX)
-    _suptitle(fig, "%s · 瀑布（各区组叠在一起比较，正扫）\n%s" % (x.line_name, x.head2()), 13.5, 0.975)
+    _suptitle(fig, tr("%s · 瀑布（各区组叠在一起比较，正扫）\n%s",
+                      "%s · waterfall (blocks overlaid for comparison, forward sweep)\n%s")
+              % (x.line_name, x.head2()), 13.5, 0.975)
     return fig
 
 
@@ -525,8 +540,10 @@ def _fig_mean(x: _Ctx, kind: str):
                 _cbar(cb, "%s (%s)" % ("Current" if k == "I" else "dI/dV", unit))
                 if mode == "log":
                     log_cbar(cb, sc["x0"], *sc["log"])
-                _title(ax, "%s · 站位均值 · %s" % (lab, "线性色标" if mode == "lin" else
-                                                  "对数色标 sign·log₁₀(1+|x|/x₀)，x₀ = %g %s" % (sc["x0"], unit)), 10.5)
+                _title(ax, tr("%s · 站位均值 · %s", "%s · station mean · %s")
+                       % (lab, tr("线性色标", "linear colour scale") if mode == "lin" else
+                          tr("对数色标 sign·log₁₀(1+|x|/x₀)，x₀ = %g %s",
+                             "log colour scale sign·log₁₀(1+|x|/x₀), x₀ = %g %s") % (sc["x0"], unit)), 10.5)
     else:
         viridis = colormaps["viridis"]
         gr = GridSpecFromSubplotSpec(1, 2, subplot_spec=gs[1], wspace=0.16)
@@ -548,10 +565,12 @@ def _fig_mean(x: _Ctx, kind: str):
             ax.set_ylim(-2.5 * step, (x.n + 1.5) * step)
             ax.invert_xaxis()
             ax.grid(alpha=0.2, axis="x")
-            ax.set_xlabel("偏压 (V)", color=C.INK_HEX, fontproperties=C.fp(10))
-            _title(ax, "%s · 均值 ± 标准误，每条抬高 %.3g %s" % (lab, step, unit))
-    _suptitle(fig, "%s · %s（重复测量取均值：每条正反扫平均，再在区组间等权平均；×n＝该站位用了几条）\n%s · 左图＝%s 这组谱之前的最后一张 STM"
-              % (x.line_name, "均值热图" if kind == "heat" else "均值瀑布", x.head2(), x.blabel[x.blks[0]]),
+            ax.set_xlabel(tr("偏压 (V)", "Bias (V)"), color=C.INK_HEX, fontproperties=C.fp(10))
+            _title(ax, tr("%s · 均值 ± 标准误，每条抬高 %.3g %s", "%s · mean ± standard error, each offset %.3g %s") % (lab, step, unit))
+    _suptitle(fig, tr("%s · %s（重复测量取均值：每条正反扫平均，再在区组间等权平均；×n＝该站位用了几条）\n%s · 左图＝%s 这组谱之前的最后一张 STM",
+                      "%s · %s (repeated measurements averaged: forward and backward sweeps averaged per spectrum, then blocks equally weighted; ×n = how many spectra at that station)\n%s · left image = the last STM image before the %s spectra")
+              % (x.line_name, tr("均值热图", "mean heatmap") if kind == "heat" else tr("均值瀑布", "mean waterfall"),
+                 x.head2(), x.blabel[x.blks[0]]),
               12.5, 0.975)
     return fig
 
@@ -571,7 +590,7 @@ def make_lines(lay: _paths.Layout, doc: dict, marks: dict, series: list[str], op
     plan = infer_stations(blocks, shifts=station_shifts(options))
     warns = warns + list(plan["warnings"])
     if not plan["ok"]:
-        raise C.JobError("；".join(warns) or "推断不出站位")
+        raise C.JobError(tr("；", "; ").join(warns) or tr("推断不出站位", "Cannot infer stations"))
     line_name = str(options.get("line_name") or line_default or "拉线谱")
     by = C.by_id(doc)
     st_marks: dict[int, str] = {}
@@ -614,8 +633,8 @@ def make_lines(lay: _paths.Layout, doc: dict, marks: dict, series: list[str], op
             continue
         G.append(r)
     if not G:
-        raise C.JobError("这条线上没有可画的谱（%d 条全部剔除%s）" % (
-            len(rows), "，%d 条读不出来" % len(load_errors) if load_errors else ""))
+        raise C.JobError(tr("这条线上没有可画的谱（%d 条全部剔除%s）", "No spectra to plot on this line (all %d excluded%s)") % (
+            len(rows), tr("，%d 条读不出来", ", %d unreadable") % len(load_errors) if load_errors else ""))
     blks = sorted({r["blk"] for r in G})
     blabel = {bi: bp["label"] or bp["series"] for bi, bp in enumerate(plan["blocks"])}
     first = S[G[0]["id"]]
@@ -623,7 +642,9 @@ def make_lines(lay: _paths.Layout, doc: dict, marks: dict, series: list[str], op
     A = {i: {key: SP.on_grid(V, s["V"], s[key]) for key in ("If", "I", "Df", "D")} for i, s in S.items()}
     dnames = {s["dname"] for s in S.values()}
     if len(dnames) > 1:
-        warns.append("这一组谱的 dI/dV 来源不一致（%s），图里用第一条的名字与单位" % "、".join(sorted(dnames)))
+        warns.append(tr("这一组谱的 dI/dV 来源不一致（%s），图里用第一条的名字与单位",
+                        "The dI/dV sources of this group of spectra are inconsistent (%s); the figure uses the name and unit of the first")
+                     % tr("、", ", ").join(sorted(dnames)))
 
     mats = {b: [np.full((n, len(V)), np.nan), np.full((n, len(V)), np.nan)] for b in blks}
     for r in G:
@@ -644,12 +665,13 @@ def make_lines(lay: _paths.Layout, doc: dict, marks: dict, series: list[str], op
         try:
             SP.frame_image(f, cache)
         except Exception as exc:  # noqa: BLE001
-            warns.append("帧 %s 读不出来：%s" % (f.get("fn"), exc))
+            warns.append(tr("帧 %s 读不出来：%s", "Frame %s unreadable: %s") % (f.get("fn"), exc))
             stm[b] = None
     t_all = [float(S[r["id"]]["t"]) for r in G if S[r["id"]]["t"]]
     mt_all = [float(S[r["id"]]["mt"]) for r in G if S[r["id"]]["mt"]]
     when = _span_text(min(t_all) if t_all else None, max(mt_all or t_all) if (mt_all or t_all) else None)
-    spec_desc = ("%+.1f→%+.1f V · %d 点 · %s sweeps · Zoff %.0f pm" % (
+    spec_desc = (tr("%+.1f→%+.1f V · %d 点 · %s sweeps · Zoff %.0f pm",
+                    "%+.1f→%+.1f V · %d points · %s sweeps · Zoff %.0f pm") % (
         float(V[0]), float(V[-1]), len(V), first["sweeps"], first["zoff"])).replace("-", "−")
     x = _Ctx(G=G, drop=drop, S=S, A=A, V=V, n=n, blks=blks, blabel=blabel, st_marks=st_marks, dname=first["dname"],
              dunit=first["dunit"], line_name=line_name, when=when, spec_desc=spec_desc, t0=t0, stm=stm, cache=cache,
@@ -666,12 +688,13 @@ def make_lines(lay: _paths.Layout, doc: dict, marks: dict, series: list[str], op
         files.append(name)
 
     n_unmatched = sum(len(b["unmatched"]) for b in plan["blocks"])
-    summary = {"区组": len(blks), "站位数": n, "谱": len(G), "剔除": len(drop), "对不上": n_unmatched,
-               "dI/dV": first["dname"].replace("dI/dV · ", "").replace("电流", "")}
+    summary = {tr("区组", "Blocks"): len(blks), tr("站位数", "Stations"): n, tr("谱", "Spectra"): len(G),
+               tr("剔除", "Excluded"): len(drop), tr("对不上", "Unmatched"): n_unmatched,
+               "dI/dV": first["dname"].replace("dI/dV · ", "").replace(tr("电流", " of current"), "")}
     if plan.get("step_nm"):
-        summary["步长 pm"] = round(float(plan["step_nm"]) * 1000, 1)
+        summary[tr("步长 pm", "Step pm")] = round(float(plan["step_nm"]) * 1000, 1)
     if load_errors:
-        summary["读不出"] = len(load_errors)
+        summary[tr("读不出", "Unreadable")] = len(load_errors)
 
     def _sc(sc):
         return {"x0": sc["x0"], "lin": list(sc["lin"]), "log": list(sc["log"])}
@@ -682,6 +705,6 @@ def make_lines(lay: _paths.Layout, doc: dict, marks: dict, series: list[str], op
               "scales": {"compare": {k: _sc(v) for k, v in sc_cmp.items()},
                          "mean": {k: _sc(v) for k, v in sc_mean.items()}},
               "load_errors": load_errors, "warnings": warns}
-    return C.write_figure_json(lay, CAT, base, kind="sts_lines", title="%s · 拉线谱" % line_name, files=files,
+    return C.write_figure_json(lay, CAT, base, kind="sts_lines", title=tr("%s · 拉线谱", "%s · line spectra") % line_name, files=files,
                                ids=[r["id"] for r in G], series=[b["series"] for b in plan["blocks"]],
                                options=options, summary=summary, detail=detail, maker_version=VER)

@@ -129,7 +129,7 @@ def make_handoff(target: str, description: str):
         if not _is_return:
             # +1 DELTA for the target SIBLING agent — the visit_count reducer
             # (sum_int_dicts) ACCUMULATES these so the supervisor's per-agent loop
-            # guard sees the real running total even across many hops ().
+            # guard sees the real running total even across many hops.
             # The supervisor honours the hint WITHOUT re-counting the target
             # (graph.py only writes {"supervisor": 1} on the hint-dispatch branch),
             # so counting it here is the agent's single contribution for this hop.
@@ -151,7 +151,7 @@ def make_handoff(target: str, description: str):
         # supervisor key is the binding constraint — would trip at ~half the
         # intended hop budget and cut the six-phase pipeline short.
         # ALWAYS land on the supervisor so its loop/budget guard runs every hop
-        # (). The supervisor then honours routing_hint (if set) or
+        # The supervisor then honours routing_hint (if set) or
         # falls back to LLM routing.
         return Command(goto="supervisor", graph=Command.PARENT, update=update)
 

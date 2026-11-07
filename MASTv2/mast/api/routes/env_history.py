@@ -265,7 +265,7 @@ def experiment_environment(request: Request, experiment_id: str,
     1. ``raw`` —— 逐条原始读数，带样品归属。保留期内的实验走这里。
     2. ``buckets`` —— 原始行已被清扫，回退到统计桶。曲线更粗但覆盖全时段。
 
-    不标注的话，用户看到一条比预期粗的曲线只会以为是采样出了问题。
+    不标注的话，一条比预期粗的曲线容易被误认为是采样出了问题。
     """
     lim = _clamp(limit, 1, _MAX_RAW_ROWS, 2000)
 

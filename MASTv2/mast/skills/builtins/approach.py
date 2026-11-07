@@ -19,6 +19,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from mast.i18n import tr
 from mast.core.types import (
     NanonisCallRecord,
     ParameterSpec,
@@ -60,12 +61,26 @@ _PHASE_VERIFY = "_phase_verify_status"
 _MIN_ENGAGED_CURRENT_A = 1e-12
 
 
+def _drive_latch_refusal(context, skill: str) -> "SkillResult | None":
+    """Contract §10.3: while an optical motor group's drive restore
+    is unverified (``optics_motor_groups`` latch) the coarse drive is not the
+    STM's, and Auto Approach steps the coarse motor with it. Refused before
+    anything moves, in MotorMove's words; an unreadable latch file refuses too."""
+    from mast.skills.builtins.optics_motor_groups import check_drive_latch
+
+    calls: list = []
+    why = check_drive_latch(context, calls)
+    if why:
+        return SkillResult(skill_name=skill, success=False, error=why, nanonis_calls=calls)
+    return None
+
+
 def _engagement_bar(setpoint_a: "float | None") -> "float | None":
     """The |I| a real engagement must clear, or None when it cannot be computed.
 
     Two bars, whichever is higher: half the setpoint (feedback is actually
     regulating) and the absolute noise floor (so lowering the setpoint cannot
-    make amplifier noise pass as engagement — )."""
+    make amplifier noise pass as engagement)."""
     if setpoint_a is None or setpoint_a == 0:
         return None
     return max(0.5 * abs(setpoint_a), _MIN_ENGAGED_CURRENT_A)
@@ -114,17 +129,21 @@ class EngageVerdict:
         「量程耗尽 / Z 在极限 / 状态过期」—— none of which this code had looked
         at, and they were not always true. A verdict may print what it measured;
         the causes are for whoever can actually observe them."""
-        reads = ", ".join(_fmt_a(v) for v in self.reads_a) or "(无)"
-        bar = _fmt_a(self.bar_a) if self.bar_a is not None else "无法计算(设定点读不到或为 0)"
-        scope = ("窗口内实测 |I| 依次为"
+        reads = ", ".join(_fmt_a(v) for v in self.reads_a) or tr("(无)", "(none)")
+        bar = _fmt_a(self.bar_a) if self.bar_a is not None else tr("无法计算(设定点读不到或为 0)", "cannot be computed (setpoint unreadable or 0)")
+        scope = (tr("窗口内实测 |I| 依次为", "measured |I| in the window, in order:")
                  if self.total_reads_n <= len(self.reads_a)
-                 else f"窗口内共读 {self.total_reads_n} 次,最近 {len(self.reads_a)} 次 |I| 依次为")
-        # 明确标注电流判定窗口，避免把窗口耗时误读为进针模块运行时长。
-        return (f"判据 |I| ≥ {bar}(= max(50%×设定点 {_fmt_a(self.setpoint_a)}, "
+                 else tr(f"窗口内共读 {self.total_reads_n} 次,最近 {len(self.reads_a)} 次 |I| 依次为", f"{self.total_reads_n} reads in the window; the latest {len(self.reads_a)} |I| readings, in order:"))
+        # 「电流判定窗口」而不是原来的「等了」:这个秒数说的是判电流花了多久,而报文里
+        # 曾经**只有它一个秒数**,于是读的人都把它当成了进针本身的时长
+        # (「1.0s」→「模块秒停」),白白去查一个不存在的故障。名字里带上它计的是什么,
+        # 比在旁边加一句「这不是进针时长」更结实 —— 后者会在下一次改写里被删掉。
+        return (tr(f"判据 |I| ≥ {bar}(= max(50%×设定点 {_fmt_a(self.setpoint_a)}, "
                 f"噪声底 {_fmt_a(_MIN_ENGAGED_CURRENT_A)}));"
                 f"{scope} [{reads}],"
                 f"电流判定窗口 {self.elapsed_s:.1f}s / 判定预算 {self.budget_s:.1f}s,"
-                f"取样间隔 {self.interval_s:.1f}s")
+                f"取样间隔 {self.interval_s:.1f}s",
+                f"Criterion |I| >= {bar} (= max(50% x setpoint {_fmt_a(self.setpoint_a)}, noise floor {_fmt_a(_MIN_ENGAGED_CURRENT_A)})); {scope} [{reads}], current decision window {self.elapsed_s:.1f}s / decision budget {self.budget_s:.1f}s, sampling interval {self.interval_s:.1f}s"))
 
     def as_dict(self) -> dict[str, Any]:
         return {"engaged": self.engaged, "measured_current_a": self.current_a,
@@ -166,6 +185,15 @@ class WaitProgress:
     #: 循环对两者的处置一样(都往「可能停了」走),但事后查账时它们要做的事完全
     #: 不同 —— 一个是查仪器,一个是查 TCP / parser。合成一个数就再也分不开了。
     status_unreadable_n: int = 0
+    #: qPlus 振幅采样(等待相的振幅看守)。读了几次、几次读不到、区间。
+    #: **一趟正常的进针也留下这几个数** —— 下一次有人问「进针时振幅一般多大」,
+    #: 答案在结果里,而不是在某个人的记忆里。
+    amp_reads_n: int = 0
+    amp_unreadable_n: int = 0
+    amp_min: "float | None" = None
+    amp_max: "float | None" = None
+    #: 看守在途中被解除的原因(例如激励状态变了);空串 = 没被解除过。
+    amp_watch_disarmed: str = ""
 
     def note_running(self, running: bool, elapsed_s: float) -> None:
         self.polls_n += 1
@@ -187,10 +215,39 @@ class WaitProgress:
         self.z_min_m = z if self.z_min_m is None else min(self.z_min_m, z)
         self.z_max_m = z if self.z_max_m is None else max(self.z_max_m, z)
 
+    def note_amp(self, amp: "float | None") -> None:
+        """一个振幅读数。``None`` = 没读到 —— 单独计数,不当成「低」也不当成「不低」。"""
+        if amp is None:
+            self.amp_unreadable_n += 1
+            return
+        a = float(amp)
+        self.amp_reads_n += 1
+        self.amp_min = a if self.amp_min is None else min(self.amp_min, a)
+        self.amp_max = a if self.amp_max is None else max(self.amp_max, a)
+        # 有界的均匀抽样:满了就隔一个丢一个、步长翻倍。一小时 0.5 s 一拍是 7200 个数,
+        # 结果里只需要一个中位数,不需要整条序列。
+        self._amp_seen += 1
+        if self._amp_seen % self._amp_stride == 0:
+            self._amp_kept.append(a)
+            if len(self._amp_kept) >= _AMP_KEEP_N:
+                self._amp_kept = self._amp_kept[::2]
+                self._amp_stride *= 2
+
+    @property
+    def amp_median(self) -> "float | None":
+        k = sorted(self._amp_kept)
+        if not k:
+            return None
+        m = len(k) // 2
+        return k[m] if len(k) % 2 else 0.5 * (k[m - 1] + k[m])
+
     #: 内部游标。dataclass 字段而不是普通属性,免得一个未初始化的实例在第一次
     #: ``note_*`` 上炸掉一趟真进针。
     _first_running_s: "float | None" = None
     _last_z: "float | None" = None
+    _amp_kept: list = field(default_factory=list)
+    _amp_seen: int = 0
+    _amp_stride: int = 1
 
     @property
     def z_span_m(self) -> "float | None":
@@ -213,26 +270,30 @@ class WaitProgress:
 
     def motion_text(self) -> str:
         """一句话说清「模块跑了多久 + 台子动没动」。永远说得出是哪一种。"""
-        head = (f"模块实际运行 **{self.module_ran_s:.1f}s**"
-                f"(共轮询 {self.polls_n} 次,其中 {self.running_polls_n} 次读到 running=1"
-                + (f",另有 {self.status_flap_n} 次读到停止但复读又在跑"
+        head = (tr(f"模块实际运行 **{self.module_ran_s:.1f}s**"
+                f"(共轮询 {self.polls_n} 次,其中 {self.running_polls_n} 次读到 running=1",
+                f"module actually ran **{self.module_ran_s:.1f}s** (polled {self.polls_n} times, {self.running_polls_n} of them read running=1")
+                + (tr(f",另有 {self.status_flap_n} 次读到停止但复读又在跑", f", and {self.status_flap_n} reads showed stopped but the re-read showed running again")
                    if self.status_flap_n else "")
-                + (f",另有 {self.status_unreadable_n} 次**状态位读不懂**"
-                   f"(那不是「没在跑」,是没问出来)"
+                + (tr(f",另有 {self.status_unreadable_n} 次**状态位读不懂**"
+                   f"(那不是「没在跑」,是没问出来)",
+                   f", and {self.status_unreadable_n} reads had an **unreadable status bit** (that is not 'not running', it is 'could not be queried')")
                    if self.status_unreadable_n else "")
                 + ")")
         if self.z_reads_n == 0:
-            return head + ";这段时间**没读到 Z 压电位置**,粗动有没有推进无法判断。"
+            return head + tr(";这段时间**没读到 Z 压电位置**,粗动有没有推进无法判断。", "; the **Z piezo position could not be read** during this time, so whether the coarse motion advanced cannot be judged.")
         span = self.z_span_m or 0.0
         if self.z_travel_m <= 0:
-            return (head + f";期间 Z 压电**纹丝不动**(采样 {self.z_reads_n} 次,"
-                    f"始终 {_fmt_m(self.z_min_m)})—— 模块报在跑,压电却没动。")
+            return (head + tr(f";期间 Z 压电**纹丝不动**(采样 {self.z_reads_n} 次,"
+                    f"始终 {_fmt_m(self.z_min_m)})—— 模块报在跑,压电却没动。",
+                           f"; the Z piezo **did not move at all** during this time ({self.z_reads_n} samples, always {_fmt_m(self.z_min_m)}) - the module reports running but the piezo did not move."))
         cyc = self.cycles_approx
-        cyc_txt = f",≈{cyc:.0f} 个进退循环" if cyc and cyc >= 1 else ""
-        return (head + f";期间 Z 压电总行程 **{_fmt_m(self.z_travel_m)}**"
+        cyc_txt = tr(f",≈{cyc:.0f} 个进退循环", f", about {cyc:.0f} advance-retract cycles") if cyc and cyc >= 1 else ""
+        return (head + tr(f";期间 Z 压电总行程 **{_fmt_m(self.z_travel_m)}**"
                 f"(区间 {_fmt_m(self.z_min_m)} … {_fmt_m(self.z_max_m)},"
                 f"摆幅 {_fmt_m(span)}{cyc_txt},采样 {self.z_reads_n} 次)"
-                f" —— **粗动确实在推进**。")
+                f" —— **粗动确实在推进**。",
+                       f"; Z piezo total travel **{_fmt_m(self.z_travel_m)}** during this time (range {_fmt_m(self.z_min_m)} ... {_fmt_m(self.z_max_m)}, swing {_fmt_m(span)}{cyc_txt}, {self.z_reads_n} samples) - **the coarse motion is really advancing**."))
 
     def as_dict(self) -> dict[str, Any]:
         return {"polls_n": self.polls_n, "running_polls_n": self.running_polls_n,
@@ -242,7 +303,75 @@ class WaitProgress:
                 "z_max_m": self.z_max_m, "z_travel_m": self.z_travel_m,
                 "z_cycles_approx": self.cycles_approx,
                 "status_flap_n": self.status_flap_n,
-                "status_unreadable_n": self.status_unreadable_n}
+                "status_unreadable_n": self.status_unreadable_n,
+                "amp_reads_n": self.amp_reads_n,
+                "amp_unreadable_n": self.amp_unreadable_n,
+                "amp_min": self.amp_min, "amp_max": self.amp_max,
+                "amp_median": self.amp_median,
+                "amp_watch_disarmed": self.amp_watch_disarmed}
+
+
+#: ``WaitProgress`` 留多少个振幅样本来算中位数(超了就均匀抽稀)。
+_AMP_KEEP_N = 512
+
+
+@dataclass
+class _AmpWatch:
+    """进针途中盯 qPlus 振幅的那一份状态。**一趟进针一份**,起跑前建、跑完即弃。
+
+    为什么要有:常用的操作规则是「进针时振幅归零 = 扎进去了」
+    (``docs/v2/stm_knowledge/20_qplus与振幅.md``)—— 它的价值
+    正在电流判据瞎掉的那种情形:针尖不导电,扎进去也没有电流。但 AutoApproach 在
+    模块跑着的时候**从不读振幅**,振幅证据只在进针结束后才附上(``_approach_evidence``),
+    那时候针尖已经被啄木鸟循环压了不知多少下。此前只能靠外部脚本定期读振幅、
+    自己停模块、自己退针。这里把同一件事做进等待相。
+
+    判据(``feed``),对**起跑前**取的静止基线:
+
+    * 激励关(残余振幅,STM 模式的常态):单次 < 25%,或连续 2 次 < 50%。
+      静止基线很小;途中被粗动步踢到远高于基线的幅度(向上,结构上不可能
+      造成假撞针);实测隧穿中的残余与未接触相同,所以
+      到达设定点本身不会把它压到阈下。
+    * 激励开(驱动振幅):连续 2 次 < 10%。只用「连续」:PLL 不跟踪时,针尖到了
+      隧穿距离振幅会因失谐下降,单次读数在模块停下前的最后一拍可能落进去。
+
+    读不到的一拍**不计入**连续段(当作没观测),与 aux 那条 ``amp_zero_on_approach``
+    跳过起振样本是同一个道理。"""
+
+    index: int
+    baseline: float
+    sigma: float
+    excited: "bool | None"
+    hard_frac: "float | None"
+    soft_frac: "float | None"
+    soft_n: int = 2
+    low_run: int = 0
+    recent: list = field(default_factory=list)
+
+    def feed(self, amp: "float | None") -> "str | None":
+        """一个读数进来;返回触发的判据名(``"hard"`` / ``"soft"``)或 ``None``。"""
+        if amp is None or not self.baseline > 0:
+            return None
+        a = float(amp)
+        self.recent.append(a)
+        del self.recent[:-6]
+        frac = a / self.baseline
+        if self.hard_frac is not None and frac < self.hard_frac:
+            return "hard"
+        if self.soft_frac is not None and frac < self.soft_frac:
+            self.low_run += 1
+            if self.low_run >= self.soft_n:
+                return "soft"
+        else:
+            self.low_run = 0
+        return None
+
+    def criterion_text(self, tripped: str) -> str:
+        if tripped == "hard":
+            return tr(f"单次读数 < 基线的 {self.hard_frac:.0%}",
+                      f"a single reading < {self.hard_frac:.0%} of the baseline")
+        return tr(f"连续 {self.soft_n} 次 < 基线的 {self.soft_frac:.0%}",
+                  f"{self.soft_n} consecutive readings < {self.soft_frac:.0%} of the baseline")
 
 
 #: How many CONSECUTIVE reads must land on the same side of the bar before the
@@ -371,11 +500,53 @@ def _approach_evidence(context) -> dict:
     try:
         from mast.skills.builtins._tip_evidence import didv_trend_fields, qplus_fields
 
-        out.update(qplus_fields(context))
+        if not _qplus_channel_absent(context):
+            out.update(qplus_fields(context))
         out.update(didv_trend_fields(context))
     except Exception:  # noqa: BLE001 — a bonus witness must not break the verdict
         return out
     return out
+
+
+def _qplus_channel_absent(context) -> bool:
+    """True ONLY when the controller's own signal table was read and lists no
+    oscillation-amplitude channel — i.e. this rig has no qPlus sensor to ask.
+
+    Why it exists (a plain STM on a Nanonis Mimea controller): every approach
+    carried ``qplus_status: unavailable`` plus 「读不到 PLL 激励状态 —— 判不了是否
+    撞针」, because ``CheckTipCrashByAmplitude`` asks the PLL first and a rig
+    without a PLL cannot answer. The docstring above always meant such a rig to
+    contribute nothing; the absent-channel check just ran too late to say so.
+
+    The criterion is the HARDWARE, not the tip register: a tip registered as
+    ``stm_wire`` on a qPlus-capable controller still has an amplitude channel,
+    and hiding that independent witness on a declaration would make the
+    evidence subtractive. Anything short of a clean "read, and none there"
+    returns False and the qPlus block stays exactly as before: an amplitude
+    index on file (``qplus_amplitude_signal_index``), an unreadable or empty
+    table, any exception. Matching uses ``qplus_amplitude``'s own hints, the
+    same test ``find_amplitude_signal`` applies (which cannot be reused here:
+    it answers None both for "no channel" and for "could not read")."""
+    try:
+        from mast.skills.builtins.qplus_amplitude import (
+            _AMP_HINTS, _OSC_HINTS, _remembered_index, _signal_names,
+        )
+
+        if _remembered_index() is not None:
+            return False
+        rec = context.safe_call("Signals_NamesGet")
+        if getattr(rec, "error", ""):
+            return False
+        names = _signal_names(rec)
+        if not names:
+            return False
+        for name in names:
+            low = " ".join(str(name).lower().split())
+            if any(a in low for a in _AMP_HINTS) and any(o in low for o in _OSC_HINTS):
+                return False
+        return True
+    except Exception:  # noqa: BLE001 — "cannot tell" keeps the qPlus block
+        return False
 
 
 def _evidence_warning(evidence: dict) -> str:
@@ -390,10 +561,11 @@ def _evidence_warning(evidence: dict) -> str:
         from mast.skills.builtins._tip_evidence import qplus_says_crashed
 
         if qplus_says_crashed(evidence):
-            return (" ⚠️ 但 qPlus 振幅已塌到自由振荡基线的 "
+            return (tr(" ⚠️ 但 qPlus 振幅已塌到自由振荡基线的 "
                     f"{evidence.get('qplus_fraction', '?')} —— 这是**针尖已扎进表面**"
                     "的典型特征。电流判据说进针成功,振幅判据说针尖不自由;"
-                    "两者矛盾时以更悲观的为准:先退针复查,不要直接扫图。")
+                    "两者矛盾时以更悲观的为准:先退针复查,不要直接扫图。",
+                    f"WARNING: but the qPlus amplitude has collapsed to {evidence.get('qplus_fraction', '?')} of the free-oscillation baseline - a typical sign that **the tip has dug into the surface**. The current criterion says engage succeeded, the amplitude criterion says the tip is not free; when the two conflict, take the more pessimistic one: withdraw and recheck first, do not scan directly."))
     except Exception:  # noqa: BLE001
         pass
     return ""
@@ -505,15 +677,15 @@ class AutoApproach(CompositeSkillGraph):
             version="1.2.0",
             category=SkillCategory.WRITE,
             # AUTO: Nanonis 内置进针的硬件级安全保护（电流限幅 + Z 上限），
-            # 软件层再加 confirm 反而卡死——曾经确认框弹不出来，
-            # 导致进针完全走不动。把确认要求去掉，进针直接执行。
-            # bias_nonzero precondition (2026-07-03 review): the hardware
+            # 软件层再加 confirm 反而卡死（确认框弹不出来，进针无法执行）。
+            # 把确认要求去掉，进针直接执行。
+            # bias_nonzero precondition: the hardware
             # current-feedback stop ONLY works if there is a tunnelling current to
             # detect. With bias=0 V the current stays 0 even on contact, so the
             # module never stops and the coarse stepper grinds the tip into the
             # surface. Refuse to start a coarse approach at zero bias.
             safety_level=SafetyLevel.AUTO,
-            description="启动 auto approach 流程。它会把针尖朝表面移动。",
+            description=tr("启动 auto approach 流程。它会把针尖朝表面移动。", "Start the auto approach procedure. It moves the tip toward the surface."),
             estimated_duration_s=60.0,
             rollback_skill="WithdrawTip",
             composition_level=1,
@@ -522,13 +694,14 @@ class AutoApproach(CompositeSkillGraph):
                 ParameterSpec(
                     name="wait_timeout_s", type="float",
                     description=(
-                        "等待粗动 approach 达到 setpoint 的最长秒数；到点则停掉"
+                        tr("等待粗动 approach 达到 setpoint 的最长秒数；到点则停掉"
                         "该模块并报告「未完成」。它**只是一道兜底（BACKSTOP）** —— 模块一旦"
                         "达到 setpoint，等待就立刻结束，所以保留那个宽松的"
                         "默认值（1800 s = 30 分钟）是安全的。从远处开始的粗动 "
                         "approach 可能要花好几分钟；**不要**把它降到几百秒，"
                         "否则你可能会在一次有效的 approach 触到表面之前"
-                        "就把它截断。"),
+                        "就把它截断。",
+                        "Maximum seconds to wait for the coarse approach to reach the setpoint; on timeout the module is stopped and 'not finished' is reported. It is **only a BACKSTOP** - as soon as the module reaches the setpoint the wait ends immediately, so keeping the generous default (1800 s = 30 minutes) is safe. A coarse approach starting from far away can take several minutes; **do not** lower it to a few hundred seconds, or you may cut a valid approach short before it touches the surface.")),
                     required=False, default=self._DEFAULT_WAIT_TIMEOUT_S,
                     min_value=5.0, max_value=3600.0),
             ],
@@ -606,6 +779,15 @@ class AutoApproach(CompositeSkillGraph):
         return SkillResult(skill_name=_PHASE_OPEN, success=True, data={})
 
     def _phase_start_approach(self, real_ctx) -> SkillResult:
+        # 振幅看守的静止基线必须在**模块起跑之前**取:起跑之后粗动步会把振幅踢到
+        # 几百倍,那时候取的「基线」会让真正的归零永远够不着
+        # 阈值。取不到就不看守,原因留在结果里 —— 看守只做加法,它缺席不挡进针。
+        watch, watch_note = self._arm_amp_watch(real_ctx)
+        self._amp_watch = watch
+        try:
+            self._executor.set_partial("qplus_watch", watch_note)
+        except Exception:  # noqa: BLE001 — 留痕失败不该挡住进针
+            logger.debug("qplus_watch 留痕失败", exc_info=True)
         rec = real_ctx.safe_call("AutoApproach_OnOffSet", 1)
         self._call_log.append(rec)
         if rec.error:
@@ -681,6 +863,8 @@ class AutoApproach(CompositeSkillGraph):
         progress = WaitProgress()
         z_every = float(getattr(self, "_z_sample_every_s", 1.0) or 0.0)
         z_last_t: "float | None" = None
+        amp_every = float(getattr(self, "_amp_sample_every_s", 0.5) or 0.0)
+        amp_last_t: "float | None" = None
 
         while True:
             if callable(check_abort) and check_abort():
@@ -724,6 +908,20 @@ class AutoApproach(CompositeSkillGraph):
             if z_every > 0 and (z_last_t is None or (now_t - z_last_t) >= z_every):
                 z_last_t = now_t
                 progress.note_z(self._read_z(real_ctx))
+            # qPlus 振幅看守。**只在模块报着「在跑」的这一拍读** —— 那是
+            # 针尖在被推向表面、电流判据可能瞎着的时段;模块停下之后的事交给电流判定
+            # 和 ``_approach_evidence``,一样不少。
+            watch = getattr(self, "_amp_watch", None)
+            if (watch is not None and running is True and amp_every > 0
+                    and (amp_last_t is None or (now_t - amp_last_t) >= amp_every)):
+                amp_last_t = now_t
+                amp = self._read_amp(real_ctx, watch.index)
+                progress.note_amp(amp)
+                tripped = watch.feed(amp)
+                if tripped:
+                    collapsed = self._amp_collapse(real_ctx, progress, watch, tripped)
+                    if collapsed is not None:
+                        return collapsed
             if running:
                 observed_running = True
             else:
@@ -732,9 +930,18 @@ class AutoApproach(CompositeSkillGraph):
                     _t.sleep(poll_interval)
                     continue
                 if observed_running:
-                    # A stopped module does not prove engagement: stops can have
-                    # multiple causes. Confirm using consecutive agreeing current
-                    # readings so a handover transient does not decide the result.
+                    # Ran, now stopped. Stopping is NOT proof of reaching the
+                    # setpoint — the module also stops when the motor range is
+                    # exhausted (Z piezo at limit), on an external stop, or on
+                    # a module error. Confirm with the tunnelling current
+                    # before declaring 进针成功 (the
+                    # approach would otherwise "succeed" while the current was far below the setpoint and
+                    # the agent would scan anyway).
+                    #
+                    # …but confirm it from readings that AGREE WITH EACH OTHER.
+                    # This exact line, with a single instantaneous read, failed a
+                    # successful approach because it sampled the
+                    # module→feedback handover transient. See settle_engagement.
                     v = self._judge_engagement(real_ctx)
                     self._executor.set_partial("wait_progress", progress.as_dict())
                     if v.engaged is True:
@@ -789,9 +996,10 @@ class AutoApproach(CompositeSkillGraph):
                 why = (f"AutoApproach did not reach the setpoint within "
                        f"{timeout_s:.0f}s — stopped the module。"
                        f"{progress.motion_text()}"
-                       + (" 仍在推进却被预算砍断 —— 这不是「卡住」,"
+                       + (tr(" 仍在推进却被预算砍断 —— 这不是「卡住」,"
                           "**再调一次 AutoApproach 会从当前粗动位置继续**"
-                          "(必要时把 wait_timeout_s 调大)。"
+                          "(必要时把 wait_timeout_s 调大)。",
+                          " is still advancing but was cut off by the budget - this is not 'stuck'; **calling AutoApproach again continues from the current coarse position** (increase wait_timeout_s if needed).")
                           if progress.z_travel_m > 0 else ""))
                 return SkillResult(
                     skill_name=_PHASE_WAIT, success=False,
@@ -803,6 +1011,165 @@ class AutoApproach(CompositeSkillGraph):
     # Z 采样与状态轮询使用各自的频率，以平衡链路开销与运动进度可见性。
     # 设为零表示关闭额外的 Z 进度采样。
     _z_sample_every_s = 1.0
+
+    #: 振幅看守的节奏。等待相里多久读一次振幅(0 或负数 = 不读,看守等于关掉),
+    #: 以及起跑前的静止基线读几次、间隔多久。类属性:测试可以缩短。
+    _amp_sample_every_s = 0.5
+    _amp_baseline_samples = 10
+    _amp_baseline_interval_s = 0.1
+
+    def _arm_amp_watch(self, real_ctx) -> "tuple[_AmpWatch | None, dict]":
+        """起跑前给振幅看守取静止基线。``(看守或 None, 留痕)``。永不抛异常。
+
+        不看守的每一种原因都写进留痕:档案关掉了 / 没有振幅通道 / 读不到激励状态 /
+        读数失败 / 散布像噪声底。「没看守」与「看守了、没触发」必须分得开。"""
+        note: dict = {"armed": False}
+        try:
+            from mast.core.instrument_profile import approach_qplus_watch_enabled
+            from mast.skills.builtins.qplus_amplitude import (
+                _CRASH_FRACTION, _RESIDUAL_CRASH_FRACTION, _excitation_state,
+                _median, _robust_sigma, baseline_refusal, find_amplitude_signal,
+                sample_amplitude,
+            )
+
+            if not approach_qplus_watch_enabled():
+                note["why"] = tr("仪器档案关掉了进针途中的振幅看守(approach_qplus_watch=off)",
+                                 "The instrument profile switched the approach-time amplitude "
+                                 "watch off (approach_qplus_watch=off)")
+                return None, note
+            found = find_amplitude_signal(real_ctx)
+            if found is None:
+                note["why"] = tr("没有振荡振幅通道(或信号表读不到)—— 本机没有可看的振幅",
+                                 "No oscillation-amplitude channel (or the signal table "
+                                 "could not be read) - nothing to watch on the instrument")
+                return None, note
+            idx, name = found
+            exc_on, exc_note = _excitation_state(real_ctx)
+            if exc_on is None:
+                note["why"] = baseline_refusal(1.0, 0.0, None, exc_note)
+                return None, note
+            vals, _calls, err = sample_amplitude(
+                real_ctx, idx, n=int(getattr(self, "_amp_baseline_samples", 10)),
+                interval_s=float(getattr(self, "_amp_baseline_interval_s", 0.1)))
+            if err:
+                note["why"] = err
+                return None, note
+            med = _median(vals)
+            sigma = _robust_sigma(vals, med)
+            note.update({"signal_index": int(idx), "signal_name": name,
+                         "baseline": med, "sigma": sigma, "samples_n": len(vals),
+                         "excited": exc_on})
+            why = baseline_refusal(med, sigma, exc_on, exc_note)
+            if why:
+                note["why"] = why
+                return None, note
+            if exc_on:
+                hard, soft = None, _CRASH_FRACTION
+            else:
+                hard, soft = _RESIDUAL_CRASH_FRACTION, 0.5
+            note.update({"armed": True, "hard_frac": hard, "soft_frac": soft,
+                         "soft_n": 2})
+            return _AmpWatch(index=int(idx), baseline=med, sigma=sigma,
+                             excited=exc_on, hard_frac=hard, soft_frac=soft,
+                             soft_n=2), note
+        except Exception as exc:  # noqa: BLE001 — 看守是加法,它坏了不该带走进针
+            logger.debug("振幅看守布置失败", exc_info=True)
+            note["why"] = tr(f"振幅看守布置失败:{exc}", f"Arming the amplitude watch failed: {exc}")
+            return None, note
+
+    def _read_amp(self, real_ctx, idx: int) -> "float | None":
+        """当前振幅;读不到返回 ``None``。永不抛异常。
+
+        不进 ``_call_log``:一小时的等待相是几千拍,而结果里需要的是 ``WaitProgress``
+        的统计量,不是几千条一模一样的 TCP 记录(``_read_z`` 同理)。"""
+        try:
+            from mast.skills.builtins.qplus_amplitude import _scalar
+
+            rec = real_ctx.safe_call("Signals_ValGet", int(idx), 1)
+        except Exception:  # noqa: BLE001
+            return None
+        if getattr(rec, "error", ""):
+            return None
+        return _scalar(rec)
+
+    def _amp_collapse(self, real_ctx, progress: "WaitProgress", watch: "_AmpWatch",
+                      tripped: str) -> "SkillResult | None":
+        """振幅归零:停模块 → 退针 → 报失败。``None`` = 不是归零,看守已解除。
+
+        动手之前先核一次激励状态:进针途中有人关掉了激励(驱动 → 残余),振幅会掉一个
+        量级,而那不是撞针。状态读不到时**照样动手** —— 多停一次进针的代价是几分钟,
+        少停一次的代价是一根针。"""
+        try:
+            from mast.skills.builtins.qplus_amplitude import _excitation_state
+
+            exc_now, _ = _excitation_state(real_ctx)
+        except Exception:  # noqa: BLE001
+            exc_now = None
+        if exc_now is not None and watch.excited is not None and exc_now != watch.excited:
+            self._amp_watch = None
+            progress.amp_watch_disarmed = tr(
+                f"进针途中激励状态变了({'开' if watch.excited else '关'} → "
+                f"{'开' if exc_now else '关'}),基线不再可比,看守已解除",
+                f"The excitation state changed during the approach "
+                f"({'on' if watch.excited else 'off'} -> {'on' if exc_now else 'off'}); "
+                "the baseline is no longer comparable and the watch was disarmed")
+            return None
+
+        self._stop_module(real_ctx)
+        withdraw_err = ""
+        try:
+            # 非阻塞退针,与 SafeRetract 同形:(wait=0, timeout=1)。**不用**
+            # EmergencyRetract —— 它第一步是把 Z 反馈**打开**,对一个电流瞎掉、正压在
+            # 表面上的针尖,那一步是往下走。
+            rec = real_ctx.safe_call("ZCtrl_Withdraw", 0, 1)
+            self._call_log.append(rec)
+            withdraw_err = str(getattr(rec, "error", "") or "").strip()
+        except Exception as exc:  # noqa: BLE001
+            withdraw_err = str(exc) or repr(exc)
+        try:
+            self._executor.set_partial("qplus_collapse", True)
+            self._executor.set_partial("wait_progress", progress.as_dict())
+        except Exception:  # noqa: BLE001
+            logger.debug("qplus_collapse 留痕失败", exc_info=True)
+
+        reads = ", ".join(f"{v:.3g}" for v in watch.recent)
+        mode = (tr("激励开", "excitation on") if watch.excited
+                else tr("激励关,残余振幅", "excitation off, residual amplitude"))
+        msg = tr(
+            f"qPlus 振幅在进针途中归零 —— 判据「{watch.criterion_text(tripped)}」触发:"
+            f"最近读数 [{reads}],起跑前静止基线 {watch.baseline:.3g}"
+            f"(σ {watch.sigma:.2g},{mode})。已停进针模块并下发退针(ZCtrl_Withdraw)。"
+            "这条判据与电流无关:电流判据可能没响(例如针尖不导电),但音叉已经振不起来 ——"
+            "针尖很可能已接触表面。下一步:确认退针到位、振幅回到基线附近,再检查针尖。"
+            f"{progress.motion_text()}",
+            f"The qPlus amplitude dropped to zero during the approach - criterion "
+            f"\"{watch.criterion_text(tripped)}\" tripped: latest readings [{reads}], "
+            f"at-rest baseline before the start {watch.baseline:.3g} (sigma "
+            f"{watch.sigma:.2g}, {mode}). The approach module was stopped and a withdraw "
+            "(ZCtrl_Withdraw) was issued. This criterion is independent of the current: "
+            "the current criterion may not have fired (e.g. a non-conducting tip), but the "
+            "fork can no longer ring - the tip has most likely touched the surface. Next: "
+            "confirm the withdraw completed and the amplitude came back near the baseline, "
+            f"then inspect the tip. {progress.motion_text()}")
+        if withdraw_err:
+            msg += tr(f"\n⚠️ **退针命令没有成功下发**({withdraw_err})—— 针尖可能仍压在"
+                      "表面上,请立刻手动退针。",
+                      f"\nWARNING: **the withdraw command was not delivered** "
+                      f"({withdraw_err}) - the tip may still be pressed into the surface; "
+                      "withdraw by hand immediately.")
+        return SkillResult(
+            skill_name=_PHASE_WAIT, success=False,
+            error=msg + self.stop_note(),
+            data={"qplus_collapse": {"criterion": tripped,
+                                     "readings": list(watch.recent),
+                                     "baseline": watch.baseline, "sigma": watch.sigma,
+                                     "excited": watch.excited,
+                                     "hard_frac": watch.hard_frac,
+                                     "soft_frac": watch.soft_frac,
+                                     "soft_n": watch.soft_n,
+                                     "withdraw_error": withdraw_err or None},
+                  "wait_progress": progress.as_dict(),
+                  "stop_failures": list(self._stop_failures)})
 
     def _read_z(self, real_ctx) -> "float | None":
         """当前 Z 压电位置;读不到返回 ``None``。永不抛异常。
@@ -851,7 +1218,7 @@ class AutoApproach(CompositeSkillGraph):
         gate recognises OnOffSet(0) as a stop — but saying so explicitly keeps
         the intent obvious and survives any future tightening of that policy.)
 
-        **「没停下来」必须留下痕迹**(2026-08-10)。原来整段包在 ``except: pass``
+        **「没停下来」必须留下痕迹**。原来整段包在 ``except: pass``
         里:停机命令根本没下发,而调用方拿到的东西和停成功时**一模一样** ——
         接下来它只会报「进针失败」,一个字都不会提「而且模块可能还在走」。
         进针模块还在跑意味着针尖还在往表面压,这是本文件里代价最高的一种不知情。
@@ -882,17 +1249,18 @@ class AutoApproach(CompositeSkillGraph):
             self._stop_failures.append(f"AutoApproach_OnOffSet(0): {exc}")
             self._call_log.append(NanonisCallRecord(
                 method="AutoApproach_OnOffSet", args=(0,),
-                error=f"停机命令未能下发: {exc}"))
+                error=tr(f"停机命令未能下发: {exc}", f"stop command not delivered: {exc}")))
             logger.error("进针模块停机命令未能下发: %r", exc)
 
     def stop_note(self) -> str:
         """停机没做成时顶进 error 文本的一行。空串 = 命令确实发出去了。"""
         if not getattr(self, "_stop_failures", None):
             return ""
-        return ("\n⚠️ **进针模块的停机命令没有成功下发**("
+        return (tr("\n⚠️ **进针模块的停机命令没有成功下发**(", "\nWARNING: **the stop command to the approach module was not delivered** (")
                 + "；".join(self._stop_failures)
-                + ")。模块可能仍在推进针尖 —— 请立即到 Nanonis 的 Auto Approach "
-                  "面板确认它已停止,不要假设本技能已经把它停下了。")
+                + tr(")。模块可能仍在推进针尖 —— 请立即到 Nanonis 的 Auto Approach "
+                  "面板确认它已停止,不要假设本技能已经把它停下了。",
+                  "). The module may still be advancing the tip - go to the Nanonis Auto Approach panel right now and confirm it has stopped; do not assume this skill has stopped it."))
 
     # Settle knobs, on the class so tests can shrink the window without
     # pretending the hardware is instant (same discipline as _poll_interval_s).
@@ -929,30 +1297,45 @@ class AutoApproach(CompositeSkillGraph):
     @staticmethod
     def _engage_failure_text(v: EngageVerdict, *, stopped: bool,
                              progress: "WaitProgress | None" = None) -> str:
-        """Report measured evidence without assigning unobserved failure causes.
+        """Why the approach is not confirmed — measurements only, no guesses.
 
-        Present the engagement verdict first. Report approach-module duration
-        and current-verification-window duration separately, followed by the
-        current evidence. See :class:`WaitProgress`.
-        """
-        head = ("AutoApproach 模块已停止" if stopped
-                else "AutoApproach 在宽限窗口内始终报告未运行(启动可能被拒绝)")
+        A guess list that printed 「量程耗尽 / Z 压电在极限 / 外部停止」on EVERY
+        failure. None of the three had ever been observed, and when checked they
+        were sometimes all false at once. A message that names
+        causes it did not measure is not a diagnosis, it is a rumour with a
+        line number.
+
+        加进 ``progress``:光「只说测到的东西」还不够 —— **测到的东西也可能在
+        回答另一个问题**。这条报文里原本唯一的秒数是 ``v.evidence()`` 里的
+        「等了 1.0s / 预算 20.0s」,它说的是模块停下**之后**判定电流花的时间;所有读它的人
+        (agent、团队、用户)都容易把它当成进针本身的时长,于是去查一个不存在的「秒停」。
+        实际上进针可以跑很久,Z 压电满摆上百个循环。
+
+        排版上:**判决在前,证据在后** —— 「针尖没进隧穿、别扫图」是读的人第一眼要看到的,
+        而「模块跑了多久 / 台子动没动」是紧跟其后的第一条证据,排在电流那条前面。
+        见 :class:`WaitProgress`。"""
+        head = (tr("AutoApproach 模块已停止", "AutoApproach module stopped") if stopped
+                else tr("AutoApproach 在宽限窗口内始终报告未运行(启动可能被拒绝)", "AutoApproach reported not running throughout the grace window (the start may have been refused)"))
         motion = f"{progress.motion_text()}" if progress is not None else ""
         if v.aborted:
-            return (f"{head},进针判定被中止 —— **进针状态未知**,"
-                    f"不要按「已进针」继续。{motion}{v.evidence()}")
+            return (tr(f"{head},进针判定被中止 —— **进针状态未知**,"
+                    f"不要按「已进针」继续。{motion}{v.evidence()}",
+                    f"{head}; the engage decision was aborted - **engage state unknown**, do not proceed as if 'engaged'. {motion}{v.evidence()}"))
         if v.engaged is None:
             # NOT the same sentence as engaged=False. See EngageVerdict.
-            return (f"{head},但**判不出**有没有隧穿电流:预算耗尽前始终没有出现"
-                    f"{_ENGAGE_AGREE_N} 次一致的读数"
-                    + (f"(其中 {v.unreadable_n} 次根本读不到电流/设定点)"
+            return (tr(f"{head},但**判不出**有没有隧穿电流:预算耗尽前始终没有出现"
+                    f"{_ENGAGE_AGREE_N} 次一致的读数",
+                    f"{head}, but it **cannot be told** whether there is tunnelling current: before the budget ran out there were never {_ENGAGE_AGREE_N} consistent readings")
+                    + (tr(f"(其中 {v.unreadable_n} 次根本读不到电流/设定点)", f"({v.unreadable_n} of them could not read the current/setpoint at all)")
                        if v.unreadable_n else "")
-                    + f"。{motion}{v.evidence()}。**这不等于没进针**,也不等于进针了 —— "
+                    + tr(f"。{motion}{v.evidence()}。**这不等于没进针**,也不等于进针了 —— "
                       "读数一直在动。不要扫图;先看反馈是否合上、电流量程是否合适,"
                       "若本机反馈确实较慢,到设置页把「退针 Z 稳定预算」"
-                      "(z_settle_timeout_s)调大。")
-        return (f"{head},且电流**稳定地**没有达到进针判据 —— 针尖未进入隧穿,"
-                f"不要扫图。{motion}{v.evidence()}。")
+                      "(z_settle_timeout_s)调大。",
+                      f". {motion}{v.evidence()}. **This does not mean it did not engage**, nor that it did - the readings keep moving. Do not scan; first check whether the feedback is closed and the current range is suitable; if this machine's feedback really is slow, increase 'Withdraw Z settle budget' (z_settle_timeout_s) on the settings page."))
+        return (tr(f"{head},且电流**稳定地**没有达到进针判据 —— 针尖未进入隧穿,"
+                f"不要扫图。{motion}{v.evidence()}。",
+                f"{head}, and the current **stably** fails to meet the engage criterion - the tip has not entered tunnelling, do not scan. {motion}{v.evidence()}."))
 
     @staticmethod
     def _first_value(rv):
@@ -1012,6 +1395,10 @@ class AutoApproach(CompositeSkillGraph):
         self._crosstalk_off = False
         self._crosstalk_last_t = None
 
+        refusal = _drive_latch_refusal(context, "AutoApproach")
+        if refusal is not None:
+            return refusal
+
         snapshot, note = apply_approach_preset(context, skill_name="AutoApproach")
         try:
             res = self._run_approach_graph(context, params)
@@ -1027,6 +1414,9 @@ class AutoApproach(CompositeSkillGraph):
         self._call_log: list[NanonisCallRecord] = []
         #: 停机命令里**没能下发或被仪器拒掉**的那些(见 :meth:`_stop_module`)。
         self._stop_failures: list[str] = []
+        #: 振幅看守:一趟一份,由 start 阶段布置。**在这里清掉**,否则一次续跑(start
+        #: 阶段被跳过)会拿着上一趟的基线去看这一趟。
+        self._amp_watch = None
         try:
             self._wait_timeout_s = float(
                 (params or {}).get("wait_timeout_s", self._DEFAULT_WAIT_TIMEOUT_S))
@@ -1055,6 +1445,9 @@ class AutoApproach(CompositeSkillGraph):
             # 等待相的进展观测抬到顶层:埋在 `_progress.partial_data` 里的数字,
             # 读结果的人(和 agent)不会去翻。
             "wait_progress": executor.progress.partial_data.get("wait_progress"),
+            # 振幅看守:布没布上、为什么没布上、基线多少;以及有没有因归零而停。
+            "qplus_watch": executor.progress.partial_data.get("qplus_watch"),
+            "qplus_collapse": bool(executor.progress.partial_data.get("qplus_collapse", False)),
             "_progress": executor.progress.to_dict(),
             # 缺陷⑬:用户喊停要以本来面目到达下游,而不是变成一次「失败」。
             **abort_facts(executor.progress),
@@ -1091,7 +1484,7 @@ class WithdrawTip(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="把针尖从表面完全退开。",
+            description=tr("把针尖从表面完全退开。", "Fully retract the tip from the surface."),
             estimated_duration_s=5.0,
             composition_level=0,
             tags=["tip", "withdraw", "safety"],
@@ -1133,9 +1526,10 @@ class StopAutoApproach(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
-            description=("立即停止 auto-approach 流程"
+            description=(tr("立即停止 auto-approach 流程"
                          "（AutoApproach_OnOffSet 0）。用于紧急叫停正在跑的粗动 "
-                         "approach —— 永远安全，从不设闸。"),
+                         "approach —— 永远安全，从不设闸。",
+                         "Stop the auto-approach procedure immediately (AutoApproach_OnOffSet 0). Use it to urgently halt a running coarse approach - always safe, never gated.")),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["approach", "stop", "safety", "emergency"],
@@ -1167,7 +1561,7 @@ class GetAutoApproachStatus(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取 auto-approach 流程当前是否在运行。",
+            description=tr("读取 auto-approach 流程当前是否在运行。", "Read whether the auto-approach procedure is currently running."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["approach", "status", "read"],
@@ -1192,9 +1586,10 @@ class GetAutoApproachStatus(BaseSkill):
             return SkillResult(
                 skill_name="GetAutoApproachStatus",
                 success=False,
-                error=("AutoApproach_OnOffGet 回来了,但状态位读不懂"
+                error=(tr("AutoApproach_OnOffGet 回来了,但状态位读不懂"
                        f"(return_value={record.return_value!r})—— "
-                       "这**不是**「没在进针」,是没问出来。"),
+                       "这**不是**「没在进针」,是没问出来。",
+                       f"AutoApproach_OnOffGet came back, but the status bit is unreadable (return_value={record.return_value!r}) - this is **not** 'not approaching', it is 'could not be queried'.")),
                 data={"running": None},
                 nanonis_calls=[record],
             )
@@ -1239,17 +1634,19 @@ class ApproachTip(BaseSkill):
             # stays human-gated, so this smart dispatcher is AUTO.
             safety_level=SafetyLevel.AUTO,
             description=(
-                "面对一句朴素的「进针」，用**安全**的方式建立隧道：先试着让 "
+                tr("面对一句朴素的「进针」，用**安全**的方式建立隧道：先试着让 "
                 "Z-controller 进上（feedback 开，不动马达）；**只有**当这条路"
                 "够不到隧道时，才退回到带电流反馈的 "
                 "AutoApproach（Nanonis 会在 setpoint 处停住 —— 不会撞针）。"
-                "含糊的「进针 / engage / 把针进上」这类请求，**默认**就用它。"
+                "含糊的「进针 / engage / 把针进上」这类请求，**默认**就用它。",
+                "For a plain 'engage' request, establish tunnelling the **safe** way: first try to close the Z-controller (feedback on, motor not moved); **only** if that cannot reach tunnelling, fall back to the current-feedback AutoApproach (Nanonis stops at the setpoint - no tip crash). Vague requests such as 'engage / bring the tip in' use it **by default**.")
             ),
             parameters=[
                 ParameterSpec(
                     name="settle_s", type="float",
-                    description=("engage 阶段里，一边轮询电流、一边让 feedback "
-                                 "稳定下来的秒数。"),
+                    description=(tr("engage 阶段里，一边轮询电流、一边让 feedback "
+                                 "稳定下来的秒数。",
+                                 "Seconds spent in the engage phase polling the current while letting the feedback settle.")),
                     required=False, default=1.5, min_value=0.1, max_value=30.0),
             ],
             estimated_duration_s=60.0,
@@ -1267,6 +1664,9 @@ class ApproachTip(BaseSkill):
 
         嵌套是免费的:里层看到增益已经是进针组的值,就不写也不需要放回。
         """
+        refusal = _drive_latch_refusal(context, "ApproachTip")
+        if refusal is not None:
+            return refusal
         snapshot, note = apply_approach_preset(context, skill_name="ApproachTip")
         try:
             res = self._approach(context, params)
@@ -1296,8 +1696,8 @@ class ApproachTip(BaseSkill):
             # could not prove the Z-feedback state, and running the coarse
             # approach without that proof is the crash case. Make it stick, or
             # the very next tool call re-enters the same coarse approach
-            # through AutoApproach with no gate at all (
-            # 13:50:40 refused → 13:52:53 AutoApproach, 133 s later).
+            # through AutoApproach with no gate at all (seen once:
+            # refused, then AutoApproach a couple of minutes later).
             err = f"engage phase failed: {getattr(r_eng, 'error', 'unknown')}"
             esc.record_approach_refusal(err, owner=_chain_scope(context))
             return SkillResult(
@@ -1333,7 +1733,7 @@ class ApproachTip(BaseSkill):
             # Ambiguous outcome (not engaged, not clearly asking for approach) →
             # do NOT drive the approach on a maybe. Stop and report. Same as the
             # engage-failure branch: this is a refusal to escalate and it has to
-            # outlive this tool call ().
+            # outlive this tool call.
             err = ("engage did not establish tunnelling and did not flag "
                    "needs_auto_approach — stopping rather than approaching on a "
                    "maybe; check the tip/Z state.")
@@ -1382,10 +1782,11 @@ class ApproachTip(BaseSkill):
                   "measured_current_a": cur, "setpoint_a": sp,
                   "didv_at_contact_v": didv_cal,
                   "engagement": v.as_dict(),
-                  "message": ("Tip was too far to engage by feedback alone — ran the "
+                  "message": (tr("Tip was too far to engage by feedback alone — ran the "
                               "current-feedback AutoApproach; tunnelling verified at "
                               f"|I|={_fmt_a(cur)} vs setpoint {_fmt_a(sp)} "
-                              f"({v.agreed_n} 次一致读数)."
+                              f"({v.agreed_n} 次一致读数).",
+                              f"Tip was too far to engage by feedback alone - ran the current-feedback AutoApproach; tunnelling verified at |I|={_fmt_a(cur)} vs setpoint {_fmt_a(sp)} ({v.agreed_n} consistent readings).")
                               + _evidence_warning(evidence)),
                   "steps": steps, **evidence})
 
@@ -1404,19 +1805,27 @@ class ApproachTip(BaseSkill):
 
     @staticmethod
     def _verify_failure_text(v: EngageVerdict) -> str:
-        """Report verification evidence without guessing unmeasured causes."""
+        """Measured values only — the guess list this replaced was wrong on the instrument.
+
+        「coarse range exhausted / Z at limit / stale state」was printed on every
+        failure without any of the three having been looked at. In practice all
+        three were false, and the agent went to check the motor range."""
         if v.aborted:
-            return ("post-approach verification 被中止 —— **进针状态未知**,"
-                    f"不要按「已进针」继续。{v.evidence()}")
+            return (tr("post-approach verification 被中止 —— **进针状态未知**,"
+                    f"不要按「已进针」继续。{v.evidence()}",
+                    f"post-approach verification aborted - **engage state unknown**, do not proceed as if 'engaged'. {v.evidence()}"))
         if v.engaged is None:
-            return ("post-approach verification 判不出结果:预算耗尽前始终没有出现 "
-                    f"{_ENGAGE_AGREE_N} 次一致的电流读数"
-                    + (f"(其中 {v.unreadable_n} 次根本读不到电流/设定点)"
+            return (tr("post-approach verification 判不出结果:预算耗尽前始终没有出现 "
+                    f"{_ENGAGE_AGREE_N} 次一致的电流读数",
+                    f"post-approach verification cannot tell the outcome: before the budget ran out there were never {_ENGAGE_AGREE_N} consistent current readings")
+                    + (tr(f"(其中 {v.unreadable_n} 次根本读不到电流/设定点)", f"({v.unreadable_n} of them could not read the current/setpoint at all)")
                        if v.unreadable_n else "")
-                    + f"。{v.evidence()}。**这不等于没进针**,也不等于进针了。"
-                      "不要扫图;先确认反馈已合上、电流量程合适。")
-        return ("post-approach verification FAILED:电流**稳定地**没有达到进针判据,"
-                f"针尖未进入隧穿,不要扫图。{v.evidence()}。")
+                    + tr(f"。{v.evidence()}。**这不等于没进针**,也不等于进针了。"
+                      "不要扫图;先确认反馈已合上、电流量程合适。",
+                      f". {v.evidence()}. **This does not mean it did not engage**, nor that it did. Do not scan; first confirm the feedback is closed and the current range is suitable."))
+        return (tr("post-approach verification FAILED:电流**稳定地**没有达到进针判据,"
+                f"针尖未进入隧穿,不要扫图。{v.evidence()}。",
+                f"post-approach verification FAILED: the current **stably** fails to meet the engage criterion; the tip has not entered tunnelling, do not scan. {v.evidence()}."))
 
     @staticmethod
     def _read_current_and_setpoint(context) -> tuple[float | None, float | None]:
@@ -1500,7 +1909,7 @@ class ApproachTip(BaseSkill):
             # 的通道的读数。记进标定库就是把一个假值当基准存下来,而它之后每一次
             # 被引用都不会自己声明「我是在调制关着时量的」。
             #
-            # 这条从 2026-08-05 起是必需的:那天起「用完即关」让进针类流程在开跑前
+            # 这条是必需的:「用完即关」让进针类流程在开跑前
             # 自动关掉调制(_preflight.ensure_modulation_off),所以走到这里时调制
             # **通常是关的** —— 不加这道闸,这次改动会把一个坏标定写进持久存储。
             # 读不到调制状态同样不记:「没读到」不是「开着」。

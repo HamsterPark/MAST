@@ -4,12 +4,13 @@ import type uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { useUiStore } from "@/store";
 import { fmtCurrent } from "@/lib/units";
+import { langTag, tr } from "@/lib/i18n";
 import { TRACE_WINDOWS } from "@/lib/monitoring";
 import { EmptyNote } from "@/components/ui";
 import { useElementWidth, useViewportHeight } from "@/hooks/useElementWidth";
 import { TREND_RATIO, sizeChart } from "@/lib/chartSize";
 
-// 实时电流包络 — the min/max band `/api/monitoring/live-trace` returns.
+// Live current envelope — the min/max band `/api/monitoring/live-trace` returns.
 //
 // A band, not a line, because the daemon stores an envelope per segment: at
 // 1 kHz a 5-minute window is 300k samples, and any single-value reduction of
@@ -48,7 +49,7 @@ export function LiveCurrentChart({
   degraded,
 }: {
   tS: number[];
-  /** `null` = 那一刻没在采集。**绝不能当 0 画** —— 0 是一个合法的电流读数。 */
+  /** `null` = not acquiring at that moment. Never draw it as 0, which is a valid current reading. */
   iMinA: (number | null)[];
   iMaxA: (number | null)[];
   /** Segments behind the band. NOT the point count — the store expands each
@@ -112,14 +113,14 @@ export function LiveCurrentChart({
           stroke: axisStroke,
           grid: { stroke: gridStroke },
           ticks: { stroke: tickStroke },
-          label: "电流 (pA)",
+          label: tr("电流 (pA)", "Current (pA)"),
           labelGap: 6,
         },
       ],
       series: [
-        { label: "时间" },
-        { label: "最大", stroke, width: 1 },
-        { label: "最小", stroke, width: 1 },
+        { label: tr("时间", "Time") },
+        { label: tr("最大", "Max"), stroke, width: 1 },
+        { label: tr("最小", "Min"), stroke, width: 1 },
       ],
       // [high, low] — uPlot fills the area between the two series.
       bands: [{ series: [1, 2], fill: bandFill }],
@@ -172,11 +173,17 @@ export function LiveCurrentChart({
             : "border-mast-border text-mast-muted hover:text-mast-text")
         }
       >
-        {paused ? "已暂停 · 继续" : "暂停"}
+        {paused ? tr("已暂停 · 继续", "Paused · resume") : tr("暂停", "Pause")}
       </button>
-      {paused && <span className="text-xs text-mast-warn">画面已冻结，不再跟随新数据</span>}
+      {paused && (
+        <span className="text-xs text-mast-warn">
+          {tr("画面已冻结，不再跟随新数据", "Display frozen; new data is not followed")}
+        </span>
+      )}
       {!paused && stale && (
-        <span className="text-xs text-mast-warn">数据已停更，曲线停在最后一段</span>
+        <span className="text-xs text-mast-warn">
+          {tr("数据已停更，曲线停在最后一段", "Data stopped updating; the curve stays at the last segment")}
+        </span>
       )}
     </div>
   );
@@ -185,11 +192,16 @@ export function LiveCurrentChart({
     <div className="space-y-2">
       {controls}
       {degraded ? (
-        <EmptyNote label="监控模块未装载，无实时曲线。" />
+        <EmptyNote label={tr("监控模块未装载，无实时曲线。", "Monitoring module not loaded; no live trace.")} />
       ) : !nPoints ? (
-        // 判据是真实读数条数，不是数组长度：一窗口全是断点标记时数组不空，
-        // 但那正是「还没有采集到数据」。
-        <EmptyNote label="窗口内还没有采集到数据——启动采集后曲线会自动出现。" />
+        // Test the number of real readings, not the array length: a window of
+        // nothing but gap markers is non-empty yet has no data.
+        <EmptyNote
+          label={tr(
+            "窗口内还没有采集到数据——启动采集后曲线会自动出现。",
+            "No data collected in this window yet; the trace appears automatically once acquisition starts.",
+          )}
+        />
       ) : (
         <>
           <div
@@ -200,26 +212,33 @@ export function LiveCurrentChart({
           </div>
           <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-mast-muted">
             <span>
-              游标：
+              {tr("游标：", "Cursor: ")}
               {hover ? (
                 <span className="ml-1 font-mono text-mast-text">
-                  {new Date(hover.t * 1000).toLocaleTimeString("zh-CN", { hour12: false })} →{" "}
+                  {new Date(hover.t * 1000).toLocaleTimeString(langTag(), { hour12: false })} →{" "}
                   {fmtCurrent(hover.lo * 1e-12)} ～ {fmtCurrent(hover.hi * 1e-12)}
                 </span>
               ) : (
-                <span className="ml-1">移动鼠标到曲线上读取</span>
+                <span className="ml-1">{tr("移动鼠标到曲线上读取", "Move the mouse over the curve to read")}</span>
               )}
             </span>
             <span>
-              {nSegments} 段 / {nPoints} 点
+              {tr(`${nSegments} 段 / ${nPoints} 点`, `${nSegments} segments / ${nPoints} points`)}
             </span>
             {nGaps > 0 && (
               <span className="text-mast-warn">
-                曲线断开 {nGaps} 处 = 那几段时间没有采集（守护停过 / 服务重启），
-                不是电流为零
+                {tr(
+                  `曲线断开 ${nGaps} 处 = 那几段时间没有采集（守护停过 / 服务重启），不是电流为零`,
+                  `The curve breaks at ${nGaps} place(s) = no acquisition then (daemon stopped / service restarted); the current is not zero`,
+                )}
               </span>
             )}
-            <span>带宽即每桶的最小/最大值，尖峰不会被抽稀抹掉</span>
+            <span>
+              {tr(
+                "带宽即每桶的最小/最大值，尖峰不会被抽稀抹掉",
+                "The band is each bucket's min/max, so spikes are not lost to decimation",
+              )}
+            </span>
           </div>
         </>
       )}

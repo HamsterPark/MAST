@@ -131,7 +131,7 @@ def bus_events(monkeypatch):
 
 def _service(store, *, pool=None, state=None, th=None, pump=None,
              skill="") -> S.CurrentMonitorService:
-    thresholds = th or MonitorThresholds()
+    thresholds = th or MonitorThresholds.from_mapping({"cm_alerts_enabled": 1.0})
     svc = S.CurrentMonitorService(
         pool_getter=lambda: pool,
         state_getter=lambda: state,
@@ -199,6 +199,18 @@ def test_missing_scope_module_goes_quiet_and_reports_a_retry(store, bus_events):
     assert st["state"] == S.STATE_UNAVAILABLE
     assert st["retry_in_s"] >= 30
     assert "Osci1T" in st["detail"]
+    assert "NeedModule" in st["detail"]        # 仪器原话要带上，不能只说仿真器上正常
+
+
+def test_stopped_scope_tells_the_operator_what_to_do(store, bus_events):
+    from types import SimpleNamespace
+    svc = _service(store, pool=FakePool(), pump=StubPump([]))
+    svc._pump = SimpleNamespace(
+        config={}, STRATEGY="osci1t", MODULE_NAME="Osci1T",
+        trouble="error: Cannot access the Oscilloscope. Please make sure it is running.")
+    detail = svc.status()["detail"]
+    assert "Oscilloscope" in detail and "面板" in detail
+    assert "持续不可用" not in detail
 
 
 def test_paused_pump_reports_and_recovers(store, bus_events):
@@ -414,7 +426,7 @@ def test_a_scanning_segment_does_not_suppress_a_critical(store, bus_events,
     """The three CRITICAL rules describe the instrument; a scan does not make
     a railed preamp acceptable."""
     monkeypatch.setattr("mast.buffer.active.get_active_buffer", lambda: None)
-    th = MonitorThresholds.from_mapping({"cm_crit_consecutive": 1.0})
+    th = MonitorThresholds.from_mapping({"cm_crit_consecutive": 1.0, "cm_alerts_enabled": 1.0})
     svc = _service(store, pool=FakePool(), state=FakeState(scanning=True),
                    th=th, pump=StubPump([]))
     seg = _segment(time.time())
@@ -435,7 +447,7 @@ def test_suppression_matcher_is_case_insensitive_substring():
 
 def test_confirmed_critical_alerts_pins_and_publishes(store, bus_events, monkeypatch):
     monkeypatch.setattr("mast.buffer.active.get_active_buffer", lambda: None)
-    th = MonitorThresholds.from_mapping({"cm_crit_consecutive": 2.0,
+    th = MonitorThresholds.from_mapping({"cm_crit_consecutive": 2.0, "cm_alerts_enabled": 1.0,
                                          "cm_evidence_min_interval_s": 10.0})
     svc = _service(store, pool=FakePool(), th=th, pump=StubPump([]))
 
@@ -468,7 +480,7 @@ def test_confirmed_critical_alerts_pins_and_publishes(store, bus_events, monkeyp
 
 def test_a_single_bad_segment_does_not_escalate(store, bus_events, monkeypatch):
     monkeypatch.setattr("mast.buffer.active.get_active_buffer", lambda: None)
-    th = MonitorThresholds.from_mapping({"cm_crit_consecutive": 3.0})
+    th = MonitorThresholds.from_mapping({"cm_crit_consecutive": 3.0, "cm_alerts_enabled": 1.0})
     svc = _service(store, pool=FakePool(), th=th, pump=StubPump([]))
     seg = _segment(time.time())
     seg.runs[0][:] = 1e-12
@@ -489,7 +501,7 @@ def test_alerts_can_be_switched_off_while_still_recording(store, bus_events):
 
 
 def test_warn_alert_is_recorded_without_evidence(store, bus_events):
-    th = MonitorThresholds.from_mapping({"cm_rms_warn_a": 1e-13})
+    th = MonitorThresholds.from_mapping({"cm_rms_warn_a": 1e-13, "cm_alerts_enabled": 1.0})
     svc = _service(store, pool=FakePool(), th=th, pump=StubPump([]))
     svc._on_segment(_segment(time.time()))
     rows, total = store.alerts_query(level="warn")
@@ -523,6 +535,67 @@ def test_skill_step_for_an_unrelated_skill_pins_nothing(store, bus_events):
     svc._on_bus_event(1, Event(type=EventType.SKILL_STEP,
                                data={"skill": "GetBias", "step": 1, "success": True}))
     assert store.segment_meta(sid)["pinned"] == 0
+
+
+def test_a_read_category_skill_step_neither_pins_nor_mutes(store, bus_events):
+    """``GetAutoApproachStatus`` matches "autoapproach" by NAME, and an
+    external watcher polling it every 5-10 s issued a pin_range UPDATE and restarted
+    the afterglow on every poll. A read says so on the event and is left alone."""
+    from mast.core.events import Event, EventType
+
+    svc = _service(store, pool=FakePool(), pump=StubPump([]))
+    svc._on_segment(_segment(time.time()))
+    sid = store.latest_feature()["segment_id"]
+    before = getattr(svc, "_afterglow_until", 0.0)
+    svc._on_bus_event(1, Event(type=EventType.SKILL_STEP,
+                               data={"skill": "GetAutoApproachStatus", "step": 0,
+                                     "success": True, "category": "read"}))
+    assert store.segment_meta(sid)["pinned"] == 0
+    assert getattr(svc, "_afterglow_until", 0.0) == before, "a status read restarted the afterglow"
+
+
+def test_a_motion_skill_step_with_a_category_still_pins(store, bus_events):
+    from mast.core.events import Event, EventType
+
+    svc = _service(store, pool=FakePool(), pump=StubPump([]))
+    svc._on_segment(_segment(time.time()))
+    sid = store.latest_feature()["segment_id"]
+    svc._on_bus_event(1, Event(type=EventType.SKILL_STEP,
+                               data={"skill": "AutoApproach", "step": 0,
+                                     "success": True, "category": "composite"}))
+    assert store.segment_meta(sid)["pinned"] == 1
+    assert svc._afterglow_until > time.time()
+
+
+def test_a_name_only_skill_step_keeps_the_old_behaviour(store, bus_events):
+    """Legacy publishers (``SkillExecutor``) send no category: unchanged."""
+    from mast.core.events import Event, EventType
+
+    svc = _service(store, pool=FakePool(), pump=StubPump([]))
+    svc._on_segment(_segment(time.time()))
+    sid = store.latest_feature()["segment_id"]
+    svc._on_bus_event(1, Event(type=EventType.SKILL_STEP,
+                               data={"skill": "GetAutoApproachStatus", "step": 0,
+                                     "success": True}))
+    assert store.segment_meta(sid)["pinned"] == 1
+
+
+def test_publish_skill_step_carries_the_category_only_when_given():
+    from mast.core.events import EventBus, EventType
+
+    seen: list = []
+    bus = EventBus.get()
+    handle = bus.subscribe_with_id(
+        lambda seq, ev: seen.append(ev) if getattr(ev, "type", None) is EventType.SKILL_STEP
+        else None)
+    try:
+        bus.publish_skill_step(skill="GetAutoApproachStatus", step=0, success=True,
+                               category="read")
+        bus.publish_skill_step(skill="TipShape", step=0, success=True)
+    finally:
+        bus.unsubscribe(handle)
+    assert seen[-2].data["category"] == "read"
+    assert "category" not in seen[-1].data, "an event without a category must keep its old shape"
 
 
 def test_bus_callback_never_raises(store, bus_events):
@@ -755,3 +828,153 @@ def test_a_throwing_aux_sampler_never_stops_the_pump(store):
     svc._aux = Boom()
     svc._pump_until_interrupted(MonitorThresholds())      # 不抛就是通过
     assert svc._segments_done == 1
+
+
+# ── what an alert says about itself ─────────────────────────────
+
+def test_an_alert_right_after_a_scan_says_the_scan_just_ended(store, bus_events):
+    """Motivating case: scans ended in a spike_warn + jump_burst pair from
+    the first segment after ``ctx_scanning`` flipped to 0 — the label is read at the
+    segment's end, the samples still hold the scan's last line. The alert said only "watch
+    for a discharge". It has to carry the window it judged, the numbers and how long ago
+    the scan was, so the reader can tell the tail of a scan from a tip event."""
+    state = FakeState(scanning=True)
+    svc = _service(store, pool=FakePool(), state=state, pump=StubPump([]))
+    t0 = time.time()
+    svc._on_segment(_jumpy_segment(t0))                   # scanning: suppressed
+    assert not [e for e in bus_events if e.get("kind") == "alert"]
+    state._snap.scan_running = False
+    svc._on_segment(_jumpy_segment(t0 + 3.0))             # two seconds after the scan
+    alert = next(e for e in bus_events
+                 if e.get("kind") == "alert" and e.get("rule") == "jump_burst")
+    assert alert["seg_t_start"] == pytest.approx(t0 + 3.0)
+    assert alert["seg_t_end"] == pytest.approx(t0 + 4.0)
+    assert alert["ctx_scanning"] is False
+    assert alert["scanning_s_ago"] == pytest.approx(2.0, abs=1e-3)
+    assert alert["jump_rate_hz"] > 5.0 and 50.0 < alert["mean_pa"] < 150.0
+    assert alert["ctx_zctrl_on"] is True and alert["ctx_bias_v"] == -1.0
+    assert alert["ctx_setpoint_pa"] == pytest.approx(100.0)
+    for key, value in alert.items():                      # the bus carries scalars only
+        assert isinstance(value, (int, float, str, bool)), key
+
+
+def test_the_first_segment_after_a_scan_is_judged_as_the_scans_edge(store, bus_events):
+    """Segments right after a scan: labelled 0 at their end, holding the scan's
+    last line. The scan-suppressed rules treat them as scanning; the row still says what was
+    measured and says why it was suppressed."""
+    import json
+
+    state = FakeState(scanning=True)
+    svc = _service(store, pool=FakePool(), state=state, pump=StubPump([]))
+    t0 = time.time()
+    svc._on_segment(_jumpy_segment(t0))
+    state._snap.scan_running = False
+    svc._on_segment(_jumpy_segment(t0 + 1.0))             # contiguous: the scan's edge
+    assert not [e for e in bus_events if e.get("kind") == "alert"]
+    row = store.latest_feature()
+    assert row["ctx_scanning"] == 0 and row["alert_level"] == "suppressed"
+    assert json.loads(row["extra_json"])["suppressed_by"] == "scan_edge"
+
+
+def test_without_a_scan_before_it_the_same_segment_alerts(store, bus_events):
+    """The control: no scan in the previous segment ⇒ judged at rest, as before."""
+    state = FakeState(scanning=False)
+    svc = _service(store, pool=FakePool(), state=state, pump=StubPump([]))
+    t0 = time.time()
+    svc._on_segment(_segment(t0))
+    svc._on_segment(_jumpy_segment(t0 + 1.0))
+    assert "jump_burst" in {e.get("rule") for e in bus_events if e.get("kind") == "alert"}
+
+
+def test_a_critical_at_the_scan_edge_still_fires(store, bus_events, monkeypatch):
+    """Only the two scan-suppressed WARN rules move; a railed / frozen readout is a statement
+    about the instrument, at the edge of a scan as anywhere."""
+    monkeypatch.setattr("mast.buffer.active.get_active_buffer", lambda: None)
+    th = MonitorThresholds.from_mapping({"cm_crit_consecutive": 1.0, "cm_alerts_enabled": 1.0})
+    state = FakeState(scanning=True)
+    svc = _service(store, pool=FakePool(), state=state, th=th, pump=StubPump([]))
+    t0 = time.time()
+    svc._on_segment(_segment(t0))
+    state._snap.scan_running = False
+    seg = _segment(t0 + 1.0)
+    seg.runs[0][:] = 1e-12                                # frozen readout
+    svc._on_segment(seg)
+    rows, total = store.alerts_query(level="critical")
+    assert total == 1 and rows[0]["rule"] == "freeze"
+
+
+def test_the_last_skill_seen_and_its_age(store):
+    svc = _service(store)
+    svc._note_alert_context(_segment(1000.0), {"ctx_skill": "ScanAt", "ctx_scanning": True})
+    later = _segment(1003.5)
+    ctx = svc._alert_context({"ctx_skill": "", "ctx_scanning": False}, segment=later)
+    assert ctx["last_skill"] == "ScanAt" and ctx["last_skill_s_ago"] == pytest.approx(2.5)
+    assert ctx["scanning_s_ago"] == pytest.approx(2.5) and "ctx_skill" not in ctx
+    held = svc._alert_context({"ctx_skill": "AcquireSTS"}, segment=later)
+    assert held["last_skill"] == "AcquireSTS" and held["last_skill_s_ago"] == 0.0
+
+
+def test_an_alert_context_with_nothing_known_is_empty_and_never_raises(store):
+    svc = _service(store)
+    assert svc._alert_context(None) == {}
+    assert svc._alert_context({"ctx_scanning": "garbage", "ctx_bias_v": object()},
+                              segment=object()) == {}         # swallowed, not raised
+
+
+def test_the_safe_bias_path_is_suppressed_like_setbias_but_a_lateral_move_is_not():
+    """7.0.1: ``mast_act set_bias`` goes through BiasSettleChange for a zero crossing, a large
+    change or a dead-band target. The token names the OUTER skill, so its ramp
+    through zero raised spike_warn / rtn_bistable / jump_burst / rms_high until it was in the
+    table. MoveToXY stays out: the table silences the CRITICAL rules too, and a lateral move
+    under feedback is where a crash into a cluster would show."""
+    from mast.monitoring.service import SUPPRESS_SKILL_PATTERNS
+    from mast.skills.composite.bias_settle import BiasSettleChange
+
+    def matched(name: str) -> bool:
+        return any(p in name.lower() for p in SUPPRESS_SKILL_PATTERNS)
+
+    real_name = BiasSettleChange().metadata().name          # the name the token carries
+    assert matched(real_name) and matched("SetBias") and matched("SetBiasRamp")
+    assert not matched("MoveToXY")
+
+# ── 泵空转时状态要说出原因；清理不许卡住采集线程 ─────────────
+
+def test_status_detail_names_why_the_pump_is_stuck(store, bus_events):
+    """泵一段都交不上来时，服务这一层看不到任何东西，状态会一直停在「正在探测」——
+    曾这样一直挂着。原因由泵自己报，状态把它带出去。"""
+    pump = StubPump([])
+    pump.trouble = "error: Osci1T said no"
+    svc = _service(store, pool=FakePool(), pump=pump)
+    assert "Osci1T said no" in svc.status()["detail"]
+    pump.trouble = ""
+    assert "Osci1T said no" not in svc.status()["detail"]
+
+
+def test_retention_runs_off_the_acquisition_thread(store, bus_events, monkeypatch):
+    """停采一天以上恢复后，第一段会触发一次上万个文件的清理。它曾在
+    采集线程上跑了十几分钟。清理必须交给别的线程，而且同一时刻只有一个。"""
+    gate = threading.Event()
+    started = threading.Event()
+    seen: list[str] = []
+
+    def slow_sweep(keep_hours, keep_gb):
+        seen.append(threading.current_thread().name)
+        started.set()
+        gate.wait(5)
+        return {}
+
+    monkeypatch.setattr(store, "retention_sweep", slow_sweep)
+    svc = _service(store, pool=FakePool(), pump=StubPump([]))
+    th = svc._th()
+    t0 = time.monotonic()
+    svc._maybe_sweep(store, th)
+    assert time.monotonic() - t0 < 1.0, "采集线程在等清理"
+    assert started.wait(2)
+    assert seen[0] != threading.current_thread().name
+
+    svc._last_sweep = 0.0
+    svc._maybe_sweep(store, th)          # 上一轮还没删完：不开第二个
+    assert len(seen) == 1
+    gate.set()
+    svc._sweeper.join(2)
+    assert not svc._sweeper.is_alive()

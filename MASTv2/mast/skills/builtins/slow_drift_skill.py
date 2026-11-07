@@ -36,6 +36,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -52,27 +53,27 @@ class AnalyseSlowDrift(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "从扫描图的行序列提取 0.001–1 Hz 的慢扰动，用跨扫描角判断它是否"
-                "时间性的、用跨帧长排除谱泄漏。这一段频率其他数据通道都够不着。"
+                tr("从扫描图的行序列提取 0.001–1 Hz 的慢扰动，用跨扫描角判断它是否"
+                "时间性的、用跨帧长排除谱泄漏。这一段频率其他数据通道都够不着。", "Extract 0.001-1 Hz slow disturbances from the line sequence of scan images, using multiple scan angles to judge whether it is temporal and multiple frame lengths to rule out spectral leakage. No other data channel reaches this frequency band.")
             ),
             parameters=[
                 ParameterSpec(
                     name="scan_paths", type="str", required=True,
-                    description=("多个 .sxm 路径，逗号分隔。**扫描角与帧长越杂越好** "
-                                 "—— 同角度只是重复，同帧长排除不了谱泄漏"),
+                    description=(tr("多个 .sxm 路径，逗号分隔。**扫描角与帧长越杂越好** "
+                                 "—— 同角度只是重复，同帧长排除不了谱泄漏", "Multiple .sxm paths, comma-separated. **The more varied the scan angles and frame lengths the better** - the same angle is just repetition, and the same frame length cannot rule out spectral leakage")),
                 ),
                 ParameterSpec(name="channel", type="str", required=False,
-                              default="Z", description="通道（恒流模式用 Z）"),
+                              default="Z", description=tr("通道（恒流模式用 Z）", "Channel (use Z in constant-current mode)")),
                 ParameterSpec(
                     name="min_coverage", type="float", required=False,
                     default=0.9, min_value=0.1, max_value=1.0,
-                    description="残帧的行序列有缺口，会在谱上生出假峰；低于这个"
-                                "有效像素比例的帧直接不用",
+                    description=tr("残帧的行序列有缺口，会在谱上生出假峰；低于这个"
+                                "有效像素比例的帧直接不用", "The line sequence of a partial frame has gaps, which create false peaks on the spectrum; frames below this valid-pixel fraction are not used at all"),
                 ),
                 ParameterSpec(
                     name="max_components", type="int", required=False,
                     default=4, min_value=1, max_value=12,
-                    description="每帧最多报几条成分"),
+                    description=tr("每帧最多报几条成分", "Maximum number of components reported per frame")),
             ],
             estimated_duration_s=15.0,
             tags=["drift", "environment", "diagnostics", "multiframe"],
@@ -93,7 +94,7 @@ class AnalyseSlowDrift(BaseSkill):
         maxc = int(params.get("max_components") or 4)
         if not paths:
             return SkillResult(skill_name=name, success=False,
-                               error="没有给 scan_paths")
+                               error=tr("没有给 scan_paths", "scan_paths not given"))
 
         seen: set[str] = set()
         results, rejected, used = [], [], []
@@ -105,16 +106,16 @@ class AnalyseSlowDrift(BaseSkill):
             cov = float(np.isfinite(img).mean())
             if cov < min_cov:
                 rejected.append({"path": p,
-                                 "reason": "只有 %.0f%% 的行有数据" % (cov * 100)})
+                                 "reason": tr("只有 %.0f%% 的行有数据", "Only %.0f%% of the lines have data") % (cov * 100)})
                 continue
             if not lt or lt <= 0:
-                rejected.append({"path": p, "reason": "文件头里没有每行时间"})
+                rejected.append({"path": p, "reason": tr("文件头里没有每行时间", "No per-line time in the file header")})
                 continue
             # 同一帧被存成多份是常事（autosave + 手工 SaveScan）。把重复当成
             # 独立证据会让「几个角度上都出现」这句话凭空变强。
             h = hashlib.md5(np.ascontiguousarray(img).tobytes()).hexdigest()
             if h in seen:
-                rejected.append({"path": p, "reason": "与已用帧逐位相同（重复存盘）"})
+                rejected.append({"path": p, "reason": tr("与已用帧逐位相同（重复存盘）", "Bit-for-bit identical to an already used frame (duplicate save)")})
                 continue
             seen.add(h)
             label = str(p).replace("\\", "/").split("/")[-1]
@@ -125,7 +126,7 @@ class AnalyseSlowDrift(BaseSkill):
 
         if not results:
             return SkillResult(skill_name=name, success=False,
-                               error="没有可用的帧", data={"rejected": rejected})
+                               error=tr("没有可用的帧", "No usable frames"), data={"rejected": rejected})
 
         comb = combine_frames(results)
         groups = comb.get("groups", [])
@@ -165,35 +166,35 @@ class AnalyseSlowDrift(BaseSkill):
         angles = sorted({round(float(u["angle_deg"]), 1) for u in used})
         if len(angles) < 2:
             data["warnings"].append(
-                "所有帧都是同一个扫描角（%s°）—— **分不开「时间性扰动」和「样品上的"
-                "结构」**，因为后者只有换角度才会露出马脚。这一批只能算重复。"
+                tr("所有帧都是同一个扫描角（%s°）—— **分不开「时间性扰动」和「样品上的"
+                "结构」**，因为后者只有换角度才会露出马脚。这一批只能算重复。", "All frames have the same scan angle (%s deg) - **\"temporal disturbance\" cannot be told apart from \"structure on the sample\"**, because the latter only gives itself away when the angle is changed. This batch can only count as repetition.")
                 % angles[0] if angles else "?")
         data["has_two_distinct_frame_lengths"] = has_two_spans
         if not has_two_spans:
             data["warnings"].append(
-                "这批帧没有**实质不同**的帧长（差异都不到 25%），所以「不是谱"
+                tr("这批帧没有**实质不同**的帧长（差异都不到 25%），所以「不是谱"
                 "泄漏」这一关没考过 —— 列出来的成分只经过了跨扫描角那一关。"
-                "补一批帧长差一半的帧，判据会强得多。")
+                "补一批帧长差一半的帧，判据会强得多。", "This batch has no frames with **substantially different** frame lengths (differences all under 25%), so the \"not spectral leakage\" test has not been passed - the listed components have only passed the cross-scan-angle test. Add a batch of frames with frame lengths differing by half, and the criterion becomes much stronger."))
         if solid:
             best = solid[0]
             data["advice"] = (
-                "站得住的最强成分：周期 %.0f s（%.4f Hz），幅度中位 %.1f pm，"
+                tr("站得住的最强成分：周期 %.0f s（%.4f Hz），幅度中位 %.1f pm，"
                 "在 %d 个不同扫描角上出现且不是帧长的整数分之一。"
                 "接下来该问的是「什么东西以这个周期在动」—— 它在慢轴上的幅度是 Z 的"
-                "共模起伏，可以拿去和环境历史（温度 / 真空 / 氦位）对时间。"
+                "共模起伏，可以拿去和环境历史（温度 / 真空 / 氦位）对时间。", "Strongest component that holds up: period %.0f s (%.4f Hz), median amplitude %.1f pm, appearing at %d different scan angles and not an integer fraction of the frame length. The next question is \"what is moving with this period\" - its amplitude on the slow axis is a common-mode fluctuation of Z, which can be matched in time against the environment history (temperature / vacuum / helium level).")
                 % (best["period_s"], best["freq_hz"],
                    best["amplitude_m_median"] * 1e12, best["n_distinct_angles"]))
         elif groups:
             data["advice"] = (
-                "找到 %d 条候选成分，但没有一条同时满足「跨扫描角」和「不是帧长"
-                "谐波」。%s"
+                tr("找到 %d 条候选成分，但没有一条同时满足「跨扫描角」和「不是帧长"
+                "谐波」。%s", "Found %d candidate components, but none satisfies both \"across scan angles\" and \"not a frame-length harmonic\". %s")
                 % (len(groups),
-                   "先补一批**不同帧长**的帧（改 line_time 或行数）。"
+                   tr("先补一批**不同帧长**的帧（改 line_time 或行数）。", "First add a batch of frames with **different frame lengths** (change line_time or number of lines).")
                    if comb.get("single_frame_length") else
-                   "先补一批**不同扫描角**的帧。"))
+                   tr("先补一批**不同扫描角**的帧。", "First add a batch of frames at **different scan angles**.")))
         else:
             data["advice"] = (
-                "这批帧上没有高过本底的周期成分 —— 慢扰动在这段时间里不显著。"
-                "残差 rms 中位 %.1f pm 可以当作「这段时间的慢起伏总量」。"
+                tr("这批帧上没有高过本底的周期成分 —— 慢扰动在这段时间里不显著。"
+                "残差 rms 中位 %.1f pm 可以当作「这段时间的慢起伏总量」。", "No periodic component above the noise floor in this batch of frames - the slow disturbance is not significant over this period. The median residual rms of %.1f pm can be taken as \"the total slow fluctuation over this period\".")
                 % (float(np.median(comb.get("residual_rms_m") or [0])) * 1e12))
         return SkillResult(skill_name=name, success=True, data=data)

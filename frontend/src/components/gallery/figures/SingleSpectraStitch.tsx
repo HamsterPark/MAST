@@ -1,6 +1,7 @@
-// 已标记页：不属于任何系列的单根谱，按目录拼接（绘图实现 draw_sts.py 的「单根谱拼接」）。
+// Marked page: single spectra that belong to no series, stitched per directory.
 //
-// 绘图实现的规则原样：带标记、是谱、不在任何系列里，按目录成组。拼不拼、按哪几条拼由人点。
+// Rule: the spectrum carries a mark and is in no series; items are grouped by directory.
+// Whether to stitch, and which ones, is up to the user.
 
 import { useMemo, useState } from "react";
 import { dirLabel, num } from "@/lib/gallery/format";
@@ -10,6 +11,7 @@ import { useMarksStore } from "../marksStore";
 import { SMALL_BTN } from "../bits";
 import { Sub } from "../ListHeads";
 import { DEFAULT_KAPPA, KappaInput, useStitchStarter } from "./StitchControls";
+import { tr } from "@/lib/i18n";
 
 export function SingleSpectraStitch({ model }: { model: GalleryModel }) {
   const items = useMarksStore((s) => s.doc.items);
@@ -21,19 +23,23 @@ export function SingleSpectraStitch({ model }: { model: GalleryModel }) {
 
   return (
     <>
-      <h2 className="mb-1.5 mt-[18px] text-[1.05rem] font-semibold">不属于任何系列的单根谱 · {total}</h2>
+      <h2 className="mb-1.5 mt-[18px] text-[1.05rem] font-semibold">
+        {tr("不属于任何系列的单根谱", "Single spectra not in any series")} · {total}
+      </h2>
       {!groups.length ? (
-        <Sub>没有：带标记、又不在任何系列里的谱才会列在这里。</Sub>
+        <Sub>{tr("没有：带标记、又不在任何系列里的谱才会列在这里。", "None: only spectra that carry a mark and are in no series are listed here.")}</Sub>
       ) : (
         <>
           <Sub>
-            同一目录里几段不同偏压范围的谱可以拼成一条宽范围曲线：覆盖 0 V、sweep×点数最多的一段为核心（同范围同 Zoff 的几条先平均），
-            其余各段按接缝附近的电流比乘系数接上。各段不在同一点时图上会写明相距多远，拼接只作参考。
+            {tr(
+              "同一目录里几段不同偏压范围的谱可以拼成一条宽范围曲线：覆盖 0 V、sweep×点数最多的一段为核心（同范围同 Zoff 的几条先平均），其余各段按接缝附近的电流比乘系数接上。各段不在同一点时图上会写明相距多远，拼接只作参考。",
+              "Spectra covering different bias ranges in the same directory can be stitched into one wide-range curve: the segment that covers 0 V and has the most sweeps × points is the core (several with the same range and Zoff are averaged first); the other segments are joined with a factor from the current ratio near the seams. When segments were not taken at the same point, the figure states how far apart they are, and the stitch is for reference only.",
+            )}
           </Sub>
           <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[13px]">
             <KappaInput value={kappa} onChange={setKappa} />
             <button type="button" className={SMALL_BTN} onClick={() => start([], kappa, true)}>
-              全部按目录拼接
+              {tr("全部按目录拼接", "Stitch all by directory")}
             </button>
           </div>
           <ul className="space-y-1 text-[13px]">
@@ -50,7 +56,7 @@ export function SingleSpectraStitch({ model }: { model: GalleryModel }) {
                     .join(" · ")}
                 </span>
                 <button type="button" className={SMALL_BTN} onClick={() => start(g.ids, kappa)}>
-                  拼接出图（{g.ids.length} 条）
+                  {tr(`拼接出图（${g.ids.length} 条）`, `Stitch figure (${g.ids.length})`)}
                 </button>
               </li>
             ))}

@@ -128,20 +128,32 @@ if __name__ == "__main__":
 
 # ── 端口可以显式停用 ────────────────────────────────────────────────────
 
-def test_a_port_set_to_zero_is_skipped_not_retried(monkeypatch):
-    """端口为零表示显式停用该角色：不连接、不重试，也不生成链路故障日志。"""
+def test_a_port_set_to_zero_is_skipped_not_retried(monkeypatch, unused_tcp_ports):
+    """端口=0 ⇒ **显式停用**该角色:不连、不重连、不刷日志。
+
+    用户可能要腾一个 Nanonis 端口给外部直连。不设这条也能腾 ——
+    让 MAST 连不上就行 —— 但那样它会一直重试、日志刷屏,而且「这个口挂了」
+    的错误路径会长期亮着,把真正的故障盖掉。**停用要是一个决定,不是一个故障。**
+
+    另外三个角色用**保证没人监听**的端口(``unused_tcp_ports``):从前它们用 6501–6503 的
+    默认值并假设「没人在听」,而本机的 Nanonis 模拟器常开着 —— 测试真连上去、占住了
+    别人的口。
+    """
     cfg = _Config()
+    cfg.host = "127.0.0.1"
+    cfg.port_main, cfg.port_monitor, cfg.port_data = unused_tcp_ports(3)
     cfg.port_emergency = 0
     pool = ConnectionPool(cfg)
-    results = {}
     try:
         results = pool.connect_all()
-    except Exception:  # noqa: BLE001 — 连不上真端口是正常的,只看 emergency
-        pass
-    assert results.get("emergency") is False
-    assert "emergency" not in pool._connections
-    # 停用的角色不该进重连流程
-    assert pool._reconnect_role("emergency") is False
+        # 停用的那个被跳过;其余三个**真的去连了**、而且连不上(没人监听) —— 证明跳过的只是 0 口
+        assert results == {"main": False, "monitor": False, "data": False, "emergency": False}
+        assert "emergency" not in pool._connections
+        # 停用的角色不该进重连流程(池子还开着:关了的池子不重连,那样这条就证明不了什么)
+        assert pool._closed is False
+        assert pool._reconnect_role("emergency") is False
+    finally:
+        pool.close_all()
 
 
 def test_the_env_var_can_disable_a_role(monkeypatch):

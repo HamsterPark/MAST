@@ -15,18 +15,21 @@ import {
 import { Field, TextField, Button, Modal, useToast } from "@/components/controls";
 import { SkillEjectPanel } from "./SkillEjectPanel";
 import { SkillPacksPanel } from "./SkillPacksPanel";
+import { tr } from "@/lib/i18n";
 
-// ── 技能覆盖层 —— 改 skill 不用发新版本 ─────────────────────────────────────
+// ── Skill overlay — change a skill without shipping a new version ──────────
 //
-// 这个面板的第一职责**不是**列条目，是回答一个问题：**现在生效了吗？**
+// The panel's first job is not listing entries but answering one question: is it in effect now?
 //
-// 这个功能有三条独立的失败路径，全都不报错：
-//   · 重载排队了（任务在跑）—— 注册表都没动；
-//   · 注册表换了，但 agent 图还没重建 —— 模型手上仍是旧工具；
-//   · 重建被调度了但失败了。
-// 所以后端每个响应都带 fingerprint_matches / agent_path_pending，这里按它们显示，
-// **不按 ok**。三态而不是两态：null = 判断不了（进程刚起、还没建过工具表），
-// 它必须显示成灰色的「未知」，不是绿色的「已生效」。
+// The feature has three independent failure paths, none of which raises an error:
+//   · the reload was queued (a task is running), so the registry has not changed;
+//   · the registry changed but the agent graph has not been rebuilt, so the model still holds
+//     the old tools;
+//   · the rebuild was scheduled but failed.
+// Every backend response therefore carries fingerprint_matches / agent_path_pending, and the UI
+// follows those, not `ok`. The state is three-valued: null means undecidable (process just
+// started, tool table never built) and must render as a grey "Unknown", never a green
+// "In effect".
 
 type EntryRow = {
   path: string;
@@ -52,11 +55,11 @@ type SkillInfo = {
   described: string;
 };
 
-/** 每个条目基于的内置版之后变过没有。
+/** Whether the built-in version each entry was based on has changed since.
  *
- * 这是「以为生效」的另一个变体，而且更隐蔽：覆盖**确实生效了**，但它基于三个
- * 版本前的代码，上游后来修的 bug 被它原样盖了回去。所以并进主列表显示，
- * 不做成一个要人记得去点的按钮 —— 靠「记得检查」的守卫等于没有守卫。
+ * This is a subtler variant of "assumed to be in effect": the overlay is in effect but is based
+ * on code several versions old, so it reverts upstream bug fixes. It is therefore shown in the
+ * main list rather than behind a button someone has to remember to click.
  */
 function useDrift() {
   return useQuery({
@@ -80,7 +83,7 @@ function useOverlay() {
   });
 }
 
-/** 生效状态横幅 —— 三态，而且「未知」不能长得像「已生效」。 */
+/** Effect-status banner: three states, and "unknown" must not look like "in effect". */
 function EffectBanner({
   matches,
   registryOverlaid,
@@ -95,11 +98,15 @@ function EffectBanner({
   if (pendingRebuild) {
     return (
       <Card>
-        <Badge tone="WARN">已排队</Badge>{" "}
-        当前有任务在运行，覆盖层重载<strong>已排队</strong>——任务结束后自动生效。
+        <Badge tone="WARN">{tr("已排队", "Queued")}</Badge>{" "}
+        {tr("当前有任务在运行，覆盖层重载", "A task is running; the overlay reload is ")}
+        <strong>{tr("已排队", "queued")}</strong>
+        {tr("——任务结束后自动生效。", " and takes effect automatically when the task ends.")}
         <div style={{ opacity: 0.75, marginTop: 4, fontSize: "0.9em" }}>
-          正在跑的流程从头到尾用它启动时那一版：技能是逐步现查的，中途换会让同一次
-          实验的前后半段行为不一致。
+          {tr(
+            "正在跑的流程从头到尾用它启动时那一版：技能是逐步现查的，中途换会让同一次实验的前后半段行为不一致。",
+            "A running workflow uses the version it started with: skills are looked up step by step, and swapping mid-run would make the two halves of one experiment behave differently.",
+          )}
         </div>
       </Card>
     );
@@ -107,9 +114,12 @@ function EffectBanner({
   if (matches === true) {
     return (
       <Card>
-        <Badge tone="AUTO">已生效</Badge>{" "}
-        agent 手上的工具表与注册表一致
-        {agentOverlaid.length > 0 && <>（{agentOverlaid.length} 个覆盖版技能）</>}。
+        <Badge tone="AUTO">{tr("已生效", "In effect")}</Badge>{" "}
+        {tr("agent 手上的工具表与注册表一致", "The agent's tool table matches the registry")}
+        {agentOverlaid.length > 0 && (
+          <>{tr(`（${agentOverlaid.length} 个覆盖版技能）`, ` (${agentOverlaid.length} overlaid skills)`)}</>
+        )}
+        {tr("。", ".")}
       </Card>
     );
   }
@@ -117,12 +127,16 @@ function EffectBanner({
     const missing = registryOverlaid.filter((n) => !agentOverlaid.includes(n));
     return (
       <Card>
-        <Badge tone="DANGEROUS">尚未生效</Badge>{" "}
-        注册表已经换了，但 <strong>agent 手上那张工具表还是旧的</strong> —— 模型现在调的仍是
-        覆盖之前的实现。点上面的「重新加载技能」。
+        <Badge tone="DANGEROUS">{tr("尚未生效", "Not in effect yet")}</Badge>{" "}
+        {tr("注册表已经换了，但 ", "The registry has changed, but ")}
+        <strong>{tr("agent 手上那张工具表还是旧的", "the agent's tool table is still the old one")}</strong>
+        {tr(
+          " —— 模型现在调的仍是覆盖之前的实现。点上面的「重新加载技能」。",
+          ": the model is still calling the pre-overlay implementation. Click \"Reload skills\" above.",
+        )}
         {missing.length > 0 && (
           <div style={{ opacity: 0.75, marginTop: 4, fontSize: "0.9em" }}>
-            agent 还看不到：{missing.join("、")}
+            {tr("agent 还看不到：", "Not yet visible to the agent: ")}{missing.join(tr("、", ", "))}
           </div>
         )}
       </Card>
@@ -130,11 +144,15 @@ function EffectBanner({
   }
   return (
     <Card>
-      <Badge tone="INFO">未知</Badge>{" "}
-      还没有建过 agent 工具表（服务刚启动，或者从未跑过任务），<strong>判断不了</strong>是否生效。
+      <Badge tone="INFO">{tr("未知", "Unknown")}</Badge>{" "}
+      {tr("还没有建过 agent 工具表（服务刚启动，或者从未跑过任务），", "The agent tool table has not been built yet (the service just started, or no task has run), so it ")}
+      <strong>{tr("判断不了", "cannot be determined")}</strong>
+      {tr("是否生效。", " whether the overlay is in effect.")}
       <div style={{ opacity: 0.75, marginTop: 4, fontSize: "0.9em" }}>
-        这不等于「没生效」，也不等于「已生效」—— 跑一次任务或点一次重载之后这里
-        才有答案。
+        {tr(
+          "这不等于「没生效」，也不等于「已生效」—— 跑一次任务或点一次重载之后这里才有答案。",
+          "This does not mean \"not in effect\" or \"in effect\"; the answer appears after a task runs or a reload is triggered.",
+        )}
       </div>
     </Card>
   );
@@ -161,18 +179,19 @@ export function SkillOverlayManager() {
       qc.invalidateQueries({ queryKey: ["skill-overlay"] });
       qc.invalidateQueries({ queryKey: ["skills", "catalog"] });
       if (d?.degraded) {
-        toast(d.reason || "覆盖层不可用", "err");
+        toast(d.reason || tr("覆盖层不可用", "Overlay unavailable"), "err");
       } else if (d?.status === "queued") {
-        // ⚠️ 排队**不是**成功。toast 只有 ok/err 两档，装不下三态；这里用 err：
-        // 宁可看起来重一点，也不能让「已安排」被读成「已完成」—— 用户会基于
-        // 「已生效」去做下一件事。权威的三态显示在下面的 EffectBanner。
-        toast("尚未生效：任务运行中，已排队 —— 当前任务结束后自动生效", "err");
+        // Queued is not success. The toast only has ok/err levels, which cannot express three
+        // states, so use err: it is better to look heavy than to have "scheduled" read as
+        // "done", since the user would proceed as if it were in effect. The authoritative
+        // three-state display is the EffectBanner below.
+        toast(tr("尚未生效：任务运行中，已排队 —— 当前任务结束后自动生效", "Not in effect yet: a task is running, reload queued. It takes effect when the current task ends."), "err");
       } else if (d?.failed?.length) {
-        toast(`${d.failed.length} 个覆盖模块被拒绝，见下方原因`, "err");
+        toast(tr(`${d.failed.length} 个覆盖模块被拒绝，见下方原因`, `${d.failed.length} overlay module(s) rejected; see the reasons below`), "err");
       } else if (d?.agent_path_pending) {
-        toast("尚未生效：注册表已更新，但 agent 工具表还没跟上", "err");
+        toast(tr("尚未生效：注册表已更新，但 agent 工具表还没跟上", "Not in effect yet: the registry is updated but the agent tool table has not caught up"), "err");
       } else {
-        toast(`已生效（${d?.applied?.length ?? 0} 个覆盖模块）`, "ok");
+        toast(tr(`已生效（${d?.applied?.length ?? 0} 个覆盖模块）`, `In effect (${d?.applied?.length ?? 0} overlay module(s))`), "ok");
       }
     },
     onError: (e: any) => toast(String(e?.message || e), "err"),
@@ -188,10 +207,11 @@ export function SkillOverlayManager() {
     },
     onSuccess: (d: any) => {
       qc.invalidateQueries({ queryKey: ["skill-overlay"] });
-      if (!d?.ok) toast(d?.reason || "写入失败", "err");
-      // 刻意不自动重载：写清单是一次编辑，让它生效是一次**决定**。
-      // 所以文案必须把「还差一次重载」说出来，否则勾完复选框就以为改完了。
-      else toast("清单已更新，尚未生效 —— 点「重新加载技能」", "err");
+      if (!d?.ok) toast(d?.reason || tr("写入失败", "Write failed"), "err");
+      // Deliberately no automatic reload: writing the manifest is an edit, making it take effect
+      // is a separate decision. The message must say a reload is still needed, otherwise ticking
+      // the checkbox looks like the change is done.
+      else toast(tr("清单已更新，尚未生效 —— 点「重新加载技能」", "Manifest updated, not in effect yet: click \"Reload skills\""), "err");
     },
     onError: (e: any) => toast(String(e?.message || e), "err"),
   });
@@ -206,7 +226,7 @@ export function SkillOverlayManager() {
     },
     onSuccess: (d: any) => {
       qc.invalidateQueries({ queryKey: ["skill-overlay"] });
-      toast(d?.ok ? d.summary || "已恢复到启动基线" : d?.reason || "恢复失败",
+      toast(d?.ok ? d.summary || tr("已恢复到启动基线", "Restored to the startup baseline") : d?.reason || tr("恢复失败", "Restore failed"),
             d?.ok ? "ok" : "err");
     },
     onError: (e: any) => toast(String(e?.message || e), "err"),
@@ -223,36 +243,36 @@ export function SkillOverlayManager() {
 
   const cols = useMemo<ColumnDef<EntryRow>[]>(
     () => [
-      { accessorKey: "path", header: "文件" },
+      { accessorKey: "path", header: tr("文件", "File") },
       {
         id: "覆盖",
-        header: "覆盖",
+        header: tr("覆盖", "Overrides"),
         cell: ({ row }) =>
           row.original.overlay_of ? (
             <code style={{ fontSize: "0.85em" }}>{row.original.overlay_of}</code>
           ) : (
-            <span style={{ opacity: 0.6 }}>新增</span>
+            <span style={{ opacity: 0.6 }}>{tr("新增", "New")}</span>
           ),
       },
       {
         id: "状态",
-        header: "状态",
+        header: tr("状态", "Status"),
         cell: ({ row }) => {
           const r = row.original;
-          if (!r.exists) return <Badge tone="DANGEROUS">文件不在</Badge>;
-          if (!r.valid_path) return <Badge tone="DANGEROUS">路径非法</Badge>;
-          if (!r.enabled) return <Badge tone="INFO">未启用</Badge>;
-          if (r.applied) return <Badge tone="AUTO">已生效</Badge>;
-          // 启用了、文件也在、却没生效 —— 要么被拒，要么还没重载过。
-          return <Badge tone="WARN">未加载</Badge>;
+          if (!r.exists) return <Badge tone="DANGEROUS">{tr("文件不在", "File missing")}</Badge>;
+          if (!r.valid_path) return <Badge tone="DANGEROUS">{tr("路径非法", "Invalid path")}</Badge>;
+          if (!r.enabled) return <Badge tone="INFO">{tr("未启用", "Disabled")}</Badge>;
+          if (r.applied) return <Badge tone="AUTO">{tr("已生效", "In effect")}</Badge>;
+          // Enabled and present but not in effect: either rejected or not yet reloaded.
+          return <Badge tone="WARN">{tr("未加载", "Not loaded")}</Badge>;
         },
       },
       {
         id: "技能",
-        header: "技能",
+        header: tr("技能", "Skills"),
         cell: ({ row }) =>
           row.original.skills.length ? (
-            <span>{row.original.skills.join("、")}</span>
+            <span>{row.original.skills.join(tr("、", ", "))}</span>
           ) : (
             <span style={{ opacity: 0.6 }}>—</span>
           ),
@@ -277,9 +297,9 @@ export function SkillOverlayManager() {
               }
               disabled={setEntry.isPending}
             >
-              {row.original.enabled ? "停用" : "启用"}
+              {row.original.enabled ? tr("停用", "Disable") : tr("启用", "Enable")}
             </Button>
-            <Button onClick={() => setDetail(row.original)}>详情</Button>
+            <Button onClick={() => setDetail(row.original)}>{tr("详情", "Details")}</Button>
           </div>
         ),
       },
@@ -290,50 +310,64 @@ export function SkillOverlayManager() {
   if (q.isPending) return <Spinner />;
   if (q.isError) return <ErrorNote error={q.error} />;
   if (q.data?.degraded)
-    return <DegradedNote what={`技能覆盖层（${q.data.reason || "不可用"}）`} />;
+    return <DegradedNote what={tr(`技能覆盖层（${q.data.reason || "不可用"}）`, `skill overlay (${q.data.reason || "unavailable"})`)} />;
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <Card>
         <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-          <Field label="管理员 PIN（未设置则留空）">
+          <Field label={tr("管理员 PIN（未设置则留空）", "Admin PIN (leave empty if not set)")}>
             <TextField value={pin} onChange={setPin} placeholder="" />
           </Field>
           <Button onClick={() => reload.mutate()} disabled={reload.isPending}>
-            {reload.isPending ? "重新加载中…" : "重新加载技能"}
+            {reload.isPending ? tr("重新加载中…", "Reloading…") : tr("重新加载技能", "Reload skills")}
           </Button>
           <Button onClick={() => restore.mutate()} disabled={restore.isPending}>
-            全部恢复内置
+            {tr("全部恢复内置", "Restore all built-ins")}
           </Button>
         </div>
         <div style={{ opacity: 0.75, marginTop: 8, fontSize: "0.9em" }}>
-          覆盖层目录：<code>{q.data?.overlay_dir}</code>
+          {tr("覆盖层目录：", "Overlay directory: ")}<code>{q.data?.overlay_dir}</code>
           <br />
-          把改好的 <code>.py</code> 放进去（路径就是它覆盖的模块，例如{" "}
-          <code>builtins/bias.py</code> 覆盖 <code>mast.skills.builtins.bias</code>），
-          启用，然后重新加载。覆盖<strong>只能收紧</strong>安全画像 —— 放宽包络请走「技能详情编辑」
-          里的管理员覆写。
+          {tr("把改好的 ", "Put the edited ")}<code>.py</code>
+          {tr(" 放进去（路径就是它覆盖的模块，例如", " files in (the path is the module it overrides, e.g.")}{" "}
+          <code>builtins/bias.py</code> {tr("覆盖", "overrides")} <code>mast.skills.builtins.bias</code>
+          {tr("），启用，然后重新加载。覆盖", "), enable them, then reload. An overlay can ")}
+          <strong>{tr("只能收紧", "only tighten")}</strong>
+          {tr(
+            "安全画像 —— 放宽包络请走「技能详情编辑」里的管理员覆写。",
+            " the safety profile; to widen the envelope use the admin overrides in \"Skill editor\".",
+          )}
         </div>
       </Card>
 
       {drifted.length > 0 && (
         <Card>
-          <Badge tone="WARN">内置版已变</Badge>{" "}
-          {drifted.length} 份覆盖基于的是更早版本的内置代码：
-          {drifted.map((d) => d.rel).join("、")}。
+          <Badge tone="WARN">{tr("内置版已变", "Built-in changed")}</Badge>{" "}
+          {tr(
+            `${drifted.length} 份覆盖基于的是更早版本的内置代码：`,
+            `${drifted.length} overlay(s) are based on an earlier version of the built-in code: `,
+          )}
+          {drifted.map((d) => d.rel).join(tr("、", ", "))}{tr("。", ".")}
           <div style={{ opacity: 0.75, marginTop: 4, fontSize: "0.9em" }}>
-            覆盖是<strong>生效的</strong> —— 问题在于它可能把上游后来的修复一起盖了
-            回去。重新导出一份，再把你的改动挪过去。
+            {tr("覆盖是", "The overlay is ")}<strong>{tr("生效的", "in effect")}</strong>
+            {tr(
+              " —— 问题在于它可能把上游后来的修复一起盖了回去。重新导出一份，再把你的改动挪过去。",
+              ", but it may revert later upstream fixes. Export a fresh copy and move your changes onto it.",
+            )}
           </div>
         </Card>
       )}
       {driftUnknown.length > 0 && (
         <Card>
-          <Badge tone="INFO">判断不了</Badge>{" "}
-          {driftUnknown.length} 份覆盖对不出基于哪一版内置代码（
-          {driftUnknown.map((d) => d.rel).join("、")}）。
+          <Badge tone="INFO">{tr("判断不了", "Undecidable")}</Badge>{" "}
+          {tr(
+            `${driftUnknown.length} 份覆盖对不出基于哪一版内置代码（`,
+            `${driftUnknown.length} overlay(s) cannot be matched to a built-in version (`,
+          )}
+          {driftUnknown.map((d) => d.rel).join(tr("、", ", "))}{tr("）。", ").")}
           <div style={{ opacity: 0.75, marginTop: 4, fontSize: "0.9em" }}>
-            这不等于「没变」 —— 手写的覆盖没有 sidecar，无从比对。
+            {tr("这不等于「没变」 —— 手写的覆盖没有 sidecar，无从比对。", "This does not mean \"unchanged\": a hand-written overlay has no sidecar to compare against.")}
           </div>
         </Card>
       )}
@@ -347,25 +381,28 @@ export function SkillOverlayManager() {
 
       {(q.data?.baseline_drift ?? []).length > 0 && (
         <Card>
-          <Badge tone="DANGEROUS">基线漂移</Badge>{" "}
-          下列技能既不是内置版、也不由覆盖层解释 —— 说明某次回滚没回干净：
-          {(q.data!.baseline_drift as string[]).join("、")}。
-          可以用「全部恢复内置」硬复位。
+          <Badge tone="DANGEROUS">{tr("基线漂移", "Baseline drift")}</Badge>{" "}
+          {tr(
+            "下列技能既不是内置版、也不由覆盖层解释 —— 说明某次回滚没回干净：",
+            "These skills are neither the built-in version nor explained by the overlay, so an earlier rollback was not clean: ",
+          )}
+          {(q.data!.baseline_drift as string[]).join(tr("、", ", "))}{tr("。", ".")}{" "}
+          {tr("可以用「全部恢复内置」硬复位。", "Use \"Restore all built-ins\" for a hard reset.")}
         </Card>
       )}
 
       {lastReload && (
         <Card>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>上一次重载</div>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>{tr("上一次重载", "Last reload")}</div>
           <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: "0.9em" }}>
             {lastReload}
           </pre>
         </Card>
       )}
 
-      <Section title={`覆盖层条目（${entries.length}）`}>
+      <Section title={tr(`覆盖层条目（${entries.length}）`, `Overlay entries (${entries.length})`)}>
         {entries.length === 0 ? (
-          <EmptyNote label="覆盖层里还没有条目" />
+          <EmptyNote label={tr("覆盖层里还没有条目", "No entries in the overlay yet")} />
         ) : (
           <DataTable columns={cols} data={entries} />
         )}
@@ -374,18 +411,21 @@ export function SkillOverlayManager() {
       {untracked.length > 0 && (
         <Card>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>
-            目录里有、但清单里没登记（{untracked.length}）
+            {tr(`目录里有、但清单里没登记（${untracked.length}）`, `In the directory but not in the manifest (${untracked.length})`)}
           </div>
           <div style={{ opacity: 0.75, fontSize: "0.9em", marginBottom: 8 }}>
-            拷进目录<strong>不会</strong>自动生效 —— 启用是一次显式动作。不单独列出来的话，
-            这些文件会被当成「怎么改了没反应」。
+            {tr("拷进目录", "Copying a file into the directory ")}<strong>{tr("不会", "does not")}</strong>
+            {tr(
+              "自动生效 —— 启用是一次显式动作。不单独列出来的话，这些文件会被当成「怎么改了没反应」。",
+              " take effect automatically; enabling is an explicit action. Without this list these files would look like edits that do nothing.",
+            )}
           </div>
           <div style={{ display: "grid", gap: 6 }}>
             {untracked.map((p) => (
               <div key={p} style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <code style={{ flex: 1 }}>{p}</code>
                 <Button onClick={() => setEntry.mutate({ path: p, enabled: true })}>
-                  登记并启用
+                  {tr("登记并启用", "Register and enable")}
                 </Button>
               </div>
             ))}
@@ -394,14 +434,14 @@ export function SkillOverlayManager() {
       )}
 
       {skills.length > 0 && (
-        <Section title={`已被覆盖的技能（${skills.length}）`}>
+        <Section title={tr(`已被覆盖的技能（${skills.length}）`, `Overlaid skills (${skills.length})`)}>
           <div style={{ display: "grid", gap: 6 }}>
             {skills.map((s) => (
               <Card key={s.name}>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <strong>{s.name}</strong>
                   <Badge tone={s.signature.startsWith("verified") ? "AUTO" : "INFO"}>
-                    {s.signature.startsWith("verified") ? "已签名" : "本机未签名"}
+                    {s.signature.startsWith("verified") ? tr("已签名", "Signed") : tr("本机未签名", "Unsigned locally")}
                   </Badge>
                 </div>
                 <div style={{ opacity: 0.8, fontSize: "0.9em", marginTop: 4 }}>
@@ -416,30 +456,30 @@ export function SkillOverlayManager() {
       <Modal
         open={!!detail}
         onClose={() => setDetail(null)}
-        title={detail ? `覆盖层条目：${detail.path}` : ""}
+        title={detail ? tr(`覆盖层条目：${detail.path}`, `Overlay entry: ${detail.path}`) : ""}
         wide
       >
         {detail && (
           <div style={{ display: "grid", gap: 8 }}>
             <div>
-              覆盖：
-              <code>{detail.overlay_of || "（纯新增，不覆盖任何内置模块）"}</code>
+              {tr("覆盖：", "Overrides: ")}
+              <code>{detail.overlay_of || tr("（纯新增，不覆盖任何内置模块）", "(new file, overrides no built-in module)")}</code>
             </div>
-            <div>文件存在：{detail.exists ? "是" : "否"}</div>
-            <div>已启用：{detail.enabled ? "是" : "否"}</div>
-            <div>本轮生效：{detail.applied ? "是" : "否"}</div>
-            <div>提供技能：{detail.skills.join("、") || "—"}</div>
+            <div>{tr("文件存在：", "File exists: ")}{detail.exists ? tr("是", "Yes") : tr("否", "No")}</div>
+            <div>{tr("已启用：", "Enabled: ")}{detail.enabled ? tr("是", "Yes") : tr("否", "No")}</div>
+            <div>{tr("本轮生效：", "In effect this round: ")}{detail.applied ? tr("是", "Yes") : tr("否", "No")}</div>
+            <div>{tr("提供技能：", "Provides skills: ")}{detail.skills.join(tr("、", ", ")) || "—"}</div>
             <div>
               sha256：<code>{detail.sha256 || "—"}</code>
             </div>
             {detail.path_error && (
               <Card>
-                <Badge tone="DANGEROUS">路径非法</Badge> {detail.path_error}
+                <Badge tone="DANGEROUS">{tr("路径非法", "Invalid path")}</Badge> {detail.path_error}
               </Card>
             )}
             {detail.error && (
               <Card>
-                <Badge tone="DANGEROUS">被拒绝</Badge>
+                <Badge tone="DANGEROUS">{tr("被拒绝", "Rejected")}</Badge>
                 <pre style={{ margin: "6px 0 0", whiteSpace: "pre-wrap" }}>
                   {detail.error}
                 </pre>

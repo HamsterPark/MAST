@@ -28,6 +28,7 @@ LAZY-imported inside each handler in try/except.
 
 from __future__ import annotations
 
+from mast.i18n import tr
 import base64
 import logging
 
@@ -56,11 +57,20 @@ router = APIRouter(tags=["chat_voice"])
 # are presentation hints, not behaviour; the agent core remains the source of
 # truth for what each instruction actually does.
 _CURATED_QUICK_PROMPTS: tuple[tuple[str, str], ...] = (
-    ("当前状态", "报告当前仪器状态：偏压、电流、Z 控制器与扫描状态。"),
-    ("扫一张图", "用当前参数扫描一张图并把结果显示出来。"),
-    ("STS 谱", "在当前位置采集一条 STS 偏压谱。"),
-    ("调针", "针尖质量看起来不好，请执行一次温和的调针流程。"),
-    ("撤针", "安全撤针：关闭 Z 控制器并把针退到安全高度。"),
+    (tr("当前状态", "Status"),
+     tr("报告当前仪器状态：偏压、电流、Z 控制器与扫描状态。",
+        "Report the current instrument state: bias, current, Z controller and scan state.")),
+    (tr("扫一张图", "Scan a frame"),
+     tr("用当前参数扫描一张图并把结果显示出来。",
+        "Scan one frame with the current parameters and show the result.")),
+    (tr("STS 谱", "STS spectrum"),
+     tr("在当前位置采集一条 STS 偏压谱。", "Acquire one STS bias spectrum at the current position.")),
+    (tr("调针", "Condition tip"),
+     tr("针尖质量看起来不好，请执行一次温和的调针流程。",
+        "The tip quality looks poor; please run one gentle tip-conditioning procedure.")),
+    (tr("撤针", "Withdraw tip"),
+     tr("安全撤针：关闭 Z 控制器并把针退到安全高度。",
+        "Withdraw the tip safely: turn off the Z controller and retract the tip to a safe height.")),
 )
 
 
@@ -111,7 +121,9 @@ def voice_transcribe(body: TranscribeRequest, request: Request) -> TranscribeRes
 
     Accepts either a base64 audio blob (+ mime) or an https audio URL. Degrades
     to ``ok=false, degraded=true`` when no voice key is configured or the ASR
-    call fails — never a 500."""
+    call fails — never a 500. Refused (403) while legacy features are off."""
+    from mast.legacy_gate import require_internal_llm
+    require_internal_llm("voice")
     if not body.audio_b64 and not body.audio_url:
         return TranscribeResult(ok=False, error="no audio supplied", degraded=False)
 
@@ -159,7 +171,10 @@ def voice_synthesize(body: SynthesizeRequest, request: Request) -> SynthesizeRes
     """Text → 24 kHz mono WAV via DashScopeVoiceClient.synthesize
     (qwen3-tts-flash). The WAV bytes are relayed base64-encoded so the SPA can
     build a ``data:audio/wav;base64,…`` URL directly. Degrades to
-    ``ok=false, degraded=true`` with no key / on failure — never a 500."""
+    ``ok=false, degraded=true`` with no key / on failure — never a 500.
+    Refused (403) while legacy features are off."""
+    from mast.legacy_gate import require_internal_llm
+    require_internal_llm("voice")
     text = (body.text or "").strip()
     if not text:
         return SynthesizeResult(ok=False, error="empty text", degraded=False)

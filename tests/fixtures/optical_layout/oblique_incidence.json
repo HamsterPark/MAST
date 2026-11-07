@@ -1,0 +1,150 @@
+{
+  "name": "oblique_incidence",
+  "description": "Non-right angles: a 30-degree beam meets a mirror whose normal is at 165 degrees (incidence 45) and leaves at 120 degrees; the detector is rounded to 0.01 mm so the hit is a few microns off its centre.",
+  "layout": {
+    "schema": 1,
+    "id": "oblique",
+    "title": "Oblique incidence",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 100.0,
+        "y_mm": 100.0,
+        "angle_deg": 30.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "m1",
+        "type": "mirror",
+        "label": "M1",
+        "x_mm": 400.0,
+        "y_mm": 273.21,
+        "angle_deg": 165.0,
+        "aperture_mm": 25.4,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det1",
+        "type": "detector",
+        "label": "D1",
+        "x_mm": 300.0,
+        "y_mm": 446.41,
+        "angle_deg": 300.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 100.0,
+              "y0": 100.0,
+              "x1": 399.998,
+              "y1": 273.204
+            },
+            {
+              "x0": 399.998,
+              "y0": 273.204,
+              "x1": 299.999,
+              "y1": 446.409
+            }
+          ],
+          "events": [
+            {
+              "component": "m1",
+              "action": "reflect",
+              "x": 399.998,
+              "y": 273.204,
+              "offset_mm": 0.006,
+              "incidence_deg": 45.0,
+              "path_mm": 346.408
+            },
+            {
+              "component": "det1",
+              "action": "stop",
+              "x": 299.999,
+              "y": 446.409,
+              "offset_mm": -0.002,
+              "incidence_deg": 0.0,
+              "path_mm": 546.408
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ]
+}

@@ -2,18 +2,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Badge, DegradedNote, EmptyNote, ErrorNote, Spinner } from "@/components/ui";
 import { Modal, useToast } from "@/components/controls";
+import { tr } from "@/lib/i18n";
 import { agentLabel } from "./registry";
 import { InterruptCard, fromPollRow, type ResolveArgs } from "./InterruptCard";
 
-// HITL interrupts viewer + RESOLVER — reproduces the old DANGEROUS / escalate
-// modal seam and (Wave E2) restores operator approval of DANGEROUS ops.
+// HITL interrupts viewer + resolver: the DANGEROUS / escalate modal, with operator
+// approval of DANGEROUS ops.
 //
 // Reads GET /api/agents/{id}/interrupts (poll) and resolves via
 // POST /api/agents/{id}/interrupts/{event_id}/resolve. The card body is the
 // SHARED InterruptCard, so a new interrupt kind (an agent's ask_user question,
-// a workflow route choice) renders here without a second implementation — the
-// three approval surfaces used to be three copies, and all three carried the
-// same bug that left route-style interrupts with no buttons at all.
+// a workflow route choice) renders here without a second implementation.
 //
 // LIVE-only: when the resolve response (or the list) reports degraded=true we
 // surface a small note and never freeze — the buttons stay clickable and report
@@ -65,18 +64,18 @@ export function InterruptsModal({
     onSuccess: (data, vars) => {
       const d = vars.args.decision;
       const label =
-        d === "approve" ? "批准"
-          : d === "reject" ? "拒绝"
-          : d === "edit" ? "编辑并批准"
-          : d === "answer" ? "回答" : `选择「${d}」`;
+        d === "approve" ? tr("批准", "approved")
+          : d === "reject" ? tr("拒绝", "rejected")
+          : d === "edit" ? tr("编辑并批准", "edited and approved")
+          : d === "answer" ? tr("回答", "answered") : tr(`选择「${d}」`, `chose "${d}"`);
       if (data?.ok && data?.applied) {
-        toast(`已${label}中断 ${vars.interrupt_id}`, "ok");
+        toast(tr(`已${label}中断 ${vars.interrupt_id}`, `Interrupt ${vars.interrupt_id} ${label}`), "ok");
       } else if (data?.status === "answer_invalid" || data?.status === "route_not_allowed") {
         // The backend left the worker blocked on purpose so this can be fixed —
         // do NOT let it read as "resolved".
-        toast(`未提交：${data?.detail ?? "回答无效"}，请修改后重试`, "err");
+        toast(tr(`未提交：${data?.detail ?? "回答无效"}，请修改后重试`, `Not submitted: ${data?.detail ?? "invalid answer"}. Please edit and retry`), "err");
       } else {
-        toast(`中断未生效（${data?.status ?? "degraded"}）：${data?.detail ?? "后端降级或中断已处理"}`, "err");
+        toast(tr(`中断未生效（${data?.status ?? "degraded"}）：${data?.detail ?? "后端降级或中断已处理"}`, `Interrupt not applied (${data?.status ?? "degraded"}): ${data?.detail ?? "backend degraded or interrupt already handled"}`), "err");
       }
       qc.invalidateQueries({ queryKey: ["agents", "interrupts", vars.agent_id] });
       qc.invalidateQueries({ queryKey: ["agents", "snapshot"] });
@@ -87,19 +86,19 @@ export function InterruptsModal({
   const interrupts = q.data?.interrupts ?? [];
 
   return (
-    <Modal open={open} onClose={onClose} title={`人机交互中断 · ${agentId ? agentLabel(agentId) : ""}`} wide>
+    <Modal open={open} onClose={onClose} title={tr(`人机交互中断 · ${agentId ? agentLabel(agentId) : ""}`, `Human-in-the-loop interrupts · ${agentId ? agentLabel(agentId) : ""}`)} wide>
       {node}
       {q.isPending && <Spinner />}
       {q.isError && <ErrorNote error={q.error} />}
-      {q.data && q.data.degraded && <DegradedNote what="中断队列" />}
+      {q.data && q.data.degraded && <DegradedNote what={tr("中断队列", "Interrupt queue")} />}
       {q.data && !q.data.degraded && (
         <div className="mb-3 flex items-center gap-3 text-sm text-mast-muted">
-          <span>共 {q.data.count} 个待处理中断</span>
-          {q.data.interrupt_gating && <Badge tone="WARN">门控开启</Badge>}
+          <span>{tr(`共 ${q.data.count} 个待处理中断`, `${q.data.count} pending interrupts`)}</span>
+          {q.data.interrupt_gating && <Badge tone="WARN">{tr("门控开启", "Gating on")}</Badge>}
         </div>
       )}
       {q.data && !q.data.degraded && interrupts.length === 0 && (
-        <EmptyNote label="当前无待处理中断。" />
+        <EmptyNote label={tr("当前无待处理中断。", "No pending interrupts.")} />
       )}
       <div className="space-y-3">
         {interrupts.map((it) => {

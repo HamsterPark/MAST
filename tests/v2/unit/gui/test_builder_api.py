@@ -208,6 +208,32 @@ class TestCompositeCrud:
         assert rep["ok"] is True                     # 警告级
         assert any("ghost_node" in w for w in rep["steps"][0]["warnings"])
 
+    @pytest.mark.parametrize("lang", ["zh", "en"])
+    def test_dangling_expr_warning_stays_advisory_in_either_language(self, client, lang):
+        """The advisory prefix is produced in the active language ("警告：" or
+        "Warning: "). Every consumer goes through is_advisory(), so an English
+        process must not turn a warning into a save-blocking error."""
+        from mast.i18n import use_lang
+
+        _, reg, _ = client
+        bad = dict(SPEC, nodes=[
+            {"type": "if", "id": "c", "cond": "ghost_name > 1",
+             "then": [{"type": "step", "id": "a", "skill": "FakeRead", "params": {}}],
+             "else": []},
+        ])
+        with use_lang(lang):
+            rep = builder_api.validate_spec_payload(bad, registry=reg)
+        warned = [p for p in rep["problems"] if "ghost_name" in p]
+        assert warned and all(builder_api.is_advisory(p) for p in warned), rep["problems"]
+        assert warned[0].startswith("Warning: " if lang == "en" else "警告：")
+        assert rep["ok"] is True
+
+    def test_is_advisory_accepts_both_prefixes_only(self):
+        assert builder_api.is_advisory("警告：x")
+        assert builder_api.is_advisory("Warning: x")
+        assert not builder_api.is_advisory("声明的 safety_level='auto' 低于子技能最高级")
+        assert not builder_api.is_advisory("Declared safety_level='auto' is below")
+
     def test_validate_depth_bomb_rejected(self, client):
         """review F6：深嵌套炸弹被显式深度上限拒绝，不打穿递归。"""
         c, *_ = client

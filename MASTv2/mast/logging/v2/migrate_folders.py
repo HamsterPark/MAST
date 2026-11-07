@@ -36,6 +36,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from mast.i18n import tr
+
 logger = logging.getLogger(__name__)
 
 #: 认领历史文件时，一个实验的时间窗在它最后一条记录之后再延多久。
@@ -69,7 +71,7 @@ def plan(*, storage: Any, scan_dirs: list[str] | None = None,
     try:
         exps = storage.list_experiments(limit=10000)
     except Exception as exc:  # noqa: BLE001
-        out["error"] = f"读取实验列表失败：{exc}"
+        out["error"] = tr(f"读取实验列表失败：{exc}", f"Failed to read the experiment list: {exc}")
         return out
 
     windows: list[tuple] = []
@@ -379,12 +381,14 @@ def rollback(plan_obj: dict) -> dict:
         try:
             meta = json.loads((p / "experiment.json").read_text(encoding="utf-8"))
             if str(meta.get("id")) != str(rec.get("id")):
-                out["errors"].append(f"{dir_name}: id 不匹配，拒绝删除")
+                out["errors"].append(tr(f"{dir_name}: id 不匹配，拒绝删除",
+                                        f"{dir_name}: id mismatch, refusing to delete"))
                 continue
             shutil.rmtree(p)
             out["removed"] += 1
         except FileNotFoundError:
-            out["errors"].append(f"{dir_name}: 没有 experiment.json，拒绝删除")
+            out["errors"].append(tr(f"{dir_name}: 没有 experiment.json，拒绝删除",
+                                    f"{dir_name}: no experiment.json, refusing to delete"))
         except Exception as exc:  # noqa: BLE001
             out["errors"].append(f"{dir_name}: {exc}")
     return out
@@ -432,19 +436,27 @@ def main(argv: "list[str] | None" = None) -> int:
 
     ap = argparse.ArgumentParser(
         prog="python -m mast.logging.v2.migrate_folders",
-        description="把已有实验记录迁进实验文件夹布局（盘点 → 建壳 → 认领文件）。"
-                    "认领是复制，原目录一个字节都不动；回滚 = 删掉 experiment_root。",
+        description=tr("把已有实验记录迁进实验文件夹布局（盘点 → 建壳 → 认领文件）。"
+                       "认领是复制，原目录一个字节都不动；回滚 = 删掉 experiment_root。",
+                       "Migrate existing experiment records into the experiment-folder layout "
+                       "(inventory -> create shells -> claim files). Claiming copies files and does "
+                       "not touch the original directories at all; rollback = delete experiment_root."),
     )
     ap.add_argument("--apply", action="store_true",
-                    help="真正执行（不给就只做 Stage 0 只读盘点）")
+                    help=tr("真正执行（不给就只做 Stage 0 只读盘点）",
+                            "Actually execute (without it only the read-only Stage 0 inventory runs)"))
     ap.add_argument("--stage", type=int, default=2, choices=(1, 2),
-                    help="1 = 只建目录+元数据；2 = 连历史文件一起认领（默认）")
+                    help=tr("1 = 只建目录+元数据；2 = 连历史文件一起认领（默认）",
+                            "1 = create directories + metadata only; 2 = also claim the historical files (default)"))
     ap.add_argument("--scan-dir", action="append", dest="scan_dirs",
-                    help="历史文件所在目录（可重复；不给则用默认扫描目录）")
+                    help=tr("历史文件所在目录（可重复；不给则用默认扫描目录）",
+                            "Directory holding historical files (repeatable; the default scan directories are used if omitted)"))
     ap.add_argument("--include-empty", action="store_true",
-                    help="连 0 action / 0 marker / 0 conversation 的空壳实验也建目录")
+                    help=tr("连 0 action / 0 marker / 0 conversation 的空壳实验也建目录",
+                            "Also create directories for empty-shell experiments with 0 actions / 0 markers / 0 conversations"))
     ap.add_argument("--dry-run", action="store_true",
-                    help="与 --apply 同用：走完全部判断但不落盘")
+                    help=tr("与 --apply 同用：走完全部判断但不落盘",
+                            "Use together with --apply: run all the checks but write nothing to disk"))
     args = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -460,15 +472,18 @@ def main(argv: "list[str] | None" = None) -> int:
     saved = save_plan(plan_obj)
     n_exp = len(plan_obj.get("experiments", []))
     n_files = len(plan_obj.get("files", []))
-    print(f"Stage 0 盘点：{n_exp} 个实验，{n_files} 个候选文件")
+    print(tr(f"Stage 0 盘点：{n_exp} 个实验，{n_files} 个候选文件",
+             f"Stage 0 inventory: {n_exp} experiment(s), {n_files} candidate file(s)"))
     if saved is not None:
-        print(f"计划已写入：{saved}")
+        print(tr(f"计划已写入：{saved}", f"Plan written to: {saved}"))
     if not args.apply:
-        print("只做了盘点。确认无误后加 --apply 执行（--stage 1 只建壳）。")
+        print(tr("只做了盘点。确认无误后加 --apply 执行（--stage 1 只建壳）。",
+                 "Inventory only. Once it looks right, add --apply to execute (--stage 1 only creates the shells)."))
         return 0
     res = apply(plan_obj, storage=storage, stage=int(args.stage),
                 dry_run=bool(args.dry_run))
-    print(f"Stage {args.stage}{'（dry-run）' if args.dry_run else ''}：{res}")
+    print(tr(f"Stage {args.stage}{'（dry-run）' if args.dry_run else ''}：{res}",
+             f"Stage {args.stage}{' (dry-run)' if args.dry_run else ''}: {res}"))
     return 1 if res.get("errors") else 0
 
 

@@ -187,9 +187,9 @@ class CompactionMiddleware(Middleware):
                          before: int, tokens_before: int):
         """带 ``mast_compaction`` 章的摘要消息。
 
-        用 ``SystemMessage`` 而不是 ``HumanMessage``：上游用后者，于是群聊桥把它
-        分类成「用户回声」丢掉了——摘要不是要求的话，把它放进 human 通道
-        本来就是错的。
+Uses ``SystemMessage`` rather than ``HumanMessage``: upstream uses the latter,
+        which made the group-chat bridge classify the summary as an operator echo and
+        drop it. A summary is not operator input and does not belong in the human channel.
         """
         from langchain_core.messages import SystemMessage
 

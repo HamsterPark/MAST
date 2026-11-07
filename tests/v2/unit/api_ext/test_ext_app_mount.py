@@ -33,7 +33,7 @@ def test_the_private_tree_mounts_the_gateway():
         assert paths.index("/api/ext/v1") < paths.index("/{full_path:path}")
 
 
-def test_every_ext_get_degrades_on_a_cold_unwired_app():
+def test_every_ext_get_degrades_on_a_cold_unwired_app(tmp_path, monkeypatch):
     """``tests/v2/unit/api/test_boot_smoke.py`` 只枚举主 app 自己的 ``APIRoute``，挂载的
     子应用不在它的网里。这里照它的做法走一遍外部面：真 ``create_app``、没有仪器、没有实验，
     每个 GET 都只许降级（JSON、非 5xx），不许 500。"""
@@ -43,14 +43,26 @@ def test_every_ext_get_degrades_on_a_cold_unwired_app():
 
     from mast.api.app import create_app
 
+    # 7.0 的 /vista/* 与 /detectors 冷启动时也会建工作区目录：指到 tmp，别写进真目录树
+    monkeypatch.setenv("MAST_VISTA_DIR", str(tmp_path / "vista"))
     app = create_app(dev_cors=False)
     mount = next(r for r in app.routes if isinstance(r, Mount) and r.path == "/api/ext/v1")
-    samples = {"job_id": "j_000000000000", "name": "GetBias", "request_id": "r-nope"}
+    samples = {"job_id": "j_000000000000", "name": "GetBias", "request_id": "r-nope",
+               "detector_id": "d_nope", "which": "guide", "run_id": "run_nope", "layout_id": "main"}
     query = {"/skills/search": {"q": "bias"}, "/data/file": {"path": "C:/nope/x.sxm"},
              "/data/frame": {"path": "C:/nope/x.sxm"}}
     client = TestClient(app)
     walked, failures = [], []
-    for route in mount.routes:
+    def _walk(routes):
+        # FastAPI ≥ 0.140 keeps an included router whole (an _IncludedRouter wrapping the
+        # original APIRouter) instead of copying its routes in; the ext routers have no prefix.
+        for r in routes:
+            yield r
+            inner = getattr(r, "original_router", None)
+            if inner is not None:
+                yield from _walk(getattr(inner, "routes", []))
+
+    for route in _walk(mount.routes):
         if not isinstance(route, APIRoute) or "GET" not in route.methods:
             continue
         path = route.path

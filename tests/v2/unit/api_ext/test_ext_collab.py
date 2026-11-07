@@ -37,6 +37,31 @@ def test_the_external_agent_can_search_notes_written_by_internal_agents(world):
     assert any(n["author"] == "agent:instrument_control" for n in r["notes"])
 
 
+def test_note_search_says_how_each_note_was_found(world):
+    """语义召回总会凑满 k 条；每条要说清是怎么找到的、分数多少，无关的那条才认得出来。
+    这个世界关掉了语义索引 ⇒ 子串；空查询 ⇒ 最近的。"""
+    world.client.post("/notes", json={"title": "超胞", "content": "Mimea 台面是 2.70 nm 超胞平铺"},
+                      headers=H())
+    hit = world.client.get("/notes", params={"q": "超胞"}, headers=H()).json()["notes"][0]
+    assert hit["match"] == "substring" and hit["score"] is None
+    recent = world.client.get("/notes", headers=H()).json()["notes"][0]
+    assert recent["match"] == "recent" and recent["score"] is None
+    only_exp = world.client.get("/notes", params={"q": "超胞", "scope": "experiment"},
+                                headers=H()).json()["notes"][0]
+    assert only_exp["match"] == "substring"
+
+
+def test_semantic_note_search_returns_the_score(world, monkeypatch):
+    def scored(q, *, experiment_id=None, k=5):
+        rows = world.cog.store.list(f"experiment:{world.eid}", limit=5)
+        return [(rows[0], 0.83, "semantic")]
+
+    world.client.post("/notes", json={"title": "t", "content": "c"}, headers=H())
+    monkeypatch.setattr(world.cog, "recall_scored", scored)
+    hit = world.client.get("/notes", params={"q": "anything"}, headers=H()).json()["notes"][0]
+    assert hit["match"] == "semantic" and hit["score"] == 0.83
+
+
 def test_a_global_note_when_there_is_no_experiment_says_so(world):
     world.log.end_experiment()
     r = world.client.post("/notes", json={"title": "x", "content": "y"}, headers=H()).json()

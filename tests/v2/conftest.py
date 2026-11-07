@@ -76,6 +76,24 @@ def _composite_store_fingerprint() -> tuple:
 
 
 @pytest.fixture(autouse=True)
+def _internal_llm_gate_open_for_the_suite():
+    """Run the suite with the internal-LLM gate forced OPEN.
+
+    Every internal-LLM path is gated on ``legacy_features_enabled``
+    (default OFF, ``mast/legacy_gate.py``). This suite exercises the legacy agent
+    stack with fakes, and must not depend on whatever the operator's real
+    ``config/ui_settings.json`` happens to say. Tests of the gate itself set it
+    back to "read the setting" (``None``) or closed in their own fixtures; this one
+    re-opens it afterwards so nothing leaks to the next test.
+    """
+    from mast import legacy_gate
+
+    legacy_gate.set_override_for_test(True)
+    yield
+    legacy_gate.set_override_for_test(True)
+
+
+@pytest.fixture(autouse=True)
 def _real_composite_store_is_read_only():
     """THE SUITE MUST NEVER WRITE TO THE OPERATOR'S REAL SKILL DEFINITIONS.
 
@@ -253,6 +271,19 @@ def _real_library_registry_is_read_only():
 
 
 _REAL_TRACE_DIR = _REPO_ROOT / "experiments" / "traces"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_diagnostics_ledger(monkeypatch, tmp_path_factory):
+    """拒绝台账（``mast.core.diagnostics``，``refusals.jsonl``）落进 tmp，不落进检出里的
+    ``artifacts/diagnostics``。
+
+    它从 project_root 走，而大多数测试不改 project_root；检出里那份台账曾经攒了
+    大量测试写的拒绝（「外部 agent ext:tester」被「别的入口 / LongScan」挡住之类）——
+    和开发服务自己的真实拒绝混在一处，事后分不出哪条是真的。"""
+    d = tmp_path_factory.getbasetemp() / "diagnostics"
+    d.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("MAST_DIAGNOSTICS_DIR", str(d))
 
 
 @pytest.fixture(autouse=True)
@@ -775,3 +806,25 @@ def _gallery_state_is_isolated(tmp_path, monkeypatch):
     只清内存状态。"""
     monkeypatch.setenv("MAST_GALLERY_DIR", str(tmp_path / "gallery"))
     yield
+
+
+@pytest.fixture(autouse=True)
+def _tool_face_registry_is_not_bound_across_tests():
+    """工具面第四道门（站点画像）绑定的注册表是**进程级全局**,谁绑了谁得放开 —— 这里替所有人放。
+
+    ``station_face.bind_registry`` 由 ``CoreRuntime.setup`` 和一次性 CLI 的
+    ``pipeline.main._build_minimal_environment`` 调用,调完一直留着。测试里走过这两处的
+    (完整 runtime、pipeline smoke)会把**自己那份**注册表留给同一个 xdist worker 里后面的每一
+    条测试:此后任何不带参数的 ``tool_face.compute()``(VISTA 的关闭名单、没有注册表可传的
+    老调用点)都按那份注册表分类,而分类的结果是**按名字**应用到别人的技能上的。症状是别人的
+    测试随机变红(例如默认 STM 画像下提交 ``AskOperator`` 被说成 skill_disabled),排查成本落在
+    无辜的那一方 —— 同 ``_scan_policy_tiers_are_restored`` 的形状,修法也放在这里。
+
+    需要绑定的测试自己绑(``tests/v2/station`` 的夹具),这里只负责收尾。"""
+    yield
+    try:
+        from mast.skills import station_face
+
+        station_face.bind_registry(None)
+    except Exception:  # noqa: BLE001 - a partial import must never fail an unrelated test
+        pass

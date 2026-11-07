@@ -1,29 +1,30 @@
 // ════════════════════════════════════════════════════════════════════════════
-// feedbackSubject — 「这条反馈是在说哪一页」。
+// feedbackSubject: which page a piece of feedback is about.
 //
-// 反馈悬浮窗飘在**每一页**上，所以它必须自己看出来人在哪。这件事有过一次前科:
-// agent 曾经是写死的，于是所有反馈全部被记成
-// instrument_control —— 包括那些明明在说群聊 / 记录 / 视觉页的。
-// 不崩、不报错，只是一张读起来完全正常、内容却错了的表。
+// The feedback float is shown on every page, so it has to work out where the user is.
+// The agent used to be hard-coded, so all feedback was recorded as instrument_control,
+// including feedback about the group chat, records and vision pages. That fails silently:
+// the table reads normally but its contents are wrong.
 //
-// 和 lib/ws.ts ↔ hooks/useWsEvents.ts 同一个分法:这里没有 React、没有 JSX，
-// 所以 node --test 直接跑得了（`frontend/test/feedbackSubject.test.ts`）。
-// 留在 FeedbackFloat.tsx 里的话，测试根本 import 不进来（node 不剥 JSX），
-// 而这几条判断恰恰是「错了也看不出来」的那一类。
+// Same split as lib/ws.ts <-> hooks/useWsEvents.ts: no React, no JSX here, so
+// node --test can run it (`frontend/test/feedbackSubject.test.ts`). Left inside
+// FeedbackFloat.tsx the test could not import it (node does not strip JSX), and these
+// checks are exactly the kind whose errors are invisible.
 // ════════════════════════════════════════════════════════════════════════════
 
 /**
- * 路径前缀 → 反馈记在哪个「面」上。
+ * Path prefix -> the surface the feedback is recorded against.
  *
- * `page_*` 是**界面**，不是 LLM agent；feedback 表的 `agent` 列是自由文本标签，
- * 所以这是一次加宽，不是 schema 变更。
+ * `page_*` are UI surfaces, not LLM agents; the `agent` column of the feedback table is a
+ * free-text label, so this widens its use without a schema change.
  *
- * 2026-08-06（#34 合并大标签）：原来的 /builder /cognition /admin 现在是
- * /skills/builder /records/memory /settings/admin。**光改字符串不够** ——
- * 见下面 {@link subjectForPath} 为什么必须按最长前缀匹配。
+ * After the tabs were merged, /builder /cognition /admin became /skills/builder
+ * /records/memory /settings/admin. Renaming the strings is not enough: see
+ * {@link subjectForPath} for why matching must use the longest prefix.
  *
- * 同时补齐了合并时暴露出来的几个从来没登记过的面（监控 / 环境历史 /
- * 仪器初始化 / 用量花销 / 光学台）—— 它们的反馈一直被记成 instrument_control。
+ * Surfaces that had never been registered (monitoring, environment history, instrument
+ * init, usage/cost, optics bench) are listed too; their feedback used to be recorded as
+ * instrument_control.
  */
 export const ROUTE_SUBJECT: { prefix: string; agent: string }[] = [
   { prefix: "/agents", agent: "orchestrator" },
@@ -45,12 +46,12 @@ export const ROUTE_SUBJECT: { prefix: string; agent: string }[] = [
 ];
 
 /**
- * 这条路径上的反馈算在哪个面上。
+ * The surface that feedback on this path is recorded against.
  *
- * **最长前缀优先**，不是「表里第一条命中」。合并之后每个大标签底下都有二级页，
- * 而 `/skills/builder` 天然会先撞上 `/skills` —— 靠把长的写在前面来避开它，
- * 等于让一张表的**行序**承重，而行序是最容易在一次无关的整理里被打乱的东西，
- * 打乱之后也没有任何东西会报错。
+ * Longest prefix wins, not the first hit in the table. Each top-level tab has sub-pages,
+ * and `/skills/builder` would otherwise match `/skills` first. Avoiding that by listing
+ * long prefixes first would make row order load-bearing, and row order is easily
+ * disturbed by an unrelated tidy-up with nothing to flag it.
  */
 export function subjectForPath(pathname: string): string {
   let best: { prefix: string; agent: string } | null = null;
@@ -58,6 +59,6 @@ export function subjectForPath(pathname: string): string {
     if (!pathname.startsWith(r.prefix)) continue;
     if (!best || r.prefix.length > best.prefix.length) best = r;
   }
-  // "/" is the 仪器 Chat page — a real private chat with the IC agent.
+  // "/" is the instrument Chat page — a real private chat with the IC agent.
   return best ? best.agent : "instrument_control";
 }

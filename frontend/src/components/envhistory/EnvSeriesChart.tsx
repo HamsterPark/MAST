@@ -3,6 +3,7 @@ import UplotReact from "uplot-react";
 import type uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { useUiStore } from "@/store";
+import { tr } from "@/lib/i18n";
 import { EmptyNote } from "@/components/ui";
 import { useElementWidth, useViewportHeight } from "@/hooks/useElementWidth";
 import { TREND_RATIO, sizeChart } from "@/lib/chartSize";
@@ -16,7 +17,7 @@ import {
   type EnvPointLike,
 } from "@/lib/envHistory";
 
-// 环境趋势 — one sensor's aggregated history.
+// Environment trend — one sensor's aggregated history.
 //
 // A mean line inside a min/max band, because that is exactly what a bucket is.
 // Drawing the mean alone would hide the excursion the bucket was built to keep:
@@ -29,11 +30,10 @@ import {
 // uPlot paints to <canvas>, which cannot resolve CSS vars — read the token's
 // computed value off <html> and feed concrete colors, keyed on the active theme.
 //
-// The names MUST carry the `--mast-` prefix (index.css). This file and
-// SpectrumViewer.tsx asked for `--accent` / `--fg-muted` / `--border` /
-// `--bg-elevated`, none of which exist anywhere in the app — so every lookup
-// returned "" and every fallback literal below was what actually got painted,
-// on both themes, and the `theme` dependency did nothing .
+// The names must carry the `--mast-` prefix (index.css). Unprefixed names such
+// as `--accent` or `--border` are not defined anywhere in the app, so the lookup
+// would return "" and only the fallback literals below would be painted on both
+// themes, making the `theme` dependency a no-op.
 function token(name: string): string {
   if (typeof window === "undefined") return "";
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -93,10 +93,9 @@ export function EnvSeriesChart({
     ];
     if (compare) {
       // Resampled onto the PRIMARY's timestamps by exact bucket match, not by
-      // index: the two series can have different numbers of buckets (that is
-      // precisely what is about — one channel having gaps the other
-      // does not), and lining them up by position would slide one curve along
-      // the time axis and invent an offset that is not there.
+      // index: the two series can have different numbers of buckets (one channel
+      // may have gaps the other does not), and lining them up by position would
+      // slide one curve along the time axis and invent an offset that is not there.
       const byTs = new Map<number, number | null>();
       for (const p of compare.points) {
         if (p && Number.isFinite(p.ts)) {
@@ -117,7 +116,7 @@ export function EnvSeriesChart({
     const muted = token("--mast-muted") || "#94a3b8";
     const grid = token("--mast-border") || "#2c3440";
     const accent = token("--mast-accent") || "#28d0e6";
-    const yLabel = duty ? "仪器空闲占比 (%)" : axisLabel(sensor, unit);
+    const yLabel = duty ? tr("仪器空闲占比 (%)", "Instrument idle fraction (%)") : axisLabel(sensor, unit);
     return {
       width,
       height,
@@ -161,14 +160,9 @@ export function EnvSeriesChart({
             } as uPlot.Series]
           : []),
       ],
-      // uPlot fills BETWEEN the two series and nothing else. This used to be
-      // faked with two `fill`s — one accent from max down to the axis, then an
-      // opaque one from min down to the axis to erase it again. `series.fill`
-      // fills to the BASELINE, not to the next series, so that second fill
-      // painted the whole region under the curve; its colour came from a token
-      // that does not exist, so it resolved to solid #fff — a white slab under
-      // the line on the dark theme, invisible on light because the card is also
-      // white (「不宜图线下方填色」).
+      // Use `bands` to fill between the two series only. `series.fill` fills to
+      // the baseline, not to the next series, so it would shade the whole region
+      // under the curve.
       bands: [{ series: [1, 2], fill: withAlpha(accent, 0.18) }],
       hooks: {
         setCursor: [
@@ -199,7 +193,7 @@ export function EnvSeriesChart({
     // points do arrive and the first painted frame is the right size.
     return (
       <div ref={boxRef}>
-        <EmptyNote label="这段时间没有记录。" />
+        <EmptyNote label={tr("这段时间没有记录。", "No records in this period.")} />
       </div>
     );
   }
@@ -214,17 +208,25 @@ export function EnvSeriesChart({
       <UplotReact options={options} data={data} />
       <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-mast-muted">
         <span>
-          {points.length} 点 · 每点 {fmtSpan(bucketS)} · 跨度 {fmtSpan(span)}
+          {tr(
+            `${points.length} 点 · 每点 ${fmtSpan(bucketS)} · 跨度 ${fmtSpan(span)}`,
+            `${points.length} points · ${fmtSpan(bucketS)} each · span ${fmtSpan(span)}`,
+          )}
         </span>
         {thinned && (
-          <span title="点数超过上限，服务端按加权合并成更粗的桶。极值与最差状态都被保留，不是抽样。">
-            概览视图（已合并）
+          <span
+            title={tr(
+              "点数超过上限，服务端按加权合并成更粗的桶。极值与最差状态都被保留，不是抽样。",
+              "The point count exceeded the limit, so the server merged buckets with weighting. Extremes and worst states are preserved; this is not sampling.",
+            )}
+          >
+            {tr("概览视图（已合并）", "Overview (merged)")}
           </span>
         )}
         {hover && (
           <span className="ml-auto tabular-nums">
-            {fmtTs(hover.t)} · 均 {fmtNum(hover.mean)}
-            {suffix} · 区间 {fmtNum(hover.lo)}–{fmtNum(hover.hi)}
+            {fmtTs(hover.t)} · {tr("均", "mean")} {fmtNum(hover.mean)}
+            {suffix} · {tr("区间", "range")} {fmtNum(hover.lo)}–{fmtNum(hover.hi)}
             {suffix}
           </span>
         )}

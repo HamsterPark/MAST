@@ -1,0 +1,213 @@
+{
+  "name": "beam_splitter_pruned_branches",
+  "description": "Branches below fraction 1e-3 are not followed: BS_A reflects 0.9995 (its 0.0005 transmitted branch is dropped), BS_B reflects 0.0005 (its reflected branch is dropped). Only 0, 0.r, 0.r.t.",
+  "layout": {
+    "schema": 1,
+    "id": "prune",
+    "title": "Pruned branches",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 50.0,
+        "y_mm": 62.5,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "bsa",
+        "type": "beam_splitter",
+        "label": "BS_A",
+        "x_mm": 150.0,
+        "y_mm": 62.5,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "reflect_fraction": 0.9995
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "bsb",
+        "type": "beam_splitter",
+        "label": "BS_B",
+        "x_mm": 150.0,
+        "y_mm": 187.5,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "reflect_fraction": 0.0005
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det1",
+        "type": "detector",
+        "label": "D1",
+        "x_mm": 150.0,
+        "y_mm": 400.0,
+        "angle_deg": 270.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 62.5,
+              "x1": 150.0,
+              "y1": 62.5
+            }
+          ],
+          "events": [
+            {
+              "component": "bsa",
+              "action": "split",
+              "x": 150.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 100.0
+            }
+          ],
+          "end": "split"
+        },
+        {
+          "branch": "0.r",
+          "fraction": 0.9995,
+          "segments": [
+            {
+              "x0": 150.0,
+              "y0": 62.5,
+              "x1": 150.0,
+              "y1": 187.5
+            }
+          ],
+          "events": [
+            {
+              "component": "bsb",
+              "action": "split",
+              "x": 150.0,
+              "y": 187.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 225.0
+            }
+          ],
+          "end": "split"
+        },
+        {
+          "branch": "0.r.t",
+          "fraction": 0.999,
+          "segments": [
+            {
+              "x0": 150.0,
+              "y0": 187.5,
+              "x1": 150.0,
+              "y1": 400.0
+            }
+          ],
+          "events": [
+            {
+              "component": "det1",
+              "action": "stop",
+              "x": 150.0,
+              "y": 400.0,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 437.5
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ]
+}

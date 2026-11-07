@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import re
 
+from mast.i18n import tr
+
 #: Prefix → factor. CASE MATTERS: ``m`` is milli, ``M`` is mega — a case-folding
 #: parser would turn a 3-milli into a 3-mega, which is the exact class of error
 #: this module exists to prevent.
@@ -40,7 +42,7 @@ class SIParseError(ValueError):
     """A quantity that did not carry a prefix, or carried an unknown one."""
 
 
-def parse_si(text: object, *, what: str = "值") -> float:
+def parse_si(text: object, *, what: str = tr("值", "value")) -> float:
     """``"3p"`` → ``3e-12``. Raises :class:`SIParseError` on anything else.
 
     There is deliberately NO fallback to ``float(text)``. A fallback would restore
@@ -54,24 +56,33 @@ def parse_si(text: object, *, what: str = "值") -> float:
             actionable rather than generic.
     """
     if isinstance(text, (int, float)) and not isinstance(text, bool):
-        raise SIParseError(
+        raise SIParseError(tr(
             f"{what} 必须写成带 SI 前缀的字符串(如 '3p'),不能是裸数字 {text!r}。"
             "裸数字一旦在传输中丢掉指数就变成另一个合法数字且无人察觉 —— "
-            "前缀掉了则直接解析失败,这正是要求前缀的原因。"
-        )
+            "前缀掉了则直接解析失败,这正是要求前缀的原因。",
+            f"{what} must be written as a string with an SI prefix (e.g. '3p'), not a bare "
+            f"number {text!r}. A bare number that loses its exponent in transit turns into "
+            "another valid number and nobody notices; a lost prefix fails to parse "
+            "instead, which is exactly why the prefix is required."
+        ))
     s = str(text or "").strip()
     m = _PATTERN.match(s)
     if not m:
-        raise SIParseError(
+        raise SIParseError(tr(
             f"{what} = {text!r} 无法解析。必须是「数字 + SI 前缀」,前缀不可省略,"
             f"例如 3p(=3e-12)、180n(=1.8e-07)、150p(=1.5e-10)。"
-            f"可用前缀: a f p n u/µ m k M G(**区分大小写**: m=毫, M=兆)。"
-        )
+            f"可用前缀: a f p n u/µ m k M G(**区分大小写**: m=毫, M=兆)。",
+            f"{what} = {text!r} cannot be parsed. It must be \"number + SI prefix\" and the "
+            f"prefix cannot be omitted, e.g. 3p (=3e-12), 180n (=1.8e-07), 150p (=1.5e-10). "
+            f"Available prefixes: a f p n u/µ m k M G (**case-sensitive**: m = milli, "
+            f"M = mega)."
+        ))
     mantissa, prefix = m.group(1), m.group(2)
     try:
         return float(mantissa) * SI_PREFIXES[prefix]
     except (TypeError, ValueError, KeyError) as exc:  # pragma: no cover
-        raise SIParseError(f"{what} = {text!r} 无法解析") from exc
+        raise SIParseError(tr(f"{what} = {text!r} 无法解析",
+                              f"{what} = {text!r} cannot be parsed")) from exc
 
 
 # ── Two tiers ───────────────────────────────────────────────────────────────
@@ -125,7 +136,8 @@ def needs_strict_prefix(min_value: "float | None",
     return False
 
 
-def parse_quantity(text: object, *, strict: bool, what: str = "值") -> float:
+def parse_quantity(text: object, *, strict: bool,
+                   what: str = tr("值", "value")) -> float:
     """Parse a quantity written as a string. ``strict`` demands an SI prefix.
 
     Non-strict still accepts a prefix (``"5m"``), so an operator or a model may
@@ -144,7 +156,7 @@ def parse_quantity(text: object, *, strict: bool, what: str = "值") -> float:
         return parse_si(text, what=what)
     s = str(text or "").strip()
     if not s:
-        raise SIParseError(f"{what} 不能为空。")
+        raise SIParseError(tr(f"{what} 不能为空。", f"{what} must not be empty."))
     try:
         return parse_si(s, what=what)
     except SIParseError:
@@ -152,10 +164,13 @@ def parse_quantity(text: object, *, strict: bool, what: str = "值") -> float:
     try:
         return float(s)
     except (TypeError, ValueError) as exc:
-        raise SIParseError(
+        raise SIParseError(tr(
             f"{what} = {text!r} 无法解析。写成数值字符串,可以带 SI 前缀 "
-            f"(如 '5m' = 0.005)也可以是普通十进制/科学计数法(如 '0.05'、'5e-3')。"
-        ) from exc
+            f"(如 '5m' = 0.005)也可以是普通十进制/科学计数法(如 '0.05'、'5e-3')。",
+            f"{what} = {text!r} cannot be parsed. Write a numeric string, either with an SI "
+            f"prefix (e.g. '5m' = 0.005) or as a plain decimal / scientific notation "
+            f"(e.g. '0.05', '5e-3')."
+        )) from exc
 
 
 def format_si(value: float, *, digits: int = 6) -> str:

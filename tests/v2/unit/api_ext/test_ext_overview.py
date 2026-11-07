@@ -168,3 +168,131 @@ def test_the_actor_header_is_only_ever_cleaned_never_a_reason_to_refuse(world, h
     b = world.client.get("/briefing", params={"sections": "recording"}, headers=hdr)
     assert b.status_code == 200
     assert b.json()["actor"] == expect
+
+
+# ── alarms: the instrument's alerts, not just the environment ──
+@pytest.fixture()
+def alert_hub(world, monkeypatch):
+    """A fresh WaitHub as the VISTA service's (the process singleton keeps other tests'
+    events), and no current-monitor store unless a test installs one."""
+    from types import SimpleNamespace
+
+    import mast.monitoring.store as mstore
+    from mast.vista.wait import WaitHub
+
+    hub = WaitHub()
+    monkeypatch.setattr(world.app.state, "vista", SimpleNamespace(hub=hub), raising=False)
+    monkeypatch.setattr(mstore, "_STORE", None)
+    return hub
+
+
+def _monitor_alert(**extra):
+    from mast.core.events import Event, EventType
+    from mast.vista.wait import alert_from_bus_event
+
+    return alert_from_bus_event(Event(type=EventType.CURRENT_MONITOR, data={
+        "kind": "alert", "level": "warn", "rule": "jump_burst", "summary_zh": "电流频繁突跳(451.9 次/秒)",
+        "alert_id": 2, "seg_id": 589, "ctx_scanning": False, "scanning_s_ago": 0.031,
+        "last_skill": "ScanAt", "last_skill_s_ago": 1.03, **extra}))
+
+
+def test_the_alarms_section_lists_recent_instrument_alerts_with_their_context(world, alert_hub):
+    """Ten current-monitor alerts, none of them in the briefing."""
+    alert_hub.publish("alert", _monitor_alert())
+    sec = world.client.get("/briefing", params={"sections": "alarms"},
+                           headers=H()).json()["sections"]["alarms"]
+    assert sec["ok"] is True
+    assert "jump_burst" in sec["text"] and "距上一段扫描 0.031 s" in sec["text"]
+    assert "最近的技能 ScanAt" in sec["text"]
+    assert sec["data"]["alerts_total"] == 1 and sec["data"]["alerts_sources"] == ["wait_hub"]
+    a = sec["data"]["alerts"][0]
+    assert a["code"] == "jump_burst" and a["context"]["scanning"] is False and a["age_s"] >= 0
+    assert sec["data"]["overall"] and "recent" in sec["data"]           # the environment part stays
+
+
+def test_info_level_events_are_counted_not_listed(world, alert_hub):
+    """Like mast_wait's default: warning and up. The monitor's own state changes (info)
+    would otherwise bury the alerts."""
+    alert_hub.publish("alert", {"level": "info", "source": "current_monitor",
+                                "code": "monitor_running", "message": "", "t": None})
+    alert_hub.publish("alert", _monitor_alert())
+    sec = world.client.get("/briefing", params={"sections": "alarms"},
+                           headers=H()).json()["sections"]["alarms"]
+    assert sec["data"]["alerts_total"] == 1 and sec["data"]["alerts_info_omitted"] == 1
+    assert "monitor_running" not in sec["text"] and "另有 1 条 info 级未列出" in sec["text"]
+
+
+def test_no_alerts_is_said_not_left_blank(world, alert_hub):
+    sec = world.client.get("/briefing", params={"sections": "alarms"},
+                           headers=H()).json()["sections"]["alarms"]
+    assert sec["ok"] is True and "近 60 分钟没有" in sec["text"]
+    assert sec["data"]["alerts"] == [] and sec["data"]["alerts_total"] == 0
+
+
+def test_alerts_still_show_when_the_environment_monitor_is_not_wired(world, alert_hub, monkeypatch):
+    monkeypatch.setattr(world.rt, "_env_alarm_log", None)
+    alert_hub.publish("alert", _monitor_alert())
+    sec = world.client.get("/briefing", params={"sections": "alarms"},
+                           headers=H()).json()["sections"]["alarms"]
+    assert sec["ok"] is True and "环境监控: 未接线" in sec["text"] and "jump_burst" in sec["text"]
+
+
+def test_after_a_restart_the_monitor_store_still_has_the_alerts(world, alert_hub, tmp_path):
+    """The hub is per server run; the current-monitor store is on disk. One alert in both
+    (same alert_id) is listed once."""
+    import time as _time
+
+    from mast.monitoring.store import CurrentMonitorStore, set_store_for_test
+
+    store = CurrentMonitorStore(tmp_path / "m.sqlite", tmp_path)
+    set_store_for_test(store)
+    try:
+        old = store.add_alert(ts=_time.time() - 600, level="warn", rule="spike_warn",
+                              summary_zh="电流出现瞬时尖峰(偏离背景噪声 41σ)", segment_id=588)
+        both = store.add_alert(ts=_time.time() - 5, level="warn", rule="jump_burst",
+                               summary_zh="电流频繁突跳", segment_id=589)
+        store.add_alert(ts=_time.time() - 7200, level="critical", rule="freeze",
+                        summary_zh="两小时前的", segment_id=1)                  # outside the window
+        alert_hub.publish("alert", _monitor_alert(alert_id=both))
+        sec = world.client.get("/briefing", params={"sections": "alarms"},
+                               headers=H()).json()["sections"]["alarms"]
+    finally:
+        set_store_for_test(None)
+        store.close()
+    data = sec["data"]
+    assert data["alerts_sources"] == ["wait_hub", "monitor_store"]
+    assert [(a["code"], a["source"]) for a in data["alerts"]] == [
+        ("jump_burst", "current_monitor"), ("spike_warn", "current_monitor")]
+    assert data["alerts"][1]["level"] == "warning" and data["alerts"][1]["alert_id"] == old
+    assert "两小时前的" not in sec["text"]
+
+
+def test_the_jobs_section_says_how_many_it_left_out(world):
+    for _ in range(8):
+        jid = world.client.post("/jobs", json={"skill": "ExtRead"}, headers=H()).json()["job_id"]
+        wait_terminal(world.client, jid)
+    sec = world.client.get("/briefing", params={"sections": "jobs"},
+                           headers=H()).json()["sections"]["jobs"]
+    assert sec["shown"] == 6 and sec["total"] == 8 and len(sec["data"]) == 6
+    assert "共 8 个" in sec["text"] and "GET /jobs" in sec["text"]
+
+
+def test_a_short_job_list_has_no_truncation_note(world):
+    jid = world.client.post("/jobs", json={"skill": "ExtRead"}, headers=H()).json()["job_id"]
+    wait_terminal(world.client, jid)
+    sec = world.client.get("/briefing", params={"sections": "jobs"},
+                           headers=H()).json()["sections"]["jobs"]
+    assert sec["shown"] == sec["total"] == 1 and "只列最近" not in sec["text"]
+
+
+def test_the_resume_section_does_not_hand_an_external_agent_the_supervisors_routing_rule(world):
+    """The briefing used to tell the external agent 「路由到相应 agent …不要从头新建实验/样品」
+    while the right move was a new experiment (simulator work, a real experiment was active)."""
+    from mast.agents._shared.resume_context import build_experiment_resume_block
+
+    sec = world.client.get("/briefing", params={"sections": "resume"},
+                           headers=H()).json()["sections"]["resume"]
+    assert sec["ok"] is True and "外部网关测试" in sec["text"]
+    assert "路由到相应 agent" not in sec["text"] and "mast_scope" in sec["text"]
+    internal = build_experiment_resume_block(world.log, world.st)
+    assert "路由到相应 agent" in internal            # what the internal agents read is unchanged

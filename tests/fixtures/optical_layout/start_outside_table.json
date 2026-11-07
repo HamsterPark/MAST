@@ -1,0 +1,73 @@
+{
+  "name": "start_outside_table",
+  "description": "A source outside the expanded table rectangle: its ray ends at once with a zero-length segment (left_table).",
+  "layout": {
+    "schema": 1,
+    "id": "outside",
+    "title": "Source off the table",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 5000.0,
+        "y_mm": 5000.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 5000.0,
+              "y0": 5000.0,
+              "x1": 5000.0,
+              "y1": 5000.0
+            }
+          ],
+          "events": [],
+          "end": "left_table"
+        }
+      ]
+    }
+  ]
+}

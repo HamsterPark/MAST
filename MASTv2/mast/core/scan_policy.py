@@ -17,7 +17,7 @@
 用户可覆写**的东西:experiment_prefs 刻意「空即无值」(不替用户发明扫描
 尺寸),而一张参数表如果空着就没有存在意义。
 
-档位是**可变长的**(1..8 档,2026-07-30 定案)。出厂给 4 档模板,数值化自
+档位是**可变长的**(1..8 档,2026-07-30 起)。出厂给 4 档模板,数值化自
 ``mast.knowledge.experiment_design.WORKFLOW_SEQUENCES["progressive_zoom"]`` 的四级
 协议 —— 那张表在知识库里躺了很久,是人类可读的区间字符串,从来没有任何代码
 消费过。**出厂值只是起点,不是真值**:随仪器 / 样品变,UI 上明示「按本机校准」。
@@ -32,6 +32,8 @@ import logging
 import threading
 from typing import Any, Callable
 
+from mast.i18n import tr
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,17 +44,18 @@ logger = logging.getLogger(__name__)
 # 回填(见 _fill_from_factory)——这是字段级 fallback,不是整档丢弃。
 # 可选字段(setpoint_a / p_gain / time_constant_s):**出厂一律 None**,
 # None = 不下发该硬件写(空即 no-op)。
-#   * setpoint 进表是因为用户确实有「大图小电流」的习惯,但没有普适安全默认;
-#   * PI 增益进表是要求要的,但增益强依赖仪器 / 针尖态,出厂不敢给数 ——
+#   * setpoint 进表是因为实际使用中有「大图小电流」的习惯,但没有普适安全默认;
+#   * PI 增益进表是为了可配置,但增益强依赖仪器 / 针尖态,出厂不敢给数 ——
 #     本机调好后填进来才生效。
 _TIER_FIELD_SPEC: dict[str, tuple[str, str, type, tuple[float, float], bool]] = {
-    "pixels":          ("像素(线数)", "px", int, (16, 4096), True),
-    "line_time_s":     ("每线时间", "s", float, (1e-4, 600.0), True),
+    "pixels":          (tr("像素(线数)", "Pixels (lines)"), "px", int, (16, 4096), True),
+    "line_time_s":     (tr("每线时间", "Time per line"), "s", float, (1e-4, 600.0), True),
     # 与 SetSetpoint 的 ParameterSpec 对齐(1 pA..100 nA)—— 表里存一个下游必然
     # 拒绝的值没有意义。
-    "setpoint_a":      ("电流设定点", "A", float, (1e-12, 1e-7), False),
-    "p_gain":          ("Z 反馈 P 增益", "", float, (0.0, 1e6), False),
-    "time_constant_s": ("Z 反馈时间常数", "s", float, (0.0, 1e3), False),
+    "setpoint_a":      (tr("电流设定点", "Current setpoint"), "A", float, (1e-12, 1e-7), False),
+    "p_gain":          (tr("Z 反馈 P 增益", "Z feedback P gain"), "", float, (0.0, 1e6), False),
+    "time_constant_s": (tr("Z 反馈时间常数", "Z feedback time constant"), "s", float,
+                        (0.0, 1e3), False),
 }
 
 #: 必需字段(缺省要回填),按 _TIER_FIELD_SPEC 推导,避免两处各写一份。
@@ -211,37 +214,49 @@ def _validate_structure(tiers: list[dict[str, Any]]) -> None:
     """
     n = len(tiers)
     if n < MIN_TIERS or n > MAX_TIERS:
-        raise PolicyRejected(
-            f"档位数量必须在 {MIN_TIERS}..{MAX_TIERS} 之间(收到 {n} 档)"
-        )
+        raise PolicyRejected(tr(
+            f"档位数量必须在 {MIN_TIERS}..{MAX_TIERS} 之间(收到 {n} 档)",
+            f"The number of tiers must be between {MIN_TIERS} and {MAX_TIERS} (got {n})"
+        ))
 
     open_idx = [i for i, t in enumerate(tiers) if t.get("upper_size_m") is None]
     if len(open_idx) != 1:
-        raise PolicyRejected(
+        raise PolicyRejected(tr(
             f"必须恰好有 1 个兜底档(upper_size_m 留空),收到 {len(open_idx)} 个。"
-            "没有兜底档时,超过最大边界的扫描尺寸查不到任何参数。"
-        )
+            "没有兜底档时,超过最大边界的扫描尺寸查不到任何参数。",
+            f"There must be exactly 1 catch-all tier (upper_size_m left empty), got "
+            f"{len(open_idx)}. Without a catch-all tier, scan sizes above the largest bound "
+            "find no parameters."
+        ))
     if open_idx[0] != n - 1:
-        raise PolicyRejected(
+        raise PolicyRejected(tr(
             f"兜底档必须放在最后一档(现在在第 {open_idx[0] + 1} 档)。"
-            "它前面的档才有意义;它后面的档永远匹配不到。"
-        )
+            "它前面的档才有意义;它后面的档永远匹配不到。",
+            f"The catch-all tier must be the last tier (it is currently tier "
+            f"{open_idx[0] + 1}). Tiers before it are meaningful; tiers after it can never "
+            "match."
+        ))
 
     prev = None
     for i, tier in enumerate(tiers[:-1]):
         upper = tier.get("upper_size_m")
         if upper is None or upper <= 0:
-            raise PolicyRejected(f"第 {i + 1} 档的边界无效: {upper!r}")
+            raise PolicyRejected(tr(f"第 {i + 1} 档的边界无效: {upper!r}",
+                                    f"The bound of tier {i + 1} is invalid: {upper!r}"))
         if not (SIZE_MIN_M <= upper <= SIZE_MAX_M):
-            raise PolicyRejected(
+            raise PolicyRejected(tr(
                 f"第 {i + 1} 档边界 {upper:.3g} m 超出硬件可扫范围 "
-                f"[{SIZE_MIN_M:.0e}, {SIZE_MAX_M:.0e}] m"
-            )
+                f"[{SIZE_MIN_M:.0e}, {SIZE_MAX_M:.0e}] m",
+                f"The bound of tier {i + 1}, {upper:.3g} m, is outside the hardware scan "
+                f"range [{SIZE_MIN_M:.0e}, {SIZE_MAX_M:.0e}] m"
+            ))
         if prev is not None and upper <= prev:
-            raise PolicyRejected(
+            raise PolicyRejected(tr(
                 f"档位边界必须严格递增:第 {i + 1} 档 {upper:.3g} m "
-                f"不大于前一档 {prev:.3g} m"
-            )
+                f"不大于前一档 {prev:.3g} m",
+                f"Tier bounds must be strictly increasing: tier {i + 1} at {upper:.3g} m "
+                f"is not larger than the previous tier at {prev:.3g} m"
+            ))
         prev = upper
 
 
@@ -299,14 +314,16 @@ def sanitize(raw: Any) -> list[dict[str, Any]]:
     if raw is None:
         return []
     if not isinstance(raw, (list, tuple)):
-        raise PolicyRejected(f"档位表必须是列表(收到 {type(raw).__name__})")
+        raise PolicyRejected(tr(f"档位表必须是列表(收到 {type(raw).__name__})",
+                                f"The tier table must be a list (got {type(raw).__name__})"))
     if not raw:
         return []
 
     cleaned: list[dict[str, Any]] = []
     for i, item in enumerate(raw):
         if not isinstance(item, dict):
-            raise PolicyRejected(f"第 {i + 1} 档不是对象(收到 {type(item).__name__})")
+            raise PolicyRejected(tr(f"第 {i + 1} 档不是对象(收到 {type(item).__name__})",
+                                    f"Tier {i + 1} is not an object (got {type(item).__name__})"))
         tier: dict[str, Any] = {}
 
         name = item.get("name")
@@ -321,7 +338,9 @@ def sanitize(raw: Any) -> list[dict[str, Any]]:
         else:
             upper = _coerce_num(float, upper_raw)
             if upper is None:
-                raise PolicyRejected(f"第 {i + 1} 档的边界不是数值: {upper_raw!r}")
+                raise PolicyRejected(tr(f"第 {i + 1} 档的边界不是数值: {upper_raw!r}",
+                                        f"The bound of tier {i + 1} is not a number: "
+                                        f"{upper_raw!r}"))
             tier["upper_size_m"] = float(upper)
 
         for key, (_label, _unit, kind, (lo, hi), _req) in _TIER_FIELD_SPEC.items():
@@ -499,20 +518,21 @@ def format_policy_block(tiers: "list[dict[str, Any]] | None" = None) -> str:
     rows = tiers if tiers is not None else get_policy()
     if not rows:
         return ""
-    lines = ["## 扫描参数档位表(按尺度)", ""]
+    lines = [tr("## 扫描参数档位表(按尺度)", "## Scan parameter tiers (by scale)"), ""]
     for tier in rows:
         upper = tier.get("upper_size_m")
-        bound = "更大" if upper is None else f"≤ {float(upper) * 1e9:.4g} nm"
-        src = {"factory": "出厂", "operator": "用户"}.get(
+        bound = tr("更大", "larger") if upper is None else f"≤ {float(upper) * 1e9:.4g} nm"
+        src = {"factory": tr("出厂", "factory"), "operator": tr("用户", "user")}.get(
             str(tier.get("source", "")), ""
         )
         src_s = f" [{src}]" if src else ""
         px = tier.get("pixels")
         lt = tier.get("line_time_s")
         est = estimate_scan_seconds(px, lt)
-        parts = [f"- **{tier.get('name')}**({bound}){src_s}: {px}px, {lt}s/线"]
+        parts = [tr(f"- **{tier.get('name')}**({bound}){src_s}: {px}px, {lt}s/线",
+                    f"- **{tier.get('name')}** ({bound}){src_s}: {px} px, {lt} s/line")]
         if est > 0:
-            parts.append(f"≈{est / 60.0:.1f} min/帧")
+            parts.append(tr(f"≈{est / 60.0:.1f} min/帧", f"~{est / 60.0:.1f} min/frame"))
         extras = []
         if tier.get("setpoint_a") is not None:
             sp = float(tier["setpoint_a"])

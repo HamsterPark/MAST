@@ -1,0 +1,21 @@
+{
+  "_readme": "Nanonis 电机组配置（schema 见 MASTv2/mast/instruments/motor_groups.py）。stm_coarse_group = STM 粗动用的 Motor_StartMove 的 Group 参数（0-based：0 = Nanonis 面板上的 Group 1）；这个文件不存在时等同于 0，所有粗动行为与以前一样。groups 只列光学用途的组（反射镜 / Beam Deflection / 透镜），由 NanonisMotorGroupMove 使用；STM 粗动组不能出现在 groups 里。每组必须写 freq_hz 与 amp_v（没有默认值：驱动电压是操作员的参数），drive_policy 默认 verify_only（不写驱动，读回与配置一致才走步）；只有在本机实测过 Motor_FreqAmpSet 是模块全局时才可改成 write_and_restore。本模板不含任何光学组。",
+  "stm_coarse_group": 0,
+  "groups": [],
+  "reserved_digital_ports": [],
+  "_reserved_digital_ports_readme": "Nanonis 数字口（DigLines：0=Port A，1=B，2=C，3=D，4+ 扩展 DIO）里接着别的控制器、任何技能都不许写的口，例如 [{\"port\": 0, \"reason\": \"外部粗动控制器的控制口\"}]。列出的口：ConfigureDigitalLine / SetDigitalLineStatus / PulseDigitalLine 与光学扫描的触发一律拒绝写（方向位、电平、脉冲），读不受影响。空列表或不写这个键 = 不保留任何口（与以前一样）；这个列表写错了（不是列表、port 不是 0–15 的整数）就拒绝写所有数字口。",
+  "_example_group": {
+    "group": 1,
+    "name": "Mirror X/Y",
+    "role": "laser_mirror",
+    "axes": {"X": "mirror_x", "Y": "mirror_y"},
+    "max_steps_per_cmd": 200,
+    "chunk_steps": 50,
+    "requires": "tip_withdrawn",
+    "freq_hz": 442.0,
+    "amp_v": 200.0,
+    "drive_policy": "verify_only",
+    "enabled": false,
+    "note": "示例；放进 groups 才生效"
+  }
+}

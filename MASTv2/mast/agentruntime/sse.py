@@ -245,12 +245,26 @@ def drive_group_run(
 
 
 def _branch_frame(event: RunEvent, persist) -> dict | None:
-    """将 agent 分支内部事件转换为可发送的帧。
+    """agent 分支内部的事件 → 帧。
 
-    工具起止应及时产生可见事件，复用 narrate_tool_call 和 summarize_args，
-    保持群聊与私聊的措辞及参数展示一致。分支线程就地调用本函数，帧暂存于
-    PendingFrames，由路由层定时排空，避免同步生成器阻塞期间事件滞留。
-    with_heartbeat 的 ping 只维持连接，不能替代工具进度帧。
+    工具调用要发帧
+    ---------------
+    工具起止除了记入转录，还要发帧，否则长工具调用期间群聊面板会持续空白。
+    帧的 kind 为 message、role 为 tool，正文是 ``narrate_tool_call`` 生成的一句自然
+    语言，参数走 ``summarize_args`` 进可折叠的「参数」面板。
+
+    这里复用这两个助手，而不是另写一套措辞：措辞漂了的话，同一个工具在
+    群聊和私聊里会被说成两件事。
+
+    帧的发出时刻
+    ------------
+    ``drive_group_run`` 只在编排器步与步之间排空，而 ``next(gen)`` 在整条分支跑完前
+    一直阻塞；同步生成器阻塞在 ``next()`` 里时，它 yield 的任何东西都出不去。
+    所以本函数在**分支线程上就地**被调用，帧存进 :class:`PendingFrames`，由路由层的
+    时钟排空 —— 这样「工具开始了」这句话在工具开始时就能到达用户面前。
+
+    阻塞期间连接并非静默：``/run-task`` 套着 ``api/sse.with_heartbeat``，它在自己的
+    线程上拉这个生成器，照发 ``: ping`` 注释帧。
     """
     if isinstance(event, MessageEvent) and event.text:
         text = _clip(event.text)

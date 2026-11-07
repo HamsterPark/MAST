@@ -4,17 +4,18 @@ import { Badge } from "@/components/ui";
 import { useToast } from "@/components/controls";
 import { useWsEvent } from "@/hooks/useWsEvents";
 import { marketWriteProblem, type MarketWriteResult } from "@/lib/skillMarket";
+import { tr } from "@/lib/i18n";
 
-// ── agent 的订阅推荐，就地确认 ────────────────────────────────────────────────
+// ── Agent skill recommendations, confirmed in place ──────────────────────────
 //
-// 为什么是**页面上的一条**而不是聊天气泡里的卡片：气泡的 HTML 是后端预渲染、前端
-// 用 dangerouslySetInnerHTML 塞进去的（`chat/render.py`），里面挂不上 React 事件
-// 处理器。硬塞的话要么把渲染搬到前端（那是另一件大事），要么在气泡里放一个假按钮。
-// 所以这条横幅贴在输入框上方 —— 对用户来说效果是一样的：**不用离开对话去点头**，
-// 而那正是「主动推荐 + 用户确认」里最容易流失的一步。
+// This is a banner rather than a card inside the chat bubble: bubble HTML is pre-rendered by the
+// backend (`chat/render.py`) and injected with dangerouslySetInnerHTML, so React event handlers
+// cannot be attached to it. The banner sits above the input box, so the user can confirm without
+// leaving the conversation.
 //
-// 数据源是 `GET /api/skill-market/recommendations`，不是 WS 帧。帧只做触发（那条
-// 总线只重放 100 条，按帧累积列表的客户端迟早显示一份错的）。
+// The data source is `GET /api/skill-market/recommendations`, not WS frames. Frames only act as
+// a trigger: the event bus replays just 100 frames, so a client that accumulates a list from
+// frames would eventually show a wrong one.
 
 type Rec = {
   id: string;
@@ -53,12 +54,13 @@ export function PendingRecommendations({ compact = false }: { compact?: boolean 
       qc.invalidateQueries({ queryKey: ["builder", "catalog"] });
       const problem = marketWriteProblem(res);
       if (problem) {
-        // 三态压进两档 toast 时一律走 err：「已排队」被读成「已生效」的代价，
-        // 比一个看起来重了点的提示大得多。权威显示在 技能 → 市场 的状态条。
+        // A three-state result is folded into a two-level toast by always using "err": reading
+        // "queued" as "in effect" costs far more than a slightly heavy-looking message. The
+        // authoritative status is shown in the Skills → Market status bar.
         toast(problem.message, "err");
         return;
       }
-      toast(accept ? (res.rebuild_note || "已加入你的技能面") : "已拒绝，记录保留", "ok");
+      toast(accept ? (res.rebuild_note || tr("已加入你的技能面", "Added to your skill set")) : tr("已拒绝，记录保留", "Declined; the record is kept"), "ok");
     },
     onError: (e: any) => toast(String(e?.message || e), "err"),
   });
@@ -74,11 +76,11 @@ export function PendingRecommendations({ compact = false }: { compact?: boolean 
           key={r.id}
           className="flex flex-wrap items-center gap-2 rounded border border-mast-warn-border bg-mast-warn-bg px-2.5 py-1.5 text-xs"
         >
-          <Badge tone="WARN">技能推荐</Badge>
+          <Badge tone="WARN">{tr("技能推荐", "Skill suggestion")}</Badge>
           <span className="text-mast-text">
-            <b>{r.by_agent || "agent"}</b> 想用{" "}
+            <b>{r.by_agent || "agent"}</b> {tr("想用", "wants to use")}{" "}
             <code className="font-mono">{r.skill}</code>
-            {r.reason ? <span className="text-mast-muted">：{r.reason}</span> : null}
+            {r.reason ? <span className="text-mast-muted">{tr("：", ": ")}{r.reason}</span> : null}
           </span>
           <span className="flex-1" />
           <button
@@ -87,7 +89,7 @@ export function PendingRecommendations({ compact = false }: { compact?: boolean 
             onClick={() => resolve.mutate({ id: r.id, accept: true })}
             className="rounded border border-mast-accent bg-mast-accent px-2 py-0.5 text-mast-accent-ink disabled:opacity-50"
           >
-            加入我的技能面
+            {tr("加入我的技能面", "Add to my skill set")}
           </button>
           <button
             type="button"
@@ -95,11 +97,11 @@ export function PendingRecommendations({ compact = false }: { compact?: boolean 
             onClick={() => resolve.mutate({ id: r.id, accept: false })}
             className="rounded border border-mast-border px-2 py-0.5 text-mast-muted disabled:opacity-50"
           >
-            不用
+            {tr("不用", "Dismiss")}
           </button>
           {!compact && (
             <span className="text-[10px] text-mast-faint">
-              在「技能 → 市场」可以看到全部
+              {tr("在「技能 → 市场」可以看到全部", "See all under Skills → Market")}
             </span>
           )}
         </div>

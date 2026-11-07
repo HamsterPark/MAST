@@ -2,15 +2,12 @@
 //
 // 设计文档：docs/v2/design/experiment_folder_persistence.md §12
 //
-// 在这之前没有 /api/experiments/current 端点，于是每个组件自己从实验列表里猜
-// 当前实验，而且猜法不一致：RightPanel 取 experiments[0]，TopBar 用
-// find(status === "active")。两处能显示不同的实验。
+// The server keeps an explicit pointer (the single-row active_scope table). Every component
+// reads the same endpoint under the same queryKey, so two views cannot disagree about which
+// experiment is current.
 //
-// 现在服务端有一个显式指针（active_scope 单行表）。所有组件读同一个端点、同一个
-// queryKey —— 结构上不可能再分歧。
-//
-// 刻意不放进 zustand：这是服务端状态。store.ts 的 persist 一旦缓存它，重启后就是
-// 一份陈旧副本 —— 那正是我们在修的 bug。react-query 的缓存就是共享 store。
+// Deliberately not in zustand: this is server state. If store.ts persisted it, a restart would
+// resurrect a stale copy. The react-query cache is the shared store.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
@@ -88,7 +85,7 @@ export function useSamplesOf(experimentId: string | null | undefined, enabled = 
   });
 }
 
-/** 新建实验前的重名检测 —— 「严谨」的实质。 */
+/** Duplicate-name check before creating an experiment. */
 export function usePreflight(name: string, enabled: boolean) {
   const trimmed = name.trim();
   return useQuery({

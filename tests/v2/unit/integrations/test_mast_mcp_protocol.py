@@ -38,9 +38,24 @@ RUN_SERVER = _SERVER_DIR / "run_server.py"
 EXPECTED_TOOLS = {
     "mast_briefing", "mast_status", "mast_find_skills", "mast_skill_card", "mast_run",
     "mast_job", "mast_jobs", "mast_cancel", "mast_emergency_stop", "mast_scope",
-    "mast_list_data", "mast_fetch", "mast_note_write", "mast_note_search",
+    "mast_list_data", "mast_search_data", "mast_fetch", "mast_note_write", "mast_note_search",
     "mast_ask_operator", "mast_operator_reply", "mast_composite_draft",
     "mast_composite_save", "mast_propose_skill", "mast_handover",
+    # MAST 7.0: VISTA inside MAST, waiting, detectors, literature
+    "mast_observe", "mast_act", "mast_wait", "mast_inspect", "mast_read_values",
+    "mast_line_profile", "mast_fft_peaks", "mast_detect_blobs", "mast_diff", "mast_stats",
+    "mast_history", "mast_read_guide", "mast_write_guide", "mast_read_working",
+    "mast_write_working", "mast_detector_create", "mast_detectors", "mast_literature_search",
+    # the optical layout: read, and comment
+    "mast_optical_layout", "mast_optical_layout_comment",
+}
+#: Tools whose results may carry images or long VISTA text: Claude Code must not move
+#: them into a file the model cannot read.
+LARGE_RESULT_TOOLS = {
+    "mast_run", "mast_observe", "mast_act", "mast_wait", "mast_inspect", "mast_read_values",
+    "mast_line_profile", "mast_fft_peaks", "mast_detect_blobs", "mast_diff", "mast_stats",
+    "mast_history", "mast_read_guide", "mast_read_working", "mast_detector_create",
+    "mast_detectors", "mast_literature_search", "mast_optical_layout",
 }
 
 
@@ -103,7 +118,10 @@ def test_initialize_result_carries_capabilities_and_rules(tmp_path):
     assert "tools" in result["capabilities"] and "resources" in result["capabilities"]
     rules = result["instructions"]
     for must in ("mast_briefing", "mast_scope", "mast_job", "refused_busy", "lost_on_restart",
-                 "mast_ask_operator", "SAFE", "mast_handover"):
+                 "mast_ask_operator", "SAFE", "mast_handover",
+                 # 7.0: the observation gate, waiting, exact numbers, notes
+                 "mast_observe", "after", "next_token", "image()", "observe_first", "mast_wait",
+                 "900 s", "mast_read_values", "GUIDE.md", "WORKING.md"):
         assert must in rules, f"instructions lost the rule about {must!r}"
 
 
@@ -122,6 +140,12 @@ def test_tools_list_has_every_tool_with_a_schema(tmp_path):
         assert len(t["description"]) > 40, t["name"]
         for prop, spec in schema["properties"].items():
             assert spec.get("description"), f"{t['name']}.{prop} has no description"
+        assert "structuredContent" not in json.dumps(t)
+        meta = t.get("_meta") or {}
+        if t["name"] in LARGE_RESULT_TOOLS:
+            assert meta == {"anthropic/maxResultSizeChars": 200000}, t["name"]
+        else:
+            assert not meta, t["name"]
 
 
 def test_unknown_method_is_method_not_found(tmp_path):
@@ -168,6 +192,26 @@ def test_stdout_carries_protocol_lines_and_nothing_else(tmp_path):
     assert by_id[2]["result"] == {}
     call = by_id["s-4"]["result"]
     assert call["isError"] is True and "127.0.0.1:9" in call["content"][0]["text"]
+
+
+def test_a_log_file_gets_the_log_while_stdout_stays_clean(tmp_path):
+    log_file = tmp_path / "runs" / "segment-0" / "bridge.log"
+    env = _env(MAST_MCP_LOG="INFO", MAST_MCP_LOG_FILE=str(log_file))
+    out, raw, _, code = _exchange([_initialize(), {"jsonrpc": "2.0", "id": 2,
+                                                   "method": "tools/list"}], env=env, cwd=tmp_path)
+    assert code == 0 and [m["id"] for m in out] == [1, 2]
+    text = log_file.read_text(encoding="utf-8")
+    assert "mast-mcp INFO mast_mcp: starting mast" in text and "initialize: client=pytest" in text
+    assert b"mast-mcp" not in raw
+
+
+def test_an_unwritable_log_file_is_reported_on_stderr_and_ignored(tmp_path):
+    blocker = tmp_path / "not-a-folder"
+    blocker.write_text("a file, so no log can be written below it", encoding="utf-8")
+    env = _env(MAST_MCP_LOG="INFO", MAST_MCP_LOG_FILE=str(blocker / "bridge.log"))
+    out, _, stderr, code = _exchange([_initialize()], env=env, cwd=tmp_path)
+    assert code == 0 and out[0]["result"]["serverInfo"]["name"] == "mast"
+    assert b"cannot write the log file" in stderr
 
 
 def test_remote_address_is_refused_without_allow_remote(tmp_path):

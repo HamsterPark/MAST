@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import List
 
+from mast.i18n import tr
 from mast.io.nanonis_files import decode_reply
 from mast.skills.base import BaseSkill
 from mast.core.types import (
@@ -26,12 +27,12 @@ class SetDriftCompensation(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="启用或禁用 piezo 漂移补偿。",
+            description=tr("启用或禁用 piezo 漂移补偿。", "Enable or disable piezo drift compensation."),
             parameters=[
                 ParameterSpec(
                     name="enable",
                     type="bool",
-                    description="True 为启用漂移补偿",
+                    description=tr("True 为启用漂移补偿", "True to enable drift compensation"),
                     required=True,
                 ),
                 # Drift speeds are signed (drift can go either way). Real thermal
@@ -41,7 +42,7 @@ class SetDriftCompensation(BaseSkill):
                 ParameterSpec(
                     name="vx",
                     type="float",
-                    description="X 向漂移速度（m/s）；默认 0.0（不做 X 轴补偿）。",
+                    description=tr("X 向漂移速度（m/s）；默认 0.0（不做 X 轴补偿）。", "X drift speed (m/s); default 0.0 (no X compensation)."),
                     unit="m/s",
                     required=False,
                     default=0.0,
@@ -51,7 +52,7 @@ class SetDriftCompensation(BaseSkill):
                 ParameterSpec(
                     name="vy",
                     type="float",
-                    description="Y 向漂移速度（m/s）；默认 0.0（不做 Y 轴补偿）。",
+                    description=tr("Y 向漂移速度（m/s）；默认 0.0（不做 Y 轴补偿）。", "Y drift speed (m/s); default 0.0 (no Y compensation)."),
                     unit="m/s",
                     required=False,
                     default=0.0,
@@ -61,7 +62,7 @@ class SetDriftCompensation(BaseSkill):
                 ParameterSpec(
                     name="vz",
                     type="float",
-                    description="Z 向漂移速度（m/s）；默认 0.0（不做 Z 轴补偿）。",
+                    description=tr("Z 向漂移速度（m/s）；默认 0.0（不做 Z 轴补偿）。", "Z drift speed (m/s); default 0.0 (no Z compensation)."),
                     unit="m/s",
                     required=False,
                     default=0.0,
@@ -114,7 +115,7 @@ class GetDriftCompensation(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取 piezo 漂移补偿的开关状态与各向速度。",
+            description=tr("读取 piezo 漂移补偿的开关状态与各向速度。", "Read the on/off state and per-axis speeds of piezo drift compensation."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["piezo", "drift", "read"],
@@ -172,19 +173,19 @@ class SetPiezoTilt(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置 piezo X、Y 轴的倾斜校正角度。",
+            description=tr("设置 piezo X、Y 轴的倾斜校正角度。", "Set the tilt correction angles of the piezo X and Y axes."),
             parameters=[
                 ParameterSpec(
                     name="tilt_x_deg",
                     type="float",
-                    description="X 向的倾斜校正角度（度）",
+                    description=tr("X 向的倾斜校正角度（度）", "Tilt correction angle in X (degrees)"),
                     unit="deg",
                     required=True,
                 ),
                 ParameterSpec(
                     name="tilt_y_deg",
                     type="float",
-                    description="Y 向的倾斜校正角度（度）",
+                    description=tr("Y 向的倾斜校正角度（度）", "Tilt correction angle in Y (degrees)"),
                     unit="deg",
                     required=True,
                 ),
@@ -223,7 +224,7 @@ class GetPiezoTilt(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取 piezo X、Y 轴的倾斜校正角度。",
+            description=tr("读取 piezo X、Y 轴的倾斜校正角度。", "Read the tilt correction angles of the piezo X and Y axes."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["piezo", "tilt", "read"],
@@ -271,14 +272,16 @@ class SetPiezoRange(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "设置全部 3 个轴的 piezo 量程（m）。"
-                "改量程的同时也会改 sensitivity（HV gain 不变）。"
+                tr("设置全部 3 个轴的 piezo 量程（m）。"
+                "改量程的同时也会改 sensitivity（HV gain 不变）。",
+                   "Set the piezo range (m) of all 3 axes. "
+                   "Changing the range also changes the sensitivity (HV gain unchanged).")
             ),
             parameters=[
                 ParameterSpec(
                     name="range_x_m",
                     type="float",
-                    description="X 轴的 piezo 量程（m）",
+                    description=tr("X 轴的 piezo 量程（m）", "Piezo range of the X axis (m)"),
                     unit="m",
                     required=True,
                     # Sanity ceiling (rig-tunable), NOT the true scanner range.
@@ -292,7 +295,7 @@ class SetPiezoRange(BaseSkill):
                 ParameterSpec(
                     name="range_y_m",
                     type="float",
-                    description="Y 轴的 piezo 量程（m）",
+                    description=tr("Y 轴的 piezo 量程（m）", "Piezo range of the Y axis (m)"),
                     unit="m",
                     required=True,
                     min_value=1e-12,   # sanity ceiling (rig-tunable); reject 0/neg
@@ -301,7 +304,7 @@ class SetPiezoRange(BaseSkill):
                 ParameterSpec(
                     name="range_z_m",
                     type="float",
-                    description="Z 轴的 piezo 量程（m）",
+                    description=tr("Z 轴的 piezo 量程（m）", "Piezo range of the Z axis (m)"),
                     unit="m",
                     required=True,
                     min_value=1e-12,   # sanity ceiling (rig-tunable); reject 0/neg
@@ -349,14 +352,16 @@ class SetPiezoSensitivity(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "设置全部 3 个轴的 piezo sensitivity（m/V）。"
-                "改 sensitivity 的同时也会改量程（HV gain 不变）。"
+                tr("设置全部 3 个轴的 piezo sensitivity（m/V）。"
+                "改 sensitivity 的同时也会改量程（HV gain 不变）。",
+                   "Set the piezo sensitivity (m/V) of all 3 axes. "
+                   "Changing the sensitivity also changes the range (HV gain unchanged).")
             ),
             parameters=[
                 ParameterSpec(
                     name="sens_x",
                     type="float",
-                    description="X 轴的 sensitivity（m/V）",
+                    description=tr("X 轴的 sensitivity（m/V）", "Sensitivity of the X axis (m/V)"),
                     unit="m/V",
                     required=True,
                     # Sanity ceiling (rig-tunable), NOT a precise calibration
@@ -370,7 +375,7 @@ class SetPiezoSensitivity(BaseSkill):
                 ParameterSpec(
                     name="sens_y",
                     type="float",
-                    description="Y 轴的 sensitivity（m/V）",
+                    description=tr("Y 轴的 sensitivity（m/V）", "Sensitivity of the Y axis (m/V)"),
                     unit="m/V",
                     required=True,
                     min_value=1e-12,   # sanity ceiling (rig-tunable); reject 0/neg
@@ -379,7 +384,7 @@ class SetPiezoSensitivity(BaseSkill):
                 ParameterSpec(
                     name="sens_z",
                     type="float",
-                    description="Z 轴的 sensitivity（m/V）",
+                    description=tr("Z 轴的 sensitivity（m/V）", "Sensitivity of the Z axis (m/V)"),
                     unit="m/V",
                     required=True,
                     min_value=1e-12,   # sanity ceiling (rig-tunable); reject 0/neg
@@ -421,7 +426,7 @@ class GetPiezoSensitivity(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取全部 3 个轴的 piezo sensitivity（m/V）。",
+            description=tr("读取全部 3 个轴的 piezo sensitivity（m/V）。", "Read the piezo sensitivity (m/V) of all 3 axes."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["piezo", "sensitivity", "calibration", "read"],
@@ -470,8 +475,10 @@ class GetPiezoHVAInfo(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读取 AUX、X、Y、Z 各轴的 HVA gain 回读信息，"
-                "以及它们的启用状态。"
+                tr("读取 AUX、X、Y、Z 各轴的 HVA gain 回读信息，"
+                "以及它们的启用状态。",
+                   "Read the HVA gain readback information of the AUX, X, Y and Z axes, "
+                   "and their enabled state.")
             ),
             estimated_duration_s=0.5,
             composition_level=0,
@@ -526,8 +533,10 @@ class GetPiezoHVAStatusLED(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读取 HVA 的 LED 状态：过热、HV 供电、"
-                "高温、输出接口。"
+                tr("读取 HVA 的 LED 状态：过热、HV 供电、"
+                "高温、输出接口。",
+                   "Read the HVA LED state: overheat, HV supply, "
+                   "high temperature, output connector.")
             ),
             estimated_duration_s=0.5,
             composition_level=0,
@@ -578,7 +587,8 @@ class GetPiezoXYZLimits(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="从 Piezo Calibration 读取 XYZ 的电压上限与启用状态。",
+            description=tr("从 Piezo Calibration 读取 XYZ 的电压上限与启用状态。",
+                           "Read the XYZ voltage limits and enabled state from Piezo Calibration."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["piezo", "limits", "voltage", "read"],
@@ -631,12 +641,14 @@ class SetPiezoHysteresisOnOff(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="启用或禁用 Piezo Configuration 中的 hysteresis 补偿。",
+            description=tr("启用或禁用 Piezo Configuration 中的 hysteresis 补偿。",
+                           "Enable or disable hysteresis compensation in Piezo Configuration."),
             parameters=[
                 ParameterSpec(
                     name="enable",
                     type="bool",
-                    description="True 为启用 hysteresis 补偿，False 为禁用",
+                    description=tr("True 为启用 hysteresis 补偿，False 为禁用",
+                                   "True to enable hysteresis compensation, False to disable it"),
                     required=True,
                 ),
             ],
@@ -680,32 +692,38 @@ class SetPiezoHysteresisValues(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "在 Piezo Calibration 模块中，为 fast 轴与 slow 轴设置并应用 "
-                "hysteresis 补偿点。"
+                tr("在 Piezo Calibration 模块中，为 fast 轴与 slow 轴设置并应用 "
+                "hysteresis 补偿点。",
+                   "In the Piezo Calibration module, set and apply the "
+                   "hysteresis compensation points for the fast and slow axes.")
             ),
             parameters=[
                 ParameterSpec(
                     name="fast_x",
                     type="str",
-                    description="fast 轴 X 的 hysteresis 补偿点，用浮点数 JSON 列表表示",
+                    description=tr("fast 轴 X 的 hysteresis 补偿点，用浮点数 JSON 列表表示",
+                                   "Hysteresis compensation points of the fast axis X, as a JSON list of floats"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="fast_y",
                     type="str",
-                    description="fast 轴 Y 的 hysteresis 补偿点，用浮点数 JSON 列表表示",
+                    description=tr("fast 轴 Y 的 hysteresis 补偿点，用浮点数 JSON 列表表示",
+                                   "Hysteresis compensation points of the fast axis Y, as a JSON list of floats"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="slow_x",
                     type="str",
-                    description="slow 轴 X 的 hysteresis 补偿点，用浮点数 JSON 列表表示",
+                    description=tr("slow 轴 X 的 hysteresis 补偿点，用浮点数 JSON 列表表示",
+                                   "Hysteresis compensation points of the slow axis X, as a JSON list of floats"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="slow_y",
                     type="str",
-                    description="slow 轴 Y 的 hysteresis 补偿点，用浮点数 JSON 列表表示",
+                    description=tr("slow 轴 Y 的 hysteresis 补偿点，用浮点数 JSON 列表表示",
+                                   "Hysteresis compensation points of the slow axis Y, as a JSON list of floats"),
                     required=True,
                 ),
             ],
@@ -739,8 +757,10 @@ class SetPiezoHysteresisValues(BaseSkill):
                 return SkillResult(
                     skill_name="SetPiezoHysteresisValues",
                     success=False,
-                    error=(f"{label} 必须是 JSON 数组，例如 \"[0.1, 0.2]\"；"
-                           f"收到的是 {type(seq).__name__}（{params[label]!r}）"),
+                    error=(tr(f"{label} 必须是 JSON 数组，例如 \"[0.1, 0.2]\"；"
+                           f"收到的是 {type(seq).__name__}（{params[label]!r}）",
+                              f"{label} must be a JSON array, e.g. \"[0.1, 0.2]\"; "
+                              f"got {type(seq).__name__} ({params[label]!r})")),
                     nanonis_calls=[],
                 )
 
@@ -805,14 +825,16 @@ class LoadPiezoHysteresisFile(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "在 Piezo Configuration 模块中，从一个 .csv 文件载入并应用"
-                "两个轴的 hysteresis 补偿值。"
+                tr("在 Piezo Configuration 模块中，从一个 .csv 文件载入并应用"
+                "两个轴的 hysteresis 补偿值。",
+                   "In the Piezo Configuration module, load and apply the hysteresis compensation values "
+                   "of both axes from a .csv file.")
             ),
             parameters=[
                 ParameterSpec(
                     name="file_path",
                     type="str",
-                    description=".csv hysteresis 文件的路径",
+                    description=tr(".csv hysteresis 文件的路径", "Path of the .csv hysteresis file"),
                     required=True,
                 ),
             ],

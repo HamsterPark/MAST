@@ -119,12 +119,12 @@ class SafetyGate:
         # single check whose limit attr is missing on the limits object is dropped
         # with a warning rather than aborting the whole SafetyGate construction —
         # which on the LIVE agent path would crash instrument_control's build()
-        # and silently take the executor offline (security 审查, #1).
+        # and silently take the executor offline.
         #
         # The SafetyLimits field NAMES are carried alongside the resolved values
         # (6-tuple, not v1's 4-tuple) so a rejection can tell the operator WHICH
         # knob to turn — "widen xy_max_m" is actionable, "the envelope is too
-        # small" is not ().
+        # small" is not.
         self._resolved_checks: list[tuple[str, str, float, float, str, str]] = []
         for pat, unit_pat, min_attr, max_attr in self._checks:
             try:
@@ -192,7 +192,7 @@ class SafetyGate:
         # Replacements — a malformed override (typo'd min_attr/max_attr, missing
         # keys, non-str fields) is dropped with a warning and the built-in check
         # left intact, rather than crashing SafetyGate construction. Validated via
-        # the same single-source helper used by core.safety (security ).
+        # the same single-source helper used by core.safety.
         for item in ovr.get("overrides", []) or []:
             valid = _valid_check_item(item)
             if valid is None:
@@ -282,9 +282,14 @@ class SafetyGate:
     #     envelope. The fix is a human decision about the envelope — NOT a new
     #     number.
     #
-    # Do not describe an ordinary envelope violation as a dropped exponent.
-    # That would invite the model to replace a correctly supplied coordinate
-    # with an invented one. Use the magnitude ratio to distinguish the cases.
+    # The old code computed the overshoot factor and then never used it, so both
+    # cases got the same "you almost certainly dropped the exponent" lecture.
+    # Example: a scan frame whose center was written in correct scientific
+    # notation but sat just over the cap (about 1.14× the cap) was told
+    # "1e+00× the cap — you almost certainly meant nanometers and
+    # dropped the exponent". That is the dangerous direction to be wrong in: it
+    # tells the agent a CORRECT coordinate is malformed and invites it to invent
+    # a different one, i.e. to point the tip somewhere nobody asked for.
     #
     # An exponent slip is ≥ 1000× by construction — one SI-prefix step is 1e3,
     # the common µm-as-m slip is 1e6, nm-as-m is 1e9. Anything under that is an
@@ -605,10 +610,19 @@ class SafetyGateMiddleware(AgentMiddleware):
                 status="error",
             )
 
-        # Layer 0g: an active ApproachTip refusal must also block a direct
-        # AutoApproach tool call. This is a sequence guard, not a change to the
-        # skill safety level. ApproachTip retains its own verified escalation
-        # route through ExecutionContext; ordinary unblocked calls are unchanged.
+        # Layer 0g: a coarse approach that ApproachTip has just DECLINED must
+        # not be re-entered through the side door. ApproachTip refuses to
+        # escalate when it cannot prove the Z-feedback state; AutoApproach is
+        # the same coarse approach with safety_level=AUTO and no confirmation,
+        # so a refusal could be undone by a direct AutoApproach call
+        # shortly afterwards.
+        #
+        # This gate is on the SEQUENCE, not the skill: AutoApproach stays AUTO
+        # for the ordinary path (its AUTO level is the v0.3.21 fix for a
+        # confirmation dialog that could not be answered), and ApproachTip's own
+        # internal escalation goes through ExecutionContext.run, not through
+        # this middleware, so the safe path is untouched. Only a DIRECT agent
+        # tool call while a refusal is live is refused.
         if is_approach_escalation(tool.name):
             refusal = active_approach_refusal()
             if refusal is not None:
@@ -684,7 +698,7 @@ class SafetyGateMiddleware(AgentMiddleware):
         * ``core.diagnostics`` — the REFUSAL ledger. Always on, and it records
           only blocks. This exists because the first sink is optional: with no
           trajectory active, a block used to leave **no trace anywhere**. The
-          operator got 「进针功能调用失败」  and neither they nor we could say
+          operator got 「进针功能调用失败」 and neither they nor we could say
           which layer had refused it, on what state, with what args. A refusal
           that isn't written down did not happen, as far as the next person is
           concerned.

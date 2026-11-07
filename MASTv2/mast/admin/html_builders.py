@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from mast.i18n import tr
+
 
 def status_dot(active: bool) -> str:
     """Small colored dot indicating active/inactive state."""
@@ -43,10 +45,10 @@ CATEGORY_COLORS = {
 }
 
 SOURCE_LABELS = {
-    "builtin": "内置",
-    "composite": "组合",
-    "paper": "论文",
-    "custom": "自定义",
+    "builtin": tr("内置", "Built-in"),
+    "composite": tr("组合", "Composite"),
+    "paper": tr("论文", "Paper"),
+    "custom": tr("自定义", "Custom"),
 }
 
 
@@ -77,19 +79,19 @@ def enforcement_badge(enforcement: str) -> str:
 def override_indicator(has_override: bool) -> str:
     """Small indicator showing whether a value has been overridden."""
     if has_override:
-        return '<span class="admin-override-dot" title="已覆盖"></span>'
+        return '<span class="admin-override-dot" title="' + tr("已覆盖", "Overridden") + '"></span>'
     return ""
 
 
 _OVERRIDE_LABELS = {
-    "safety_limits.json": "安全限制",
-    "safety_checks.json": "检查规则",
-    "safety_constraints.json": "安全约束",
-    "skill_overrides.json": "技能",
-    "knowledge_overrides.json": "知识库",
-    "fault_diagnosis_overrides.json": "故障诊断",
-    "guidance_overrides.json": "技能指导",
-    "encyclopedia_overrides.json": "百科",
+    "safety_limits.json": tr("安全限制", "Safety limits"),
+    "safety_checks.json": tr("检查规则", "Check rules"),
+    "safety_constraints.json": tr("安全约束", "Safety constraints"),
+    "skill_overrides.json": tr("技能", "Skills"),
+    "knowledge_overrides.json": tr("知识库", "Knowledge base"),
+    "fault_diagnosis_overrides.json": tr("故障诊断", "Fault diagnosis"),
+    "guidance_overrides.json": tr("技能指导", "Skill guidance"),
+    "encyclopedia_overrides.json": tr("百科", "Encyclopedia"),
 }
 
 
@@ -127,7 +129,7 @@ def build_override_banner_html(override_summary: dict[str, bool]) -> str:
         '<circle cx="9" cy="13" r="0.8" fill="currentColor"/>'
         '</svg>'
         '<div>'
-        f'<div class="mast-warning-banner-title">{count} 项配置已被覆盖</div>'
+        f'<div class="mast-warning-banner-title">{tr(f"{count} 项配置已被覆盖", f"{count} settings overridden")}</div>'
         f'<div class="mast-warning-banner-detail">{labels_str}</div>'
         '</div>'
         '<span class="mast-warning-banner-tag">override active</span>'
@@ -259,7 +261,7 @@ def build_history_html(entries: list[tuple[str, str]]) -> str:
         entries: [(timestamp_str, filename), ...]
     """
     if not entries:
-        return '<p style="color:var(--mast-text-dim)">暂无历史记录</p>'
+        return '<p style="color:var(--mast-text-dim)">' + tr("暂无历史记录", "No history yet") + '</p>'
 
     rows = ""
     for ts, fname in entries[:20]:  # Show last 20
@@ -269,12 +271,13 @@ def build_history_html(entries: list[tuple[str, str]]) -> str:
             <td style="padding:4px 8px">{fname}</td>
         </tr>"""
 
+    th_time, th_file = tr("时间", "Time"), tr("文件", "File")
     return f"""
     <table style="width:100%;border-collapse:collapse;font-size:0.85rem">
         <thead>
             <tr style="border-bottom:1px solid var(--mast-border)">
-                <th style="text-align:left;padding:4px 8px">时间</th>
-                <th style="text-align:left;padding:4px 8px">文件</th>
+                <th style="text-align:left;padding:4px 8px">{th_time}</th>
+                <th style="text-align:left;padding:4px 8px">{th_file}</th>
             </tr>
         </thead>
         <tbody>{rows}</tbody>

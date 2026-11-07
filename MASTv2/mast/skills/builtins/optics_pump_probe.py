@@ -16,6 +16,11 @@ number against names like "LI Demod 1 X (A)".
 Motion goes through the instruments registry (delay-line binding in
 ``config/optical_instruments.json``); Nanonis goes through
 ``context.safe_call``. The two stacks never touch each other's transport.
+
+Live view (contract §7): each point is also published to LiveHub as
+``local/pump_probe/<run_id>`` — an ``xy`` stream (delay → signals) for a 1D
+sweep, a ``map2d`` stream (``ix`` = delay index, ``iy`` = 2nd-stage index) for
+the two-stage map. The CSV/PNG output is unchanged.
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.instruments.base import InstrumentError, InstrumentUnavailable
 from mast.instruments.registry import get_instrument_registry
 from mast.skills.base import BaseSkill
@@ -42,10 +48,20 @@ from mast.skills.base import BaseSkill
 # OpticalStageScan / AcquireSignalPoint. Re-exported under the historical
 # _-prefixed names the tests import.
 from mast.skills.builtins.optics_acquire import (
+    DEFAULT_TRIGGER_LINE,
+    DEFAULT_TRIGGER_PORT,
     mean_std as _mean_std,
     nanonis_scalar as _nanonis_scalar,
     parse_indices as _parse_indices,
     signal_names as _signal_names,
+    trigger_port_refusal,
+    value_units,
+)
+from mast.skills.builtins.optics_common import (
+    LiveStream,
+    abort_probe,
+    new_run_id,
+    stage_tip_refusal,
 )
 
 logger = logging.getLogger(__name__)
@@ -66,30 +82,33 @@ class PumpProbeScan(BaseSkill):
             # potentially minutes-long sweep is the right friction.
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "泵浦-探测延时扫描：把光学延时线从 delay_start_ps 扫到 delay_stop_ps，"
+                tr("泵浦-探测延时扫描：把光学延时线从 delay_start_ps 扫到 delay_stop_ps，"
                 "分 `points` 步；每一点先等台子稳定，再把隧道电流（Current_Get）和／或一路锁相解调信号（Signals_ValGet）"
                 "在 samples_per_point 次读数上取平均。CSV + 预览 PNG 写到 artifacts/pump_probe/。"
-                "需要 config/optical_instruments.json 里的 delay_line 绑定。"
+                "需要 config/optical_instruments.json 里的 delay_line 绑定。",
+                   "Pump-probe delay scan: sweep the optical delay line from delay_start_ps to delay_stop_ps in `points` steps; at each point wait for the stage to settle, then average the tunneling current (Current_Get) and/or one lock-in demodulated signal (Signals_ValGet) "
+                   "over samples_per_point readings. CSV + preview PNG are written to artifacts/pump_probe/. "
+                   "Requires a delay_line binding in config/optical_instruments.json.")
             ),
             parameters=[
                 ParameterSpec(
                     name="delay_start_ps",
                     type="float",
-                    description="起始光学延时（ps）",
+                    description=tr("起始光学延时（ps）", "Start optical delay (ps)"),
                     unit="ps",
                     required=True,
                 ),
                 ParameterSpec(
                     name="delay_stop_ps",
                     type="float",
-                    description="终止光学延时（ps）",
+                    description=tr("终止光学延时（ps）", "Stop optical delay (ps)"),
                     unit="ps",
                     required=True,
                 ),
                 ParameterSpec(
                     name="points",
                     type="int",
-                    description="延时点数（含首尾两端）",
+                    description=tr("延时点数（含首尾两端）", "Number of delay points (both ends included)"),
                     required=True,
                     min_value=2,
                     max_value=10000,
@@ -97,7 +116,7 @@ class PumpProbeScan(BaseSkill):
                 ParameterSpec(
                     name="samples_per_point",
                     type="int",
-                    description="每个延时点上平均多少次信号读数",
+                    description=tr("每个延时点上平均多少次信号读数", "How many signal readings to average at each delay point"),
                     required=False,
                     default=10,
                     min_value=1,
@@ -106,7 +125,7 @@ class PumpProbeScan(BaseSkill):
                 ParameterSpec(
                     name="sample_interval_s",
                     type="float",
-                    description="同一点内两次读数之间的间隔",
+                    description=tr("同一点内两次读数之间的间隔", "Interval between two readings at the same point"),
                     unit="s",
                     required=False,
                     default=0.01,
@@ -116,7 +135,7 @@ class PumpProbeScan(BaseSkill):
                 ParameterSpec(
                     name="settle_extra_s",
                     type="float",
-                    description="台子报告已到位之后额外驻留的时间",
+                    description=tr("台子报告已到位之后额外驻留的时间", "Extra dwell time after the stage reports it is in position"),
                     unit="s",
                     required=False,
                     default=0.05,
@@ -126,14 +145,14 @@ class PumpProbeScan(BaseSkill):
                 ParameterSpec(
                     name="read_current",
                     type="bool",
-                    description="采集隧道电流（Current_Get）",
+                    description=tr("采集隧道电流（Current_Get）", "Acquire the tunneling current (Current_Get)"),
                     required=False,
                     default=True,
                 ),
                 ParameterSpec(
                     name="read_lockin",
                     type="bool",
-                    description="采集一路锁相解调信号",
+                    description=tr("采集一路锁相解调信号", "Acquire one lock-in demodulated signal"),
                     required=False,
                     default=True,
                 ),
@@ -141,7 +160,8 @@ class PumpProbeScan(BaseSkill):
                     name="lockin_signal_index",
                     type="int",
                     description=(
-                        "锁相输出所在的信号槽位（0-127）；-1 = 经 lockin_demod 从信号名里自动发现"
+                        tr("锁相输出所在的信号槽位（0-127）；-1 = 经 lockin_demod 从信号名里自动发现",
+                           "Signal slot of the lock-in output (0-127); -1 = discover automatically from the signal names via lockin_demod")
                     ),
                     required=False,
                     default=-1,
@@ -151,7 +171,7 @@ class PumpProbeScan(BaseSkill):
                 ParameterSpec(
                     name="lockin_demod",
                     type="int",
-                    description="用于自动发现的解调器编号",
+                    description=tr("用于自动发现的解调器编号", "Demodulator number used for auto-discovery"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -160,14 +180,17 @@ class PumpProbeScan(BaseSkill):
                 ParameterSpec(
                     name="return_to_start",
                     type="bool",
-                    description="扫完之后回到 delay_start_ps",
+                    description=(tr("扫完之后回到 delay_start_ps；被中止时不回（中止之后不再发起新的"
+                                 "运动），结果里 return_to_start 写明",
+                                    "Return to delay_start_ps after the scan; not done when aborted (no new "
+                                    "motion is started after an abort); return_to_start in the result says which")),
                     required=False,
                     default=True,
                 ),
                 ParameterSpec(
                     name="move_timeout_s",
                     type="float",
-                    description="每点运动的时限",
+                    description=tr("每点运动的时限", "Per-point motion time limit"),
                     unit="s",
                     required=False,
                     default=60.0,
@@ -177,7 +200,7 @@ class PumpProbeScan(BaseSkill):
                 ParameterSpec(
                     name="tag",
                     type="str",
-                    description="可选标签，附加在输出文件名上",
+                    description=tr("可选标签，附加在输出文件名上", "Optional label appended to the output file name"),
                     required=False,
                     default="",
                 ),
@@ -185,9 +208,12 @@ class PumpProbeScan(BaseSkill):
                     name="extra_signal_indices",
                     type="str",
                     description=(
-                        "每点还要额外读取并平均的 Nanonis 信号槽位（0-127），逗号分隔（例如 '14' 代表 Z）"
-                        "。每加一路就多出 sig<idx>_mean/std 两列 —— 实验室那套 VI 记的是 index 0 + 14（Z）"
-                        "。"
+                        tr("每点还要额外读取并平均的 Nanonis 信号槽位（0-127），逗号分隔（例如 '14' 代表 Z）"
+                        "。每加一路就多出 sig<idx>_mean/std 两列"
+                        "。",
+                           "Extra Nanonis signal slots (0-127) to read and average at every point, comma-separated (e.g. '14' for Z). "
+                           "Each one adds sig<idx>_mean/std columns"
+                           ".")
                     ),
                     required=False,
                     default="",
@@ -196,7 +222,8 @@ class PumpProbeScan(BaseSkill):
                     name="trigger_enable",
                     type="bool",
                     description=(
-                        "每一点上（稳定之后、读数之前）在一条 Nanonis 数字输出线上打一个脉冲，用来触发泵浦激光／光谱仪 —— 对应实验室 VI 里的 'Enable trigger'。"
+                        tr("每一点上（稳定之后、读数之前）在一条 Nanonis 数字输出线上打一个脉冲，用来触发泵浦激光／光谱仪。",
+                           "At every point (after settling, before the reading) send a pulse on one Nanonis digital output line to trigger the pump laser / spectrometer.")
                     ),
                     required=False,
                     default=False,
@@ -204,19 +231,23 @@ class PumpProbeScan(BaseSkill):
                 ParameterSpec(
                     name="trigger_port",
                     type="int",
-                    description="触发用的数字端口：0=A,1=B,2=C,3=D,4+=DIO",
-                    required=False, default=0, min_value=0, max_value=8,
+                    description=(tr("触发用的数字端口：1=B,2=C,3=D,4+=DIO。Port A（0）被拒绝："
+                                 "PMD4 机器上它是粗动控制器的控制口",
+                                    "Digital port for the trigger: 1=B, 2=C, 3=D, 4+=DIO. Port A (0) is refused: "
+                                    "on PMD4 machines it is the control port of the coarse-motion controller")),
+                    required=False, default=DEFAULT_TRIGGER_PORT, min_value=1, max_value=8,
                 ),
                 ParameterSpec(
                     name="trigger_line",
                     type="int",
-                    description="要打脉冲的数字线，1..8（VI 里的 'Trigger line 1-8'）",
-                    required=False, default=1, min_value=1, max_value=8,
+                    description=(tr("要打脉冲的数字线，1..8",
+                                    "Digital line to pulse, 1..8")),
+                    required=False, default=DEFAULT_TRIGGER_LINE, min_value=1, max_value=8,
                 ),
                 ParameterSpec(
                     name="trigger_width_s",
                     type="float",
-                    description="触发脉冲宽度（s）",
+                    description=tr("触发脉冲宽度（s）", "Trigger pulse width (s)"),
                     unit="s", required=False, default=1e-4,
                     min_value=1e-6, max_value=1.0,
                 ),
@@ -224,21 +255,24 @@ class PumpProbeScan(BaseSkill):
                     name="secondary_device_id",
                     type="str",
                     description=(
-                        "可选的第二台台子（VI 里的 S2），在扫描开始前一次性停到 secondary_position；"
-                        "'' = 不用。"
+                        tr("可选的第二台台子，在扫描开始前一次性停到 secondary_position；"
+                        "'' = 不用。",
+                           "Optional second stage, parked once at secondary_position before the scan starts; "
+                           "'' = not used.")
                     ),
                     required=False, default="",
                 ),
                 ParameterSpec(
                     name="secondary_axis",
                     type="str",
-                    description="第二台设备上的轴名",
+                    description=tr("第二台设备上的轴名", "Axis name on the second device"),
                     required=False, default="",
                 ),
                 ParameterSpec(
                     name="secondary_position",
                     type="float",
-                    description=("secondary_scan=false 时，把第二条轴**停**在哪里（用它的原生单位）"),
+                    description=(tr("secondary_scan=false 时，把第二条轴**停**在哪里（用它的原生单位）",
+                                    "Where to **park** the second axis when secondary_scan=false (in its native unit)")),
                     required=False, default=0.0,
                 ),
                 # -- 双台同时扫 (2D delay map): raster the 2nd stage too --------
@@ -246,36 +280,44 @@ class PumpProbeScan(BaseSkill):
                     name="secondary_scan",
                     type="bool",
                     description=(
-                        "把第二台台子当作**第二条**延时轴来扫，而不是把它停住：从 secondary_start→secondary_stop 取 secondary_points 个位置，"
+                        tr("把第二台台子当作**第二条**延时轴来扫，而不是把它停住：从 secondary_start→secondary_stop 取 secondary_points 个位置，"
                         "每个位置上都把主延时线整条扫一遍 —— 得到一张 2D 图（主延时 × 第二台台子位置）"
-                        "。false = 一次性停在 secondary_position（1D，默认）。"
+                        "。false = 一次性停在 secondary_position（1D，默认）。",
+                           "Scan the second stage as a **second** delay axis instead of parking it: take secondary_points positions from secondary_start to secondary_stop, "
+                           "and at each position sweep the whole primary delay line - giving a 2D map (primary delay x second stage position)"
+                           ". false = park once at secondary_position (1D, default).")
                     ),
                     required=False, default=False,
                 ),
                 ParameterSpec(
                     name="secondary_start",
                     type="float",
-                    description="第二台台子的扫描起点（其原生单位），secondary_scan 时有效",
+                    description=tr("第二台台子的扫描起点（其原生单位），secondary_scan 时有效",
+                                   "Scan start of the second stage (native unit); used when secondary_scan"),
                     required=False, default=0.0,
                 ),
                 ParameterSpec(
                     name="secondary_stop",
                     type="float",
-                    description="第二台台子的扫描终点（其原生单位），secondary_scan 时有效",
+                    description=tr("第二台台子的扫描终点（其原生单位），secondary_scan 时有效",
+                                   "Scan end of the second stage (native unit); used when secondary_scan"),
                     required=False, default=0.0,
                 ),
                 ParameterSpec(
                     name="secondary_points",
                     type="int",
-                    description="第二台台子的点数（外层／慢轴），secondary_scan 时有效",
+                    description=tr("第二台台子的点数（外层／慢轴），secondary_scan 时有效",
+                                   "Number of points of the second stage (outer / slow axis); used when secondary_scan"),
                     required=False, default=2, min_value=2, max_value=1000,
                 ),
                 ParameterSpec(
                     name="dry_run",
                     type="bool",
                     description=(
-                        "**试跑**：让延时线走遍每一个点并稳定，但跳过触发、信号读取与存盘。用来在真正（会打激光的）"
-                        "测量之前，验证台子能干净地扫完整个范围。会报告实际到达的位置。"
+                        tr("**试跑**：让延时线走遍每一个点并稳定，但跳过触发、信号读取与存盘。用来在真正（会打激光的）"
+                        "测量之前，验证台子能干净地扫完整个范围。会报告实际到达的位置。",
+                           "**Dry run**: step the delay line through every point and let it settle, but skip the trigger, signal readout and saving. Use it to verify that the stage can sweep the whole range cleanly before the real "
+                           "(laser-firing) measurement. Reports the positions actually reached.")
                     ),
                     required=False,
                     default=False,
@@ -462,13 +504,20 @@ class PumpProbeScan(BaseSkill):
         settle_extra = float(params.get("settle_extra_s", 0.05))
         move_timeout = float(params.get("move_timeout_s", 60.0))
 
-        # -- optional 2nd stage (the VI's S2) --------------------------------
+        # -- optional 2nd stage --------------------------------
         # secondary_scan=false → park it once here (legacy 1D behaviour).
         # secondary_scan=true  → raster it as a SECOND delay axis: the sweep
         #   below moves it to each secondary position and sweeps the whole main
         #   delay line there, producing a 2D map (main delay × 2nd-stage pos).
         sec_id = str(params.get("secondary_device_id", "") or "")
         sec_axis = str(params.get("secondary_axis", "") or "")
+        # the moved devices' tip_requirement (absent = none = no check), before the
+        # secondary stage is parked below; dry runs move the stages just the same
+        why, tip_info = stage_tip_refusal(
+            context, [dl.config.device_id, sec_id if sec_axis else ""])
+        if why:
+            return SkillResult(skill_name="PumpProbeScan", success=False, error=why,
+                               data={"tip_requirement": tip_info})
         two_d = bool(sec_id and sec_axis and params.get("secondary_scan", False))
         ax2 = None
         sec_positions: list = [None]
@@ -501,10 +550,13 @@ class PumpProbeScan(BaseSkill):
 
         # -- trigger line: configure as active-high output once ------------
         trigger_enable = bool(params.get("trigger_enable", False)) and not dry_run
-        trig_port = int(params.get("trigger_port", 0))
-        trig_line = int(params.get("trigger_line", 1))
+        trig_port = int(params.get("trigger_port", DEFAULT_TRIGGER_PORT))
+        trig_line = int(params.get("trigger_line", DEFAULT_TRIGGER_LINE))
         trig_width = float(params.get("trigger_width_s", 1e-4))
         if trigger_enable:
+            refusal = trigger_port_refusal(trig_port)
+            if refusal:
+                return SkillResult(skill_name="PumpProbeScan", success=False, error=refusal)
             rec = context.safe_call("DigLines_PropsSet", trig_line, trig_port, 1, 1)
             nanonis_calls.append(rec)
             if rec.error:
@@ -521,17 +573,44 @@ class PumpProbeScan(BaseSkill):
         # so the heat-map + CSV expose both axes. check_abort() only RETURNS a
         # bool (never raises) — honour it via stop_sweep to unwind both loops,
         # keeping partial data (dead-check fixed 2026-07-11).
+        live: LiveStream | None = None
+        if not dry_run:
+            run_id = new_run_id("pp")
+            channels = ((["current_a"] if read_current else [])
+                        + (["lockin_v"] if read_lockin else [])
+                        + [f"sig{xi}_mean" for xi in extra_indices])
+            if two_d:
+                s_unit = ax2.config.unit if ax2 is not None else ""
+                live = LiveStream(
+                    f"local/pump_probe/{run_id}", "map2d",
+                    title=tr("泵浦-探测 双台二维图", "Pump-probe two-stage 2D map"), source="PumpProbeScan",
+                    x_label="Delay", x_unit="ps", y_label="2nd stage", y_unit=s_unit,
+                    # LiveHub refuses a zero pixel pitch; a degenerate axis gets 1.0.
+                    meta={"nx": points, "ny": len(sec_positions), "x0": start,
+                          "y0": sec_positions[0],
+                          "dx": ((stop - start) / (points - 1) if points > 1 else 0.0) or 1.0,
+                          "dy": (((sec_positions[-1] - sec_positions[0]) / (len(sec_positions) - 1)
+                                  if len(sec_positions) > 1 else 0.0) or 1.0),
+                          "x_unit": "ps", "y_unit": s_unit,
+                          "channels": channels, "units": value_units(channels)})
+            else:
+                live = LiveStream(
+                    f"local/pump_probe/{run_id}", "xy", title=tr("泵浦-探测 延时扫描", "Pump-probe delay scan"),
+                    source="PumpProbeScan", x_label="Delay", x_unit="ps", y_label="Signal",
+                    meta={"channels": channels, "units": value_units(channels)})
+
         rows: list[dict] = []
         aborted = ""
         idx = 0
         stop_sweep = False
+        probe = abort_probe(context)
         t0 = time.monotonic()
         try:
             for si, sec_pos in enumerate(sec_positions):
                 if stop_sweep:
                     break
                 if two_d and sec_pos is not None:
-                    ax2.move_abs(sec_pos, wait=True, timeout=move_timeout)
+                    ax2.move_abs(sec_pos, wait=True, timeout=move_timeout, check_abort=probe)
                     if settle_extra > 0:
                         time.sleep(settle_extra)
                 for i, delay in enumerate(delays):
@@ -543,7 +622,8 @@ class PumpProbeScan(BaseSkill):
                         stop_sweep = True
                         break
 
-                    status = dl.move_to_delay_ps(delay, wait=True, timeout=move_timeout)
+                    status = dl.move_to_delay_ps(delay, wait=True, timeout=move_timeout,
+                                                 check_abort=probe)
                     if settle_extra > 0:
                         time.sleep(settle_extra)
 
@@ -605,6 +685,12 @@ class PumpProbeScan(BaseSkill):
                             row[f"sig{xi}_mean"], row[f"sig{xi}_std"] = _mean_std(
                                 extra_vals[xi]
                             )
+                        if live is not None:
+                            vals = {k: float(v) for k, v in row.items()
+                                    if k in ("current_a", "lockin_v")
+                                    or (k.startswith("sig") and k.endswith("_mean"))}
+                            live.publish({"ix": i, "iy": si, "values": vals} if two_d
+                                         else {"x": row["delay_ps"], "values": vals})
                     rows.append(row)
                     idx += 1
         except Exception as exc:  # noqa: BLE001 - keep partial data on any abort
@@ -612,13 +698,22 @@ class PumpProbeScan(BaseSkill):
             logger.warning("pump-probe sweep interrupted at point %d: %s",
                            len(rows), aborted)
         finally:
+            if live is not None:
+                live.end()
+            # No new motion once the operator has aborted (contract §10.3): the
+            # delay line stays where the stop left it, and the result says so.
+            parked = "not requested"
             if params.get("return_to_start", True):
-                try:
-                    dl.move_to_delay_ps(start, wait=False)
-                    if two_d and sec_positions and sec_positions[0] is not None:
-                        ax2.move_abs(sec_positions[0], wait=False)
-                except Exception:  # noqa: BLE001 - best-effort park
-                    pass
+                if probe is not None and probe():
+                    parked = "skipped: aborted"
+                else:
+                    try:
+                        dl.move_to_delay_ps(start, wait=False)
+                        if two_d and sec_positions and sec_positions[0] is not None:
+                            ax2.move_abs(sec_positions[0], wait=False)
+                        parked = "sent"
+                    except Exception as exc:  # noqa: BLE001 - best-effort park
+                        parked = f"failed: {type(exc).__name__}: {exc}"
 
         if not rows:
             return SkillResult(
@@ -642,6 +737,7 @@ class PumpProbeScan(BaseSkill):
                 "elapsed_s": round(elapsed, 3),
                 "reached_delays_ps": [round(r["delay_ps"], 4) for r in rows],
                 "stage_positions": [r["stage_position"] for r in rows],
+                "return_to_start": parked,
             }
             if two_d:
                 data["two_d"] = True
@@ -700,7 +796,10 @@ class PumpProbeScan(BaseSkill):
             "delay_stop_ps": stop,
             "samples_per_point": samples,
             "elapsed_s": round(elapsed, 3),
+            "return_to_start": parked,
         }
+        if live is not None and live.active:
+            data["live_stream"] = live.stream_id
         if two_d:
             data["two_d"] = True
             data["shape"] = [len(sec_positions), points]

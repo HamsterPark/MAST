@@ -47,13 +47,11 @@ class SensorEntry(BaseModel):
     #: Which headline gauge this sensor IS: vacuum / temperature / helium_level
     #: / noise_level, or None for an extra gauge that maps to none of them.
     #:
-    #: Added 2026-07-28 . The panel tried to de-duplicate the rail against
-    #: ``type`` — comparing a driver class name to "temperature" — so the test
-    #: never matched and EVERY sensor was printed twice: once as the headline
-    #: row, once again as a raw row. The operator saw 77.42 K as both
-    #: "Temperature" and "MODEL335 (COM13)", with vacuum / helium_level /
-    #: noise_level duplicated underneath as bare type strings. The mapping
-    #: already existed server-side; it just was not being told to the client.
+    #: The panel de-duplicates the rail against this field, not ``type``:
+    #: comparing a driver class name to "temperature" never matches, so EVERY
+    #: sensor would be printed twice: once as the headline row, once again as
+    #: a raw row (e.g. a temperature as both "Temperature" and
+    #: "MODEL335 (COM port)").
     kind: Optional[str] = None
     #: 这一行是**占位实现**，不是一个读不到的传感器。
     #:
@@ -61,7 +59,6 @@ class SensorEntry(BaseModel):
     #: 从来没返回过数字的 ``NoiseSensor``，都报 ``unavailable``。但它们是不同的
     #: 事实 ——「表接着但读不到」可以插回去，「MAST 里根本没有这个量的驱动」
     #: 插什么都没用 —— 而只有前者值得在面板上占一行等着变好。
-    #: 噪声这一路一直是 unavailable，看起来像坏了。
     placeholder: bool = False
     value: Optional[float] = None
     unit: Optional[str] = None

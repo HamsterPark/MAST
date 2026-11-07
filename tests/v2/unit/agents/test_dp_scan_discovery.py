@@ -1,7 +1,7 @@
 """DP agent scan discovery + .sxm loading — .
 
 The 2026-07-10 full-flow run saved scans into Nanonis's session dir
-(D:\\Data\\fsSTM\\...), but data_processing's get_latest_scan_file (running
+(<data-dir>\\...), but data_processing's get_latest_scan_file (running
 with context=None — no pool) searched only working-sessions and found
 nothing; load_scan then failed on a dozen guessed paths and reported ".sxm
 parsing not yet wired" because it looked for the ARCHIVED v1 parser.

@@ -43,26 +43,26 @@ import { RunTaskPanel } from "@/components/agents/RunTaskPanel";
 import { BackgroundRunsPanel } from "@/components/agents/BackgroundRunsPanel";
 import { PendingActivationsPanel } from "@/components/agents/PendingActivationsPanel";
 import { ArtifactEditor } from "@/components/agents/ArtifactEditor";
-// Replaces ArtifactConnectionGraph (2026-07-11): that drew a single-writer
-// bipartite blob from a model that was not true of the real pipeline.
+// Replaces ArtifactConnectionGraph, which drew a single-writer bipartite graph that did
+// not match the real pipeline.
 import { ArtifactFlowGraph } from "@/components/agents/ArtifactFlowGraph";
+import { langTag, tr } from "@/lib/i18n";
 
 // ════════════════════════════════════════════════════════════════════════════
-// Agents inspector — FULL parity rebuild of the old Gradio 智能体 surface.
+// Agents inspector — full parity rebuild of the old Gradio agents surface.
 //
-// Sub-tabs (flat React state via <SubTabs>, never nested gr.Tabs → no freeze):
-//   对话     — DEFAULT/primary. INTERACTIVE multi-agent conversation (POST
-//              /api/agents/run-task SSE + live POST /api/agents/{target}/interject):
-//              one scrolling thread with a persistent bottom input — first message
-//              starts the task, later messages steer the run live;
-//              inline handoffs + HITL approve/reject/edit + abort; legacy per-agent
-//              SUP private chat kept as a secondary mode
-//   拓扑     — supervisor + 7-agent topology graph (live model/active/threads)
-//   代理对话 — per-agent private chat threads
-//   检查器   — per-agent model+thinking picker + tool catalog DataTable (IC ~224)
-//   制品     — artifact list + R/W permission matrix + per-artifact operator EDITOR
-//              (save/revert/history/diff/export via /api/artifacts/{id}/edit…)
-//   QA 助手  — scoped single-turn READ-ONLY helper (POST /api/qa)
+// Sub-tabs (flat React state via <SubTabs>, never nested gr.Tabs, so nothing freezes):
+//   Chat      — default/primary. Interactive multi-agent conversation (POST
+//               /api/agents/run-task SSE + live POST /api/agents/{target}/interject):
+//               one scrolling thread with a persistent bottom input; the first message
+//               starts the task, later messages steer the run live; inline handoffs,
+//               HITL approve/reject/edit and abort; the legacy per-agent supervisor
+//               private chat is kept as a secondary mode
+//   Topology  — supervisor + 7-agent topology graph (live model/active/threads)
+//   Agent chat — per-agent private chat threads
+//   Inspector — per-agent model+thinking picker + tool catalog DataTable (IC ~224)
+//   Objects   — artifact list + R/W permission matrix + per-artifact operator editor
+//               (save/revert/history/diff/export via /api/artifacts/{id}/edit…)
 //
 // Plus a global HITL interrupts modal (badge-gated) reachable from the header.
 // All reads render loading / error / degraded / empty. All writes toast.
@@ -159,44 +159,44 @@ type SubTab =
   | "topology" | "chat" | "background" | "waking"
   | "agentchat" | "inspector" | "context" | "workspace" | "editor";
 
-// 子页表抽成一份数据，因为它同时是**两样东西**：渲染 tab 条用的 {id,label}，
-// 以及 useStickyTab 的合法 id 名单。另抄一份名单出来是行不通的 —— 抄的那份会和
-// tab 条漂开，而漂开的症状是「某一个子页记不住」，一个没人会去查存储键的症状。
+// The sub-page table is a single piece of data because it serves two purposes: the
+// {id,label} list that renders the tab bar, and the list of valid ids for useStickyTab.
+// A second hand-copied list would drift from the tab bar, and the symptom (one sub-page
+// not being remembered) is easy to miss.
 const SUB_TABS: { id: SubTab; label: string }[] = [
-  { id: "chat", label: "对话" },
-  { id: "background", label: "后台" },
-  // 待唤醒: a parked agent that nobody can see is indistinguishable from
-  // a hung system, so the scheduler's parking mechanism is not usable
-  // without this tab existing.
-  { id: "waking", label: "待唤醒" },
-  { id: "topology", label: "拓扑" },
-  { id: "agentchat", label: "代理对话" },
+  { id: "chat", label: tr("对话", "Chat") },
+  { id: "background", label: tr("后台", "Background") },
+  // A parked agent that nobody can see is indistinguishable from a hung system, so the
+  // scheduler's parking mechanism is not usable without this tab.
+  { id: "waking", label: tr("待唤醒", "Parked") },
+  { id: "topology", label: tr("拓扑", "Topology") },
+  { id: "agentchat", label: tr("代理对话", "Agent chat") },
   { id: "inspector", label: "Inspector" },
-  // 上下文注入：只读，回答「不同角色有针对性的注入吗」与「这一次调用由什么
-  // 构成」。编辑仍在 高级管理 → 上下文注入（PIN 门后面）。
-  { id: "context", label: "上下文注入" },
-  { id: "workspace", label: "对象总览" },
-  { id: "editor", label: "对象编辑" },
+  // Context injection: read-only. Answers "is injection role-specific?" and "what makes up
+  // this call?". Editing stays under Advanced → Context injection (behind the PIN gate).
+  { id: "context", label: tr("上下文注入", "Context injection") },
+  { id: "workspace", label: tr("对象总览", "Workspace") },
+  { id: "editor", label: tr("对象编辑", "Object editor") },
 ];
 
 export default function AgentsPage() {
-  // 从代理对话离开再回来，应该还停在代理对话栏目。
-  // 路由元素由 AppLayout 的 <Outlet/> 渲染，每次回来都是一次全新挂载，
-  // 所以 useState("chat") 每次都把他打回「对话」。
+  // Remember the sub-tab across navigation. The route element is rendered by AppLayout's
+  // <Outlet/> and is freshly mounted on every return, so plain useState("chat") would reset
+  // the user to the chat tab each time.
   const [tab, setTab] = useStickyTab<SubTab>(
     "agents", SUB_TABS.map((t) => t.id), "chat");
   const [selected, setSelected] = useState<string>("instrument_control");
-  // 「上下文注入」子页选的是哪个角色。名单从 ROSTER 派生 —— AdminPage 里那份
-  // 手抄的六人名单（漏了 research_director）是这个仓的反面教材。
+  // Which role the context-injection sub-page shows. The list is derived from ROSTER; a
+  // hand-copied list elsewhere (AdminPage) once missed research_director.
   const CONTEXT_PICKS = useMemo(
-    () => [{ id: CONTEXT_ALL, label: "全部" },
+    () => [{ id: CONTEXT_ALL, label: tr("全部", "All") },
            ...ROSTER.map((id) => ({ id, label: agentDef(id).cn }))],
     []);
   const [ctxPick, setCtxPick] = useStickyTab<string>(
     "agents.context.pick", CONTEXT_PICKS.map((p) => p.id), CONTEXT_ALL);
   const [interruptAgent, setInterruptAgent] = useState<string | null>(null);
-  // shared between 对象总览 and 对象编辑 (the old workspace card's 打开编辑器
-  // button navigated to the editor sub-tab focused on the selected artifact).
+  // Shared between the workspace and editor sub-tabs (the workspace card's "Open editor"
+  // button jumps to the editor sub-tab focused on the selected artifact).
   const [editArtifact, setEditArtifact] = useState<string | null>(null);
 
   const { live, snapshot } = useLiveByAgent();
@@ -205,19 +205,19 @@ export default function AgentsPage() {
   return (
     <div className="space-y-6">
       <Section
-        title="智能体"
+        title={tr("智能体", "Agents")}
         actions={
           <div className="flex items-center gap-2">
             {snapshot.data && (
               <Badge tone={snapshot.data.session_active ? "AUTO" : "INFO"}>
-                {snapshot.data.session_active ? "会话进行中" : "空闲"}
+                {snapshot.data.session_active ? tr("会话进行中", "Session active") : tr("空闲", "Idle")}
               </Badge>
             )}
             <Button
               variant={pending > 0 ? "danger" : "default"}
               onClick={() => setInterruptAgent(selected || SUP_ID)}
             >
-              人机交互{pending > 0 ? ` (${pending})` : ""}
+              {tr("人机交互", "Human-in-the-loop")}{pending > 0 ? ` (${pending})` : ""}
             </Button>
           </div>
         }
@@ -262,7 +262,7 @@ export default function AgentsPage() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 拓扑 — topology graph + per-agent live status strip
+// Topology graph + per-agent live status strip
 // ════════════════════════════════════════════════════════════════════════════
 
 function TopologyView({
@@ -291,9 +291,14 @@ function TopologyView({
       return data;
     },
     onSuccess: (data, vars) => {
-      const verb = vars.held ? "暂停" : "恢复";
-      if (data?.ok && !data.degraded) toast(`已${verb} ${agentLabel(vars.agent_id)}`, "ok");
-      else toast(`${verb}未生效（${data?.detail ?? "后端降级"}）`, "err");
+      const who = agentLabel(vars.agent_id);
+      const verb = vars.held ? tr("暂停", "Pause") : tr("恢复", "Resume");
+      if (data?.ok && !data.degraded) {
+        toast(vars.held ? tr(`已暂停 ${who}`, `Paused ${who}`) : tr(`已恢复 ${who}`, `Resumed ${who}`), "ok");
+      } else {
+        const why = data?.detail ?? tr("后端降级", "backend degraded");
+        toast(tr(`${verb}未生效（${why}）`, `${verb} had no effect (${why})`), "err");
+      }
       qc.invalidateQueries({ queryKey: ["agents", "snapshot"] });
     },
     onError: (e) => toast(String((e as Error)?.message ?? e), "err"),
@@ -302,16 +307,16 @@ function TopologyView({
   return (
     <div className="space-y-5">
       {node}
-      {/* header — 多智能体拓扑 (mirrors the old AGTopologyView title row) */}
+      {/* header — multi-agent topology (mirrors the old AGTopologyView title row) */}
       <div className="flex flex-wrap items-baseline gap-3">
-        <h2 className="text-lg font-semibold tracking-tight">多智能体拓扑</h2>
+        <h2 className="text-lg font-semibold tracking-tight">{tr("多智能体拓扑", "Multi-agent topology")}</h2>
         <span className="text-xs text-mast-muted">
-          用户 → 编排协调 → 六 agent 流水线 · BUF 侧通道
+          {tr("用户 → 编排协调 → 六 agent 流水线 · BUF 侧通道", "User → supervisor → six-agent pipeline · BUF side channel")}
         </span>
       </div>
       {snapshot.isPending && <Spinner />}
       {snapshot.isError && <ErrorNote error={snapshot.error} />}
-      {snap && snap.degraded && <DegradedNote what="智能体拓扑快照" />}
+      {snap && snap.degraded && <DegradedNote what={tr("智能体拓扑快照", "Agent topology snapshot")} />}
 
       <TopologyGraph
         selected={selected}
@@ -322,28 +327,28 @@ function TopologyView({
 
       {snap && (
         <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3 lg:grid-cols-6">
-          <StatCell label="后端" value={snap.backend || "—"} />
-          <StatCell label="会话" value={snap.session_active ? "活跃" : "空闲"} />
-          <StatCell label="活动智能体" value={snap.active_agent_id ? agentLabel(snap.active_agent_id) : "—"} />
-          <StatCell label="制品数" value={String(snap.artifacts_count ?? 0)} />
-          <StatCell label="待中断" value={String(snap.pending_interrupt_count ?? 0)} />
-          <StatCell label="插话次数" value={String(snap.interject_count ?? 0)} />
+          <StatCell label={tr("后端", "Backend")} value={snap.backend || "—"} />
+          <StatCell label={tr("会话", "Session")} value={snap.session_active ? tr("活跃", "Active") : tr("空闲", "Idle")} />
+          <StatCell label={tr("活动智能体", "Active agent")} value={snap.active_agent_id ? agentLabel(snap.active_agent_id) : "—"} />
+          <StatCell label={tr("制品数", "Artifacts")} value={String(snap.artifacts_count ?? 0)} />
+          <StatCell label={tr("待中断", "Pending interrupts")} value={String(snap.pending_interrupt_count ?? 0)} />
+          <StatCell label={tr("插话次数", "Interjections")} value={String(snap.interject_count ?? 0)} />
         </div>
       )}
 
       {/* per-agent live status strip */}
       <div>
-        <h4 className="mb-2 text-sm font-medium text-mast-muted">逐智能体实时状态</h4>
+        <h4 className="mb-2 text-sm font-medium text-mast-muted">{tr("逐智能体实时状态", "Live status per agent")}</h4>
         <div className="overflow-x-auto rounded-lg border border-mast-border">
           <table className="w-full text-sm">
             <thead className="border-b border-mast-border text-left text-xs text-mast-muted">
               <tr>
-                <th className="px-3 py-2">智能体</th>
-                <th className="px-3 py-2">模型</th>
-                <th className="px-3 py-2">思考</th>
-                <th className="px-3 py-2">状态</th>
-                <th className="px-3 py-2 text-right tabular-nums">线程深度</th>
-                <th className="px-3 py-2 text-right">操作</th>
+                <th className="px-3 py-2">{tr("智能体", "Agent")}</th>
+                <th className="px-3 py-2">{tr("模型", "Model")}</th>
+                <th className="px-3 py-2">{tr("思考", "Thinking")}</th>
+                <th className="px-3 py-2">{tr("状态", "Status")}</th>
+                <th className="px-3 py-2 text-right tabular-nums">{tr("线程深度", "Thread depth")}</th>
+                <th className="px-3 py-2 text-right">{tr("操作", "Actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -370,11 +375,11 @@ function TopologyView({
                     </td>
                     <td className="px-3 py-2">
                       {lv.active ? (
-                        <Badge tone="AUTO">运行中</Badge>
+                        <Badge tone="AUTO">{tr("运行中", "Running")}</Badge>
                       ) : lv.held ? (
-                        <Badge tone="WARN">已暂留</Badge>
+                        <Badge tone="WARN">{tr("已暂留", "Held")}</Badge>
                       ) : (
-                        <span className="text-xs text-mast-muted">空闲</span>
+                        <span className="text-xs text-mast-muted">{tr("空闲", "Idle")}</span>
                       )}
                     </td>
                     <td className="px-3 py-2 text-right font-mono tabular-nums">{lv.threads ?? 0}</td>
@@ -392,8 +397,8 @@ function TopologyView({
                         {hold.isPending && hold.variables?.agent_id === id
                           ? "…"
                           : lv.held
-                            ? "恢复"
-                            : "暂停"}
+                            ? tr("恢复", "Resume")
+                            : tr("暂停", "Pause")}
                       </button>
                     </td>
                   </tr>
@@ -417,40 +422,38 @@ function StatCell({ label, value }: { label: string; value: string }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 对话 — INTERACTIVE multi-agent conversation (run-task SSE + live interject) with
-//   a persistent bottom input + handoff timeline; legacy SUP private chat as a
+// Chat — interactive multi-agent conversation (run-task SSE + live interject) with a
+//   persistent bottom input + handoff timeline; legacy supervisor private chat as a
 //   secondary mode.
 // ════════════════════════════════════════════════════════════════════════════
 
 type ChatMode = "runtask" | "supchat";
 
 const CHAT_MODES: { id: ChatMode; label: string }[] = [
-  { id: "runtask", label: "多智能体对话" },
-  { id: "supchat", label: "编排器私聊" },
+  { id: "runtask", label: tr("多智能体对话", "Multi-agent chat") },
+  { id: "supchat", label: tr("编排器私聊", "Supervisor chat") },
 ];
 
-// Per-event-kind icon + dot colour + badge tone for the 交接事件时间线
-// (— a wall of identical dots was unscannable).
+// Per-event-kind icon + dot colour + badge tone for the handoff event timeline (a wall of
+// identical dots was unscannable).
 const TIMELINE_STYLE: Record<
   string,
   { icon: string; label?: string; dot: string; tone: React.ComponentProps<typeof Badge>["tone"] }
 > = {
-  start: { icon: "🚀", label: "开始", dot: "bg-sky-400", tone: "INFO" },
-  handoff: { icon: "🔀", label: "交接", dot: "bg-violet-400", tone: "AUTO" },
-  // A parallel fan-out is the ONE event the operator most needs to spot, and it
-  // was landing on the anonymous fallback bullet — i.e. straight back into the
-  // "wall of identical dots" #101 was about. The dispatch kind is new (2026-07-11);
-  // the style map was not updated with it.
-  dispatch: { icon: "‖", label: "并行下发", dot: "bg-cyan-400", tone: "INFO" },
-  held: { icon: "⏸️", label: "暂停", dot: "bg-amber-400", tone: "WARN" },
-  resumed: { icon: "▶️", label: "继续", dot: "bg-emerald-400", tone: "AUTO" },
-  interrupt: { icon: "🛡️", label: "待批准", dot: "bg-rose-400", tone: "DANGEROUS" },
-  dangerous: { icon: "🛡️", label: "待批准", dot: "bg-rose-400", tone: "DANGEROUS" },
-  buffer_hitl: { icon: "🛡️", label: "待批准", dot: "bg-rose-400", tone: "DANGEROUS" },
-  workflow_human: { icon: "🙋", label: "待人工", dot: "bg-rose-300", tone: "WARN" },
-  done: { icon: "✅", label: "完成", dot: "bg-emerald-500", tone: "AUTO" },
-  aborted: { icon: "🛑", label: "已中止", dot: "bg-rose-500", tone: "DANGEROUS" },
-  error: { icon: "⚠️", label: "出错", dot: "bg-rose-500", tone: "DANGEROUS" },
+  start: { icon: "🚀", label: tr("开始", "Start"), dot: "bg-sky-400", tone: "INFO" },
+  handoff: { icon: "🔀", label: tr("交接", "Handoff"), dot: "bg-violet-400", tone: "AUTO" },
+  // A parallel fan-out is the one event the operator most needs to spot; without its own
+  // style it would land on the anonymous fallback bullet.
+  dispatch: { icon: "‖", label: tr("并行下发", "Parallel dispatch"), dot: "bg-cyan-400", tone: "INFO" },
+  held: { icon: "⏸️", label: tr("暂停", "Paused"), dot: "bg-amber-400", tone: "WARN" },
+  resumed: { icon: "▶️", label: tr("继续", "Resumed"), dot: "bg-emerald-400", tone: "AUTO" },
+  interrupt: { icon: "🛡️", label: tr("待批准", "Awaiting approval"), dot: "bg-rose-400", tone: "DANGEROUS" },
+  dangerous: { icon: "🛡️", label: tr("待批准", "Awaiting approval"), dot: "bg-rose-400", tone: "DANGEROUS" },
+  buffer_hitl: { icon: "🛡️", label: tr("待批准", "Awaiting approval"), dot: "bg-rose-400", tone: "DANGEROUS" },
+  workflow_human: { icon: "🙋", label: tr("待人工", "Awaiting operator"), dot: "bg-rose-300", tone: "WARN" },
+  done: { icon: "✅", label: tr("完成", "Done"), dot: "bg-emerald-500", tone: "AUTO" },
+  aborted: { icon: "🛑", label: tr("已中止", "Aborted"), dot: "bg-rose-500", tone: "DANGEROUS" },
+  error: { icon: "⚠️", label: tr("出错", "Error"), dot: "bg-rose-500", tone: "DANGEROUS" },
 };
 const TIMELINE_FALLBACK: {
   icon: string;
@@ -475,8 +478,8 @@ function SupervisorChatView({
   const task = snap?.active_task ?? null;
   // Primary action = the REAL multi-agent orchestrator runner (run-task SSE).
   // The legacy per-agent SUP private chat is kept reachable as a secondary mode.
-  // 第二层也记 —— 停在「编排器私聊」的人离开一次就被弹回「多智能体对话」，
-  // 和 #32 抱怨的是同一件事，只是深了一层。
+  // Remembered one level deeper too: someone parked on "Supervisor chat" would otherwise be
+  // bounced back to "Multi-agent chat" after leaving once.
   const [mode, setMode] = useStickyTab<ChatMode>(
     "agents.chat.mode", CHAT_MODES.map((m) => m.id), "runtask");
 
@@ -489,29 +492,30 @@ function SupervisorChatView({
       <Card className="space-y-2 px-4 py-3">
         <div className="flex flex-wrap items-center gap-3">
           <span className="flex items-center gap-2 text-sm font-medium">
-            <Avatar id={SUP_ID} size={20} /> 编排与协调
+            <Avatar id={SUP_ID} size={20} /> {tr("编排与协调", "Orchestration")}
           </span>
           {task?.active ? (
-            <Badge tone="AUTO">任务进行中</Badge>
+            <Badge tone="AUTO">{tr("任务进行中", "Task running")}</Badge>
           ) : (
-            <Badge tone="INFO">无活动任务</Badge>
+            <Badge tone="INFO">{tr("无活动任务", "No active task")}</Badge>
           )}
           <div className="ml-auto">
             <Button variant="default" onClick={onOpenInterrupts}>
-              人机交互
+              {tr("人机交互", "Human-in-the-loop")}
             </Button>
           </div>
         </div>
         <SubTabs<ChatMode> tabs={CHAT_MODES} value={mode} onChange={setMode} />
         {mode === "runtask" ? (
           <p className="text-xs text-mast-muted">
-            与 6 智能体编排器持续对话（POST /api/agents/run-task）：第一条消息下发任务，运行期间继续输入即可
-            插话引导（POST /api/agents/&#123;target&#125;/interject），逐智能体进展、交接与 HITL 批准
-            内联呈现；与下方「编排器私聊」（单代理对话）不同。
+            {tr(
+              "与 6 智能体编排器持续对话（POST /api/agents/run-task）：第一条消息下发任务，运行期间继续输入即可插话引导（POST /api/agents/{target}/interject），逐智能体进展、交接与 HITL 批准内联呈现；与「编排器私聊」（单代理对话）不同。",
+              "Ongoing conversation with the 6-agent orchestrator (POST /api/agents/run-task): the first message dispatches the task; keep typing while it runs to steer it (POST /api/agents/{target}/interject). Per-agent progress, handoffs and HITL approvals appear inline. This differs from \"Supervisor chat\" (single-agent conversation).",
+            )}
           </p>
         ) : (
           <p className="text-xs text-mast-muted">
-            与编排智能体的单代理私聊线程（不触发多智能体编排）。
+            {tr("与编排智能体的单代理私聊线程（不触发多智能体编排）。", "Single-agent private chat thread with the supervisor (does not trigger multi-agent orchestration).")}
           </p>
         )}
       </Card>
@@ -524,12 +528,12 @@ function SupervisorChatView({
       {/* SECONDARY: legacy per-agent supervisor private chat (kept as-is) */}
       {mode === "supchat" && <AgentChatPanel agentId={SUP_ID} />}
 
-      {/* handoff event timeline (from snapshot) — per-kind icon + colour so the
+      {/* Handoff event timeline (from snapshot) — per-kind icon + colour so the
           operator can scan it at a glance. */}
       <div>
-        <h4 className="mb-2 text-sm font-medium text-mast-muted">交接事件时间线</h4>
+        <h4 className="mb-2 text-sm font-medium text-mast-muted">{tr("交接事件时间线", "Handoff event timeline")}</h4>
         {handoffs.length === 0 ? (
-          <EmptyNote label="暂无交接事件（编排器空闲或未接入）。" />
+          <EmptyNote label={tr("暂无交接事件（编排器空闲或未接入）。", "No handoff events (orchestrator idle or not connected).")} />
         ) : (
           <ol className="space-y-1.5 border-l border-mast-border pl-4">
             {handoffs.map((ev, i) => {
@@ -540,7 +544,7 @@ function SupervisorChatView({
                     className={`absolute -left-[21px] top-1.5 h-2 w-2 rounded-full ${st.dot}`}
                   />
                   <span className="mr-2 font-mono text-xs text-mast-muted">
-                    {ev.t != null ? new Date(ev.t * 1000).toLocaleTimeString() : "—"}
+                    {ev.t != null ? new Date(ev.t * 1000).toLocaleTimeString(langTag()) : "—"}
                   </span>
                   {ev.kind && (
                     <Badge tone={st.tone}>
@@ -562,21 +566,20 @@ function SupervisorChatView({
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 代理对话 — per-agent private chat threads
+// Agent chat — per-agent private chat threads
 // ════════════════════════════════════════════════════════════════════════════
 
 function AgentChatView({ selected, onSelect }: { selected: string; onSelect: (id: string) => void }) {
-  // 编排器(_supervisor) is selectable here too so its 群聊 contributions are
-  // viewable per-agent like everyone else (the bridge covers it: agent_activity
-  // ("_supervisor") returns its group messages). Its 1:1 private chat lives in the
-  // 对话 → 编排器私聊 tab, so the private-chat panel below is shown only for the
-  // pipeline agents.
+  // The supervisor (_supervisor) is selectable here too so its group-chat contributions are
+  // viewable per agent like everyone else (agent_activity("_supervisor") returns its group
+  // messages). Its 1:1 private chat lives under Chat → Supervisor chat, so the private-chat
+  // panel below is shown only for the pipeline agents.
   const isSup = selected === SUP_ID;
   const { toast, node } = useToast();
   const [interjectText, setInterjectText] = useState("");
 
-  // 插话 — queue an operator interjection for the RUNNING supervisor; it is
-  // delivered as an operator message on the supervisor's next super-step.
+  // Interject — queue an operator interjection for the running supervisor; it is delivered
+  // as an operator message on the supervisor's next super-step.
   // LIVE-only; degrade-safe (typed no-op when no live app / not running).
   const interject = useMutation({
     mutationFn: async (text: string) => {
@@ -589,10 +592,11 @@ function AgentChatView({ selected, onSelect }: { selected: string; onSelect: (id
     },
     onSuccess: (data) => {
       if (data?.ok && !data.degraded) {
-        toast("已插话，将于编排器下一步送达", "ok");
+        toast(tr("已插话，将于编排器下一步送达", "Interjection sent; it will be delivered at the supervisor's next step"), "ok");
         setInterjectText("");
       } else {
-        toast(`插话未生效（${data?.detail ?? "编排器未在运行 / 后端降级"}）`, "err");
+        const why = data?.detail ?? tr("编排器未在运行 / 后端降级", "supervisor not running / backend degraded");
+        toast(tr(`插话未生效（${why}）`, `Interjection had no effect (${why})`), "err");
       }
     },
     onError: (e) => toast(String((e as Error)?.message ?? e), "err"),
@@ -624,11 +628,11 @@ function AgentChatView({ selected, onSelect }: { selected: string; onSelect: (id
         ))}
       </div>
 
-      {/* 插话 — operator interjection to the running supervisor */}
+      {/* Interject — operator interjection to the running supervisor */}
       <Card className="space-y-2 px-4 py-3">
         <Field
-          label="插话"
-          hint="向正在运行的编排智能体注入一条用户消息（不打断当前回合，于下一步送达）。"
+          label={tr("插话", "Interject")}
+          hint={tr("向正在运行的编排智能体注入一条用户消息（不打断当前回合，于下一步送达）。", "Inject a user message into the running supervisor (does not interrupt the current turn; delivered at the next step).")}
         >
           <div className="flex items-end gap-2">
             <textarea
@@ -640,7 +644,7 @@ function AgentChatView({ selected, onSelect }: { selected: string; onSelect: (id
                   submitInterject();
                 }
               }}
-              placeholder="例：优先处理 Au(111)，跳过当前样品的剩余扫描"
+              placeholder={tr("例：优先处理 Au(111)，跳过当前样品的剩余扫描", "e.g. prioritise Au(111) and skip the remaining scans of the current sample")}
               rows={2}
               disabled={interject.isPending}
               className="flex-1 resize-none rounded-md border border-mast-border bg-mast-bg px-3 py-2 text-sm text-mast-text outline-none focus:border-mast-accent disabled:opacity-50"
@@ -650,21 +654,20 @@ function AgentChatView({ selected, onSelect }: { selected: string; onSelect: (id
               onClick={submitInterject}
               disabled={!interjectText.trim() || interject.isPending}
             >
-              {interject.isPending ? "插话中…" : "插话"}
+              {interject.isPending ? tr("插话中…", "Sending…") : tr("插话", "Interject")}
             </Button>
           </div>
         </Field>
       </Card>
 
-      {/* 群聊中的活动 — what this agent said/did in multi-agent (群聊) runs, the
-          per-agent view of the team conversation (the bridge restored). Covers
-          编排器(_supervisor) too — its routing/decision turns are persisted with
-          agent_id="_supervisor" and surface here. */}
+      {/* Group-chat activity — what this agent said/did in multi-agent runs, the per-agent
+          view of the team conversation. Covers the supervisor too: its routing/decision turns
+          are persisted with agent_id="_supervisor" and surface here. */}
       <GroupActivityFeed agentId={selected} />
 
       {isSup ? (
         <Card className="px-4 py-3 text-sm text-mast-muted">
-          编排器的 1:1 私聊在「对话 → 编排器私聊」标签。此处展示的是它在多智能体群聊中的发言。
+          {tr("编排器的 1:1 私聊在「对话 → 编排器私聊」标签。此处展示的是它在多智能体群聊中的发言。", "The supervisor's 1:1 private chat is under Chat → Supervisor chat. This view shows what it said in multi-agent group chats.")}
         </Card>
       ) : (
         <AgentChatPanel agentId={selected} />
@@ -674,7 +677,7 @@ function AgentChatView({ selected, onSelect }: { selected: string; onSelect: (id
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 检查器 — per-agent model+thinking picker + tool catalog DataTable
+// Inspector — per-agent model+thinking picker + tool catalog DataTable
 // ════════════════════════════════════════════════════════════════════════════
 
 type ToolRow = {
@@ -687,12 +690,12 @@ type ToolRow = {
 const TOOL_COLUMNS: ColumnDef<ToolRow, any>[] = [
   {
     accessorKey: "name",
-    header: "工具名",
+    header: tr("工具名", "Tool name"),
     cell: (c) => <span className="font-mono text-xs">{c.getValue() as string}</span>,
   },
   {
     accessorKey: "safety_level",
-    header: "安全等级",
+    header: tr("安全等级", "Safety level"),
     cell: (c) => {
       const sl = (c.getValue() as string) || "AUTO";
       return <Badge tone={safetyTone(sl)}>{sl}</Badge>;
@@ -700,7 +703,7 @@ const TOOL_COLUMNS: ColumnDef<ToolRow, any>[] = [
   },
   {
     accessorKey: "composition_level",
-    header: "组合层级",
+    header: tr("组合层级", "Composition level"),
     cell: (c) => {
       const lvl = c.getValue() as string | null | undefined;
       return lvl ? (
@@ -759,8 +762,8 @@ function InspectorView({
       return data;
     },
     onSuccess: (data) => {
-      if (data?.ok && !data.degraded) toast("已保存并将于下个任务生效", "ok");
-      else toast("后端未接入 / 降级，未生效", "err");
+      if (data?.ok && !data.degraded) toast(tr("已保存并将于下个任务生效", "Saved; takes effect on the next task"), "ok");
+      else toast(tr("后端未接入 / 降级，未生效", "Backend not connected / degraded; no effect"), "err");
       qc.invalidateQueries({ queryKey: ["agents", "snapshot"] });
       qc.invalidateQueries({ queryKey: ["agents", "models"] });
     },
@@ -819,20 +822,23 @@ function InspectorView({
           </div>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="模型" hint="保存后重建编排器，下个任务生效（不影响进行中的会话）">
+          <Field
+            label={tr("模型", "Model")}
+            hint={tr("保存后重建编排器，下个任务生效（不影响进行中的会话）", "Rebuilds the orchestrator on save; takes effect on the next task (does not affect a running session)")}
+          >
             <SelectField
               value={String(lv.model ?? "")}
               onChange={(v) => override.mutate({ agent_id: selected, model: v })}
               options={
                 modelOptions.length
                   ? modelOptions
-                  : [{ value: String(lv.model ?? ""), label: String(lv.model ?? "（未知）") }]
+                  : [{ value: String(lv.model ?? ""), label: String(lv.model ?? tr("（未知）", "(unknown)")) }]
               }
             />
           </Field>
           <Field
-            label="思考强度"
-            hint="对 Claude 映射为扩展思考预算；Kimi/DeepSeek 等推理模型自带推理、固定最高强度。"
+            label={tr("思考强度", "Thinking effort")}
+            hint={tr("对 Claude 映射为扩展思考预算；Kimi/DeepSeek 等推理模型自带推理、固定最高强度。", "Mapped to an extended-thinking budget for Claude; reasoning models such as Kimi/DeepSeek reason natively at a fixed maximum effort.")}
           >
             <div className="flex gap-1">
               {THINKING_LEVELS.map((tl) => (
@@ -858,25 +864,25 @@ function InspectorView({
       <div>
         <div className="mb-3 flex items-center justify-between gap-3">
           <h4 className="text-sm font-medium">
-            工具目录 · {a.cn}
-            <span className="ml-2 text-xs text-mast-muted">共 {selectedTools.length} 个</span>
+            {tr("工具目录", "Tool catalog")} · {a.cn}
+            <span className="ml-2 text-xs text-mast-muted">{tr(`共 ${selectedTools.length} 个`, `${selectedTools.length} total`)}</span>
           </h4>
           <input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="搜索工具名 / 安全等级 / 层级…"
+            placeholder={tr("搜索工具名 / 安全等级 / 层级…", "Search tool name / safety level / level…")}
             className="w-64 rounded border border-mast-border bg-mast-bg px-3 py-1.5 text-sm text-mast-text outline-none focus:border-mast-accent"
           />
         </div>
         {tools.isPending && <Spinner />}
         {tools.isError && <ErrorNote error={tools.error} />}
-        {tools.data && tools.data.degraded && <DegradedNote what="工具目录" />}
+        {tools.data && tools.data.degraded && <DegradedNote what={tr("工具目录", "Tool catalog")} />}
         {tools.data && !tools.data.degraded && (
           <DataTable
             data={selectedTools}
             columns={TOOL_COLUMNS}
             globalFilter={filter}
-            empty="该智能体暂无工具（或目录尚未预热）。"
+            empty={tr("该智能体暂无工具（或目录尚未预热）。", "This agent has no tools (or the catalog is not warmed up yet).")}
           />
         )}
       </div>
@@ -885,11 +891,10 @@ function InspectorView({
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 对象总览 — 共享对象 · Workspace: R/W permission matrix + artifact list + the
+// Workspace overview — shared objects: R/W permission matrix + artifact list + the
 //   selected-artifact detail card (read-only overview). Mirrors the old
-//   AGWorkspaceView: title "共享对象 · Workspace", access matrix with an
-//   operator column, per-artifact detail with a "打开编辑器" button that jumps
-//   to the 对象编辑 sub-tab.
+//   AGWorkspaceView: access matrix, per-artifact detail with an "Open editor" button
+//   that jumps to the editor sub-tab.
 // ════════════════════════════════════════════════════════════════════════════
 
 // Permission-matrix columns = the 6 pipeline agents. The old table also carried
@@ -923,26 +928,16 @@ function WorkspaceView({ onEdit }: { onEdit: (id: string) => void }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
-  // ── 制品分组 (+ #29, 2026-07-28) ────────────────────────────
+  // Artifact grouping.
   //
-  // This used to compute "which classes are still 待产出" in the browser, like
-  // this:
-  //
-  //     const producedIds = new Set(entries.map((e) => e.id));   // "draft:Au111_v001"
-  //     matrix.filter((r) => !producedIds.has(r.artifact_id))    // "draft"
-  //
-  // Those are two different id spaces — a produced id is per-FILE and always
-  // contains a colon, a permission row's id is the CLASS and never does — so
-  // the filter removed nothing, ever. All nine classes rendered as 待产出 on
-  // every load no matter what had been produced. (Measured on the real repo at
-  // the time of the report: six of the nine stores had content; the panel said
-  // nothing had been produced.) The twin component below, EditorView, had
-  // already been fixed to compare on `kind`; this copy was missed.
-  //
-  // The class state is no longer derived here at all. `groups` comes from
-  // GET /api/artifacts, which asks each class its OWN store — the only way the
-  // four non-file classes (文献库 / 实验记录 / 长期记忆 / 视觉缓冲) can report
-  // themselves at all, since nothing walks a directory to find them.
+  // Which classes are still "pending" must not be computed in the browser by subtracting
+  // produced ids from permission rows: a produced id is per-FILE ("draft:Au111_v001", always
+  // contains a colon) while a permission row id is the CLASS ("draft"), so such a filter
+  // removes nothing and every class would show as pending on every load. The class state is
+  // therefore not derived here at all. `groups` comes from GET /api/artifacts, which asks
+  // each class its own store; this is the only way the non-file classes (literature library,
+  // experiment records, long-term memory, vision buffer) can report themselves, since
+  // nothing walks a directory to find them.
   const sessionActive = !!artifacts.data?.session_active;
   const groups = useMemo(() => {
     const byClass = new Map<string, typeof entries>();
@@ -962,11 +957,10 @@ function WorkspaceView({ onEdit }: { onEdit: (id: string) => void }) {
     }));
   }, [entries, matrix, artifacts.data?.groups]);
 
-  // A group starts open when it holds a manageable number of files. `scan_files`
-  // is flagged high_volume by the backend (one row per SaveScan — a night's run
-  // is hundreds), which is the pile that made the list unreadable: "如果可以算
-  // 的话，这个制品区域就应该分目录，否则看起来太乱了" . Classes with no
-  // enumerable files (the DB/registry ones) have nothing to expand.
+  // A group starts open when it holds a manageable number of files. `scan_files` is flagged
+  // high_volume by the backend (one row per SaveScan; a night's run is hundreds), which would
+  // make the list unreadable. Classes with no enumerable files (the DB/registry ones) have
+  // nothing to expand.
   function isOpen(g: { artifact_id: string; high_volume: boolean; items: unknown[] }) {
     const explicit = openGroups[g.artifact_id];
     if (explicit !== undefined) return explicit;
@@ -974,16 +968,13 @@ function WorkspaceView({ onEdit }: { onEdit: (id: string) => void }) {
   }
   const pendingCount = groups.filter((g) => !g.produced).length;
 
-  // (The old graphArtifacts memo fed ArtifactConnectionGraph, which is gone —
-  // ArtifactFlowGraph consumes the permission rows directly, since those now
-  // carry the label / kind / store / multi_writer the picture needs.)
+  // (ArtifactFlowGraph consumes the permission rows directly, since those carry the
+  // label / kind / store / multi_writer the picture needs.)
 
-  // permission lookup for the selected-artifact detail card. The selection is a
-  // per-FILE id ("draft:Au111_v001"); permissions are keyed by CLASS ("draft"),
-  // so resolve through the entry's kind. Matching the file id against the class
-  // id directly — which is what this line used to do — never hit, so the 访问权限
-  // panel read "无权限信息" for every produced artifact. Same id-space confusion
-  // as the roster bug above, in a second place.
+  // Permission lookup for the selected-artifact detail card. The selection is a per-FILE id
+  // ("draft:Au111_v001") while permissions are keyed by CLASS ("draft"), so resolve through
+  // the entry's kind; matching the file id against the class id directly never hits and the
+  // access panel would show "no permission info" for every produced artifact.
   const selEntry = entries.find((e) => e.id === selectedId);
   const selRow = matrix.find((r) => r.artifact_id === (selEntry?.kind ?? selectedId));
   const writers = new Set(selRow?.writers ?? []);
@@ -991,36 +982,35 @@ function WorkspaceView({ onEdit }: { onEdit: (id: string) => void }) {
 
   return (
     <div className="space-y-5">
-      {/* header — 共享对象 · Workspace */}
+      {/* header — shared objects · Workspace */}
       <div className="flex flex-wrap items-baseline gap-3">
-        <h2 className="text-lg font-semibold tracking-tight">共享对象 · Workspace</h2>
+        <h2 className="text-lg font-semibold tracking-tight">{tr("共享对象 · Workspace", "Shared objects · Workspace")}</h2>
         <span className="text-xs text-mast-muted">
-          本次运行的客体 · agent 和用户均可直接读写 · 写权限收紧
+          {tr("本次运行的客体 · agent 和用户均可直接读写 · 写权限收紧", "Objects of this run · readable and writable by agents and the user · write access restricted")}
         </span>
         {artifacts.data && (
           <span className="ml-auto font-mono text-xs text-mast-muted">
-            {artifacts.data.count} 对象
+            {tr(`${artifacts.data.count} 对象`, `${artifacts.data.count} ${artifacts.data.count === 1 ? "object" : "objects"}`)}
           </span>
         )}
       </div>
 
-      {/* 数据流图 (redrawn 2026-07-11, ): the REAL directed flow —
-          production is the skeleton (solid, in the writer's hue), consumption
-          the detail (dashed, on hover). Multi-writer artifacts are called out;
-          the two artifacts everyone touches are drawn as a shared bus / side
-          rail rather than as nodes with a dozen edges each. */}
+      {/* Data-flow graph: the real directed flow. Production is the skeleton (solid, in the
+          writer's hue), consumption the detail (dashed, on hover). Multi-writer artifacts are
+          called out; the two artifacts everyone touches are drawn as a shared bus / side rail
+          rather than as nodes with a dozen edges each. */}
       <div>
         <h4 className="mb-2 text-sm font-medium">
-          数据流 · 谁写 → 谁读
+          {tr("数据流 · 谁写 → 谁读", "Data flow · who writes → who reads")}
           <span className="ml-2 text-xs font-normal text-mast-muted">
-            · 悬停聚焦 · 单击选中 · 双击打开编辑器
+            {tr("· 悬停聚焦 · 单击选中 · 双击打开编辑器", "· hover to focus · click to select · double-click to open the editor")}
           </span>
         </h4>
         {perms.isPending && <Spinner />}
         {perms.isError && <ErrorNote error={perms.error} />}
-        {perms.data && perms.data.degraded && <DegradedNote what="数据流图" />}
+        {perms.data && perms.data.degraded && <DegradedNote what={tr("数据流图", "Data-flow graph")} />}
         {perms.data && !perms.data.degraded && matrix.length === 0 && (
-          <EmptyNote label="无产物定义。" />
+          <EmptyNote label={tr("无产物定义。", "No artifact definitions.")} />
         )}
         {matrix.length > 0 && (
           <ArtifactFlowGraph
@@ -1038,29 +1028,29 @@ function WorkspaceView({ onEdit }: { onEdit: (id: string) => void }) {
           same (now truthful) flow model. */}
       <div>
         <h4 className="mb-2 text-sm font-medium">
-          读写矩阵
+          {tr("读写矩阵", "Read/write matrix")}
           <span className="ml-2 text-xs font-normal text-mast-muted">
-            · W=写入 · R=读取 · 点击行聚焦
+            {tr("· W=写入 · R=读取 · 点击行聚焦", "· W=write · R=read · click a row to focus")}
           </span>
         </h4>
         {perms.isPending && <Spinner />}
         {perms.isError && <ErrorNote error={perms.error} />}
-        {perms.data && perms.data.degraded && <DegradedNote what="读写矩阵" />}
+        {perms.data && perms.data.degraded && <DegradedNote what={tr("读写矩阵", "Read/write matrix")} />}
         {perms.data && !perms.data.degraded && matrix.length === 0 && (
-          <EmptyNote label="无产物定义。" />
+          <EmptyNote label={tr("无产物定义。", "No artifact definitions.")} />
         )}
         {matrix.length > 0 && (
           <div className="overflow-x-auto rounded-lg border border-mast-border">
             <table className="w-full text-sm">
               <thead className="border-b border-mast-border text-left text-xs text-mast-muted">
                 <tr>
-                  <th className="px-3 py-2">产物</th>
+                  <th className="px-3 py-2">{tr("产物", "Artifact")}</th>
                   {WS_COLS.map((id) => (
                     <th key={id} className="px-2 py-2 text-center">
                       {agentDef(id).short}
                     </th>
                   ))}
-                  <th className="px-3 py-2 text-left">存储位置</th>
+                  <th className="px-3 py-2 text-left">{tr("存储位置", "Storage")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1083,9 +1073,12 @@ function WorkspaceView({ onEdit }: { onEdit: (id: string) => void }) {
                           {row.multi_writer && (
                             <span
                               className="rounded border border-mast-accent px-1 font-mono text-[9px] text-mast-accent"
-                              title={`多个智能体都写入：${(row.writers ?? []).map((x) => agentDef(x).cn).join("、")}`}
+                              title={tr(
+                                `多个智能体都写入：${(row.writers ?? []).map((x) => agentDef(x).cn).join("、")}`,
+                                `Written by several agents: ${(row.writers ?? []).map((x) => agentDef(x).cn).join(", ")}`,
+                              )}
                             >
-                              多写
+                              {tr("多写", "multi")}
                             </span>
                           )}
                         </div>
@@ -1099,15 +1092,15 @@ function WorkspaceView({ onEdit }: { onEdit: (id: string) => void }) {
                         return (
                           <td key={id} className="px-2 py-2 text-center">
                             {canW && canR ? (
-                              <span className="font-mono text-xs text-mast-warn" title="读 + 写">
+                              <span className="font-mono text-xs text-mast-warn" title={tr("读 + 写", "Read + write")}>
                                 W·R
                               </span>
                             ) : canW ? (
-                              <span className="font-mono text-xs text-mast-warn" title="写入">
+                              <span className="font-mono text-xs text-mast-warn" title={tr("写入", "Write")}>
                                 W
                               </span>
                             ) : canR ? (
-                              <span className="font-mono text-xs text-mast-info" title="只读">
+                              <span className="font-mono text-xs text-mast-info" title={tr("只读", "Read-only")}>
                                 R
                               </span>
                             ) : (
@@ -1125,8 +1118,8 @@ function WorkspaceView({ onEdit }: { onEdit: (id: string) => void }) {
               </tbody>
             </table>
             <p className="px-3 py-2 text-xs text-mast-muted/80">
-              <span className="text-mast-warn">W</span> 读 + 写 ·{" "}
-              <span className="text-mast-info">R</span> 只读
+              <span className="text-mast-warn">W</span> {tr("读 + 写", "read + write")} ·{" "}
+              <span className="text-mast-info">R</span> {tr("只读", "read-only")}
             </p>
           </div>
         )}
@@ -1135,30 +1128,29 @@ function WorkspaceView({ onEdit }: { onEdit: (id: string) => void }) {
       {/* artifact list */}
       <div>
         <div className="mb-2 flex items-center gap-3">
-          <h4 className="text-sm font-medium">工作区制品</h4>
+          <h4 className="text-sm font-medium">{tr("工作区制品", "Workspace artifacts")}</h4>
           {artifacts.data && (
             <Badge tone={artifacts.data.session_active ? "AUTO" : "INFO"}>
-              {artifacts.data.session_active ? "会话活跃" : "空闲"} · {artifacts.data.count} 项
+              {artifacts.data.session_active ? tr("会话活跃", "Session active") : tr("空闲", "Idle")} ·{" "}
+              {tr(`${artifacts.data.count} 项`, `${artifacts.data.count} ${artifacts.data.count === 1 ? "item" : "items"}`)}
             </Badge>
           )}
           {pendingCount > 0 && (
-            <Badge tone="INFO">{pendingCount} 类尚未产出</Badge>
+            <Badge tone="INFO">{tr(`${pendingCount} 类尚未产出`, `${pendingCount} not produced yet`)}</Badge>
           )}
         </div>
         {artifacts.isPending && <Spinner />}
         {artifacts.isError && <ErrorNote error={artifacts.error} />}
-        {artifacts.data && artifacts.data.degraded && <DegradedNote what="制品列表" />}
+        {artifacts.data && artifacts.data.degraded && <DegradedNote what={tr("制品列表", "Artifact list")} />}
         {artifacts.data && !artifacts.data.degraded && groups.length === 0 && (
-          <EmptyNote label="无产物定义。" />
+          <EmptyNote label={tr("无产物定义。", "No artifact definitions.")} />
         )}
         <p className="mb-2 text-xs text-mast-muted">
-          按类型分组 · 点组标题展开/折叠 · 计数来自各自的存储（不是猜的）
-          {sessionActive && " · 实验进行中"}
+          {tr("按类型分组 · 点组标题展开/折叠 · 计数来自各自的存储（不是猜的）", "Grouped by type · click a group title to expand/collapse · counts come from each store (not guessed)")}
+          {sessionActive && tr(" · 实验进行中", " · experiment running")}
         </p>
-        {/* #29 — grouped by class instead of one flat grid. A run saves one row
-            per scan, so the .sxm pile used to bury the drafts, figures and plans
-            underneath it: "sxm文件算不算工作区制品？可以算，但是…这个制品区域就
-            应该分目录，否则看起来太乱了". */}
+        {/* Grouped by class instead of one flat grid. A run saves one row per scan, so the
+            .sxm pile would otherwise bury the drafts, figures and plans underneath it. */}
         <div className="space-y-2">
           {groups.map((g) => {
             const open = isOpen(g);
@@ -1190,38 +1182,37 @@ function WorkspaceView({ onEdit }: { onEdit: (id: string) => void }) {
                   <span className="font-mono text-[10px] text-mast-muted">
                     {g.artifact_id}
                   </span>
-                  {/* Honest three-way state. 待产出 is now only shown when the
-                      store really is empty; 无法读取 covers a store we could not
-                      open, which must never be rendered as "0 / 待产出". */}
+                  {/* Honest three-way state. "Pending" is shown only when the store really is
+                      empty; "unreadable" covers a store we could not open, which must never be
+                      rendered as "0 / pending". */}
                   {!g.known ? (
-                    <Badge tone="WARN">无法读取</Badge>
+                    <Badge tone="WARN">{tr("无法读取", "Unreadable")}</Badge>
                   ) : g.produced ? (
-                    <Badge tone="AUTO">已产出 · {g.count}</Badge>
+                    <Badge tone="AUTO">{tr("已产出", "Produced")} · {g.count}</Badge>
                   ) : (
-                    <Badge tone="INFO">待产出</Badge>
+                    <Badge tone="INFO">{tr("待产出", "Pending")}</Badge>
                   )}
                   {g.high_volume && g.items.length > 0 && (
-                    <span className="text-[10px] text-mast-muted/70">量大 · 默认折叠</span>
+                    <span className="text-[10px] text-mast-muted/70">{tr("量大 · 默认折叠", "large · collapsed by default")}</span>
                   )}
                   <span className="ml-auto truncate pl-2 text-xs text-mast-muted">
                     {g.detail}
                   </span>
                 </button>
 
-                {/* Classes whose contents are not files (实验记录 / 长期记忆 /
-                    视觉缓冲 / 文献库) have a real count but nothing to list here
-                    — say where they live instead of showing a fake empty folder.
-                    They also get NO edit button: the old 编辑/填充 button on
-                    these slots called POST /api/artifacts/<class>/edit, which
-                    the backend rejects for a bare class id every single time
-                    ("artifact_id 必须是 '<draft|review>:<文件名>'"). That button
-                    could not work — 编辑/填充这些东西还是不会自动生产 —
-                    and a button that cannot work is worse than none. */}
+                {/* Classes whose contents are not files (experiment records / long-term memory /
+                    vision buffer / literature library) have a real count but nothing to list
+                    here; say where they live instead of showing a fake empty folder. They get
+                    no edit button either: POST /api/artifacts/<class>/edit is always rejected
+                    for a bare class id, and a button that cannot work is worse than none. */}
                 {!expandable && (
                   <div className="border-t border-mast-border/50 px-3 py-2 text-xs text-mast-muted/80">
                     {g.produced
-                      ? `内容存于 ${g.store}（此处不逐条列出）`
-                      : `尚未产出 · 由 ${g.producer ? agentLabel(g.producer) : "系统"} 写入 ${g.store}`}
+                      ? tr(`内容存于 ${g.store}（此处不逐条列出）`, `Content is stored in ${g.store} (not listed individually here)`)
+                      : tr(
+                          `尚未产出 · 由 ${g.producer ? agentLabel(g.producer) : "系统"} 写入 ${g.store}`,
+                          `Not produced yet · written to ${g.store} by ${g.producer ? agentLabel(g.producer) : "the system"}`,
+                        )}
                   </div>
                 )}
 
@@ -1240,24 +1231,23 @@ function WorkspaceView({ onEdit }: { onEdit: (id: string) => void }) {
                           <span className="truncate font-mono text-xs" title={e.path || undefined}>
                             {e.preview || e.id}
                           </span>
-                          {e.edited && <Badge tone="WARN">已编辑</Badge>}
+                          {e.edited && <Badge tone="WARN">{tr("已编辑", "Edited")}</Badge>}
                         </div>
                         {e.producer && (
                           <div className="text-xs text-mast-muted">
-                            产出 · {agentLabel(e.producer)}
+                            {tr("产出", "Produced by")} · {agentLabel(e.producer)}
                           </div>
                         )}
                         <div className="pt-1" onClick={(ev) => ev.stopPropagation()}>
-                          {/* Only file-backed EDITABLE artifacts get a button.
-                              Every row used to get 打开编辑器 including .sxm
-                              scans , and the backend refuses those — so the
-                              button could only ever open a degraded editor. */}
+                          {/* Only file-backed editable artifacts get a button. Read-only rows
+                              (e.g. .sxm scans) are refused by the backend, so a button there
+                              could only open a degraded editor. */}
                           {e.editable ? (
                             <Button variant="default" onClick={() => onEdit(e.id)}>
-                              打开编辑器
+                              {tr("打开编辑器", "Open editor")}
                             </Button>
                           ) : (
-                            <Badge tone="INFO">只读</Badge>
+                            <Badge tone="INFO">{tr("只读", "Read-only")}</Badge>
                           )}
                         </div>
                       </div>
@@ -1270,7 +1260,7 @@ function WorkspaceView({ onEdit }: { onEdit: (id: string) => void }) {
         </div>
       </div>
 
-      {/* selected-artifact detail card with 访问权限 panel + 打开编辑器 */}
+      {/* selected-artifact detail card with access-permission panel + Open editor */}
       {selectedId && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
           <Card className="space-y-3 border-l-4 border-l-mast-accent px-5 py-4">
@@ -1280,7 +1270,7 @@ function WorkspaceView({ onEdit }: { onEdit: (id: string) => void }) {
                 <span className="font-mono text-xs text-mast-muted">· {selEntry.kind}</span>
               )}
               {selEntry?.producer && (
-                <span className="text-xs text-mast-muted">· 产出 {agentLabel(selEntry.producer)}</span>
+                <span className="text-xs text-mast-muted">· {tr("产出", "produced by")} {agentLabel(selEntry.producer)}</span>
               )}
             </div>
             {selEntry?.preview ? (
@@ -1288,16 +1278,16 @@ function WorkspaceView({ onEdit }: { onEdit: (id: string) => void }) {
                 {selEntry.preview}
               </pre>
             ) : (
-              <EmptyNote label="无预览正文。" />
+              <EmptyNote label={tr("无预览正文。", "No preview text.")} />
             )}
             <div className="flex flex-wrap items-center gap-2">
               {selEntry?.editable ? (
                 <Button variant="primary" onClick={() => onEdit(selectedId)}>
-                  打开编辑器
+                  {tr("打开编辑器", "Open editor")}
                 </Button>
               ) : (
                 <span className="text-xs text-mast-muted">
-                  只读 · {selEntry?.path || "该产物不可手工编辑"}
+                  {tr("只读", "Read-only")} · {selEntry?.path || tr("该产物不可手工编辑", "This artifact cannot be edited by hand")}
                 </span>
               )}
             </div>
@@ -1306,10 +1296,10 @@ function WorkspaceView({ onEdit }: { onEdit: (id: string) => void }) {
           <Card className="space-y-0 px-0 py-0">
             <div className="border-b border-mast-border px-4 py-2">
               <div className="text-xs font-semibold uppercase tracking-wide text-mast-muted">
-                访问权限
+                {tr("访问权限", "Access permissions")}
               </div>
               <div className="mt-0.5 text-xs text-mast-muted">
-                {writers.size} 写 · {readers.size} 读
+                {tr(`${writers.size} 写 · ${readers.size} 读`, `${writers.size} write · ${readers.size} read`)}
               </div>
             </div>
             {selRow
@@ -1333,7 +1323,7 @@ function WorkspaceView({ onEdit }: { onEdit: (id: string) => void }) {
                           {def ? def.short : "OP"}
                         </div>
                         <div className="text-xs text-mast-muted">
-                          {def ? def.cn : "用户"}
+                          {def ? def.cn : tr("用户", "User")}
                         </div>
                       </div>
                       <span
@@ -1344,14 +1334,14 @@ function WorkspaceView({ onEdit }: { onEdit: (id: string) => void }) {
                             : "bg-mast-bg text-mast-muted")
                         }
                       >
-                        {canWrite ? "读 + 写" : "只读"}
+                        {canWrite ? tr("读 + 写", "Read + write") : tr("只读", "Read-only")}
                       </span>
                     </div>
                   );
                 })
               : (
                 <div className="px-4 py-3">
-                  <EmptyNote label="无权限信息。" />
+                  <EmptyNote label={tr("无权限信息。", "No permission info.")} />
                 </div>
               )}
           </Card>
@@ -1362,11 +1352,10 @@ function WorkspaceView({ onEdit }: { onEdit: (id: string) => void }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 对象编辑 — inline per-artifact editor (left artifact list + center editor).
-//   Mirrors the old AGWorkspaceEditorView 3-column layout: left = artifact
-//   roster, center = the operator editor (edit / diff / history). The center
-//   editor reuses the fully-wired ArtifactEditor logic, rendered inline (not a
-//   modal) so it lives on its own sub-tab exactly like the old build.
+// Object editor — inline per-artifact editor (left artifact list + center editor).
+//   Mirrors the old AGWorkspaceEditorView 3-column layout: left = artifact roster, center =
+//   the operator editor (edit / diff / history). The center editor reuses the fully wired
+//   ArtifactEditor logic, rendered inline (not a modal) so it lives on its own sub-tab.
 // ════════════════════════════════════════════════════════════════════════════
 
 function EditorView({
@@ -1385,15 +1374,11 @@ function EditorView({
     },
     refetchInterval: 6000,
   });
-  // The artifact CLASSES that nothing has produced yet are shown as
-  // informational rows — NOT as editable slots.
-  //
-  // They used to be clickable "seed" slots, which was incoherent: you cannot
-  // bring a manuscript into existence by typing into a textarea (paper_writing
-  // creates it with save_draft), and you cannot hand-edit the experiment DB or a
-  // Nanonis .sxm at all. Clicking one opened an editor over nothing. Showing them
-  // is still useful — they say what the system CAN produce and where it lands —
-  // so they stay, as rows you read rather than buttons that lie.
+  // Artifact classes that nothing has produced yet are shown as informational rows, not as
+  // editable slots: a manuscript cannot be brought into existence by typing into a textarea
+  // (paper_writing creates it with save_draft), and the experiment DB or a Nanonis .sxm cannot
+  // be hand-edited at all. Showing them still says what the system can produce and where it
+  // lands, so they stay as rows you read rather than buttons that lie.
   const perms = useQuery({
     queryKey: ["artifacts", "permissions"],
     queryFn: async () => {
@@ -1405,22 +1390,18 @@ function EditorView({
   const entries = artifacts.data?.artifacts ?? [];
   const cur = entries.find((e) => e.id === selected) ?? null;
   const [showReadonly, setShowReadonly] = useState(false);
-  // Only file-backed EDITABLE artifacts (drafts / reviews) are clickable edit
-  // targets. Produced-but-read-only artifacts (scan .sxm / figures) are listed
-  // as informational rows, not buttons: the backend refuses to edit them, so
-  // clicking one only opens a degraded editor — the same "button that lies" the
-  // not-yet-produced classes below are careful to avoid. Read-only scans are
-  // usually the newest files (list is mtime-sorted), so they sit at the top of
-  // this roster and were the first thing an operator clicked.
+  // Only file-backed editable artifacts (drafts / reviews) are clickable edit targets.
+  // Produced-but-read-only artifacts (scan .sxm / figures) are listed as informational rows:
+  // the backend refuses to edit them, so a click would only open a degraded editor. They are
+  // usually the newest files (the list is mtime-sorted) and would otherwise sit at the top.
   const editableEntries = entries.filter((e) => e.editable);
-  // #29 — collapsed behind one summary row instead of N flat rows. This rail is
-  // 260px wide and a run's scans push everything else off the screen.
+  // Collapsed behind one summary row instead of N flat rows: this rail is 260px wide and a
+  // run's scans would push everything else off the screen.
   const readonlyEntries = entries.filter((e) => !e.editable);
-  // 待产出 comes from the backend's per-class status, not from subtracting the
-  // produced FILES: 文献库 / 实验记录 / 长期记忆 / 视觉缓冲 have no files to
-  // enumerate, so subtracting files marked them 待产出 permanently even with
-  // 77 experiment records in the DB. Sharing `groups` also keeps
-  // this tab and 对象总览 from disagreeing about the same class.
+  // "Pending" comes from the backend's per-class status, not from subtracting the produced
+  // files: the literature library / experiment records / long-term memory / vision buffer have
+  // no files to enumerate, so subtracting would mark them pending permanently. Sharing
+  // `groups` also keeps this tab and the workspace overview from disagreeing about a class.
   const permById = new Map(
     (perms.data?.permissions ?? []).map((r) => [r.artifact_id, r]),
   );
@@ -1439,9 +1420,9 @@ function EditorView({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-baseline gap-3">
-        <h2 className="text-lg font-semibold tracking-tight">对象编辑</h2>
+        <h2 className="text-lg font-semibold tracking-tight">{tr("对象编辑", "Object editor")}</h2>
         <span className="text-xs text-mast-muted">
-          直接编辑智能体产出的文档（论文草稿 / 评审报告）。保存 = 存为新版本，下一个打开该文档的智能体会读到你的修改。
+          {tr("直接编辑智能体产出的文档（论文草稿 / 评审报告）。保存 = 存为新版本，下一个打开该文档的智能体会读到你的修改。", "Edit documents produced by the agents (paper drafts / review reports) directly. Saving creates a new version; the next agent that opens the document will see your changes.")}
         </span>
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[260px_1fr]">
@@ -1449,9 +1430,9 @@ function EditorView({
         <div className="space-y-1">
           {artifacts.isPending && <Spinner />}
           {artifacts.isError && <ErrorNote error={artifacts.error} />}
-          {artifacts.data && artifacts.data.degraded && <DegradedNote what="制品列表" />}
+          {artifacts.data && artifacts.data.degraded && <DegradedNote what={tr("制品列表", "Artifact list")} />}
           {artifacts.data && !artifacts.data.degraded && entries.length === 0 && rosterSlots.length === 0 && (
-            <EmptyNote label="当前会话尚无制品。" />
+            <EmptyNote label={tr("当前会话尚无制品。", "No artifacts in the current session yet.")} />
           )}
           {editableEntries.map((e) => (
             <button
@@ -1465,14 +1446,13 @@ function EditorView({
               }
             >
               <span className="min-w-0 flex-1 truncate font-mono text-xs">{e.id}</span>
-              {e.edited && <Badge tone="WARN">已编辑</Badge>}
+              {e.edited && <Badge tone="WARN">{tr("已编辑", "Edited")}</Badge>}
             </button>
           ))}
-          {/* Produced but READ-ONLY (scan .sxm / figures) — shown so the operator
-              knows they exist and where (title=path), but NOT clickable: the
-              backend cannot edit them and the editor would only degrade. Behind
-              one collapsed summary row : a run's scans are read-only and
-              would otherwise push the two editable drafts off the rail. */}
+          {/* Produced but read-only (scan .sxm / figures): shown so the operator knows they
+              exist and where (title=path), but not clickable since the backend cannot edit
+              them. Behind one collapsed summary row so they do not push the editable drafts
+              off the rail. */}
           {readonlyEntries.length > 0 && (
             <button
               type="button"
@@ -1483,7 +1463,7 @@ function EditorView({
                 {showReadonly ? "▾" : "▸"}
               </span>
               <span className="min-w-0 flex-1 truncate text-xs">
-                只读产物 · {readonlyEntries.length} 项
+                {tr(`只读产物 · ${readonlyEntries.length} 项`, `Read-only artifacts · ${readonlyEntries.length}`)}
               </span>
             </button>
           )}
@@ -1495,7 +1475,7 @@ function EditorView({
                 className="flex w-full items-center gap-2 rounded-md border border-dashed border-mast-border/50 py-2 pl-6 pr-3 text-left text-sm text-mast-muted/70"
               >
                 <span className="min-w-0 flex-1 truncate font-mono text-xs">{e.id}</span>
-                <Badge tone="INFO">只读</Badge>
+                <Badge tone="INFO">{tr("只读", "Read-only")}</Badge>
               </div>
             ))}
           {/* Not-yet-produced artifact CLASSES — informational, not clickable.
@@ -1509,7 +1489,7 @@ function EditorView({
             >
               <span className="min-w-0 flex-1 truncate font-mono text-xs">{slot.id}</span>
               <Badge tone={slot.known ? "INFO" : "WARN"}>
-                {slot.known ? "待产出" : "无法读取"}
+                {slot.known ? tr("待产出", "Pending") : tr("无法读取", "Unreadable")}
               </Badge>
             </div>
           ))}
@@ -1524,7 +1504,7 @@ function EditorView({
               producer={cur?.producer ?? rosterSlots.find((s) => s.id === selected)?.producer ?? null}
             />
           ) : (
-            <EmptyNote label="从左侧选择一个对象进行编辑。" />
+            <EmptyNote label={tr("从左侧选择一个对象进行编辑。", "Select an object on the left to edit it.")} />
           )}
         </div>
       </div>

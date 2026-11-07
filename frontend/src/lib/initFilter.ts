@@ -1,16 +1,15 @@
-// 新仪器初始化 — which items the page shows.
+// New-instrument initialisation: which items the page shows.
 //
 // The page has to serve two jobs that pull in opposite directions:
 //
 //   1. first install — "what is still missing", a to-do list;
-//   2. going back to change ONE number — "where is 退针方向".
+//   2. going back to change ONE number, e.g. "where is the retract direction".
 //
-// It only ever served (1). Answered items stay in the payload, but they end up
-// inside a group whose header reads「完成」and which therefore collapses, so from
-// the operator's side they have vanished. On 2026-08-04 that cost a round trip
-// through the API to flip a retract direction — the single field where being
-// wrong drives the tip INTO the sample, i.e. the one most likely to need
-// changing after someone measures it.
+// It only served (1). Answered items stay in the payload, but they end up inside a
+// group whose header reads "complete" and which therefore collapses, so from the
+// operator's side they vanish. That made it hard to flip a retract direction, the
+// single field where being wrong drives the tip INTO the sample and the one most
+// likely to need changing after someone measures it.
 //
 // So: a scope switch, and a search that ignores the scope entirely. Search has
 // to reach an answered item or it does not solve (2).
@@ -43,17 +42,17 @@ export type InitScope = "todo" | "all";
  * Everything the search box looks at for one item.
  *
  * The prose is stripped of its `**` markup first — otherwise searching for a
- * phrase that happens to be emphasised in the catalog ("运行时有兜底") misses,
+ * phrase that happens to be emphasised in the catalog ("runtime fallback") misses,
  * and the operator concludes the search is broken rather than that they typed
  * across an asterisk they cannot see.
  */
 function haystack(item: InitItemLike): string {
   return [
     item.label, item.key, item.store, item.id, item.unit,
-    // `hint` 是可搜的:用户记得住的往往是「铭牌」「面板」这类**去哪儿找**,
-    // 而不是这一项叫什么。它进 haystack 之后「铭牌」能搜到前放那两项。
-    // 合并自从前的 what + where(#39/#40),两个字段都进过 haystack,这里没有
-    // 少掉任何可搜的字。
+    // `hint` is searchable: people tend to remember where to find a value (e.g. the
+    // nameplate, a front panel) rather than what the item is called. It merges the
+    // former `what` and `where` fields, both of which were searchable, so no
+    // searchable text is lost.
     stripBold(item.hint), stripBold(item.consequence),
   ]
     .filter(Boolean)
@@ -74,7 +73,7 @@ export function matchesQuery(item: InitItemLike, query: string): boolean {
  * `todo` = anything not yet answered, at ANY severity — plus items still on a
  * factory default, which the operator has not looked at either.
  *
- * `n/a` items never appear in 待办: they were ruled out by an earlier answer,
+ * `n/a` items never appear in the to-do scope: they were ruled out by an earlier answer,
  * so listing them as outstanding work would be a lie.
  */
 export function isOutstanding(item: InitItemLike): boolean {
@@ -88,7 +87,7 @@ export function visibleItems(
 ): InitItemLike[] {
   const q = opts.query.trim();
   // A search reaches across the whole catalog on purpose — the answered item
-  // the operator is hunting for is by definition not in 待办.
+  // the operator is hunting for is by definition not in the to-do scope.
   if (q) return items.filter((i) => matchesQuery(i, q));
   if (opts.scope === "all") return [...items];
   return items.filter(isOutstanding);

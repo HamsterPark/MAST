@@ -34,7 +34,7 @@ def _default_dir() -> Path:
     """The board's directory, via the ONE shared resolver (``knowledge/paths.py``).
 
     Was a private ``parents[3]`` walk frozen into a module constant — one of five
-    such copies in ``knowledge/*``, and the exact shape of . Resolved
+    such copies in ``knowledge/*``, each frozen into a module constant. Resolved
     per call now, so ``MAST_LITERATURE_LIBS_DIR`` is honoured even when set after
     import; the default is unchanged.
     """

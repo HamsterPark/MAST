@@ -1,8 +1,7 @@
 """逐偏压账 —— append-only JSONL，键是**偏压**，不是帧序号。
 
 设计文档:``docs/v2/design/`` 的「S2 偏压序列」设计,D4/§3.2/§3.3
-(文件名按「S2 偏压序列」检索;通用层注释不写样品名前缀 ——
-``stm_capability_vs_sample_layer.md`` 拍板④)。
+(文件名按「S2 偏压序列」检索;通用层注释不写样品名前缀)。
 
 纯数据层:不碰硬件、不导入任何技能、不知道 conduct 是什么。上层把数递进来。
 
@@ -43,6 +42,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from mast.i18n import tr
+
 SCHEMA = "s2_bias_ledger/1"
 LEDGER_FILENAME = "s2_bias_ledger.jsonl"
 
@@ -51,7 +52,7 @@ STATE_RESOLVED = "bias_resolved"                 # 任一次 atomic_resolved
 STATE_ABSENT_CONFIRMED = "bias_absent_confirmed"  # 全 absent + 至少一次帧准入过
 STATE_UNDECIDED = "bias_undecided"               # 证据不足。**不是「没有」**
 STATE_BLOCKED = "bias_blocked"                   # 安全侧拒绝,不是物理结论
-STATE_TIP_ABORTED = "bias_tip_aborted"           # 帧间守卫中止,等 S1 绕道
+STATE_TIP_ABORTED = "bias_tip_aborted"           # 帧间守卫中止,等针尖修复绕道
 FINAL_STATES = (STATE_RESOLVED, STATE_ABSENT_CONFIRMED, STATE_UNDECIDED,
                 STATE_BLOCKED, STATE_TIP_ABORTED)
 
@@ -254,7 +255,8 @@ def read_ledger(path: "str | os.PathLike", *,
     try:
         raw = p.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
-        out.unreadable.append({"what": str(p), "why": f"读不开:{exc}"})
+        out.unreadable.append({"what": str(p),
+                               "why": tr(f"读不开:{exc}", f"Could not open: {exc}")})
         return out
     for i, line in enumerate(raw, 1):
         s = line.strip()
@@ -266,11 +268,15 @@ def read_ledger(path: "str | os.PathLike", *,
             # 半截行(写到一半断电/断进程)不许静默丢:丢掉一条 resolved,
             # 汇总就会把那个偏压报成 undecided,而那是一句假话。
             out.unreadable.append(
-                {"what": f"{p}:{i}", "why": f"这一行不是合法 JSON:{exc}"})
+                {"what": f"{p}:{i}",
+                 "why": tr(f"这一行不是合法 JSON:{exc}",
+                           f"This line is not valid JSON: {exc}")})
             continue
         if not isinstance(row, dict):
             out.unreadable.append(
-                {"what": f"{p}:{i}", "why": f"这一行不是对象:{type(row).__name__}"})
+                {"what": f"{p}:{i}",
+                 "why": tr(f"这一行不是对象:{type(row).__name__}",
+                           f"This line is not an object: {type(row).__name__}")})
             continue
         row["stale"] = _staleness(row, current_evidence_epoch)
         out.rows.append(row)
@@ -295,7 +301,7 @@ def derive_final_state(attempts: "list[dict]") -> str:
 
     1. 任何一次 ``atomic_resolved`` ⇒ ``bias_resolved``。拿到过就是拿到过。
     2. 否则任何一次 ``tip_abort`` ⇒ ``bias_tip_aborted``。针尖出过事,这个偏压
-       上的其余证据都得在 S1 绕道之后重新看 —— 不能先替它下结论。
+       上的其余证据都得在针尖修复绕道之后重新看 —— 不能先替它下结论。
     3. 否则完全没有裁决、且有过 ``blocked`` ⇒ ``bias_blocked``。安全侧拒绝是
        **拒绝**,不是「这里没有原子」。
     4. 否则所有裁决都是 ``atomic_absent`` **且**至少有一次帧准入通过
@@ -367,7 +373,9 @@ def summarize(read: LedgerRead, *,
         elif st is None:
             unreadable.append({
                 "what": f"{r.get('bias_human')} attempt {r.get('attempt')}",
-                "why": "这一行对不上 evidence_epoch(当前代次或行内代次读不到)"})
+                "why": tr("这一行对不上 evidence_epoch(当前代次或行内代次读不到)",
+                          "This row cannot be reconciled with evidence_epoch "
+                          "(the current epoch or the row's own epoch is unreadable)")})
         # st is True ⇒ 陈旧,不删不报错,只是不参与汇总
 
     groups = by_bias(usable)
@@ -387,7 +395,9 @@ def summarize(read: LedgerRead, *,
         if not attempts:
             unreadable.append({
                 "what": bias_human(float(k)),
-                "why": "计划里有这个偏压,账里一条记录都没有 —— 没跑到"})
+                "why": tr("计划里有这个偏压,账里一条记录都没有 —— 没跑到",
+                          "This bias is in the plan but the ledger has no record of it "
+                          "- it was never run")})
             continue
         state = derive_final_state(attempts)
         counts[state] += 1

@@ -40,10 +40,11 @@ MIN_GUIDE_FILES = 8
 #: skipped; a location with only one of the two files is a failure.
 ROOT_PAIRS = [
     *((f"scripts/release/public_overlay/{n}.md", f"scripts/release/public_overlay/{n}.zh.md")
-      for n in ("AGENTS", "CONTRIBUTING", "SECURITY")),
+      for n in ("README", "AGENTS", "CONTRIBUTING", "SECURITY")),
     *((f"{n}.md", f"{n}.zh.md") for n in ("AGENTS", "CONTRIBUTING", "SECURITY")),
     ("contrib/README.md", "contrib/README.zh.md"),
     ("integrations/claude-code/README.md", "integrations/claude-code/README.zh.md"),
+    ("integrations/codex/README.md", "integrations/codex/README.zh.md"),
 ]
 
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")

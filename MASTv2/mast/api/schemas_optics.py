@@ -37,11 +37,19 @@ class OpticsAxis(BaseModel):
 
 
 class OpticsDevice(BaseModel):
-    """One configured optical-bench device (stage controller)."""
+    """One configured optical-bench device (stage controller, rotation mount,
+    open-loop stepper or spectrometer — local or on a satellite node)."""
 
     id: str
     name: str
     type: str
+    #: motion | rotation | openloop | spectrometer (from ``type``; 2026-10-19)
+    kind: str = "motion"
+    #: device-level role (e.g. ``raman_ccd``); axis roles stay on the axes
+    role: Optional[str] = None
+    #: satellite id and the device id on it, for ``satellite_*`` types
+    satellite: Optional[str] = None
+    remote_device: Optional[str] = None
     enabled: bool = True
     connected: bool = False
     axes: list[OpticsAxis] = Field(default_factory=list)

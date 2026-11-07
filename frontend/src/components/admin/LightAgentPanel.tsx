@@ -2,16 +2,16 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Badge, Card, DegradedNote, EmptyNote, ErrorNote, Spinner } from "@/components/ui";
+import { tr } from "@/lib/i18n";
 
 /** Per-agent LIGHT admin panel for the 5 non-IC tool-based agents
  *  (LIT / XD / DP / PW / PR).
  *
- *  Verbatim parity with the OLD admin_panel.py:_build_light_agent_panel — those
- *  agents are LangGraph @tool agents auto-bridged into the registry as AUTO-level
- *  skills. They carry NO editable hardware governance (safety_level / preconditions
- *  / rollback are not applicable), so their tools are shown READ-ONLY here, with a
- *  note that everything is AUTO-level (no safety gating). Model / thinking is the
- *  single source in 设置 → 各 Agent 模型; we only DISPLAY it (GET /api/agents/models).
+ *  Those agents are LangGraph @tool agents bridged into the registry as AUTO-level
+ *  skills. They carry no editable hardware governance (safety_level / preconditions
+ *  / rollback do not apply), so their tools are shown read-only here, with a note
+ *  that everything is AUTO-level (no safety gating). Model / thinking is edited in
+ *  Settings → per-agent models; this panel only displays it (GET /api/agents/models).
  *
  *  Tool list: GET /api/agents/tools (per-agent catalog), filtered to this agent.
  */
@@ -51,23 +51,30 @@ export function LightAgentPanel({ agentId, label }: { agentId: string; label: st
 
   return (
     <div className="space-y-4">
-      {/* model / thinking summary (display-only — edited in 设置) */}
+      {/* model / thinking summary (display-only; edited in Settings) */}
       <Card>
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
           <span className="text-sm font-semibold text-mast-text">{label}</span>
-          <span className="text-sm text-mast-muted">— 工具型 agent（LangGraph tools）</span>
+          <span className="text-sm text-mast-muted">{tr("— 工具型 agent（LangGraph tools）", "— tool agent (LangGraph tools)")}</span>
         </div>
         <div className="mt-2 text-sm text-mast-muted">
           {modelsQ.isPending ? (
-            <Spinner label="读取模型…" />
+            <Spinner label={tr("读取模型…", "Loading model…")} />
           ) : modelsQ.error ? (
             <ErrorNote error={modelsQ.error} />
           ) : (
             <p>
-              当前模型 <span className="font-mono text-mast-text">{modelTxt}</span> · thinking{" "}
+              {tr("当前模型", "Current model")} <span className="font-mono text-mast-text">{modelTxt}</span> · thinking{" "}
               <span className="font-mono text-mast-text">{thinkTxt}</span>
-              {modelsQ.data?.degraded && <span className="ml-2 text-mast-warn">（registry 未接入）</span>}
-              <span className="ml-1">（在「设置 → 各 Agent 模型 / Thinking」调整——单一真源）。</span>
+              {modelsQ.data?.degraded && (
+                <span className="ml-2 text-mast-warn">{tr("（registry 未接入）", "(registry not attached)")}</span>
+              )}
+              <span className="ml-1">
+                {tr(
+                  "（在「设置 → 各 Agent 模型 / Thinking」调整——单一真源）。",
+                  "(change it under Settings → per-agent models / thinking; that is the single source).",
+                )}
+              </span>
             </p>
           )}
         </div>
@@ -76,19 +83,23 @@ export function LightAgentPanel({ agentId, label }: { agentId: string; label: st
       {/* read-only tool codex */}
       <Card>
         <div className="mb-1 flex items-center gap-2">
-          <span className="text-sm font-semibold text-mast-text">技能管理（只读）</span>
+          <span className="text-sm font-semibold text-mast-text">{tr("技能管理（只读）", "Skill management (read-only)")}</span>
           {toolsQ.data && !toolsQ.data.degraded && <Badge tone="INFO">{myTools.length}</Badge>}
         </div>
         <p className="mb-3 text-xs text-mast-muted">
-          该 agent 的工具均为 <Badge tone="AUTO">AUTO</Badge> 级（纯分析/检索，不碰硬件），无需安全门控 /
-          前置条件 / 回滚等可治理项，故此处只读展示；如需编辑技能元数据见「仪器控制 IC」。
+          {tr("该 agent 的工具均为 ", "All tools of this agent are ")}
+          <Badge tone="AUTO">AUTO</Badge>
+          {tr(
+            " 级（纯分析/检索，不碰硬件），无需安全门控 / 前置条件 / 回滚等可治理项，故此处只读展示；如需编辑技能元数据见「仪器控制 IC」。",
+            " level (analysis / retrieval only, no hardware access). They need no safety gating, preconditions or rollback, so they are shown read-only; to edit skill metadata see Instrument control (IC).",
+          )}
         </p>
         {toolsQ.isPending && <Spinner />}
         {toolsQ.error && <ErrorNote error={toolsQ.error} />}
-        {toolsQ.data?.degraded && <DegradedNote what="工具目录" />}
+        {toolsQ.data?.degraded && <DegradedNote what={tr("工具目录", "Tool catalog")} />}
         {toolsQ.data && !toolsQ.data.degraded && (
           myTools.length === 0 ? (
-            <EmptyNote label="该 agent 暂无可列出的工具。" />
+            <EmptyNote label={tr("该 agent 暂无可列出的工具。", "This agent has no tools to list.")} />
           ) : (
             <ul className="grid grid-cols-1 gap-0.5 sm:grid-cols-2">
               {myTools.map((t) => (

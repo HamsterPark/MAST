@@ -44,6 +44,7 @@ from pathlib import Path
 
 from mast.documents.model import normalize_kind
 from mast.documents.store import DocumentStore
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,7 @@ def migrate_plans(*, plan_store=None, dry_run: bool = False,
             from mast.planning.plan_store import PlanStore
             plan_store = PlanStore(experiment_db_path())
         except Exception as exc:  # noqa: BLE001
-            res["errors"].append(f"PlanStore 不可用：{exc!r}")
+            res["errors"].append(tr(f"PlanStore 不可用：{exc!r}", f"PlanStore unavailable: {exc!r}"))
             return res
 
     legacy_dir = getattr(plan_store, "_plans_dir", None)
@@ -154,7 +155,7 @@ def migrate_plans(*, plan_store=None, dry_run: bool = False,
                 conn.execute("UPDATE plans SET doc_id=? WHERE plan_id=?",
                              (out.doc_id, plan_id))
         except Exception as exc:  # noqa: BLE001
-            res["errors"].append(f"{p.name}: doc_id 回写失败 {exc!r}")
+            res["errors"].append(tr(f"{p.name}: doc_id 回写失败 {exc!r}", f"{p.name}: doc_id write-back failed {exc!r}"))
     return res
 
 
@@ -171,7 +172,7 @@ def migrate_legacy_markdown(*, dry_run: bool = False,
     try:
         from mast.agents._shared.data_paths import drafts_dir, reviews_dir
     except Exception as exc:  # noqa: BLE001
-        res["errors"].append(f"data_paths 不可用：{exc!r}")
+        res["errors"].append(tr(f"data_paths 不可用：{exc!r}", f"data_paths unavailable: {exc!r}"))
         return res
 
     seen = _existing_legacy_stems(s)
@@ -246,11 +247,14 @@ def main(argv: "list[str] | None" = None) -> int:
 
     ap = argparse.ArgumentParser(
         prog="python -m mast.documents.migrate",
-        description="把旧的全局文档（plans / drafts / reviews）导入实验文件夹。"
-                    "复制导入，原文件不动；跑两遍结果一致。",
+        description=tr("把旧的全局文档（plans / drafts / reviews）导入实验文件夹。"
+                       "复制导入，原文件不动；跑两遍结果一致。",
+                       "Import old global documents (plans / drafts / reviews) into experiment "
+                       "folders. Import is by copy, the originals are untouched; running twice "
+                       "gives the same result."),
     )
     ap.add_argument("--dry-run", action="store_true",
-                    help="只报告会导入什么，不写任何东西")
+                    help=tr("只报告会导入什么，不写任何东西", "Only report what would be imported; write nothing"))
     args = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")

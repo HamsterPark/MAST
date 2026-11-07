@@ -1,11 +1,11 @@
-// 大图 + 键盘标记（旧版兼容格式 app.js 的 openLB / showLB / lbMetaHtml / lbMarkUI / keydown，
-// 与 context.js 的 ctxStage / anchorTo / ctxKey）。
+// Lightbox with keyboard marking, including the spectrum/neighbour-frame comparison and anchoring.
 //
-// 渲染到 document.body（portal）：MAST 的滚动容器是 AppLayout 的 <main>，fixed 遮罩
-// 若留在 main 里，滚轮事件冒泡上去会把底下的页面一起滚走。
+// Rendered into document.body (portal): MAST's scroll container is AppLayout's <main>, and a
+// fixed overlay left inside <main> would let wheel events bubble up and scroll the page below.
 //
-// 键盘监听只注册一次，所有「当前是谁」都从 latest ref 读——翻页、打分、系定在同一个
-// 事件循环里连按时，闭包里的旧条目会把分打到上一张上。
+// The keyboard listener is registered once and reads "which item is current" from the `latest`
+// ref. When paging, rating and anchoring are pressed in quick succession within one event loop,
+// a stale item in a closure would apply the rating to the previous card.
 
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -26,6 +26,7 @@ import { ContextStage, type Side } from "./ContextStage";
 import { Chip, DARK_BTN, Kbd, arText, chipClass, darkRatingOnClass } from "./bits";
 import { CopyButton } from "./clipboard";
 import { LightboxFigureButton } from "./figures/LightboxFigureButton";
+import { tr } from "@/lib/i18n";
 
 const AUTO_KEY = "mast.gallery.auto";
 
@@ -68,7 +69,7 @@ export function Lightbox({
   const [interactive, setInteractive] = useState(false);
   const [newTag, setNewTag] = useState("");
 
-  // 两侧摆哪两张帧：换了条目就按「开始前最后保存 / 结束后第一张开始 / 已系定那张」重算。
+  // Which two frames sit on the sides: on an item change, recompute as (last saved before start / first started after end / the anchored frame).
   const [sides, setSides] = useState<{ id: string; prev: number; next: number } | null>(null);
   let curSides = sides;
   if (it && spectrumLike && (!sides || sides.id !== it.id)) {
@@ -77,7 +78,7 @@ export function Lightbox({
     setSides(curSides);
   }
 
-  // 备注：本地草稿，700 ms 去抖 + 失焦时存；换条目前先存。
+  // Note: local draft, saved with a 700 ms debounce and on blur; flushed before switching items.
   const [note, setNote] = useState("");
   const noteRef = useRef<HTMLTextAreaElement>(null);
   const noteFor = useRef<string | null>(null);
@@ -201,15 +202,15 @@ export function Lightbox({
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  // 列表空了（别处把最后一条筛掉了）就自己关。
+  // Close itself when the list becomes empty (the last item was filtered out elsewhere).
   useEffect(() => {
     if (!list.length) actions.current.close();
   }, [list.length]);
 
-  // 离开时把没存的备注存掉（路由变化直接卸载大图时也走这里）。
+  // Save any unsaved note on leave (also covers unmounting on route change).
   useEffect(() => () => actions.current.flushNote(), []);
 
-  // 预加载前后两张。
+  // Preload the next and previous images.
   useEffect(() => {
     for (const n of [list[j + 1], list[j - 1]]) {
       if (!n) continue;
@@ -225,25 +226,42 @@ export function Lightbox({
   const startItem = startId ? model.byId.get(startId) : undefined;
   const extraTags = (mark.tags || []).filter((t) => !tagTable.includes(t));
 
-  const metaLines: ReactNode[] = [`${KLAB[it.k]} · 目录 ${it.d}`, meta(it)];
+  const metaLines: ReactNode[] = [tr(`${KLAB[it.k]} · 目录 ${it.d}`, `${KLAB[it.k]} · directory ${it.d}`), meta(it)];
   if (it.k === "f") {
     metaLines.push(
-      `中心 (${fix2(it.cx)}, ${fix2(it.cy)}) nm · 转角 ${it.ang || 0}° · 行 ${it.rows}/${it.rall} · ` +
-        `保存 ${fmtTs(it.mt)}${it.li ? " · 右图为 lock-in dI/dV 通道" : ""}`,
+      tr(
+        `中心 (${fix2(it.cx)}, ${fix2(it.cy)}) nm · 转角 ${it.ang || 0}° · 行 ${it.rows}/${it.rall} · ` +
+          `保存 ${fmtTs(it.mt)}${it.li ? " · 右图为 lock-in dI/dV 通道" : ""}`,
+        `center (${fix2(it.cx)}, ${fix2(it.cy)}) nm · angle ${it.ang || 0}° · rows ${it.rows}/${it.rall} · ` +
+          `saved ${fmtTs(it.mt)}${it.li ? " · right image is the lock-in dI/dV channel" : ""}`,
+      ),
     );
-    if (it.ar) metaLines.push(<span className="text-[#fbbf24]">原子判据判不了：{arText(it.ar)}</span>);
+    if (it.ar) metaLines.push(<span className="text-[#fbbf24]">{tr("原子判据判不了：", "Atomic criterion could not decide: ")}{arText(it.ar)}</span>);
   }
   if (it.k === "s") {
     metaLines.push(
-      `${it.sw || 1} sweep${
-        it.lic ? " · 谱图下半为 lock-in dI/dV" : it.dn ? " · 没有 lock-in，谱图下半为 I(V) 数值求导的 dI/dV" : ""
-      } · 开始 ${fmtTs(it.t)} · 保存 ${fmtTs(it.mt)}`,
+      tr(
+        `${it.sw || 1} sweep${
+          it.lic ? " · 谱图下半为 lock-in dI/dV" : it.dn ? " · 没有 lock-in，谱图下半为 I(V) 数值求导的 dI/dV" : ""
+        } · 开始 ${fmtTs(it.t)} · 保存 ${fmtTs(it.mt)}`,
+        `${it.sw || 1} sweep${
+          it.lic
+            ? " · lower half of the plot is lock-in dI/dV"
+            : it.dn
+              ? " · no lock-in; lower half is dI/dV from numerical differentiation of I(V)"
+              : ""
+        } · started ${fmtTs(it.t)} · saved ${fmtTs(it.mt)}`,
+      ),
     );
   }
   if (it.k === "g") {
     metaLines.push(
-      `中心 (${fix2(it.cx)}, ${fix2(it.cy)}) nm · ${it.sw ?? "?"} sweep · 完成 ${it.have}/${(it.gx ?? 0) * (it.gy ?? 0)} · ` +
-        `结束 ${fmtT(it.t1)} · 图中第 0 行在下沿（按点坐标核对过）`,
+      tr(
+        `中心 (${fix2(it.cx)}, ${fix2(it.cy)}) nm · ${it.sw ?? "?"} sweep · 完成 ${it.have}/${(it.gx ?? 0) * (it.gy ?? 0)} · ` +
+          `结束 ${fmtT(it.t1)} · 图中第 0 行在下沿（按点坐标核对过）`,
+        `center (${fix2(it.cx)}, ${fix2(it.cy)}) nm · ${it.sw ?? "?"} sweep · done ${it.have}/${(it.gx ?? 0) * (it.gy ?? 0)} · ` +
+          `ended ${fmtT(it.t1)} · row 0 is at the bottom edge of the plot (checked against point coordinates)`,
+      ),
     );
   }
 
@@ -293,7 +311,7 @@ export function Lightbox({
 
       <button
         type="button"
-        title="关闭（Esc）"
+        title={tr("关闭（Esc）", "Close (Esc)")}
         onClick={() => actions.current.close()}
         className="absolute right-[352px] top-2 text-xl text-[#ccc] hover:text-white max-[760px]:right-2.5"
       >
@@ -327,30 +345,32 @@ export function Lightbox({
             <span className="text-[#8a939c]">{fullPath(it)}</span>{" "}
             <CopyButton
               text={fullPath(it)}
-              label="复制路径"
+              label={tr("复制路径", "Copy path")}
               className="!border-[#444] !bg-[#2a2e33] !text-[#eee]"
             />
           </div>
           {(it.cpl?.length ?? 0) > 1 && (
             <div className="mt-1 text-[#8a939c]">
-              字节相同的副本 {it.cpl!.length} 处：
+              {tr(`字节相同的副本 ${it.cpl!.length} 处：`, `Byte-identical copies (${it.cpl!.length}):`)}
               {it.cpl!.map((p) => (
                 <div key={p}>· {p}</div>
               ))}
             </div>
           )}
           <div className="text-[#c4b5fd]">
-            {selIds.has(it.id) ? "☑ 已选中" : "☐ 未选中"} · 共选 {selIds.size} 个
-            {startItem ? ` · 起点 ${num(startItem)}` : ""} · S 选/取消 · [ 起点 · ] 选到这里
+            {selIds.has(it.id) ? tr("☑ 已选中", "☑ Selected") : tr("☐ 未选中", "☐ Not selected")} ·{" "}
+            {tr(`共选 ${selIds.size} 个`, `${selIds.size} selected`)}
+            {startItem ? tr(` · 起点 ${num(startItem)}`, ` · start ${num(startItem)}`) : ""} ·{" "}
+            {tr("S 选/取消 · [ 起点 · ] 选到这里", "S toggle · [ start · ] select to here")}
           </div>
         </div>
 
         <div className="mb-1 mt-2.5 flex flex-wrap items-center gap-[5px]">
           {([
-            [1, "✓ 可用", "1"],
-            [2, "★ 重点", "2"],
-            [-1, "✗ 排除", "3"],
-            [0, "清除", "0"],
+            [1, tr("✓ 可用", "✓ Usable"), "1"],
+            [2, tr("★ 重点", "★ Key"), "2"],
+            [-1, tr("✗ 排除", "✗ Exclude"), "3"],
+            [0, tr("清除", "Clear"), "0"],
           ] as const).map(([r, label, key]) => (
             <button
               key={r}
@@ -394,7 +414,7 @@ export function Lightbox({
         <div className="mb-1 mt-2.5">
           <input
             value={newTag}
-            placeholder="新标签，回车添加"
+            placeholder={tr("新标签，回车添加", "New tag, Enter to add")}
             onChange={(e) => setNewTag(e.target.value)}
             onKeyDown={(e) => {
               if (e.key !== "Enter") return;
@@ -410,7 +430,7 @@ export function Lightbox({
         <textarea
           ref={noteRef}
           value={note}
-          placeholder="备注（N 键聚焦，Esc 退出输入）"
+          placeholder={tr("备注（N 键聚焦，Esc 退出输入）", "Note (N to focus, Esc to leave)")}
           onChange={(e) => {
             setNote(e.target.value);
             noteFor.current = it.id;
@@ -423,13 +443,13 @@ export function Lightbox({
 
         <div className="mt-1.5 flex items-center justify-between">
           <button type="button" className={DARK_BTN} onClick={() => actions.current.go(j - 1)}>
-            ← 上一个
+            {tr("← 上一个", "← Previous")}
           </button>
           <span className="font-mono">
             {j + 1} / {list.length}
           </span>
           <button type="button" className={DARK_BTN} onClick={() => actions.current.go(j + 1)}>
-            下一个 →
+            {tr("下一个 →", "Next →")}
           </button>
         </div>
         <label className="mt-2 block text-[12.5px] text-[#c9d0d7]">
@@ -441,28 +461,32 @@ export function Lightbox({
               try {
                 localStorage.setItem(AUTO_KEY, String(e.target.checked));
               } catch {
-                /* 记不住也能用 */
+                /* works without remembering */
               }
             }}
           />{" "}
-          按 1/2/3 打分后自动跳到下一个
+          {tr("按 1/2/3 打分后自动跳到下一个", "Advance automatically after rating with 1/2/3")}
         </label>
         {it.k === "s" && !it.ex && (
-          <label className="mt-1 block text-[12.5px] text-[#c9d0d7]" title="改用 MAST 数据页的交互谱图（可缩放、看全部通道）">
-            <input type="checkbox" checked={interactive} onChange={(e) => setInteractive(e.target.checked)} /> 谱图改用交互曲线
+          <label className="mt-1 block text-[12.5px] text-[#c9d0d7]" title={tr("改用 MAST 数据页的交互谱图（可缩放、看全部通道）", "Use the interactive spectrum plot from the MAST data page (zoomable, all channels)")}>
+            <input type="checkbox" checked={interactive} onChange={(e) => setInteractive(e.target.checked)} />{" "}
+            {tr("谱图改用交互曲线", "Interactive spectrum plot")}
           </label>
         )}
         <LightboxFigureButton it={it} />
         <div className="mt-3 text-[11.5px] leading-relaxed text-[#8a939c]">
-          ←/→ 翻页 · 1 可用 · 2 重点 · 3 排除 · 0 清除
+          {tr("←/→ 翻页 · 1 可用 · 2 重点 · 3 排除 · 0 清除", "←/→ page · 1 usable · 2 key · 3 exclude · 0 clear")}
           <br />
-          Q W E R T Y U I O 开关对应标签 · N 写备注 · Esc 关闭
+          {tr("Q W E R T Y U I O 开关对应标签 · N 写备注 · Esc 关闭", "Q W E R T Y U I O toggle the matching tag · N write note · Esc close")}
           <br />
-          S 选中/取消 · [ 定起点 · ] 选到这里（一段）→ 底部存为系列
+          {tr(
+            "S 选中/取消 · [ 定起点 · ] 选到这里（一段）→ 底部存为系列",
+            "S select/deselect · [ set start · ] select up to here (a range) → save as series from the bottom bar",
+          )}
           <br />
-          谱/网格：A 系于前一张帧 · D 系于后一张帧
+          {tr("谱/网格：A 系于前一张帧 · D 系于后一张帧", "Spectrum/grid: A anchor to previous frame · D anchor to next frame")}
           <br />
-          <span className="text-[#6d7681]">改动自动存盘（顶栏显示保存状态）</span>
+          <span className="text-[#6d7681]">{tr("改动自动存盘（顶栏显示保存状态）", "Changes are saved automatically (save state shown in the header)")}</span>
         </div>
       </aside>
     </div>

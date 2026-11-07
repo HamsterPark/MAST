@@ -43,6 +43,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, Protocol, runtime_checkable
 
+from mast.i18n import tr
+
 logger = logging.getLogger(__name__)
 
 
@@ -495,13 +497,14 @@ class GraphExecutor:
                     self._composite_name, step.step_id,
                 )
                 # A SKIPPED step and a step that ran-and-succeeded are
-                # indistinguishable from outside — which is exactly why an early
-                # stop like this could not be diagnosed. If a
+                # indistinguishable from outside — which is exactly why
+                # a run that "stopped at STS point 5" could not be diagnosed. If a
                 # stale sidecar makes the executor resume-skip the leading points,
                 # the composite silently starts in the middle and the operator sees
                 # it "stop early". A skip is a DECISION; write it down.
                 _diag("step_skip", f"{self._composite_name}.{step.step_id}",
-                      "已完成（从 sidecar 断点恢复）——本次未执行",
+                      tr("已完成（从 sidecar 断点恢复）——本次未执行",
+                         "Already completed (resumed from the sidecar checkpoint) - not executed this time"),
                       skill=step.skill_name, ordinal=steps_seen,
                       completed=len(self._progress.completed_steps))
                 continue
@@ -585,7 +588,7 @@ class GraphExecutor:
                 # 一步失败之后 ``sub_results`` 不收它（下面那行只在成功分支），
                 # 于是 ``_narrate_step_result`` 不发、``_data()`` 读不到 ——
                 # **技能说得最清楚的那句话，正好在出事的时候被丢掉**。
-                # 调平时的操作和效果也应该记入旁白——
+                # 调平时的操作和效果应记入旁白。
                 # 出事那次的读数比顺利那次更该留下来。
                 #
                 # 走**显式形参**，不走一个临时挂在 self 上的字段：后者等于给
@@ -631,8 +634,8 @@ class GraphExecutor:
         # returned in 0.37/0.38/0.38/0.22 s — while the composite reported
         # success_count=5, fail_count=0, five distinct .sxm paths, and
         # recommended one of the fake regions as the best. That is the second
-        # shipment of this failure mode; the first (AutoApproach, 2026-07-10
-        # #42/#75) is recorded in the guard's own comment.
+        # shipment of this failure mode; the first (AutoApproach)
+        # is recorded in the guard's own comment.
         #
         # Normal completion clears the sidecar right after this; this write is
         # what makes the guard correct when that cleanup does NOT happen.
@@ -748,8 +751,11 @@ class GraphExecutor:
                         self._composite_name,
                         len(prior.completed_steps), prior.total_steps)
                     _diag("progress_discard", self._composite_name,
-                          "上下文里的既往进度是**跑完了的**——本次从头跑,"
-                          "不跳步(跳步 = 零仪器调用的假成功)",
+                          tr("上下文里的既往进度是**跑完了的**——本次从头跑,"
+                             "不跳步(跳步 = 零仪器调用的假成功)",
+                             "The earlier progress in the context is from a **finished** run - starting "
+                             "from scratch this time without skipping steps (skipping steps = a fake "
+                             "success with zero instrument calls)"),
                           completed=len(prior.completed_steps),
                           total=prior.total_steps)
                 else:
@@ -813,7 +819,20 @@ class GraphExecutor:
             data = getattr(result, "data", None)
             if not isinstance(data, dict):
                 return
-            # 附带判据分解图，使用户能核对判断依据。
+            # ⚠️ 配图必须是**落好盘的 PNG**,不能是 .sxm 路径。
+            #
+            # 若传 ``{"src": scan_path, "origin": "sxm"}``,而
+            # ``/api/chat/narration-image/{seq}`` 的自述写着:
+            #   「``origin="sxm"`` 那一档还没有生产方,所以这里连门都不开」——
+            # 也就是说那张图**永远取不到**(404)。理由也在那儿:在 API 线程上
+            # 渲染 .sxm 会和 ``/api/vision/recent`` 共用 pyplot 的全局 Gcf。
+            #
+            # 所以在**判读发生的这一刻**把分析图画好落盘,走能取到的
+            # ``milestone_png`` 那一档。渲染用面向对象的 Figure/FigureCanvasAgg,
+            # 完全不碰 Gcf —— 在这条工作线程上是安全的。
+            #
+            # 挂的是**判据分解图**而不是原始缩略图:要呈现的是
+            # 「这个团簇的识别图,这个团簇被做了什么计算,结果如何」。
             image = None
             src = str((step.params or {}).get("scan_path") or "").strip()
             if src:
@@ -830,7 +849,7 @@ class GraphExecutor:
 
     def _narrate_failure(self, step: CompositeStep, msg: str,
                          continued: bool, detail: str = "") -> None:
-        """这一步没成。``continued`` 是用户看到「没成」之后要知道的第一件事：
+        """这一步没成。``continued`` 是看到「没成」之后要知道的第一件事：
         **这次跑还在不在跑**。它由这里的三条出路各自决定，不由 ``step.optional``
         推断 —— ``on_step_failed`` 回调也能放行一个非 optional 的步骤。"""
         _narrate("step_failed", skill=step.skill_name, step_id=step.step_id,
@@ -957,8 +976,7 @@ class GraphExecutor:
 def abort_error_text(progress: CompositeProgress) -> str:
     """The error text for a composite that stopped early — WHY it stopped.
 
-    the run was reported as user-aborted
-    when no one had touched it.
+    A run could be reported as user-aborted when no one had touched it.
 
     ``progress.aborted`` is set by more than one thing. The operator's 中止 and
     E_STOP set it, but so does a CRITICAL tip-quality halt, and so does a
@@ -975,7 +993,7 @@ def abort_error_text(progress: CompositeProgress) -> str:
 
     Only the ABORT LATCH is rendered as "aborted by user": that Event has
     exactly two setters, the operator's 中止 button and E_STOP. Every other
-    reason is passed through verbatim.
+    reason is passed through unchanged.
 
     Since 2026-07-28 the latch already STORES that text (see ``_USER_ABORT_TEXT``),
     so this function is no longer the only thing standing between executor jargon

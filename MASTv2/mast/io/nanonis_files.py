@@ -131,7 +131,8 @@ def frame_acquired_lines(parsed) -> "tuple[int, int] | None":
     the scan front and counting rows that are not entirely NaN measures progress
     exactly. That is not a guess: it is the measurement the scan-vision monitor
     was rebuilt around after the clock-based estimate was caught burning every
-    milestone in the first slice of a scan (``vision/scan_monitor.py::_measure_acquired_frac``).
+    milestone in the first slice of a scan
+    (``vision/scan_monitor.py::_measure_acquired_frac``).
 
     Returns ``None`` when the reply carries no usable 2-D frame — the caller must
     then treat progress as UNKNOWN, never as zero.
@@ -176,10 +177,18 @@ def reply_body(return_value):
 
 
 def decode_reply(return_value):
-    """返回回包实际载荷：剥掉信封后再展开单元素 body。
+    """回包 → 它**真正携带的值**:剥信封,单元素载荷再解一层。
 
-    单值设定点返回标量，多值增益或限值保持列表。共用解包函数，
-    避免把整个三段信封当成仪器读数或控制器状态。
+    这份逻辑原本叫 ``readback._decode_nanonis``,是这一族里**唯一做对了的**
+    那一份,而它的 docstring 记着一次事故:整个三段信封进了 LLM
+    上下文,而且 ``controller_on`` 因此**每一次都返回 None** —— 即使
+    Z 控制器好好的。(那份代码里的解释保留在原处。)
+
+    另外五处 ``_rv`` 当时只写了 ``return record.return_value``,犯的是同一个错。
+    提到这里是为了让它只有一份。
+
+    单元素载荷解包的理由:一个设定点是**一个数**,不是一个只有一个数的表;
+    多元素(增益、限值)保持列表。
     """
     body = reply_body(return_value)
     if body is return_value:
@@ -262,7 +271,7 @@ def parse_buffer_get(parsed) -> "dict | None":
     but no channels are selected" (a different, also-refusable condition).
 
     ``num_channels`` is what the INSTRUMENT declared (``body[0]``), reported
-    verbatim rather than recomputed as ``len(channel_indexes)`` — if the two ever
+    as-is rather than recomputed as ``len(channel_indexes)`` — if the two ever
     disagree, that is a parse failure the caller deserves to see, not one to
     paper over.
 
@@ -931,7 +940,7 @@ def read_3ds(path: str) -> dict:
 
     # Guard EVERY header-declared dimension with ``<= 0`` *before* it reaches
     # np.zeros / range().  A negative grid_dim or Points would otherwise raise
-    # ``ValueError: negative dimensions are not allowed`` from np.zeros ;
+    # ``ValueError: negative dimensions are not allowed`` from np.zeros;
     # a negative n_params would do the same for the params array.  We treat any
     # non-positive geometry as "no data" rather than crashing the caller.
     if n_points <= 0 or nx <= 0 or ny <= 0:
@@ -946,7 +955,7 @@ def read_3ds(path: str) -> dict:
     # Clip the requested grid to what the binary blob can actually back, and
     # refuse pathologically large header-declared grids before np.zeros tries
     # to allocate them (a corrupt header claiming e.g. 100000x100000 would
-    # raise MemoryError deep in numpy — #71).  We bound by both the element
+    # raise MemoryError deep in numpy).  We bound by both the element
     # ceiling and the real data length.
     floats_per_point = n_params + n_channels * n_points
     point_bytes = floats_per_point * 4

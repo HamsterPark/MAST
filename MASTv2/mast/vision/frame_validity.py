@@ -161,7 +161,7 @@ def acquired_row_mask(*frames: Any) -> "np.ndarray":
         #
         # ⚠️ **只在有非零行作对照时才这么读。** 整帧全零是另一件事:反馈关掉/
         # 没接上时「**测出来就是零**」—— 而「测出来是零」和「没测」必须是两句话
-        # (``_domain_synth.dead_flat_frame`` 的 docstring 原话,
+        # (见 ``_domain_synth.dead_flat_frame`` 的 docstring,
         #  ``test_dead_flat_is_undetermined`` 钉着它)。
         # 一整帧零里没有任何东西能把这两者分开,所以那时不裁,让下游按
         # ``dead_flat`` 去说 —— 那句话比「什么都没扫到」更接近现场。

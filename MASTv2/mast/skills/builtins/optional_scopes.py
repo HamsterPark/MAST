@@ -30,6 +30,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.skills.base import BaseSkill
 
 # OsciHR_TrigModeSet(Trigger_mode): 0=immediate, 1=level, 2=digital
@@ -65,45 +66,54 @@ class ConfigureHighResScope(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "配置高分辨率示波器（OsciHR）：用哪个信号、采多少点、过采样，以及触发。\n"
+                tr("配置高分辨率示波器（OsciHR）：用哪个信号、采多少点、过采样，以及触发。\n"
                 "\n"
                 "配置示波器不会碰仪器 —— 它只决定**什么被数字化**。没有东西会动，也没有东西被施加出去。"
                 "\n"
                 "\n"
                 "trigger_mode 为 'immediate' 时，一 Run 就立刻捕获；'level' 会等 trigger_channel 按给定方向穿过 trigger_level；"
                 "'digital' 则等一条数字线。信号序号来自信号目录（ListSignalNames）"
-                "。"
+                "。",
+                   "Configure the high-resolution oscilloscope (OsciHR): which signal, how many points, oversampling, and the trigger.\n"
+                   "\n"
+                   "Configuring the scope does not touch the instrument - it only decides **what gets digitized**. Nothing moves and nothing is applied."
+                   "\n"
+                   "\n"
+                   "With trigger_mode 'immediate', capture starts as soon as it is run; 'level' waits for trigger_channel to cross trigger_level in the given direction; "
+                   "'digital' waits for a digital line. Signal indices come from the signal catalog (ListSignalNames)"
+                   ".")
             ),
             parameters=[
                 ParameterSpec(name="signal_index", type="int",
-                              description="要数字化的信号（来自 ListSignalNames）",
+                              description=tr("要数字化的信号（来自 ListSignalNames）", "Signal to digitize (from ListSignalNames)"),
                               required=True, min_value=0, max_value=127),
                 ParameterSpec(name="samples", type="int",
-                              description="每次采集捕获的点数",
+                              description=tr("每次采集捕获的点数", "Number of points captured per acquisition"),
                               required=False, default=1024,
                               min_value=1, max_value=1_000_000),
                 ParameterSpec(name="oversampling_index", type="int",
-                              description="过采样序号（0 = 不过采样；越高平均越多、越慢）",
+                              description=tr("过采样序号（0 = 不过采样；越高平均越多、越慢）",
+                                             "Oversampling index (0 = no oversampling; higher averages more and is slower)"),
                               required=False, default=0, min_value=0, max_value=10),
                 ParameterSpec(name="trigger_mode", type="str",
                               description="immediate | level | digital",
                               required=False, default="immediate",
                               allowed_values=list(_TRIG_MODES)),
                 ParameterSpec(name="trigger_channel", type="int",
-                              description="触发源通道（level 模式用）",
+                              description=tr("触发源通道（level 模式用）", "Trigger source channel (used in level mode)"),
                               required=False, default=0, min_value=0, max_value=127),
                 ParameterSpec(name="trigger_level", type="float",
-                              description="触发阈值，用触发通道自己的物理单位",
+                              description=tr("触发阈值，用触发通道自己的物理单位", "Trigger threshold, in the trigger channel's own physical unit"),
                               required=False, default=0.0),
                 ParameterSpec(name="trigger_slope", type="str",
                               description="rising | falling",
                               required=False, default="rising",
                               allowed_values=list(_SLOPES)),
                 ParameterSpec(name="trigger_hysteresis", type="float",
-                              description="触发迟滞（防止在噪声上反复触发）",
+                              description=tr("触发迟滞（防止在噪声上反复触发）", "Trigger hysteresis (prevents repeated triggering on noise)"),
                               required=False, default=0.0, min_value=0.0),
                 ParameterSpec(name="osci_index", type="int",
-                              description="第几个 OsciHR 实例（0 起算）",
+                              description=tr("第几个 OsciHR 实例（0 起算）", "Which OsciHR instance (counted from 0)"),
                               required=False, default=0, min_value=0, max_value=7),
             ],
             estimated_duration_s=1.0,
@@ -173,8 +183,10 @@ class ConfigureHighResScope(BaseSkill):
             data={"osci_index": idx, "signal_index": int(params["signal_index"]),
                   "samples": int(params.get("samples", 1024) or 1024),
                   "trigger_mode": mode},
-            summary=(f"OsciHR#{idx} 已配置：信号 {params['signal_index']}，"
-                     f"{params.get('samples', 1024)} 点，触发={mode}"),
+            summary=(tr(f"OsciHR#{idx} 已配置：信号 {params['signal_index']}，"
+                     f"{params.get('samples', 1024)} 点，触发={mode}",
+                        f"OsciHR#{idx} configured: signal {params['signal_index']}, "
+                        f"{params.get('samples', 1024)} points, trigger={mode}")),
         )
 
 
@@ -188,14 +200,18 @@ class RunHighResScope(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "启动高分辨率示波器（并重新武装它的触发）。之后调 GetHighResScopeData 把波形取回来。"
+                tr("启动高分辨率示波器（并重新武装它的触发）。之后调 GetHighResScopeData 把波形取回来。"
                 "\n"
                 "\n"
-                "对仪器而言这是只读的：跑示波器是把一个信号数字化，它不驱动任何东西。"
+                "对仪器而言这是只读的：跑示波器是把一个信号数字化，它不驱动任何东西。",
+                   "Start the high-resolution oscilloscope (and re-arm its trigger). Afterwards call GetHighResScopeData to fetch the waveform."
+                   "\n"
+                   "\n"
+                   "This is read-only for the instrument: running the scope digitizes a signal and drives nothing.")
             ),
             parameters=[
                 ParameterSpec(name="rearm", type="bool",
-                              description="启动前先重新武装触发",
+                              description=tr("启动前先重新武装触发", "Re-arm the trigger before starting"),
                               required=False, default=True),
             ],
             estimated_duration_s=1.0,
@@ -215,7 +231,7 @@ class RunHighResScope(BaseSkill):
         if rec.error:
             return _fail("RunHighResScope", f"OsciHR_Run failed: {rec.error}", calls)
         return SkillResult(skill_name="RunHighResScope", success=True,
-                           nanonis_calls=calls, summary="OsciHR 已启动")
+                           nanonis_calls=calls, summary=tr("OsciHR 已启动", "OsciHR started"))
 
 
 class GetHighResScopeData(BaseSkill):
@@ -228,25 +244,30 @@ class GetHighResScopeData(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读高分辨率示波器捕获到的波形，并可选地读它的功率谱密度。\n"
+                tr("读高分辨率示波器捕获到的波形，并可选地读它的功率谱密度。\n"
                 "\n"
                 "wait_for_trigger=true 会在示波器上**阻塞**，直到下一次触发发生、"
                 "或 timeout_s 到期 —— 触发是 level/digital 时，请在 RunHighResScope 之后这样用。"
-                "timeout_s 给短了你会拿到一个错误，而不是半条波形。"
+                "timeout_s 给短了你会拿到一个错误，而不是半条波形。",
+                   "Read the waveform captured by the high-resolution oscilloscope, and optionally its power spectral density.\n"
+                   "\n"
+                   "wait_for_trigger=true **blocks** on the scope until the next trigger occurs "
+                   "or timeout_s expires - with a level/digital trigger, use it this way after RunHighResScope. "
+                   "If timeout_s is too short you get an error, not half a waveform.")
             ),
             parameters=[
                 ParameterSpec(name="wait_for_trigger", type="bool",
-                              description="等下一次触发，而不是取当前缓冲区",
+                              description=tr("等下一次触发，而不是取当前缓冲区", "Wait for the next trigger instead of taking the current buffer"),
                               required=False, default=True),
                 ParameterSpec(name="timeout_s", type="float",
-                              description="等触发最多等多久",
+                              description=tr("等触发最多等多久", "How long to wait for the trigger at most"),
                               unit="s", required=False, default=10.0,
                               min_value=0.1, max_value=600.0),
                 ParameterSpec(name="include_psd", type="bool",
-                              description="同时读 PSD 部分",
+                              description=tr("同时读 PSD 部分", "Also read the PSD part"),
                               required=False, default=False),
                 ParameterSpec(name="osci_index", type="int",
-                              description="第几个 OsciHR 实例（0 起算）",
+                              description=tr("第几个 OsciHR 实例（0 起算）", "Which OsciHR instance (counted from 0)"),
                               required=False, default=0, min_value=0, max_value=7),
             ],
             estimated_duration_s=10.0,
@@ -277,7 +298,7 @@ class GetHighResScopeData(BaseSkill):
                 data["psd"] = _rv(rec)
 
         return SkillResult(skill_name=name, success=True, nanonis_calls=calls,
-                           data=data, summary=f"OsciHR#{idx} 数据已取回")
+                           data=data, summary=tr(f"OsciHR#{idx} 数据已取回", f"OsciHR#{idx} data retrieved"))
 
 
 class GetHighResScopeStatus(BaseSkill):
@@ -290,12 +311,13 @@ class GetHighResScopeStatus(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "回读高分辨率示波器当前的配置：通道、采样点数、过采样与触发模式。在信任一次由别人（或 Nanonis 界面）"
-                "设好的捕获之前先读它。"
+                tr("回读高分辨率示波器当前的配置：通道、采样点数、过采样与触发模式。在信任一次由别人（或 Nanonis 界面）"
+                "设好的捕获之前先读它。",
+                   "Read back the current configuration of the high-resolution oscilloscope: channel, number of samples, oversampling and trigger mode. Read it before trusting a capture set up by someone else (or by the Nanonis GUI).")
             ),
             parameters=[
                 ParameterSpec(name="osci_index", type="int",
-                              description="第几个 OsciHR 实例（0 起算）",
+                              description=tr("第几个 OsciHR 实例（0 起算）", "Which OsciHR instance (counted from 0)"),
                               required=False, default=0, min_value=0, max_value=7),
             ],
             estimated_duration_s=0.5,
@@ -334,39 +356,45 @@ class ConfigureDualScope(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "配置 2 通道示波器：两路信号、时基，以及触发。需要把两个信号放在**同一条**时基上互相对照时用它（一对 pump-probe、"
+                tr("配置 2 通道示波器：两路信号、时基，以及触发。需要把两个信号放在**同一条**时基上互相对照时用它（一对 pump-probe、"
                 "电流对偏压、锁相的 X/Y）。\n"
                 "\n"
                 "timebase_index 是从 Nanonis 固定的时基表里挑一项，它**不是**以秒为单位的时间。"
-                "配置示波器不驱动任何东西。"
+                "配置示波器不驱动任何东西。",
+                   "Configure the 2-channel oscilloscope: the two signals, the time base, and the trigger. Use it when you need two signals on the **same** time base to compare against each other (a pump-probe pair, "
+                   "current vs bias, the lock-in X/Y).\n"
+                   "\n"
+                   "timebase_index picks an entry from the fixed Nanonis time-base table; it is **not** a time in seconds. "
+                   "Configuring the scope drives nothing.")
             ),
             parameters=[
                 ParameterSpec(name="channel_a", type="int",
-                              description="通道 A 的信号序号",
+                              description=tr("通道 A 的信号序号", "Signal index of channel A"),
                               required=True, min_value=0, max_value=127),
                 ParameterSpec(name="channel_b", type="int",
-                              description="通道 B 的信号序号",
+                              description=tr("通道 B 的信号序号", "Signal index of channel B"),
                               required=True, min_value=0, max_value=127),
                 ParameterSpec(name="timebase_index", type="int",
-                              description="时基序号（0 起算，取自 Nanonis 的固定表 —— 不是秒）",
+                              description=tr("时基序号（0 起算，取自 Nanonis 的固定表 —— 不是秒）",
+                                             "Time-base index (counted from 0, from the fixed Nanonis table - not seconds)"),
                               required=False, default=0, min_value=0, max_value=15),
                 ParameterSpec(name="trigger_mode", type="int",
-                              description="0 = immediate，1 = level，2 = auto",
+                              description=tr("0 = immediate，1 = level，2 = auto", "0 = immediate, 1 = level, 2 = auto"),
                               required=False, default=0, min_value=0, max_value=2),
                 ParameterSpec(name="trigger_channel", type="int",
-                              description="触发源：0 = 通道 A，1 = 通道 B",
+                              description=tr("触发源：0 = 通道 A，1 = 通道 B", "Trigger source: 0 = channel A, 1 = channel B"),
                               required=False, default=0, min_value=0, max_value=1),
                 ParameterSpec(name="trigger_slope", type="int",
-                              description="0 = 下降沿，1 = 上升沿",
+                              description=tr("0 = 下降沿，1 = 上升沿", "0 = falling edge, 1 = rising edge"),
                               required=False, default=1, min_value=0, max_value=1),
                 ParameterSpec(name="trigger_level", type="float",
-                              description="触发阈值，用触发通道自己的单位",
+                              description=tr("触发阈值，用触发通道自己的单位", "Trigger threshold, in the trigger channel's own unit"),
                               required=False, default=0.0),
                 ParameterSpec(name="trigger_hysteresis", type="float",
-                              description="触发迟滞",
+                              description=tr("触发迟滞", "Trigger hysteresis"),
                               required=False, default=0.0, min_value=0.0),
                 ParameterSpec(name="trigger_position", type="float",
-                              description="触发点在记录中的位置（0..1）",
+                              description=tr("触发点在记录中的位置（0..1）", "Position of the trigger point in the record (0..1)"),
                               required=False, default=0.0, min_value=0.0, max_value=1.0),
             ],
             estimated_duration_s=1.0,
@@ -407,7 +435,8 @@ class ConfigureDualScope(BaseSkill):
             skill_name=name, success=True, nanonis_calls=calls,
             data={"channel_a": int(params["channel_a"]),
                   "channel_b": int(params["channel_b"])},
-            summary=f"Osci2T 已配置：A={params['channel_a']} B={params['channel_b']}",
+            summary=tr(f"Osci2T 已配置：A={params['channel_a']} B={params['channel_b']}",
+                       f"Osci2T configured: A={params['channel_a']} B={params['channel_b']}"),
         )
 
 
@@ -421,17 +450,22 @@ class GetDualScopeData(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "跑 2 通道示波器并把两路波形都读回来。先调 ConfigureDualScope 选定信号与时基。"
+                tr("跑 2 通道示波器并把两路波形都读回来。先调 ConfigureDualScope 选定信号与时基。"
                 "\n"
                 "\n"
-                "返回的通道 A 与通道 B 共用一条时间轴。"
+                "返回的通道 A 与通道 B 共用一条时间轴。",
+                   "Run the 2-channel oscilloscope and read both waveforms back. First call ConfigureDualScope to choose the signals and time base."
+                   "\n"
+                   "\n"
+                   "The returned channel A and channel B share one time axis.")
             ),
             parameters=[
                 ParameterSpec(name="run_first", type="bool",
-                              description="读之前先启动一次新的采集",
+                              description=tr("读之前先启动一次新的采集", "Start a fresh acquisition before reading"),
                               required=False, default=True),
                 ParameterSpec(name="data_to_get", type="int",
-                              description="0 = 当前缓冲区，1 = 下一次触发，2 = 等待下一次触发",
+                              description=tr("0 = 当前缓冲区，1 = 下一次触发，2 = 等待下一次触发",
+                                             "0 = current buffer, 1 = next trigger, 2 = wait for the next trigger"),
                               required=False, default=1, min_value=0, max_value=2),
             ],
             estimated_duration_s=5.0,
@@ -452,7 +486,7 @@ class GetDualScopeData(BaseSkill):
         if rec.error:
             return _fail(name, f"Osci2T_DataGet failed: {rec.error}", calls)
         return SkillResult(skill_name=name, success=True, nanonis_calls=calls,
-                           data={"trace": _rv(rec)}, summary="Osci2T 双通道数据已取回")
+                           data={"trace": _rv(rec)}, summary=tr("Osci2T 双通道数据已取回", "Osci2T dual-channel data retrieved"))
 
 
 class ConfigureSignalChart(BaseSkill):
@@ -465,15 +499,17 @@ class ConfigureSignalChart(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "打开 Signal Chart 并设定它显示哪两路信号。这是 Nanonis 机器上的一个**显示**模块 —— 它改变的是用户在那边看到的东西，"
-                "与测量本身无关。"
+                tr("打开 Signal Chart 并设定它显示哪两路信号。这是 Nanonis 机器上的一个**显示**模块 —— 它改变的是用户在那边看到的东西，"
+                "与测量本身无关。",
+                   "Open the Signal Chart and set which two signals it displays. This is a **display** module on the Nanonis machine - it changes what the user sees there, "
+                   "and has nothing to do with the measurement itself.")
             ),
             parameters=[
                 ParameterSpec(name="channel_a", type="int",
-                              description="图表 A 的信号序号",
+                              description=tr("图表 A 的信号序号", "Signal index of chart A"),
                               required=True, min_value=0, max_value=127),
                 ParameterSpec(name="channel_b", type="int",
-                              description="图表 B 的信号序号",
+                              description=tr("图表 B 的信号序号", "Signal index of chart B"),
                               required=True, min_value=0, max_value=127),
             ],
             estimated_duration_s=1.0,
@@ -496,4 +532,4 @@ class ConfigureSignalChart(BaseSkill):
         return SkillResult(skill_name=name, success=True, nanonis_calls=calls,
                            data={"channel_a": int(params["channel_a"]),
                                  "channel_b": int(params["channel_b"])},
-                           summary="Signal Chart 已设置")
+                           summary=tr("Signal Chart 已设置", "Signal Chart set"))

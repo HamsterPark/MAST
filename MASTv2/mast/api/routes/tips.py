@@ -16,6 +16,7 @@ schemas 内联（与 ``routes/scope.py`` 同款）：这些模型只有这一个
 from __future__ import annotations
 
 import logging
+from mast.i18n import tr as _tr_lang
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -113,8 +114,8 @@ class TipVocabularyResponse(BaseModel):
 
 # ── helpers ───────────────────────────────────────────────────────────
 
-_NO_TIP_HINT = ("当前没有已登记的针尖。仪器里物理上当然有针，"
-                "但没登记它是什么，修针方案只能用通用保守参数。")
+_NO_TIP_HINT = (_tr_lang("当前没有已登记的针尖。仪器里物理上当然有针，"
+                "但没登记它是什么，修针方案只能用通用保守参数。", "No tip is registered right now. There is of course physically a tip in the instrument, but without a record of what it is, tip conditioning can only use generic conservative parameters."))
 
 
 def _storage(request: Request):
@@ -167,12 +168,12 @@ def current_tip(request: Request) -> CurrentTipResponse:
     """当前装在仪器里的针尖。前端针尖卡片的真源。"""
     st = _storage(request)
     if st is None:
-        return CurrentTipResponse(degraded=True, hint="实验记录库不可用。")
+        return CurrentTipResponse(degraded=True, hint=_tr_lang("实验记录库不可用。", "Experiment record store unavailable."))
     try:
         row = st.get_current_tip()
     except Exception as exc:  # noqa: BLE001
         logger.warning("current tip read failed: %s", exc)
-        return CurrentTipResponse(degraded=True, hint="读取当前针尖失败。")
+        return CurrentTipResponse(degraded=True, hint=_tr_lang("读取当前针尖失败。", "Failed to read the current tip."))
     if not row:
         return CurrentTipResponse(registered=False, hint=_NO_TIP_HINT)
     return CurrentTipResponse(tip=_model(row), registered=True)
@@ -215,7 +216,7 @@ def register_tip(body: RegisterTipBody, request: Request) -> TipChangeResult:
     """登记装入一根针尖：退役上一根 + 记新行 + 清掉绑旧针的学习标定。"""
     st = _storage(request)
     if st is None:
-        return TipChangeResult(ok=False, error="实验记录库不可用。")
+        return TipChangeResult(ok=False, error=_tr_lang("实验记录库不可用。", "Experiment record store unavailable."))
     try:
         from mast.logging import tip_registry as tr
         res = tr.register_tip(
@@ -233,7 +234,7 @@ def register_tip(body: RegisterTipBody, request: Request) -> TipChangeResult:
         logger.warning("register tip failed: %s", exc)
         return TipChangeResult(ok=False, error=str(exc))
     if not res.get("ok"):
-        return TipChangeResult(ok=False, error=res.get("error", "登记失败"),
+        return TipChangeResult(ok=False, error=res.get("error", _tr_lang("登记失败", "Registration failed")),
                                warnings=res.get("warnings") or [])
     return TipChangeResult(
         ok=True, tip=_model(res.get("tip")),
@@ -246,10 +247,10 @@ def update_tip(tip_id: str, body: UpdateTipBody, request: Request) -> TipChangeR
     """补记/更正针尖属性。不清任何标定 —— 那只在登记新针时发生。"""
     st = _storage(request)
     if st is None:
-        return TipChangeResult(ok=False, error="实验记录库不可用。")
+        return TipChangeResult(ok=False, error=_tr_lang("实验记录库不可用。", "Experiment record store unavailable."))
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
     if not fields:
-        return TipChangeResult(ok=False, error="没有要改的字段。")
+        return TipChangeResult(ok=False, error=_tr_lang("没有要改的字段。", "No fields to change."))
     try:
         from mast.logging import tip_registry as tr
         res = tr.update_tip(st, tip_id, fields)
@@ -257,7 +258,7 @@ def update_tip(tip_id: str, body: UpdateTipBody, request: Request) -> TipChangeR
         logger.warning("update tip failed: %s", exc)
         return TipChangeResult(ok=False, error=str(exc))
     if not res.get("ok"):
-        return TipChangeResult(ok=False, error=res.get("error", "更新失败"),
+        return TipChangeResult(ok=False, error=res.get("error", _tr_lang("更新失败", "Update failed")),
                                warnings=res.get("warnings") or [])
     return TipChangeResult(ok=True, tip=_model(res.get("tip")),
                            warnings=res.get("warnings") or [])
@@ -268,7 +269,7 @@ def remove_current_tip(request: Request) -> TipChangeResult:
     """记录「针尖已取出、还没装新的」。通常不需要 —— 装下一根直接登记即可。"""
     st = _storage(request)
     if st is None:
-        return TipChangeResult(ok=False, error="实验记录库不可用。")
+        return TipChangeResult(ok=False, error=_tr_lang("实验记录库不可用。", "Experiment record store unavailable."))
     try:
         from mast.logging import tip_registry as tr
         res = tr.remove_current_tip(st)
@@ -276,7 +277,7 @@ def remove_current_tip(request: Request) -> TipChangeResult:
         logger.warning("remove tip failed: %s", exc)
         return TipChangeResult(ok=False, error=str(exc))
     if not res.get("ok"):
-        return TipChangeResult(ok=False, error=res.get("error", "退役失败"))
+        return TipChangeResult(ok=False, error=res.get("error", _tr_lang("退役失败", "Retire failed")))
     return TipChangeResult(
         ok=True, changed=bool(res.get("changed", True)),
         cleared_calibration=sorted(res.get("cleared") or {}))

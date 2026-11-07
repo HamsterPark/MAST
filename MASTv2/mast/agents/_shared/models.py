@@ -5,7 +5,7 @@ Three providers are wired:
   * `deepseek`   — DeepSeek V4 via DeepSeek's OpenAI-compatible endpoint.
   * `anthropic`  — Claude via the official `langchain_anthropic.ChatAnthropic`.
 
-Default for every agent is **Kimi K3** (per operator request 2026-07-18).
+Default for every agent is **Kimi K3**.
 Override per agent with the AGENT_MODEL dict below or per-call via
 `make_chat_model("orchestrator", model_id="deepseek-v4-pro")`.
 
@@ -76,7 +76,7 @@ SONNET_4 = "claude-sonnet-4"
 
 
 # ── Per-agent default model ─────────────────────────────────────────
-# All agents default to KIMI-K3 per operator request 2026-07-18 (was GLM-5.2):
+# All agents default to KIMI-K3 (was GLM-5.2 until 2026-07-18):
 # Kimi K3 is the strongest open-weight model available (2.8T, released 2026-07-16).
 # Switch to another model selectively at call sites or in the UI picker.
 # NOTE: this is only the CODE fallback; the running system is governed by the
@@ -412,7 +412,15 @@ def make_chat_model(
 
     Raises:
         RuntimeError if no fallback provider has an API key configured.
+        mast.legacy_gate.LegacyFeaturesDisabled (a RuntimeError) while legacy
+        features are off — the internal LLM is disabled, so no client is built.
+
+    Every model built here also carries the internal-LLM gate callback, checked
+    at CALL time: a model built while legacy features were on refuses to call the
+    provider as soon as they are switched off (mast/legacy_gate.py).
     """
+    from mast.legacy_gate import make_gate_callback, require_internal_llm
+    require_internal_llm(f"build model for {agent or model_id}")
     if model_id is None:
         if agent is None:
             raise ValueError("make_chat_model: pass either agent= or model_id=")
@@ -465,7 +473,9 @@ def make_chat_model(
     #
     # Prompt capture below deliberately keeps ``agent``: it answers "what did this
     # agent actually receive", which is a different question from "who spent this".
-    _bill_cb: list = []
+    # First callback: the internal-LLM gate. Not fail-safe like the two below —
+    # if it cannot be built, the model is not built either.
+    _bill_cb: list = [make_gate_callback(usage_source or agent or model_id)]
     try:
         from mast.billing.capture import LlmUsageCallback
         _bill_cb.append(LlmUsageCallback(

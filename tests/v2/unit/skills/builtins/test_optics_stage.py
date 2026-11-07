@@ -124,6 +124,16 @@ class FakeRegistry(InstrumentRegistry):
                               zero_offset_mm=0.0)
         return DelayLine(self._delay_ctrl.axis("delay"), cfg)
 
+    def delay_line_info(self):
+        """The config-only binding ListOpticalDevices reports (it opens nothing)."""
+        if not self._with_delay_line:
+            return None
+        cfg = DelayLineConfig(device_id="dl1", axis="delay", unit_per_mm=1000.0,
+                              zero_offset_mm=0.0)
+        lo = DelayLine(self._delay_ctrl.axis("delay"), cfg).delay_range_ps
+        return {"device_id": "dl1", "axis": "delay", "ps_per_mm": cfg.ps_per_mm,
+                "zero_offset_mm": 0.0, "delay_range_ps": list(lo)}
+
 
 @pytest.fixture
 def fake_registry():

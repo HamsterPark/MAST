@@ -1,0 +1,283 @@
+{
+  "name": "iris_open_diameter",
+  "description": "An iris with open_mm 4 on the axis of three beams: 0 and 2 mm above the axis pass (2 is exactly open/2), 3 mm above is blocked.",
+  "layout": {
+    "schema": 1,
+    "id": "iris",
+    "title": "Iris",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 50.0,
+        "y_mm": 62.5,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "las2",
+        "type": "laser",
+        "label": "L2",
+        "x_mm": 50.0,
+        "y_mm": 64.5,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "las3",
+        "type": "laser",
+        "label": "L3",
+        "x_mm": 50.0,
+        "y_mm": 65.5,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "iris1",
+        "type": "iris",
+        "label": "IR1",
+        "x_mm": 150.0,
+        "y_mm": 62.5,
+        "angle_deg": 0.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "open_mm": 4.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det1",
+        "type": "detector",
+        "label": "D1",
+        "x_mm": 300.0,
+        "y_mm": 62.5,
+        "angle_deg": 180.0,
+        "aperture_mm": 50.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 62.5,
+              "x1": 150.0,
+              "y1": 62.5
+            },
+            {
+              "x0": 150.0,
+              "y0": 62.5,
+              "x1": 300.0,
+              "y1": 62.5
+            }
+          ],
+          "events": [
+            {
+              "component": "iris1",
+              "action": "transmit",
+              "x": 150.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 100.0
+            },
+            {
+              "component": "det1",
+              "action": "stop",
+              "x": 300.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 250.0
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "las2",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 64.5,
+              "x1": 150.0,
+              "y1": 64.5
+            },
+            {
+              "x0": 150.0,
+              "y0": 64.5,
+              "x1": 300.0,
+              "y1": 64.5
+            }
+          ],
+          "events": [
+            {
+              "component": "iris1",
+              "action": "transmit",
+              "x": 150.0,
+              "y": 64.5,
+              "offset_mm": 2.0,
+              "incidence_deg": 0.0,
+              "path_mm": 100.0
+            },
+            {
+              "component": "det1",
+              "action": "stop",
+              "x": 300.0,
+              "y": 64.5,
+              "offset_mm": -2.0,
+              "incidence_deg": 0.0,
+              "path_mm": 250.0
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "las3",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 65.5,
+              "x1": 150.0,
+              "y1": 65.5
+            }
+          ],
+          "events": [
+            {
+              "component": "iris1",
+              "action": "blocked",
+              "x": 150.0,
+              "y": 65.5,
+              "offset_mm": 3.0,
+              "incidence_deg": 0.0,
+              "path_mm": 100.0
+            }
+          ],
+          "end": "blocked"
+        }
+      ]
+    }
+  ]
+}

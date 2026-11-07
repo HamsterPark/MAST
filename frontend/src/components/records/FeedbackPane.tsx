@@ -4,29 +4,22 @@ import { api } from "@/api/client";
 import type { components } from "@/api/schema";
 import { Badge, DegradedNote, EmptyNote, ErrorNote, Section, Spinner } from "@/components/ui";
 import { Button, TextField, useToast } from "@/components/controls";
+import { tr } from "../../lib/i18n";
 import { fmtTime } from "./shared";
 
 type FeedbackEntry = components["schemas"]["FeedbackEntry"];
 
-// 用户反馈 — the list of everything filed from the feedback float.
+// Feedback list: everything filed from the feedback float.
 //
-// ── why this page exists at all ────────────────────────────────────────────
-// `GET /api/feedback` has existed for a while and NOTHING consumed it: the
-// float is write-only, and the per-experiment drill-down filters by
-// experiment_id, so the float's own rows (which have none) appeared nowhere.
-// The operator could file feedback and never see it again.
+// `GET /api/feedback` is consumed here so filed feedback does not disappear: the
+// float itself is write-only, and the per-experiment drill-down filters by
+// experiment_id, so the float's own rows (which have none) would appear nowhere.
 //
-// That is the mechanism behind「有些已经处理过了」: with no visible list, no
-// timestamps and no processed marker, every batch of feedback arrived as an
-// undated pile mixed old with new, and working out which entries were already
-// closed meant an archaeology pass over git log, KNOWN_ISSUES and the
-// machine-test checklists. One batch got that wrong in BOTH directions —
-// an item re-reported after it had been fixed, and an item assumed fixed that
-// was only half-fixed.
-//
-// So this list shows three things the pile did not: the row id (so a reference
-// like「#12」 stops being ambiguous between two numbering spaces), the filing
-// time, and whether it has been processed and in which version.
+// Without a visible list, timestamps and a processed marker, feedback arrives as
+// an undated pile and working out which entries are already closed means digging
+// through the git log and issue notes. The list therefore shows the row id (so a
+// reference like "#12" is unambiguous), the filing time, and whether the entry
+// has been processed and in which version.
 
 const RESOLVED_ROW = "opacity-55";
 
@@ -47,9 +40,8 @@ export function FeedbackPane() {
   const qc = useQueryClient();
   const { toast, node } = useToast();
   const q = useFeedback();
-  // Pre-filled with the version being prepared, because typing it per row is
-  // what would make people skip it — and a resolved row with no version is
-  // barely better than no marker at all next time someone asks "已经修过了吗".
+  // Pre-filled with the version being prepared: typing it per row would get
+  // skipped, and a resolved row with no version is barely better than no marker.
   const [version, setVersion] = useState("v6.2.1");
   const [showResolved, setShowResolved] = useState(true);
 
@@ -65,10 +57,10 @@ export function FeedbackPane() {
     onSuccess: (d, v) => {
       // `ok=false` means the row was not there — say so rather than showing a
       // success toast over a write that did not happen.
-      if (!d?.ok) toast(`第 ${v.id} 条没有更新（这一行可能已不存在）`);
+      if (!d?.ok) toast(tr(`第 ${v.id} 条没有更新（这一行可能已不存在）`, `Entry ${v.id} was not updated (the row may no longer exist)`));
       void qc.invalidateQueries({ queryKey: ["feedback", "list"] });
     },
-    onError: () => toast("标记失败"),
+    onError: () => toast(tr("标记失败", "Failed to mark")),
   });
 
   const items: FeedbackEntry[] = q.data?.items ?? [];
@@ -78,15 +70,19 @@ export function FeedbackPane() {
 
   return (
     <Section
-      title={`用户反馈${items.length ? ` (未处理 ${nOpen} / 共 ${items.length})` : ""}`}
+      title={`${tr("用户反馈", "Feedback")}${
+        items.length
+          ? tr(` (未处理 ${nOpen} / 共 ${items.length})`, ` (${nOpen} open / ${items.length} total)`)
+          : ""
+      }`}
       actions={
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-mast-muted">标记版本</span>
+          <span className="text-xs text-mast-muted">{tr("标记版本", "Mark as version")}</span>
           <div className="w-28">
             <TextField value={version} onChange={setVersion} placeholder="v6.2.1" mono />
           </div>
           <Button onClick={() => setShowResolved((v) => !v)}>
-            {showResolved ? "只看未处理" : "显示全部"}
+            {showResolved ? tr("只看未处理", "Open only") : tr("显示全部", "Show all")}
           </Button>
         </div>
       }
@@ -94,13 +90,13 @@ export function FeedbackPane() {
       {node}
       {q.isPending && <Spinner />}
       {q.isError && <ErrorNote error={q.error} />}
-      {q.data?.degraded && <DegradedNote what="用户反馈" />}
+      {q.data?.degraded && <DegradedNote what={tr("用户反馈", "feedback")} />}
       {q.data && !q.data.degraded && rows.length === 0 && (
         <EmptyNote
           label={
             items.length
-              ? "没有未处理的反馈——全部已标记。"
-              : "还没有反馈。右下角的反馈浮窗提交的内容会出现在这里。"
+              ? tr("没有未处理的反馈——全部已标记。", "No open feedback: everything is marked.")
+              : tr("还没有反馈。右下角的反馈浮窗提交的内容会出现在这里。", "No feedback yet. Entries submitted from the feedback float at the bottom right appear here.")
           }
         />
       )}
@@ -111,10 +107,10 @@ export function FeedbackPane() {
             <thead>
               <tr className="text-left text-xs text-mast-muted">
                 <th className="py-1 pr-3 font-normal">#</th>
-                <th className="py-1 pr-3 font-normal">时间</th>
-                <th className="py-1 pr-3 font-normal">内容</th>
-                <th className="py-1 pr-3 font-normal">来自</th>
-                <th className="py-1 font-normal">状态</th>
+                <th className="py-1 pr-3 font-normal">{tr("时间", "Time")}</th>
+                <th className="py-1 pr-3 font-normal">{tr("内容", "Content")}</th>
+                <th className="py-1 pr-3 font-normal">{tr("来自", "From")}</th>
+                <th className="py-1 font-normal">{tr("状态", "Status")}</th>
               </tr>
             </thead>
             <tbody>
@@ -126,9 +122,7 @@ export function FeedbackPane() {
                     (f.resolved_at ? RESOLVED_ROW : "")
                   }
                 >
-                  {/* The id, shown. An operator saying「#12」 was ambiguous
-                      between two numbering spaces that both reached #12 and
-                      meant different things; a row id is not. */}
+                  {/* The row id, shown, so references to an entry are unambiguous. */}
                   <td className="py-1.5 pr-3 font-mono text-xs text-mast-muted tabular-nums">
                     {f.id}
                   </td>
@@ -136,9 +130,9 @@ export function FeedbackPane() {
                     {f.timestamp ? fmtTime(f.timestamp) : "—"}
                   </td>
                   <td className="py-1.5 pr-3 text-mast-text">
-                    {f.comment || <span className="text-mast-muted">（只有评分）</span>}
+                    {f.comment || <span className="text-mast-muted">{tr("（只有评分）", "(rating only)")}</span>}
                     {f.rating && (
-                      <span className="ml-2 text-xs text-mast-muted">评分 {f.rating}</span>
+                      <span className="ml-2 text-xs text-mast-muted">{tr("评分", "Rating")} {f.rating}</span>
                     )}
                   </td>
                   <td className="py-1.5 pr-3 text-xs text-mast-muted">
@@ -148,15 +142,18 @@ export function FeedbackPane() {
                     {f.resolved_at ? (
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge tone="AUTO">
-                          已在 {f.resolved_version || "某版本"} 处理
+                          {tr(
+                            `已在 ${f.resolved_version || "某版本"} 处理`,
+                            `Handled in ${f.resolved_version || "an earlier version"}`,
+                          )}
                         </Badge>
                         <button
                           type="button"
                           onClick={() => mark.mutate({ id: f.id, resolved: false })}
                           className="text-xs text-mast-muted hover:text-mast-text"
-                          title="这个症状又回来了 —— 撤销标记，重新当作未处理"
+                          title={tr("这个症状又回来了 —— 撤销标记，重新当作未处理", "The symptom is back: remove the mark and treat it as open again")}
                         >
-                          又回来了
+                          {tr("又回来了", "Reopen")}
                         </button>
                       </div>
                     ) : (
@@ -165,7 +162,7 @@ export function FeedbackPane() {
                         onClick={() => mark.mutate({ id: f.id, resolved: true })}
                         className="rounded-mast-ctl border border-mast-border px-2 py-0.5 text-xs text-mast-muted hover:text-mast-text"
                       >
-                        标为已处理
+                        {tr("标为已处理", "Mark handled")}
                       </button>
                     )}
                   </td>

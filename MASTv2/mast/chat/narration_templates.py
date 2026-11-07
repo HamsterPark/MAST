@@ -337,9 +337,8 @@ class Rendered:
 #: 团簇判读三态的**主句**。提成常量不是为了复用 —— 只有一个调用方 ——
 #: 是为了让纪律测试断言「第三态没被写成第二态」时,**不必写死任何形容词**。
 #:
-#: 第一版措辞「圆了 / 判不了」改写之后,
-#: 四条钉着那几个字的测试立刻变红。它们钉的其实是三态纪律,不是形容词;
-#: 红得没错,却红错了理由。文案还会再改,纪律不会。
+#: Tests pin the three-state discipline, not the adjectives, so the wording
+#: can change without touching them.
 CLUSTER_ROUND_HEAD = "这一针的团簇**形状规整**"
 CLUSTER_NOT_ROUND_HEAD = "这一针的团簇**形状还不够规整**"
 #: ⚠️ 第三态**不是**「不合格」,是「这一张图给不出读数」。两者天差地别:
@@ -357,15 +356,15 @@ def _cluster_sentence(d: dict) -> str:
     一个系统其实没有下过的判决 —— 这个仓库最常复发的缺陷族,而旁白正是他
     唯一会读的那一层。
 
-    ## 措辞
+    ## 措辞(2026-08-16 改定)
 
-    第一版写「这一针的团簇**圆**了」/「**判不了**」,这类措辞不够合适。
-    ——「圆了」像在夸自己,「判不了」像在推卸。换成读起来像**一份读数**:
+    不写「这一针的团簇**圆**了」/「**判不了**」:「圆了」像在自夸,「判不了」像在推卸。
+    措辞读起来应像**一份读数**:
 
         形状规整 / 形状还不够规整 / 团簇太小,这一张给不出可靠读数
 
-    含义一个字没变(尤其第三种仍然**不是**「不合格」),变的是它听起来像
-    一台仪器在报数,而不是像一个人在下结论。
+    含义一个字没变(尤其第三种仍然**不是**「不合格」),变的是它读起来像
+    仪器在报数,而不是在下结论。
     """
     res = d.get("result") if isinstance(d.get("result"), dict) else {}
 
@@ -437,14 +436,11 @@ FIND_SPOT_ZONE_PATH = "result.effective_half_range_m"
 def _find_spot_sentence(d: dict) -> str:
     """地图给了什么 —— **一句拿来 debug 的话**。
 
-    ## 出处
+    ## Why
 
-    「问地图要干净区域这种事情也应该做进旁白,方便 debug。
-    你再想想,旁白要大幅地细致一点。」
-
-    起因是他在屏幕前看着 forge 连打了 76 发脉冲,以为针尖一直没挪窝。查下来
-    **挪了**(每 4 发一次,每轮 5 个落点),但**旁白里一个字都没有** ——
-    移动这件事只存在于 ``completed_steps`` 里,而那个要事后翻 sidecar 才看得到。
+    When the tip relocates during a forge run, the narration must say so: the
+    move is otherwise recorded only in ``completed_steps``, which can be read
+    only from the sidecar afterwards.
 
     ## 三态在这里尤其要紧
 
@@ -542,11 +538,32 @@ _TILT_GOOD_OUTCOMES = ("applied", "no_action_needed")
 
 
 def _tilt_sentence(d: dict) -> str:
-    """根据 AutoTilt 的实际返回说明是否执行、调整量与效果。
-    
-    读取 outcome、before.z_span_m 和 after.z_span_m，与 _tip_phases._tilt_readout
-    使用同一组字段。skipped、z_span_before_m、z_span_after_m 或 action 不是该回包
-    契约；字段缺失时应报告未知，不猜测成功或失败。"""
+    """调平做了没有、动了多少、效果如何。
+
+    Without this sentence the narration gives no way to tell whether the
+    levelling step ran.
+
+    ═══════════════════════════════════════════════════════════════════════
+    读错键名会让这一句**每次调用都说不出话**
+    ═══════════════════════════════════════════════════════════════════════
+
+    读错键名时旁白恒为 «调平这一步跑完了,但是否执行没记下来。»
+
+    原因不是「仪器没给数」,是读下面这三个键 —— 它们在 ``AutoTilt`` 的回包里
+    **一个都不存在**::
+
+        result.skipped            # 没有。真源是 data["outcome"]
+        result.z_span_before_m    # 没有。真源是 data["before"]["z_span_m"]
+        result.z_span_after_m     # 没有。真源是 data["after"]["z_span_m"]
+        result.action             # 没有。
+
+    ``_tip_phases._tilt_readout`` 读的是同一批键
+    (its docstring lists the same four names); both sides must change together,
+    or the narration keeps printing "是否执行没记下来".
+
+    所以这里读 ``outcome`` / ``before.z_span_m`` / ``after.z_span_m`` ——
+    与 ``_tilt_readout`` 读的是**同一批键**,那边改了这边会立刻走「读不到」。
+    """
     outcome = text_of(d, "result.outcome")
     if not outcome:
         # 「读不到」不是一个结局。**绝不猜**,也绝不说成「没做成」。
@@ -620,8 +637,8 @@ def _terrace_window_shrink(d: dict) -> str:
 def _find_terrace_result(d: dict) -> str:
     """找台面的**过程与全部读数** —— 算了就说。
 
-    「有些分析的结果值虽然程序不会参考,但是既然分析了就都说出来。」
-    一个算出来却不报的数,下一次出问题时没人知道它当时是多少。
+    Values that are computed are reported even when the program does not act on
+    them. 一个算出来却不报的数,下一次出问题时没人知道它当时是多少。
     """
     n = num(d, "found")
     proc = []
@@ -678,7 +695,7 @@ def _level_result(d: dict) -> str:
     * ``skipped``          —— 没标定 / 测不到:**没做**,不是没做成
     * ``failed``           —— 做了没做成(发散 / 硬件拒绝 / 迭代用尽)
 
-    2026-08-18 之前这里只有三支,而且判「跳过」读的是一个**不存在的字段**
+    曾经这里只有三支,而且判「跳过」读的是一个**不存在的字段**
     (``skipped``,AutoTilt 从来没有回过这个键)—— 于是 ``skipped`` 恒为假,
     每一次「没做」都被念成「没做成」。一个前置条件缺失被报成了一次失败:
     前者要去跑 ``TiltCalibrate``,后者要去查标定为什么失效。
@@ -742,8 +759,7 @@ _FB_SEG_ZH = {
 def _poke_indent(d: dict) -> str:
     """扎完这一针，**Z 曲线说了什么** —— 这条此前一个字都没有。
 
-    「修针尖过程中，扎针的检测应该写进旁白，包括读取到的
-    z 曲线也应该画出来。」
+    The poke detection (and the Z curve it read) is part of the narration.
 
     ═══════════════════════════════════════════════════════════════════════
     为什么这一句必须带上「读的是哪一段」
@@ -817,7 +833,7 @@ _CONC_DIGITS = 1
 def _atomic_result(d: dict) -> str:
     """扫到原子分辨这一轮的**结论与全部读数**（2026-08-23）。
 
-    要求：原子分辨这个 skill 应当有自己的旁白体系，展示最终的原子分辨
+    该 skill 有自己的旁白体系，展示最终的原子分辨
     图与分析结果，并尽量附上分析图像。图由发出方
     （``composite/achieve_atomic.py::_narrate_atomic_result``）画好挂在
     ``image`` 上，这里负责那句话。
@@ -834,7 +850,8 @@ def _atomic_result(d: dict) -> str:
     * **反扫**：只在一个扫描方向上出现的周期是**针尖产物**，不是表面的。
       两个方向都有，这条才排得掉。
     * **帧内前后两半**：证书描述的是**算它的那一段**，不是它结束的那一刻。
-      若前后半帧差异明显，整帧结果可能只描述已消失的状态，必须并排报告。
+      例如整帧指标「过」，而前后两半相差几个数量级 —— 针尖在半帧处
+      变了，那张「合格」的证书描述的是一段已经不存在的状态。
 
     ``rungs_used`` 是「爬到第几档才拿到」：它回答的不是「成没成」，是**代价花在
     哪**，而那是用户下一次决定从哪一档起步的依据。
@@ -866,9 +883,9 @@ def _atomic_frame_readings(d: dict) -> list:
     两个调用点共用:拿到了那一条(:func:`_atomic_resolution_achieved`)和
     **没拿到**那一条(:func:`_atomic_run_result`)。
 
-    要求详细介绍其分析结果,包括分析图的旁白,
-    **无论成或不成**——而在此之前只有拿到了那一支摆得出这几个数,
-    没拿到那一支只说一句「没有拿到」。**失败那一次恰恰最需要解释**:
+    The analysis is narrated whether or not the run succeeded; previously only
+    the success branch reported these numbers and the failure branch said just
+    「没有拿到」。**失败那一次恰恰最需要解释**:
     反扫有没有、周期是多少、帧内两半差多少,正是「为什么不算」的证据,
     而它们本来就在渲染三联图时算过了,只是从没往这条路上交。
 
@@ -972,8 +989,9 @@ _ATOMIC_FOUND = "found"
 #: ``rungs_used`` 是一份**记账清单**,里面除了档,还有分诊(``surface`` /
 #: ``triage``)和粗动换区(``relocate``,而且它一次动作记两条:moving + moved)。
 #: 把它们统统念成「档」,屏幕上就会出现「走过 12 档」—— 而这部阶梯**只有四档**。
-#: 用户看到那句话的第一个问题必然是「哪来的 12 档」,而这条旁白本来是要回答
-#: 「代价花在哪」的。所以两个数分开报:开过几档,一共走过几步。
+#: That sentence would raise the obvious question of where 12 rungs came from,
+#: while this narration is meant to answer where the cost went. So two numbers
+#: are reported separately: rungs opened, and total steps taken.
 _ATOMIC_LADDER_RUNGS: frozenset = frozenset({"r1", "r2", "r3a", "r3b", "r4"})
 
 
@@ -1032,14 +1050,13 @@ def _atomic_site_no(rung: str) -> "float | None":
 def _atomic_begin(d: dict) -> str:
     """开跑之前**先把现状念出来** —— 反馈、setpoint、Z,以及这一跑的权限。
 
-    「每一步判断都不出旁白……应该有一个详细介绍其分析结果」。
-    在此之前 ``AchieveAtomicResolution`` 只在**最后成功**时说一句话,于是屏幕上
+    Previously ``AchieveAtomicResolution`` spoke only on **final success**,于是屏幕上
     看到的是一连串通用的「我们开始扫一张图」,而它**先量了什么、据此决定从哪一档
     起步**一个字都没有。
 
     ⚠️ ``controller_on`` 是**三态**:True / False / **读不到**。
-    ``if not controller_on`` 会把「读不到」念成「没开」—— 而本仓这一类
-    (「读不到」被折叠成一个具体的值)一天里出现过五次。所以这里逐个比 ``is``。
+    ``if not controller_on`` 会把「读不到」念成「没开」—— 而这是「读不到」
+    被折叠成一个具体值的典型错误。所以这里逐个比 ``is``。
     """
     on = dig(d, "controller_on")
     if on is True:
@@ -1165,9 +1182,9 @@ def _atomic_rung(d: dict) -> str:
 
 
 def _atomic_run_result(d: dict) -> str:
-    """整跑的结局 —— **没拿到的时候也要说**。
+    """整跑的结局 —— **没拿到的时候也要说**(2026-08-24)。
 
-    「无论成或不成」都要有一段带分析图的旁白。在此之前只有**验证通过**那一支
+    Success or not, there is a narration with the analysis figure. 在此之前只有**验证通过**那一支
     发得出声音,于是最需要解释的那一次跑(没拿到)反而是全程最沉默的 ——
     用户屏幕上只剩下一串通用的扫描进度。
 
@@ -1221,8 +1238,7 @@ def _step_failed(d: dict) -> str:
 
     失败的步骤不进 ``sub_results``(``graph_executor`` 只在成功分支收),所以
     ``_narrate_step_result`` 不发、``_data()`` 也读不到 —— **技能说得最清楚的
-    那句话,正好在出事的时候被丢掉了**。「调平时的操作和
-    效果宜记入旁白。」出事那一次的读数比顺利那一次更该留下来。
+    那句话,正好在出事的时候被丢掉了**。出事那一次的读数比顺利那一次更该留下来。
 
     ``detail`` 已经被短码包含时不重复念(有些技能把同一句同时放两处)。
     """
@@ -1260,8 +1276,7 @@ _POKE_FLOOR = "floor"            # 已在最浅档,不再变浅
 _POKE_ROUND = "round"            # 单峰且圆,连续计数 +1
 _POKE_STAGE = "stage_switch"     # 扫图确认表面变了 ⇒ 转临界深度搜索
 
-#: 修针外环的结局代码 → **一行**中文。「旁白应该尽可能多
-#: 涵盖内容。」在此之前 ``forge_au_tip.py`` 整个文件**一句旁白都没有** ——
+#: 修针外环的结局代码 → **一行**中文。在此之前 ``forge_au_tip.py`` 整个文件**一句旁白都没有** ——
 #: 站点为什么结束、为什么换区、验收判了什么,全在沉默里,只有跑完那份报告里才有。
 #:
 #: ⚠️ **这不是 ``forge_au_tip._OUTCOME_CN`` 的副本,是它的另一种排版。**
@@ -1337,10 +1352,16 @@ def _run_result(d: dict) -> str:
 
 
 def _accept_result(d: dict) -> str:
-    """报告台阶边缘锐度的三态结果。
-    
-    缺少阈值或无法测量时只报读数和原因，不把未知当成不合格。
-    只有明确测得 blunt 才构成拒绝；旁白需展示该判定及其依据。"""
+    """台阶边缘锐度验收 —— **三态,而且「量不出来」不是「不合格」**。
+
+    若它是必过的闸,则 ``AssessTipSharpness`` 在没给阈值时
+    恒返回「判不了」⇒ ``ready`` 结构上不可达。
+    现在它**只报不判**:数照量、照进报告,只有明确量到 ``blunt`` 才拦。
+    那是一个真的否定测量,不是一个缺失的答案。
+
+    这三态必须进旁白:否则用户看到的是流程扫完
+    一张图然后结束,不知道验收到底说了什么。
+    """
     kind = text_of(d, "kind")
     res = num(d, "edge_resolution_nm")
     limit = num(d, "sharp_edge_nm")
@@ -1389,8 +1410,8 @@ def _poke_decision(d: dict) -> str:
     """扎完一针之后**它决定干什么** —— 一条流程里最能说明「它在想什么」的一句。
 
     这些决策此前只存在于 ``entry["note"]`` 里(进报文、进 sidecar),
-    而屏幕上看到的是一针接一针,中间没有任何理由。「在原地反复打脉冲却不说明为什么」
-    正是这个形状:动作换了,旁白一个字都没有。
+    而屏幕上看到的是一针接一针,中间没有任何理由,
+    例如在原地反复打脉冲时动作换了而旁白不变。
 
     ⚠️ 句子由这里拼,**不接收调用方写好的那句话**。`entry["note"]` 是报告用的,
     它和这里读的是同一批局部变量,所以两者的数字不可能对不上;而让调用方把
@@ -1460,10 +1481,10 @@ def _relocate_result(d: dict) -> str:
 def _fwd_bwd_result(d: dict) -> str:
     """正反扫描线重不重合 —— 修针环里的**第一道**判据。**三态**。
 
-    判据:正反扫描重合是基本判据,阈值取得较宽;团簇
-    圆度排在其后。它是 B 相唯一的判决,而 2026-08-18 之前 **B 相一句旁白都没有** ——
+    Criterion: forward/backward scan coincidence is the primary check with a
+    wide threshold; cluster roundness comes after it.它是 B 相唯一的判决,没有旁白就 **B 相一句话都看不到** ——
     屏幕上只看得见「扫了一张图」,紧接着针尖要么被放行、要么挨一批脉冲,
-    中间那个理由从来不出现——旁白没有展示扫描线重合的分析。
+    中间那个理由从来不出现。
 
     为什么必须是三态:``inconclusive``(读不到线数据、或者这块地方太平)
     **不是**「针尖不好」。当成不好会拿脉冲去打一根可能好好的针 ——
@@ -1500,8 +1521,8 @@ def _fwd_bwd_result(d: dict) -> str:
         return "正反扫描线**重合**" + tail + ",针尖过了这道基本判据。"
     # 重合度过了、却被多针尖否决 —— **这一句非说不可**。
     #
-    # 不说的话看到的是「重合度 0.87 通过」紧接着一批脉冲,而那正是
-    # 「在原地反复打脉冲却不说明为什么」的形状:动作换了、旁白一个字都没有。
+    # 不说的话看到的是「重合度 0.87 通过」紧接着一批脉冲,
+    # 动作换了、旁白却没有任何解释。
     # 两条判据看的是两件事:一根劈成两个顶点的针尖**照样来回重复**,
     # 两趟画出的是同一对重影,所以重合度量不到它。
     if dig(d, "fwd_bwd_ok") is True and dig(d, "split_tip") is True:
@@ -1523,8 +1544,9 @@ _V_SINGLE = "single"
 def _step_split_sentence(d: dict) -> str:
     """大图上台阶有没有被劈开 —— **三态**。
 
-    判据:先调平再看所有点的高度统计分组,看台阶高度,
-    劈裂就是多针尖,多针尖就直接 pulse。
+    Criterion: level first, then group the height statistics of all points and
+    look at the step height; a split step means a multi-tip, which goes
+    straight to pulsing.
 
     尺子是 Au(111) 单原子台阶 —— 一个**有物理零点**的量。单针尖成像时相邻台面
     的高度差是它的整数倍;多针尖把每条台阶重复成两道,直方图里冒出半整数能级。
@@ -1608,7 +1630,8 @@ TEMPLATES: dict[str, Template] = {
     ),
     "scan_stopped_early": Template(
         kind="scan_stopped_early",
-        # **必须和 scan_done 是两句话**。「停止」不等于「达标」—— # 与「假成功」四根因之一。判据不是时间到了，是扫描缓冲里的 NaN 前沿
+        # **必须和 scan_done 是两句话**。「停止」不等于「达标」(避免把提前停止
+        # 记成完成)。判据不是时间到了，是扫描缓冲里的 NaN 前沿
         # （``_confirm_complete``）。
         requires=("frac",),
         records=("scan_id",),
@@ -1961,7 +1984,7 @@ TEMPLATES: dict[str, Template] = {
         # 判不了 = info(既不是好消息也不是坏消息,是没消息)。
         tone_of=lambda d: ("info" if dig(d, "inconclusive") is True
                            else "good" if dig(d, "passed") is True else "warn")),
-    # ── 大图上的多针尖:台阶劈裂 ──
+    # ── 大图上的多针尖:台阶劈裂(2026-08-17) ──
     "step_split": Template(
         kind="step_split",
         requires=(),
@@ -2011,7 +2034,7 @@ TEMPLATES: dict[str, Template] = {
 }
 
 
-#: 子步骤**开始之前**发哪一条。放在开始之前不是排版偏好：要求的措辞是
+#: 子步骤**开始之前**发哪一条。放在开始之前不是排版偏好：措辞是
 #: 未来时的「**即将**打 10V 500ms 脉冲」——它的价值在于用户在
 #: 脉冲落下**之前**就知道要发生什么。跑完再说一遍「刚才打了」是另一件事。
 BEGIN_KIND_FOR_SKILL: dict[str, str] = {
@@ -2023,12 +2046,12 @@ BEGIN_KIND_FOR_SKILL: dict[str, str] = {
     "BiasPulseWithReadback": "bias_pulse",
     "TipShapeWithReadback": "poke",
     "RelocateCoarseXY": "relocate",
-    # 2026-08-17 加的两条。要求:向地图申请干净区域这件事也要进旁白,
-    # 便于 debug。在此之前「换地方」只存在于 completed_steps 里,
-    # 而屏幕前看到的是连着 4 发脉冲 —— 于是以为针尖压根没挪。
+    # Added 2026-08-17: requesting a clean spot from the map is narrated for
+    # debugging. Previously a relocation was recorded only in completed_steps,
+    # while the screen showed 4 consecutive pulses with no sign the tip moved.
     "FindCleanSpot": "find_spot",
     "MoveToXY": "move_xy",
-    # 已知问题:调平这一步是否执行过无法判断,旁白没有说明。
+    # 2026-08-17: narrate whether the levelling step ran.
     "AutoTilt": "auto_tilt",
     "FindFlatRegion": "flat_region",
 }

@@ -1,8 +1,9 @@
 import { useRef } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import { tr } from "@/lib/i18n";
 
-// Batch text→speech for the chat 朗读 (🔊) action on a finished reply.
+// Batch text-to-speech for the chat read-aloud (🔊) action on a finished reply.
 //
 // NOTE: the live voice INPUT path (record → transcribe) was replaced by the
 // full-duplex VoiceDock (/ws/voice streaming ASR/TTS). Only this one-shot "read
@@ -29,7 +30,7 @@ export function useVoiceOutput(onError?: (msg: string) => void) {
         a.src = src;
         void a.play().catch(() => {});
       } else {
-        onError?.(data?.error || "语音合成失败");
+        onError?.(data?.error || tr("语音合成失败", "Speech synthesis failed"));
       }
     },
     onError: (e) => onError?.(String((e as Error)?.message ?? e)),

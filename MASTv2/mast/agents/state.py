@@ -405,7 +405,7 @@ class MASTState(TypedDict):
     # The cost of de-duping ``error_log`` is that two byte-identical failures read
     # as one. That is acceptable because it is NOT the authoritative record: every
     # skill call is written to the records DB unconditionally by ``_emit_record``
-    # (both success and failure branches, since the 2026-07-27 forensics), and that
+    # (both success and failure branches, since 2026-07-27), and that
     # is where a count belongs. This channel has zero readers in the tree.
     executed_skills: Annotated[list[str], dedupe_append]
     #: 本轮已取出的工具包（按需加载）。父图也要有它，否则子图不交接直接结束时
@@ -424,10 +424,9 @@ class MASTState(TypedDict):
     # --- loop / budget guards ---
     # ADDING reducer (sum_int_dicts): every hop writes a +1 DELTA for the agent
     # being entered, so the supervisor's per-agent guard sees the real running
-    # total. (Was merge_dicts, which overwrote and pinned every agent at 1 —
-    # 审查.)
+    # total. (Was merge_dicts, which overwrote and pinned every agent at 1.)
     visit_count: Annotated[dict[str, int], sum_int_dicts]
-    # Hard gate (): the supervisor ENDs the run when this is <= 0.
+    # Hard gate: the supervisor ENDs the run when this is <= 0.
     # The graph still does no billing of its own — the value is SEEDED by the host
     # at run start and REFRESHED every hop from a ``budget_probe`` callable
     # (mast.billing.run_meter). Until 2026-07-30 it was seeded by nobody at all,
@@ -459,7 +458,7 @@ class MASTState(TypedDict):
     # identity is not zero — not last_wins.
     budget_remaining_usd: NotRequired[float]       # hard gate at 0; see above
 
-    # --- handoff routing hints ---
+    # --- handoff routing hints (pluralised 2026-07-11) ---
     # Every agent handoff routes through the 'supervisor' node so the loop /
     # budget guard runs on EVERY inter-agent hop (direct sibling→sibling hops
     # used to bypass it entirely, letting an A→B→A ping-pong run unbounded).
@@ -525,7 +524,7 @@ class MASTState(TypedDict):
     # 熔断。两个老病同根：**太早停**（模型说「完了」——fail_silent 那 621 条）
     # 与**停不下来**（每次唤醒是新 run，per-run 熔断全归零）。
     #
-    #   {"text": str,                     # 判据（_goal_text 优先读它）
+    #   {"text": str,                     # 运行时给出的判据（_goal_text 优先读它）
     #    "done_when": <闭集判据树的 JSON>,  # mast.goals.normalise_done_when 校验过
     #    "baseline": {field: [count, mtime]},   # 目标设定那一刻的产物版本
     #    "operator_confirmed": {"answer": "yes"|"no", "at": float} | None,

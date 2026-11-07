@@ -298,6 +298,18 @@ class CognitionContext:
         cross-experiment leakage); falls back to substring search otherwise.
         Returns full MemoryStore rows.
         """
+        return [row for row, _score, _how in self.recall_scored(query, experiment_id=experiment_id, k=k)]
+
+    def recall_scored(self, query: str, *, experiment_id: str | None = None,
+                      k: int = 5) -> list[tuple[dict, float | None, str]]:
+        """:meth:`recall` with how each row was found: ``[(row, score, how)]``.
+
+        ``how`` is ``"semantic"`` (vector index; ``score`` = cosine similarity of the query
+        and the memory, -1..1, comparable only within one embedder) or ``"substring"``
+        (``score`` None: the words occur in the memory). A knn returns its k nearest rows
+        however far they are — with a handful of notes in scope, an unrelated one comes back
+        next to the right one, and without the score nobody reading the list can tell. Same rows, same order as :meth:`recall`.
+        """
         ns = _namespace_for(experiment_id)
         namespaces = {ns, "global"}
         vec = self._ensure_vec()
@@ -315,7 +327,7 @@ class CognitionContext:
                     seen.add(eid)
                     row = self.store.read(hns, hpath)
                     if row:
-                        out.append(row)
+                        out.append((row, _similarity(vec, h.get("distance")), "semantic"))
                     if len(out) >= k:
                         break
                 if out:
@@ -327,7 +339,26 @@ class CognitionContext:
         for n in (ns, "global"):
             for r in self.store.search(query, namespace=n, limit=k):
                 uniq[(r["namespace"], r["path"])] = r
-        return list(uniq.values())[:k]
+        return [(r, None, "substring") for r in list(uniq.values())[:k]]
+
+
+def _similarity(vec, distance) -> float | None:
+    """Cosine similarity from a knn ``distance``. Every embedding tier L2-normalises its output
+    (``mast.memory.embeddings``), so sqlite-vec's default L2 distance d gives ``1 - d**2 / 2``
+    and the NumPy fallback's ``1 - dot`` gives ``1 - d``. Another backend: None (no guess)."""
+    try:
+        d = float(distance)
+    except (TypeError, ValueError):
+        return None
+    if d != d:
+        return None
+    from mast.logging.v2.vector_search import NumpyFallbackSearch, SqliteVecSearch
+
+    if isinstance(vec, SqliteVecSearch):
+        return round(1.0 - d * d / 2.0, 4)
+    if isinstance(vec, NumpyFallbackSearch):
+        return round(1.0 - d, 4)
+    return None
 
 
 def from_storage(storage, **kw) -> CognitionContext:

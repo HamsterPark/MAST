@@ -1,8 +1,7 @@
 import { useCallback, useState } from "react";
 
 /**
- * A text input whose draft survives tab switches / page navigation
- * (previously, switching tabs did not persist the draft).
+ * A text input whose draft survives tab switches / page navigation.
  *
  * Backed by sessionStorage: drafts live for the browser-tab session (a full
  * app restart intentionally clears them — half-typed commands from yesterday

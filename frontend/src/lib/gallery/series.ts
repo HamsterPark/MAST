@@ -5,6 +5,7 @@
 // `{name, k, ids, r, tags, note, anchor?}`。成员自己的单条标记与系列互不影响。
 // ════════════════════════════════════════════════════════════════════════════
 
+import { tr } from "../i18n.ts";
 import type { GalleryItem, Series } from "./types.ts";
 import { KLAB, bKey, dirLabel, fmtB, fmtT, num, stem } from "./format.ts";
 
@@ -66,13 +67,16 @@ export function kindOf(items: readonly Pick<GalleryItem, "k">[]): "f" | "s" | "g
   return [...ks][0] ?? "mix";
 }
 
-/** 默认系列名：`2001-01-01 0001–0003 · 3 帧`，帧的偏压不止一个时附上范围。 */
+const UNIT_EN: Record<string, string> = { f: "frames", s: "spectra", g: "grids", mix: "items" };
+
+/** 默认系列名：`2026-01-01 0001–0100 · 100 帧`，帧的偏压不止一个时附上范围。 */
 export function autoName(items: readonly GalleryItem[]): string {
   const a = items[0];
   const b = items[items.length - 1];
-  if (!a || !b) return "新系列";
+  if (!a || !b) return tr("新系列", "New series");
   const k = kindOf(items);
-  let s = `${dirLabel(a.d)} ${num(a)}–${num(b)} · ${items.length} ${k === "mix" ? "个" : KLAB[k]}`;
+  const head = `${dirLabel(a.d)} ${num(a)}–${num(b)} · ${items.length}`;
+  let s = tr(`${head} ${k === "mix" ? "个" : KLAB[k]}`, `${head} ${UNIT_EN[k]}`);
   const bs = [...new Set(items.filter((it) => it.k === "f" && it.b != null).map((it) => bKey(it.b)))];
   if (bs.length > 1) s += ` · ${fmtB(+(bs[0] ?? 0))}…${fmtB(+(bs[bs.length - 1] ?? 0))}`;
   return s;
@@ -91,7 +95,7 @@ export function rangeText(items: readonly GalleryItem[]): string {
   if (!a || !b) return "";
   return (
     ` ${dirLabel(a.d)} ${num(a)} → ${b.d !== a.d ? `${dirLabel(b.d)} ` : ""}${num(b)}` +
-    `（${fmtT(a.t)} → ${fmtT(b.mt || b.t)}）`
+    tr(`（${fmtT(a.t)} → ${fmtT(b.mt || b.t)}）`, ` (${fmtT(a.t)} → ${fmtT(b.mt || b.t)})`)
   );
 }
 

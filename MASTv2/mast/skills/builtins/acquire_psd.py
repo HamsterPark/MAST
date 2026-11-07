@@ -43,6 +43,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.skills.base import BaseSkill
 from mast.skills.composite._base import CompositeSkillGraph
 from mast.skills.composite.graph_executor import (
@@ -90,26 +91,34 @@ class AcquirePSD(CompositeSkillGraph):
             version="2.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description=(
+            description=tr(
                 "从 Nanonis 侧的 Spectrum Analyzer（硬件 FFT）读功率谱密度。"
                 "每个请求的频率量程返回一组 (f0, df, psd_array)。时延：每个量程 ~0.5 ms RTT。"
                 "当你需要的刷新率超出软件轮询能达到的范围时用它（真实硬件：Nyquist 最高 ~10 kHz；"
-                "模拟器：上限 1 kHz）。"
+                "模拟器：上限 1 kHz）。",
+                "Read the power spectral density from the Spectrum Analyzer on the Nanonis side "
+                "(hardware FFT). Each requested frequency range returns one (f0, df, psd_array). "
+                "Latency: ~0.5 ms RTT per range. Use it when you need a refresh rate beyond what "
+                "software polling can reach (real hardware: Nyquist up to ~10 kHz; simulator: capped "
+                "at 1 kHz).",
             ),
             parameters=[
                 ParameterSpec(
                     name="instance",
                     type="int",
-                    description="Spectrum Analyzer 实例（1 或 2）。",
+                    description=tr("Spectrum Analyzer 实例（1 或 2）。",
+                                   "Spectrum Analyzer instance (1 or 2)."),
                     required=False, default=1,
                     min_value=1, max_value=2,
                 ),
                 ParameterSpec(
                     name="signal_index",
                     type="int",
-                    description=(
+                    description=tr(
                         "可选的待分析信号索引（0–127）。默认用 Spectrum Analyzer "
-                        "前面板上已配置好的通道。"
+                        "前面板上已配置好的通道。",
+                        "Optional index of the signal to analyse (0-127). By default the channel "
+                        "already configured on the Spectrum Analyzer front panel is used.",
                     ),
                     required=False, default=-1,
                     min_value=-1, max_value=127,
@@ -117,10 +126,13 @@ class AcquirePSD(CompositeSkillGraph):
                 ParameterSpec(
                     name="freq_range_index",
                     type="int",
-                    description=(
+                    description=tr(
                         "可选的、从 0 开始的索引，指向可用频率量程列表。-1 = 保持当前。本模拟器上："
                         "0=20Hz, 1=50, 2=100, 3=200, 4=500, 5=1000 Hz。给了 freq_range_indices "
-                        "时本参数被忽略。"
+                        "时本参数被忽略。",
+                        "Optional zero-based index into the list of available frequency ranges. "
+                        "-1 = keep the current one. On this simulator: 0=20Hz, 1=50, 2=100, 3=200, "
+                        "4=500, 5=1000 Hz. Ignored when freq_range_indices is given.",
                     ),
                     required=False, default=-1,
                     min_value=-1, max_value=15,
@@ -128,17 +140,22 @@ class AcquirePSD(CompositeSkillGraph):
                 ParameterSpec(
                     name="freq_range_indices",
                     type="str",
-                    description=(
+                    description=tr(
                         "可选的 JSON 列表，给出要扫的频率量程索引，例如 '[0, 2, 5]'。给了之后，"
-                        "技能会对每个索引各采一条 PSD，并返回一个 per_range 字典。"
+                        "技能会对每个索引各采一条 PSD，并返回一个 per_range 字典。",
+                        "Optional JSON list of the frequency range indices to sweep, e.g. '[0, 2, 5]'. "
+                        "When given, the skill acquires one PSD per index and returns a per_range "
+                        "dict.",
                     ),
                     required=False, default="",
                 ),
                 ParameterSpec(
                     name="freq_resolution_index",
                     type="int",
-                    description=(
-                        "可选的、从 0 开始的索引，指向分辨率列表。-1 = 保持当前。索引越小 = df 越细。"
+                    description=tr(
+                        "可选的、从 0 开始的索引，指向分辨率列表。-1 = 保持当前。索引越小 = df 越细。",
+                        "Optional zero-based index into the list of resolutions. -1 = keep the "
+                        "current one. A smaller index = a finer df.",
                     ),
                     required=False, default=-1,
                     min_value=-1, max_value=15,

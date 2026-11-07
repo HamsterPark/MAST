@@ -1,32 +1,33 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { Badge, Card, DegradedNote, ErrorNote, Spinner } from "../ui";
+import { tr } from "@/lib/i18n";
 
-// 设置 → 硬件连接 — READ-ONLY Nanonis host + 4 TCP port display (ITEM 5).
+// Settings -> hardware connection: READ-ONLY Nanonis host + 4 TCP port display.
 //
-// The 硬件 editor (host/port edit + reconnect + sensors) lives behind 「高级管理
-// → 硬件」 (PIN-gated, owned by the admin agent). Here in 设置 we only SHOW the
-// resolved values so the operator can see them without unlocking admin. We read
-// GET /api/nanonis/connection (now reports the defaults 6501/6502/6503/6504 even
-// when no pool is wired) and render a small read-only table — host + 4 ports +
-// live per-port status — plus the note pointing at 高级管理 for edits.
+// The hardware editor (host/port edit, reconnect, sensors) lives under
+// Advanced -> Hardware (PIN-gated). Here in Settings we only SHOW the resolved
+// values so the operator can read them without unlocking admin. We read
+// GET /api/nanonis/connection (which reports the defaults 6501-6504 even when
+// no pool is wired) and render a small read-only table (host, 4 ports, live
+// per-port status) plus a note pointing at Advanced for edits.
 //
-// We deliberately do NOT reuse admin/HardwareManager here: this Settings-side
-// surface is owned by the settings agent and must never edit hardware.
+// admin/HardwareManager is deliberately not reused: this surface must never
+// edit hardware.
 
-// role (as returned by /api/nanonis/connection) → human label, canonical order
-// matching the four Nanonis TCP roles. Mirrors the admin PORT_ROLES labels so the
-// two surfaces read identically.
+// role (as returned by /api/nanonis/connection) -> human label, in the canonical
+// order of the four Nanonis TCP roles. Mirrors the admin PORT_ROLES labels so
+// the two surfaces read identically.
 const PORT_ROLES: { key: string; label: string }[] = [
-  { key: "main", label: "主控端口 (main)" },
-  { key: "monitor", label: "监控端口 (monitor)" },
-  { key: "data", label: "数据端口 (data)" },
-  { key: "emergency", label: "急停端口 (emergency)" },
+  { key: "main", label: tr("主控端口 (main)", "Main port (main)") },
+  { key: "monitor", label: tr("监控端口 (monitor)", "Monitor port (monitor)") },
+  { key: "data", label: tr("数据端口 (data)", "Data port (data)") },
+  { key: "emergency", label: tr("急停端口 (emergency)", "Emergency port (emergency)") },
 ];
 
 function StatusBadge({ connected }: { connected?: boolean | null }) {
   if (connected == null) return null;
-  return connected ? <Badge tone="AUTO">已连</Badge> : <Badge tone="DANGEROUS">未连</Badge>;
+  return connected ? <Badge tone="AUTO">{tr("已连", "Connected")}</Badge> : <Badge tone="DANGEROUS">{tr("未连", "Disconnected")}</Badge>;
 }
 
 export function NanonisPortsReadOnly() {
@@ -54,23 +55,23 @@ export function NanonisPortsReadOnly() {
   return (
     <Card>
       <div className="mb-2 flex items-center gap-2">
-        <span className="text-sm font-medium text-mast-text">Nanonis 连接（只读）</span>
+        <span className="text-sm font-medium text-mast-text">{tr("Nanonis 连接（只读）", "Nanonis connection (read-only)")}</span>
         {conn && !conn.degraded &&
-          (conn.connected ? <Badge tone="AUTO">在线</Badge> : <Badge tone="WARN">离线</Badge>)}
+          (conn.connected ? <Badge tone="AUTO">{tr("在线", "Online")}</Badge> : <Badge tone="WARN">{tr("离线", "Offline")}</Badge>)}
       </div>
 
-      {conn?.degraded && <DegradedNote what="Nanonis 连接" />}
+      {conn?.degraded && <DegradedNote what={tr("Nanonis 连接", "Nanonis connection")} />}
 
       <div className="space-y-3">
-        {/* 主机地址 — read-only */}
+        {/* Host address, read-only */}
         <div className="flex flex-col gap-1 text-sm">
-          <span className="text-mast-muted">主机地址 Host</span>
+          <span className="text-mast-muted">{tr("主机地址 Host", "Host address")}</span>
           <span className="rounded-md border border-mast-border bg-mast-bg/40 px-2 py-1.5 font-mono text-mast-text">
             {host}
           </span>
         </div>
 
-        {/* 4 端口 — read-only values + live status */}
+        {/* The 4 ports: read-only values + live status */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {PORT_ROLES.map((r) => {
             const ps = portByRole.get(r.key);
@@ -90,8 +91,10 @@ export function NanonisPortsReadOnly() {
         </div>
 
         <p className="rounded-md border border-mast-border bg-mast-bg/40 px-2 py-1.5 text-xs text-mast-muted">
-          这些为只读默认值（端口 6501–6504）。如需修改主机 / 端口或重新连接，请前往
-          「高级管理 → 硬件」（需 PIN 解锁）。
+          {tr(
+            "这些为只读默认值（端口 6501–6504）。如需修改主机 / 端口或重新连接，请前往「高级管理 → 硬件」（需 PIN 解锁）。",
+            "These are read-only defaults (ports 6501–6504). To change the host or ports, or to reconnect, go to Advanced → Hardware (PIN required).",
+          )}
         </p>
       </div>
     </Card>

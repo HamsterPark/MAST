@@ -43,6 +43,7 @@ from __future__ import annotations
 import random
 import time
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -95,7 +96,7 @@ class BiasWiggle(BaseSkill):
             capabilities=frozenset({"tip_shaping"}),
             safety_level=SafetyLevel.AUTO,
             description=(
-                "在一个小的双极性窗口内（默认 "
+                tr("在一个小的双极性窗口内（默认 "
                 "±4..20 mV）随机跳变偏压，跑一小段 burst，把针尖顶端推向"
                 "原子级尖锐的构型 —— 相当于用软件来回拖那根偏压滑块。"
                 "feedback 必须是**开**的：机理在于 |V| 越小，环路就把针尖"
@@ -103,65 +104,71 @@ class BiasWiggle(BaseSkill):
                 "一穿而过、不作停留，每一步之后都会检查电流，"
                 "整段 burst 硬上限 10 s。它是**故意**"
                 "允许在扫描过程中跑的（配方就是在一帧牺牲掉的"
-                "扫描框里 wiggle）。"
+                "扫描框里 wiggle）。",
+                "Randomly hop the bias inside a small bipolar window (default ±4..20 mV) for a short burst, pushing the tip apex toward an atomically sharp configuration - like dragging the bias slider back and forth in software. The feedback must be **on**: the mechanism is that the smaller |V| is, the closer the loop pushes the tip. The target never lands near zero; on a sign change it passes through at the maximum allowed slew without dwelling; the current is checked after every step; the whole burst has a hard limit of 10 s. It is **deliberately** allowed to run during a scan (the recipe is to wiggle inside a sacrificial scan frame).")
             ),
             parameters=[
                 ParameterSpec(
                     name="base_bias_v", type="float", unit="V",
                     description=(
-                        "burst 结束后要回到的偏压（通常就是成像偏压，如 "
+                        tr("burst 结束后要回到的偏压（通常就是成像偏压，如 "
                         "0.02 V）。每一条退出路径都会把它恢复回去，"
-                        "abort 也不例外。"),
+                        "abort 也不例外。",
+                        "Bias to return to after the burst ends (usually the imaging bias, e.g. 0.02 V). Every exit path restores it, abort included.")),
                     required=True, min_value=-10.0, max_value=10.0),
                 ParameterSpec(
                     name="wiggle_lower_v", type="float", unit="V",
                     description=(
-                        "|target| 的最小值（V）。**不能**为零：在恒流 "
+                        tr("|target| 的最小值（V）。**不能**为零：在恒流 "
                         "feedback 下，偏压接近零会让环路把针尖一路"
-                        "压进表面。"),
+                        "压进表面。",
+                        "Minimum of |target| (V). It **cannot** be zero: under constant-current feedback, a bias near zero makes the loop push the tip all the way into the surface.")),
                     required=False, default=0.004,
                     min_value=0.0005, max_value=ABSOLUTE_MAX_V),
                 ParameterSpec(
                     name="wiggle_upper_v", type="float", unit="V",
-                    description="|target| 的最大值（V）。上限 ±0.1 V。",
+                    description=tr("|target| 的最大值（V）。上限 ±0.1 V。", "Maximum of |target| (V). Upper limit ±0.1 V."),
                     required=False, default=0.020,
                     min_value=0.001, max_value=ABSOLUTE_MAX_V),
                 ParameterSpec(
                     name="dwell_min_s", type="float", unit="s",
-                    description="在一个目标值上的最短停留时间。",
+                    description=tr("在一个目标值上的最短停留时间。", "Shortest dwell time on one target value."),
                     required=False, default=0.05, min_value=0.01, max_value=5.0),
                 ParameterSpec(
                     name="dwell_max_s", type="float", unit="s",
-                    description="在一个目标值上的最长停留时间。",
+                    description=tr("在一个目标值上的最长停留时间。", "Longest dwell time on one target value."),
                     required=False, default=0.15, min_value=0.01, max_value=10.0),
                 ParameterSpec(
                     name="slew_rate_v_per_s", type="float", unit="V/s",
                     description=(
-                        "目标值之间的最大 ramp 速率。变号时允许用到绝对"
-                        "上限，好让它快速穿过零点。"),
+                        tr("目标值之间的最大 ramp 速率。变号时允许用到绝对"
+                        "上限，好让它快速穿过零点。",
+                        "Maximum ramp rate between targets. On a sign change the absolute limit is allowed, so it crosses zero quickly.")),
                     required=False, default=1.0,
                     min_value=0.005, max_value=ABSOLUTE_MAX_SLEW),
                 ParameterSpec(
                     name="burst_s", type="float", unit="s",
-                    description="burst 总时长。硬上限 10 s。",
+                    description=tr("burst 总时长。硬上限 10 s。", "Total burst duration. Hard limit 10 s."),
                     required=False, default=5.0,
                     min_value=0.1, max_value=ABSOLUTE_MAX_BURST_S),
                 ParameterSpec(
                     name="abort_current_a", type="float", unit="A",
                     description=(
-                        "任何一步只要 |I| 超过这个值，就 abort 并把偏压"
-                        "恢复回去。"),
+                        tr("任何一步只要 |I| 超过这个值，就 abort 并把偏压"
+                        "恢复回去。",
+                        "If |I| exceeds this value at any step, abort and restore the bias.")),
                     required=False, default=5e-9,
                     min_value=1e-11, max_value=1e-6),
                 ParameterSpec(
                     name="seed", type="int",
-                    description="随机种子（0 = 非确定性）。",
+                    description=tr("随机种子（0 = 非确定性）。", "Random seed (0 = non-deterministic)."),
                     required=False, default=0, min_value=0),
                 ParameterSpec(
                     name="allow_feedback_off", type="bool",
                     description=(
-                        "即使 Z controller 关着也照跑。没有 feedback 就不"
-                        "存在上面那个机理，所以这件事默认会被**拒绝**。"),
+                        tr("即使 Z controller 关着也照跑。没有 feedback 就不"
+                        "存在上面那个机理，所以这件事默认会被**拒绝**。",
+                        "Run even when the Z controller is off. Without feedback the mechanism above does not exist, so this is **refused** by default.")),
                     required=False, default=False),
             ],
             # scan_not_running 刻意不在这里:配方就是要在一张牺牲帧里打扰动。
@@ -185,7 +192,7 @@ class BiasWiggle(BaseSkill):
             rec = context.safe_call("Bias_Set", float(target))
             calls.append(rec)
             if rec.error:
-                return start, f"Bias_Set 失败: {rec.error}"
+                return start, tr(f"Bias_Set 失败: {rec.error}", f"Bias_Set failed: {rec.error}")
             # 小幅改变也要看电流。这条快捷路径最初漏了这一步 —— 「每一步都看
             # 电流」一旦有例外,一次恰好落在例外里的跳变就会让针尖在超阈状态下
             # 继续走下一步。护栏不能有大小之分。
@@ -194,7 +201,7 @@ class BiasWiggle(BaseSkill):
             amps = _parse_scalar(cur_rec)
             if amps is not None and abs(amps) > abort_a:
                 return float(target), (
-                    f"电流 {abs(amps):.3g} A 超过中止阈 {abort_a:.3g} A")
+                    tr(f"电流 {abs(amps):.3g} A 超过中止阈 {abort_a:.3g} A", f"Current {abs(amps):.3g} A exceeds the abort threshold {abort_a:.3g} A"))
             return float(target), ""
 
         n_steps = max(1, int(round(delta / max(slew * _STEP_INTERVAL_S, 1e-9))))
@@ -207,14 +214,14 @@ class BiasWiggle(BaseSkill):
             rec = context.safe_call("Bias_Set", float(value))
             calls.append(rec)
             if rec.error:
-                return current, f"Bias_Set 失败: {rec.error}"
+                return current, tr(f"Bias_Set 失败: {rec.error}", f"Bias_Set failed: {rec.error}")
             current = float(value)
             cur_rec = context.safe_call("Current_Get")
             calls.append(cur_rec)
             amps = _parse_scalar(cur_rec)
             if amps is not None and abs(amps) > abort_a:
                 return current, (
-                    f"电流 {abs(amps):.3g} A 超过中止阈 {abort_a:.3g} A")
+                    tr(f"电流 {abs(amps):.3g} A 超过中止阈 {abort_a:.3g} A", f"Current {abs(amps):.3g} A exceeds the abort threshold {abort_a:.3g} A"))
             if i < n_steps:
                 time.sleep(_STEP_INTERVAL_S)
         return current, ""
@@ -268,27 +275,30 @@ class BiasWiggle(BaseSkill):
         # 之前再查一次。拒绝,不夹紧。
         if upper > ABSOLUTE_MAX_V or lower > ABSOLUTE_MAX_V:
             return _fail(
-                f"扰动幅值上限 {upper:g} V 超过硬上限 ±{ABSOLUTE_MAX_V} V。这是"
+                tr(f"扰动幅值上限 {upper:g} V 超过硬上限 ±{ABSOLUTE_MAX_V} V。这是"
                 f"写死在代码里的界,配置改不了 —— 拒绝执行而不是替你降到上限。"
-                f"要更大的幅度请用 BiasPulse(那是另一件事,有它自己的包络)。")
+                f"要更大的幅度请用 BiasPulse(那是另一件事,有它自己的包络)。",
+                f"Perturbation amplitude upper limit {upper:g} V exceeds the hard limit ±{ABSOLUTE_MAX_V} V. This is a bound hard-coded in the code that configuration cannot change - refusing to run rather than silently lowering it to the limit for you. For a larger amplitude use BiasPulse (a different thing, with its own envelope)."))
         if lower >= upper:
             return _fail(
-                f"扰动下限 {lower:g} V 不小于上限 {upper:g} V —— 区间是空的。")
+                tr(f"扰动下限 {lower:g} V 不小于上限 {upper:g} V —— 区间是空的。", f"Perturbation lower limit {lower:g} V is not less than the upper limit {upper:g} V - the interval is empty."))
         if burst > ABSOLUTE_MAX_BURST_S:
             return _fail(
-                f"突发时长 {burst:g} s 超过硬上限 {ABSOLUTE_MAX_BURST_S} s。"
-                f"这是一次短促扰动,不是一个可以一直开着的模式。")
+                tr(f"突发时长 {burst:g} s 超过硬上限 {ABSOLUTE_MAX_BURST_S} s。"
+                f"这是一次短促扰动,不是一个可以一直开着的模式。",
+                f"Burst duration {burst:g} s exceeds the hard limit {ABSOLUTE_MAX_BURST_S} s. This is a short perturbation, not a mode that can be left on."))
         if slew > ABSOLUTE_MAX_SLEW:
             return _fail(
-                f"斜率 {slew:g} V/s 超过硬上限 {ABSOLUTE_MAX_SLEW} V/s。")
+                tr(f"斜率 {slew:g} V/s 超过硬上限 {ABSOLUTE_MAX_SLEW} V/s。", f"Slew {slew:g} V/s exceeds the hard limit {ABSOLUTE_MAX_SLEW} V/s."))
         if dwell_hi < dwell_lo:
             dwell_lo, dwell_hi = dwell_hi, dwell_lo
         if abs(base) > ABSOLUTE_MAX_V + upper:
             # 从 1 V 的成像偏压跳进 ±20 mV 的扰动区,那一下不是扰动是一次大跳变。
             return _fail(
-                f"基准偏压 {base:g} V 离扰动区间(±{upper:g} V)太远 —— 进出扰动"
+                tr(f"基准偏压 {base:g} V 离扰动区间(±{upper:g} V)太远 —— 进出扰动"
                 f"区的那两次跳变本身就是一次大的偏压变化。请先用 "
-                f"BiasSettleChange 把偏压带到成像值附近再打扰动。")
+                f"BiasSettleChange 把偏压带到成像值附近再打扰动。",
+                f"Base bias {base:g} V is too far from the perturbation interval (±{upper:g} V) - the two jumps into and out of the perturbation zone would themselves be a large bias change. First bring the bias near the imaging value with BiasSettleChange, then perturb."))
 
         # ── 前置:反馈必须开着 ──
         # 这个技能的物理机制就是「|V| 变小 → 反馈把针尖推近」。反馈关着时它什么
@@ -301,12 +311,13 @@ class BiasWiggle(BaseSkill):
             feedback_on = None if fb is None else bool(int(fb))
             if feedback_on is not True:
                 return _fail(
-                    ("Z 反馈是关的" if feedback_on is False else
-                     "读不到 Z 反馈状态(ZCtrl_OnOffGet)") +
-                    " —— 偏压扰动靠的是恒流反馈在低偏压下把针尖推近，"
+                    (tr("Z 反馈是关的", "Z feedback is off") if feedback_on is False else
+                     tr("读不到 Z 反馈状态(ZCtrl_OnOffGet)", "Cannot read the Z feedback state (ZCtrl_OnOffGet)")) +
+                    tr(" —— 偏压扰动靠的是恒流反馈在低偏压下把针尖推近，"
                     "反馈不开这一步什么也不会发生。先开反馈"
                     "(ZControllerOnOff enable=true)，或显式传 "
                     "allow_feedback_off=true。",
+                    " - bias perturbation relies on the constant-current feedback pushing the tip closer at low bias; with the feedback off nothing happens. First turn the feedback on (ZControllerOnOff enable=true), or pass allow_feedback_off=true explicitly."),
                     feedback_on=feedback_on)
 
         # ── 起点确认:读不到就拒绝斜坡 ──
@@ -315,9 +326,10 @@ class BiasWiggle(BaseSkill):
         start = _parse_scalar(start_rec)
         if start is None:
             return _fail(
-                f"读不到当前偏压(Bias_Get: {start_rec.error or '返回值无法解析'})"
+                tr(f"读不到当前偏压(Bias_Get: {start_rec.error or '返回值无法解析'})"
                 f" —— 不知道起点就不能受控地改变偏压。拒绝执行，不从假设的 0 V "
-                f"开始。")
+                f"开始。",
+                f"Cannot read the current bias (Bias_Get: {start_rec.error or 'return value could not be parsed'}) - without knowing the starting point the bias cannot be changed under control. Refusing to run; not starting from an assumed 0 V."))
 
         rng = random.Random(seed) if seed else random.Random()
         t0 = time.monotonic()
@@ -377,21 +389,24 @@ class BiasWiggle(BaseSkill):
         if aborted:
             return SkillResult(
                 skill_name="BiasWiggle", success=False,
-                error=(f"扰动被中止(已完成 {len(log)} 次跳变)，偏压已恢复到 "
-                       f"{base:g} V。"),
+                error=(tr(f"扰动被中止(已完成 {len(log)} 次跳变)，偏压已恢复到 "
+                       f"{base:g} V。",
+                       f"Perturbation aborted ({len(log)} jumps completed); bias restored to {base:g} V.")),
                 data=data, nanonis_calls=calls)
         if stop_reason:
             return SkillResult(
                 skill_name="BiasWiggle", success=False,
-                error=(f"扰动在第 {len(log)} 次跳变时停下：{stop_reason}。"
-                       f"偏压已恢复到 {base:g} V。"),
+                error=(tr(f"扰动在第 {len(log)} 次跳变时停下：{stop_reason}。"
+                       f"偏压已恢复到 {base:g} V。",
+                       f"Perturbation stopped at jump {len(log)}: {stop_reason}. Bias restored to {base:g} V.")),
                 data=data, nanonis_calls=calls)
         return SkillResult(
             skill_name="BiasWiggle", success=True, data=data,
             nanonis_calls=calls,
-            summary=(f"偏压扰动 {len(log)} 次跳变／{elapsed:.1f} s "
+            summary=(tr(f"偏压扰动 {len(log)} 次跳变／{elapsed:.1f} s "
                      f"(±{lower * 1e3:.0f}–{upper * 1e3:.0f} mV)，"
-                     f"已恢复到 {base * 1e3:.0f} mV。"))
+                     f"已恢复到 {base * 1e3:.0f} mV。",
+                     f"Bias perturbation: {len(log)} jumps / {elapsed:.1f} s (±{lower * 1e3:.0f}-{upper * 1e3:.0f} mV), restored to {base * 1e3:.0f} mV.")))
 
 
 def make_tool(context_provider):

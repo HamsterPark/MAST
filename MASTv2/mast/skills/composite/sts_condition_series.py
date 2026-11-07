@@ -1,7 +1,7 @@
 """STSConditionSeries —— **同一个位置**上，按一张条件表逐条取谱。
 
 设计文档:``docs/v2/design/`` 的「S4 STS」设计,D18/D19/D20(文件名按「S4 STS」
-检索;通用层注释不写样品名前缀 —— ``stm_capability_vs_sample_layer.md`` 拍板④)。
+检索;通用层注释不写样品名前缀)。
 
 ## MLS 已经有的,这里不重造(D18)
 
@@ -22,7 +22,7 @@ MLS **做不到**的是这个流程要的那件事:**多条各自独立的谱,�
 ## 采集不自己写,交给逐点引擎
 
 每一条都是 ``CompositeStep(skill_name="SpectroscopyAtPositions", ...)`` 按名字调
-一次,位置只有一个。理由与 ``LineSTSAcrossWall`` 逐字相同:.dat 归属那三层
+一次,位置只有一个。理由与 ``LineSTSAcrossWall`` 完全相同:.dat 归属那三层
 (文件名 / 采前水位 / 位置核对)是这条链上最容易**静默**出错的地方 —— 一个点没落盘,
 下一条就会拿到上一条的文件,而两份数据长得一模一样。那套逻辑只该有一份。
 按名字走 registry 也意味着版本钉选、安全闸、HITL、进度上报都还是那一套。
@@ -62,6 +62,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.skills.composite._base import CompositeSkillGraph
 from mast.skills.composite.graph_executor import (
     CompositeProgress,
@@ -96,29 +97,32 @@ def parse_conditions(raw: Any) -> "tuple[list[str], str]":
     **空的不当成「用默认」** —— 那会让一次打错的输入变成一条谁也没要的谱。
     """
     if raw is None:
-        return [], "没有给条件组名。"
+        return [], tr("没有给条件组名。", "No condition group name given.")
     if isinstance(raw, (list, tuple)):
         names = [str(x).strip() for x in raw]
     else:
         text = str(raw).strip()
         if not text:
-            return [], "条件组名是空的 —— 空不当成「用默认」,那会让一次打错的输入变成一条谁也没要的谱。"
+            return [], tr("条件组名是空的 —— 空不当成「用默认」,那会让一次打错的输入变成一条谁也没要的谱。",
+                          "The condition group name is empty -- empty does not mean 'use the default'; that would turn a typo into a spectrum nobody asked for.")
         if text.startswith("["):
             try:
                 loaded = json.loads(text)
             except json.JSONDecodeError as exc:
-                return [], f"条件组名看着像 JSON 数组但解不开:{exc}"
+                return [], tr(f"条件组名看着像 JSON 数组但解不开:{exc}", f"The condition group names look like a JSON array but cannot be parsed: {exc}")
             if not isinstance(loaded, list):
-                return [], "条件组名的 JSON 不是一个数组。"
+                return [], tr("条件组名的 JSON 不是一个数组。", "The JSON of the condition group names is not an array.")
             names = [str(x).strip() for x in loaded]
         else:
             names = [p.strip() for p in text.split(",")]
     names = [n for n in names if n]
     if not names:
-        return [], "条件组名列表是空的。"
+        return [], tr("条件组名列表是空的。", "The condition group name list is empty.")
     if len(names) > MAX_CONDITIONS:
-        return [], (f"一次要跑 {len(names)} 条,超过上限 {MAX_CONDITIONS}。"
-                    f"每条是一次完整的条件建立加一条谱 —— 这个上限是预算,不是目标。")
+        return [], tr(f"一次要跑 {len(names)} 条,超过上限 {MAX_CONDITIONS}。"
+                      f"每条是一次完整的条件建立加一条谱 —— 这个上限是预算,不是目标。",
+                      f"{len(names)} conditions requested, above the limit of {MAX_CONDITIONS}. "
+                      f"Each is a full condition set-up plus one spectrum -- the limit is a budget, not a target.")
     return names, ""
 
 
@@ -134,7 +138,8 @@ class STSConditionSeries(CompositeSkillGraph):
             version="1.0.0",
             category=SkillCategory.COMPOSITE,
             safety_level=SafetyLevel.CONFIRM,
-            description=(
+            description=tr(
+                (
                 "在**同一个**位置上取**若干条**谱，每一条各有自己的稳定条件 —— "
                 "走的是一张条件**组名**表。一条曲线表达不了你要的东西时用它："
                 "逐条不同的稳定 bias/setpoint（一个宽窗口按它的中心稳下来，"
@@ -146,73 +151,120 @@ class STSConditionSeries(CompositeSkillGraph):
                 "（core.sts_workflow）；本技能只收**组名**，绝不收数值。"
                 "两条谱之间，稳定条件经 BiasSettleChange 重建 —— 因为相邻两条条件"
                 "完全可能落在零的两侧，而恒流反馈下偏压穿零会把针尖推进样品。"
+                ),
+                (
+                    "Acquire **several** spectra at the **same** position, each with its own "
+                    "stabilisation conditions -- driven by a table of condition **group "
+                    "names**. Use it when a single curve cannot express what you need: a "
+                    "different stabilisation bias/setpoint per spectrum (a wide window "
+                    "stabilised at its centre saturates the preamplifier at the ends), or a "
+                    "different modulation amplitude per spectrum. Do **NOT** use it for "
+                    "\"several bias **segments** within one curve\" -- Nanonis MLS already does "
+                    "that (dense sampling near E_F, sparse far away, longer integration on "
+                    "weak-signal segments, modulation only in the windows that matter), and a "
+                    "condition group can pass those segments through unchanged. All numbers "
+                    "live in the condition table (core.sts_workflow); this skill takes only "
+                    "**group names**, never numbers. Between two spectra the stabilisation "
+                    "conditions are re-established through BiasSettleChange, because adjacent "
+                    "conditions may well lie on opposite sides of zero, and crossing zero "
+                    "bias under constant-current feedback can push the tip into the sample."
+                ),
             ),
             parameters=[
                 ParameterSpec(
                     name="conditions", type="str", required=True,
-                    description=(
+                    description=tr(
                         "要逐条走的条件**组名**，按顺序 —— 写成 "
                         "'a,b,c' 或者一个 JSON 数组。**不是数值**：每一个值"
                         "都住在组里（core.sts_workflow）。组名不认识、"
                         "覆写越界、或者这个组未标定，都只拒绝**那一条**，"
-                        "并指名是哪里不对；序列其余部分照跑。")),
+                        "并指名是哪里不对；序列其余部分照跑。",
+                        "The condition **group names** to run, in order -- written as "
+                        "'a,b,c' or a JSON array. **Not numbers**: every value lives in "
+                        "the group (core.sts_workflow). An unknown name, an out-of-range "
+                        "override, or an uncalibrated group refuses only **that one** "
+                        "and names what is wrong; the rest of the sequence still runs.")),
                 ParameterSpec(
                     name="x_m", type="float", unit="m", required=True,
                     min_value=-1e-4, max_value=1e-4,
-                    description=(
+                    description=tr(
                         "那**一个**位置的 X，单位是**米**（SI），不是纳米："
                         "20 nm -> 20n。序列里每一条谱都在这里取 —— "
-                        "这正是这条序列的意义所在。")),
+                        "这正是这条序列的意义所在。",
+                        "X of that **one** position, in **metres** (SI), not nanometres: "
+                        "20 nm -> 20n. Every spectrum in the sequence is taken here -- "
+                        "that is the whole point of this sequence.")),
                 ParameterSpec(
                     name="y_m", type="float", unit="m", required=True,
                     min_value=-1e-4, max_value=1e-4,
-                    description="那一个位置的 Y，单位是**米**（SI）。"),
+                    description=tr("那一个位置的 Y，单位是**米**（SI）。",
+                                   "Y of that one position, in **metres** (SI).")),
                 ParameterSpec(
                     name="expected_coord_epoch", type="int", required=True,
                     min_value=0,
-                    description=(
+                    description=tr(
                         "这个位置是在哪一代坐标下算出来的。"
                         "对不上**或者**当前代次读不到，都要拒绝；那时候这个"
                         "坐标指向的是另一片表面。由逐点引擎**逐条谱**查一次 —— "
-                        "一条序列要跑一个小时，而一次粗动完全可能就落在中间。")),
+                        "一条序列要跑一个小时，而一次粗动完全可能就落在中间。",
+                        "The coordinate epoch this position was computed in. A mismatch "
+                        "**or** an unreadable current epoch is refused; such a coordinate "
+                        "would point at a different piece of surface. Checked by the "
+                        "per-point engine **for every spectrum** -- a sequence can run for "
+                        "an hour, and a coarse move may well land in the middle.")),
                 ParameterSpec(
                     name="settle_s", type="float", unit="s", required=False,
                     min_value=0.0, max_value=60.0,
-                    description=(
+                    description=tr(
                         "**只**覆写整定时间这一项，对序列里每一条条件都生效。"
-                        "不填则各条用自己那个组里的值。")),
+                        "不填则各条用自己那个组里的值。",
+                        "**Only** overrides the settle time, for every condition in the "
+                        "sequence. Omit it and each uses its own group's value.")),
                 ParameterSpec(
                     name="spectral_family", type="str", required=False,
                     default="", allowed_values=["", "metallic", "gapped",
                                                 "unknown"],
-                    description=(
+                    description=tr(
                         "哪些谱的子判据有资格当闸门。留空 = unknown，"
-                        "而 unknown **不是** metallic。")),
+                        "而 unknown **不是** metallic。",
+                        "Which spectral sub-criteria may act as a gate. Empty = unknown, "
+                        "and unknown is **not** metallic.")),
                 ParameterSpec(
                     name="assess", type="bool", required=False, default=True,
-                    description=(
+                    description=tr(
                         "对每一条谱跑一次谱质量闸门。它**只记账** —— "
                         "一个差评绝不会打断序列，除非 "
-                        "stop_after_consecutive_discard 说要打断。")),
+                        "stop_after_consecutive_discard 说要打断。",
+                        "Run the spectrum-quality gate on every spectrum. It **only keeps "
+                        "the books** -- a bad verdict never interrupts the sequence unless "
+                        "stop_after_consecutive_discard says so.")),
                 ParameterSpec(
                     name="stop_after_consecutive_discard", type="int",
                     required=False, default=2, min_value=0, max_value=24,
-                    description=(
+                    description=tr(
                         "连续这么多条判为 'discard' 就停下。"
                         "0 = 永不停。'unrated' **不计**在内 —— 「判不了」"
                         "不是一条差谱。这里不做任何补救；"
-                        "序列停下来，并把这件事说出来。")),
+                        "序列停下来，并把这件事说出来。",
+                        "Stop after this many consecutive 'discard' verdicts. 0 = never "
+                        "stop. 'unrated' does **not** count -- being unable to judge is "
+                        "not a bad spectrum. No remediation is attempted here; the "
+                        "sequence stops and says so.")),
                 ParameterSpec(
                     name="per_point_timeout_s", type="float", unit="s",
                     required=False, default=600.0,
                     min_value=1.0, max_value=7200.0,
-                    description=(
-                        "**一条**谱的预算，原样交给逐点引擎。")),
+                    description=tr(
+                        "**一条**谱的预算，原样交给逐点引擎。",
+                        "Time budget for **one** spectrum, passed unchanged to the "
+                        "per-point engine.")),
                 ParameterSpec(
                     name="run_tag", type="str", required=False, default="",
-                    description=(
+                    description=tr(
                         "逐条谱的 .dat 文件名前缀。留空 = 用一个时间戳，"
-                        "这样重跑一次的文件仍然分得开。")),
+                        "这样重跑一次的文件仍然分得开。",
+                        "Prefix of the per-spectrum .dat file names. Empty = use a "
+                        "timestamp, so a rerun's files remain distinguishable.")),
             ],
             preconditions=["z_controller_on"],
             estimated_duration_s=1800.0,
@@ -263,7 +315,8 @@ class STSConditionSeries(CompositeSkillGraph):
             }
             self._records.append(rec)
             if stopped:
-                rec["error"] = f"早停后未执行：{stopped}"
+                rec["error"] = tr(f"早停后未执行：{stopped}",
+                                f"Not run after early stop: {stopped}")
                 continue
             if not res.usable:
                 # **这一条不发出去,其余照跑。** 一个坏组名不该废掉整条序列 ——
@@ -304,14 +357,18 @@ class STSConditionSeries(CompositeSkillGraph):
             rec["dat_path"] = first.get("path")
             rec["error"] = (None if ok else
                             (getattr(out, "error", None) or first.get("error")
-                             or "取谱引擎没有返回可用的结果"))
+                             or tr("取谱引擎没有返回可用的结果",
+                                    "The acquisition engine returned no usable result")))
             rec["lockin_readback"] = data.get("lockin_readback") or {}
 
             if stop_after and rec["verdict"] == "discard":
                 streak += 1
                 if streak >= stop_after:
-                    stopped = (f"连续 {streak} 条判为 discard —— 序列停在这里。"
-                               f"没有尝试任何补救:接着跑只会得到更多同样的谱。")
+                    stopped = tr(f"连续 {streak} 条判为 discard —— 序列停在这里。"
+                                 f"没有尝试任何补救:接着跑只会得到更多同样的谱。",
+                                 f"{streak} consecutive spectra judged discard -- the sequence "
+                                 f"stops here. No remediation was attempted: continuing would "
+                                 f"only yield more of the same spectra.")
             elif rec["verdict"] != "discard":
                 # 「判不了」不打断连击,也不重置它:unrated 对「针尖在变坏吗」
                 # 这个问题一个字都没说。
@@ -376,8 +433,9 @@ class STSConditionSeries(CompositeSkillGraph):
         n = int(data.get("n_planned") or 0)
         if n and n_ok == 0:
             bits = [r["error"] for r in data.get("spectra") or () if r.get("error")]
-            return False, (f"{n} 条条件一条都没采成（0/{n}）。"
-                           + ("；".join(str(b)[:120] for b in bits[:3]) if bits else ""))
+            return False, (tr(f"{n} 条条件一条都没采成（0/{n}）。",
+                              f"None of the {n} conditions yielded a spectrum (0/{n}). ")
+                           + (tr("；", "; ").join(str(b)[:120] for b in bits[:3]) if bits else ""))
         return super()._decide_outcome(all_good, progress, data)
 
     # ── 执行 ──────────────────────────────────────────────────────────────
@@ -387,7 +445,7 @@ class STSConditionSeries(CompositeSkillGraph):
         self._refusal = ""
         names, err = parse_conditions(params.get("conditions"))
         if err:
-            return self.fail(f"条件序列用不了：{err}")
+            return self.fail(tr(f"条件序列用不了：{err}", f"The condition sequence is unusable: {err}"))
 
         executor = GraphExecutor(
             composite_name=self._skill_name(), context=context,
@@ -415,33 +473,44 @@ class STSConditionSeries(CompositeSkillGraph):
     @staticmethod
     def _summary(data: dict) -> str:
         n, ok = data.get("n_planned") or 0, data.get("n_acquired") or 0
-        lines = [f"条件序列：{n} 条里采到 {ok} 条"
-                 f"（{data.get('x_m', 0.0) * 1e9:.1f}, "
-                 f"{data.get('y_m', 0.0) * 1e9:.1f}) nm 同一个位置）。"]
+        lines = [tr(f"条件序列：{n} 条里采到 {ok} 条"
+                    f"（{data.get('x_m', 0.0) * 1e9:.1f}, "
+                    f"{data.get('y_m', 0.0) * 1e9:.1f}) nm 同一个位置）。",
+                    f"Condition sequence: {ok} of {n} acquired "
+                    f"(same position ({data.get('x_m', 0.0) * 1e9:.1f}, "
+                    f"{data.get('y_m', 0.0) * 1e9:.1f}) nm).")]
         if ok < n:
             gaps = []
-            for key, word in (("n_refused", "条件用不了"), ("n_failed", "采集失败"),
-                              ("n_skipped", "早停未执行")):
+            for key, word in (("n_refused", tr("条件用不了", "condition unusable")),
+                              ("n_failed", tr("采集失败", "acquisition failed")),
+                              ("n_skipped", tr("早停未执行", "not run after early stop"))):
                 if data.get(key):
                     gaps.append(f"{word} {data[key]}")
             if gaps:
-                lines.append("缺口：" + "、".join(gaps))
+                lines.append(tr("缺口：", "Gaps: ") + tr("、", ", ").join(gaps))
         verdicts = [(k, data.get(f"n_{k}")) for k in
                     ("keep", "flagged", "discard", "unrated")]
         shown = [f"{k} ×{v}" for k, v in verdicts if v]
         if shown:
-            lines.append("判决：" + "、".join(shown))
+            lines.append(tr("判决：", "Verdicts: ") + tr("、", ", ").join(shown))
         if data.get("n_zero_crossings"):
             lines.append(
-                f"其中 {data['n_zero_crossings']} 次稳定偏压穿零 —— 走的是 "
-                f"BiasSettleChange（恒流反馈下穿零会把针尖推进样品）。"
-                f"事后若发现针尖变了，先看这几步。")
+                tr(f"其中 {data['n_zero_crossings']} 次稳定偏压穿零 —— 走的是 "
+                   f"BiasSettleChange（恒流反馈下穿零会把针尖推进样品）。"
+                   f"事后若发现针尖变了，先看这几步。",
+                   f"{data['n_zero_crossings']} of them crossed zero stabilisation bias "
+                   f"-- done via BiasSettleChange (crossing zero under constant-current "
+                   f"feedback can push the tip into the sample). If the tip changed "
+                   f"afterwards, look at these steps first."))
         for r in (data.get("spectra") or ()):
             if r.get("status") == STATUS_REFUSED:
-                lines.append(f"⚠️ 第 {r['index']} 条（{r['condition']}）没发出去："
-                             f"{str(r.get('error'))[:160]}")
+                lines.append(tr(f"⚠️ 第 {r['index']} 条（{r['condition']}）没发出去："
+                                f"{str(r.get('error'))[:160]}",
+                                f"Warning: condition {r['index']} ({r['condition']}) was not sent: "
+                                f"{str(r.get('error'))[:160]}"))
         if data.get("stopped_early"):
-            lines.append(f"早停：{data.get('stopped_reason')}")
+            lines.append(tr(f"早停：{data.get('stopped_reason')}",
+                            f"Stopped early: {data.get('stopped_reason')}"))
         return "\n".join(lines)
 
 

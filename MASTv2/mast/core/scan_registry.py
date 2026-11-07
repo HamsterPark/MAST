@@ -1,7 +1,7 @@
 """Process-level registry of where scan files actually live.
 
 Why: instrument_control saves .sxm files into
-Nanonis's session directory (e.g. ``D:\\Data\\fsSTM\\STM\\2026\\20260629``),
+Nanonis's session directory (e.g. ``<data_dir>\\<date>``),
 but the data_processing agent's file tools run with ``context=None`` — no
 pool, no ``Util_SessionPathGet`` — so their directory search only covered
 ``<data_root>/working-sessions`` and came back empty. The DP agent then

@@ -8,15 +8,14 @@ it instead of authoring a spec from scratch.
 **Every step here must name a skill that actually exists, with that skill's real
 parameter names, and read result keys that skill actually returns.**
 
-(): all five templates were written against *plausible*
+Earlier revisions of these five templates were written against *plausible*
 skill names — ``AssessTipQuality``, ``LogNote``, ``BiasSpectroscopy`` — which
-have never existed in v2's 418-skill registry. Nothing was deleted or renamed;
+never existed in the v2 skill registry. Nothing was deleted or renamed;
 the specs were simply authored against an imagined API and never checked. The
 loader's unknown-skill guard therefore refused all five at every startup, and
 the two automatic tip-repair loops (``ConditionTipUntilSharp``,
-``ScanThenConditionTip``) were absent for the whole session in which the tip
-degraded five times. Because a refused spec just doesn't appear in the UI, no
-one could tell "broken" from "never designed".
+``ScanThenConditionTip``) were absent. Because a refused spec just doesn't
+appear in the UI, "broken" could not be told apart from "never designed".
 
 They were broken past the skill names too: ``MoveToXY`` takes ``x_m``/``y_m``
 (the specs passed ``x``/``y``), ``FullScan`` requires a centre and an extent
@@ -35,6 +34,7 @@ from __future__ import annotations
 import logging
 
 from mast.skills.composite.spec import CompositeSpec, ParamSpec
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +43,17 @@ def _condition_tip_until_sharp() -> CompositeSpec:
     """while-loop with a result-bound exit condition + accumulators."""
     return CompositeSpec(
         name="ConditionTipUntilSharp",
-        description="反复脉冲修复针尖,每次重扫并评估图像质量,直到合格或达到最大次数。",
+        description=tr("反复脉冲修复针尖,每次重扫并评估图像质量,直到合格或达到最大次数。",
+                        "Repeatedly pulse to repair the tip, rescan and assess image quality each time, until it passes or the maximum number of attempts is reached."),
         safety_level="confirm",
         params=[
-            ParamSpec("pulse_v", "number", 3.0, "修复脉冲电压 (V)", True),
-            ParamSpec("center_x_m", "number", 0.0, "检验扫描中心 X (m)", True),
-            ParamSpec("center_y_m", "number", 0.0, "检验扫描中心 Y (m)", True),
-            ParamSpec("check_scan_m", "number", 2e-8, "检验扫描边长 (m,默认 20 nm)", False),
+            ParamSpec("pulse_v", "number", 3.0, tr("修复脉冲电压 (V)", "Repair pulse voltage (V)"), True),
+            ParamSpec("center_x_m", "number", 0.0, tr("检验扫描中心 X (m)", "Check scan center X (m)"), True),
+            ParamSpec("center_y_m", "number", 0.0, tr("检验扫描中心 Y (m)", "Check scan center Y (m)"), True),
+            ParamSpec("check_scan_m", "number", 2e-8, tr("检验扫描边长 (m,默认 20 nm)", "Check scan side length (m, default 20 nm)"), False),
             ParamSpec("quality_threshold", "number", 0.3,
-                      "合格 FFT 质量阈值 (AssessImageQuality.fft_quality)", False),
-            ParamSpec("max_attempts", "int", 5, "最大尝试次数", False),
+                      tr("合格 FFT 质量阈值 (AssessImageQuality.fft_quality)", "Pass FFT quality threshold (AssessImageQuality.fft_quality)"), False),
+            ParamSpec("max_attempts", "int", 5, tr("最大尝试次数", "Maximum number of attempts"), False),
         ],
         nodes=[
             {"type": "set", "id": "init_attempts", "var": "attempts", "value": "0"},
@@ -95,18 +96,21 @@ def _grid_sts_with_precheck() -> CompositeSpec:
     """Nested repeat loops + a per-point conditional skip."""
     return CompositeSpec(
         name="GridSTSWithPrecheck",
-        description="在 nx×ny 网格上逐点移动并做 STS;每点先质量预检,不合格则跳过。",
+        description=tr("在 nx×ny 网格上逐点移动并做 STS;每点先质量预检,不合格则跳过。",
+                        "Move point by point on an nx×ny grid and take an STS at each; each point is pre-checked for quality first and skipped if it fails."),
         safety_level="confirm",
         params=[
-            ParamSpec("nx", "int", 3, "X 方向点数", True),
-            ParamSpec("ny", "int", 3, "Y 方向点数", True),
-            ParamSpec("x0", "number", 0.0, "起点 X (m)", False),
-            ParamSpec("y0", "number", 0.0, "起点 Y (m)", False),
-            ParamSpec("spacing_m", "number", 1e-9, "点间距 (m)", False),
+            ParamSpec("nx", "int", 3, tr("X 方向点数", "Number of points in X"), True),
+            ParamSpec("ny", "int", 3, tr("Y 方向点数", "Number of points in Y"), True),
+            ParamSpec("x0", "number", 0.0, tr("起点 X (m)", "Start X (m)"), False),
+            ParamSpec("y0", "number", 0.0, tr("起点 Y (m)", "Start Y (m)"), False),
+            ParamSpec("spacing_m", "number", 1e-9, tr("点间距 (m)", "Point spacing (m)"), False),
             ParamSpec("min_quality", "number", 0.3,
-                      "网格开跑前的最低 FFT 质量 (AssessImageQuality.fft_quality)", False),
+                      tr("网格开跑前的最低 FFT 质量 (AssessImageQuality.fft_quality)",
+                          "Minimum FFT quality before the grid starts (AssessImageQuality.fft_quality)"), False),
             ParamSpec("max_radius_m", "number", 5e-9,
-                      "只在距起点该半径内取谱 (m) —— 矩形网格上开圆形窗", False),
+                      tr("只在距起点该半径内取谱 (m) —— 矩形网格上开圆形窗",
+                          "Take spectra only within this radius of the start (m) -- a circular window on a rectangular grid"), False),
         ],
         nodes=[
             # Gate the whole grid on the CURRENT image once. Per-point tip
@@ -150,15 +154,16 @@ def _scan_assess_rescan() -> CompositeSpec:
     """质量门控:扫描→评估→不合格则重扫,直到合格或达上限(while + 累加器)。"""
     return CompositeSpec(
         name="ScanAssessRescan",
-        description="扫描成像后评估图像质量,不合格则重扫,直到合格或达到最大重扫次数。",
+        description=tr("扫描成像后评估图像质量,不合格则重扫,直到合格或达到最大重扫次数。",
+                        "Assess image quality after scanning; rescan if it fails, until it passes or the maximum number of rescans is reached."),
         safety_level="confirm",
         params=[
-            ParamSpec("center_x_m", "number", 0.0, "扫描中心 X (m)", True),
-            ParamSpec("center_y_m", "number", 0.0, "扫描中心 Y (m)", True),
-            ParamSpec("scan_m", "number", 1e-7, "扫描边长 (m,默认 100 nm)", False),
+            ParamSpec("center_x_m", "number", 0.0, tr("扫描中心 X (m)", "Scan center X (m)"), True),
+            ParamSpec("center_y_m", "number", 0.0, tr("扫描中心 Y (m)", "Scan center Y (m)"), True),
+            ParamSpec("scan_m", "number", 1e-7, tr("扫描边长 (m,默认 100 nm)", "Scan side length (m, default 100 nm)"), False),
             ParamSpec("quality_threshold", "number", 0.3,
-                      "合格 FFT 质量阈值 (AssessImageQuality.fft_quality)", False),
-            ParamSpec("max_rescans", "int", 3, "最大重扫次数", False),
+                      tr("合格 FFT 质量阈值 (AssessImageQuality.fft_quality)", "Pass FFT quality threshold (AssessImageQuality.fft_quality)"), False),
+            ParamSpec("max_rescans", "int", 3, tr("最大重扫次数", "Maximum number of rescans"), False),
         ],
         nodes=[
             {"type": "set", "id": "init_good", "var": "good", "value": "False"},
@@ -195,14 +200,15 @@ def _line_profile_sts() -> CompositeSpec:
     """沿一条线等间距取 n 个点做 STS(repeat 循环 + 表达式坐标)。"""
     return CompositeSpec(
         name="LineProfileSTS",
-        description="从起点沿固定方向等间距移动 n 个点,每点做一次 STS 谱采集(线扫谱)。",
+        description=tr("从起点沿固定方向等间距移动 n 个点,每点做一次 STS 谱采集(线扫谱)。",
+                        "Move n equally spaced points from the start along a fixed direction and take one STS spectrum at each (line spectroscopy)."),
         safety_level="confirm",
         params=[
-            ParamSpec("n_points", "int", 5, "采点数", True),
-            ParamSpec("x0", "number", 0.0, "起点 X (m)", False),
-            ParamSpec("y0", "number", 0.0, "起点 Y (m)", False),
-            ParamSpec("dx", "number", 1e-9, "每步 X 增量 (m)", False),
-            ParamSpec("dy", "number", 0.0, "每步 Y 增量 (m)", False),
+            ParamSpec("n_points", "int", 5, tr("采点数", "Number of points"), True),
+            ParamSpec("x0", "number", 0.0, tr("起点 X (m)", "Start X (m)"), False),
+            ParamSpec("y0", "number", 0.0, tr("起点 Y (m)", "Start Y (m)"), False),
+            ParamSpec("dx", "number", 1e-9, tr("每步 X 增量 (m)", "X increment per step (m)"), False),
+            ParamSpec("dy", "number", 0.0, tr("每步 Y 增量 (m)", "Y increment per step (m)"), False),
         ],
         nodes=[
             {"type": "loop", "id": "line", "mode": "repeat", "count": "n_points",
@@ -223,15 +229,16 @@ def _scan_then_condition_tip() -> CompositeSpec:
     """巡扫成像 → 质量评估 → 质量不足则脉冲修针(扫描-质量-条件分支)。"""
     return CompositeSpec(
         name="ScanThenConditionTip",
-        description="扫描成像并评估质量;若质量低于阈值则脉冲修复针尖,否则记录通过。",
+        description=tr("扫描成像并评估质量;若质量低于阈值则脉冲修复针尖,否则记录通过。",
+                        "Scan and assess quality; if quality is below the threshold pulse to repair the tip, otherwise record a pass."),
         safety_level="confirm",
         params=[
-            ParamSpec("center_x_m", "number", 0.0, "扫描中心 X (m)", True),
-            ParamSpec("center_y_m", "number", 0.0, "扫描中心 Y (m)", True),
-            ParamSpec("scan_m", "number", 1e-7, "扫描边长 (m,默认 100 nm)", False),
+            ParamSpec("center_x_m", "number", 0.0, tr("扫描中心 X (m)", "Scan center X (m)"), True),
+            ParamSpec("center_y_m", "number", 0.0, tr("扫描中心 Y (m)", "Scan center Y (m)"), True),
+            ParamSpec("scan_m", "number", 1e-7, tr("扫描边长 (m,默认 100 nm)", "Scan side length (m, default 100 nm)"), False),
             ParamSpec("quality_threshold", "number", 0.3,
-                      "FFT 质量阈值 (AssessImageQuality.fft_quality)", False),
-            ParamSpec("pulse_v", "number", 3.0, "修针脉冲电压 (V)", True),
+                      tr("FFT 质量阈值 (AssessImageQuality.fft_quality)", "FFT quality threshold (AssessImageQuality.fft_quality)"), False),
+            ParamSpec("pulse_v", "number", 3.0, tr("修针脉冲电压 (V)", "Tip-conditioning pulse voltage (V)"), True),
         ],
         nodes=[
             {"type": "step", "id": "scan", "skill": "FullScan", "params": {
@@ -285,8 +292,8 @@ def seed_templates(store, registry=None) -> list[str]:
     """Save any missing built-in template into *store*. Returns names written.
 
     Also REPAIRS a previously-seeded template that is currently unregisterable.
-    Seeding was ``if not exists: save``, so the broken specs shipped before
-    2026-07-27 () would survive every upgrade — the machine that lost its
+    Seeding was ``if not exists: save``, so broken specs shipped in earlier
+    versions would survive every upgrade — an installation that lost its
     tip-repair loops would still be missing them after installing the fix. When
     *registry* is supplied we re-seed a stored template that (a) still carries
     the ``template`` tag and (b) references a skill that does not exist, i.e.

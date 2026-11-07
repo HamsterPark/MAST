@@ -84,6 +84,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -131,11 +132,15 @@ def _refuse(name: str, slot: int, reason: str) -> SkillResult:
     """A refusal that says how to fix it — and records itself."""
     allowed = sorted(load_allowlist())
     msg = (
-        f"{reason}\n"
+        tr(f"{reason}\n"
         f"已审核的槽位：{allowed if allowed else '（空——没有任何脚本被批准）'}\n"
         f"MAST 看不见脚本内部：脚本跑在 RT 控制器上，安全门/模式门/中止门在它里面"
         f"全部不生效。所以只有你在 {_CONFIG_NAME} 里签过字的槽位才能跑。"
-        f"审核步骤见该文件的 _how_to_vet。"
+        f"审核步骤见该文件的 _how_to_vet。", f"{reason}\n"
+f"Vetted slots: {allowed if allowed else '(empty -- no script has been approved)'}\n"
+f"MAST cannot see inside the script: it runs on the RT controller, where the safety gate / mode gate / abort gate "
+f"are all ineffective. So only slots you have signed off in {_CONFIG_NAME} can run. "
+f"See _how_to_vet in that file for the vetting steps.")
     )
     try:
         from mast.core.diagnostics import record
@@ -153,11 +158,11 @@ def _gate(name: str, slot: int) -> "tuple[dict | None, SkillResult | None]":
     if not allow:
         return None, _refuse(
             name, slot,
-            f"拒绝：脚本白名单为空，没有任何脚本槽位被批准供智能体运行。")
+            tr(f"拒绝：脚本白名单为空，没有任何脚本槽位被批准供智能体运行。", "Refused: the script allow-list is empty, no script slot has been approved for the agent to run."))
     entry = allow.get(slot)
     if entry is None:
         return None, _refuse(
-            name, slot, f"拒绝：槽位 {slot} 不在已审核的白名单里。")
+            name, slot, tr(f"拒绝：槽位 {slot} 不在已审核的白名单里。", f"Refused: slot {slot} is not in the vetted allow-list."))
     return entry, None
 
 
@@ -184,11 +189,15 @@ class ListNanonisScripts(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "列出**用户**已经审过、允许自主使用的那些 Nanonis 脚本槽位，连同每一个做什么、"
+                tr("列出**用户**已经审过、允许自主使用的那些 Nanonis 脚本槽位，连同每一个做什么、"
                 "接受什么 LUT 范围。想跑任何东西之前先调它：没过审的槽位会被拒绝，而这份名单通常很短。"
                 "\n"
                 "\n"
-                "Nanonis 脚本跑在实时控制器上。MAST 的各道安全闸门在脚本**内部不**生效 —— 这正是只有过审槽位才允许运行的原因。"
+                "Nanonis 脚本跑在实时控制器上。MAST 的各道安全闸门在脚本**内部不**生效 —— 这正是只有过审槽位才允许运行的原因。", "List the Nanonis script slots that the **user** has vetted and allowed for autonomous use, with what each does and "
+"what LUT range it accepts. Call it before running anything: slots that are not vetted are refused, and this list is usually short."
+"\n"
+"\n"
+"Nanonis scripts run on the real-time controller. MAST's safety gates are **not** in effect **inside** a script -- which is exactly why only vetted slots may run.")
             ),
             parameters=[],
             estimated_duration_s=0.1,
@@ -212,9 +221,10 @@ class ListNanonisScripts(BaseSkill):
             skill_name="ListNanonisScripts", success=True,
             data={"vetted_slots": slots, "count": len(slots),
                   "allowlist_file": str(_allowlist_path()),
-                  "note": ("没有已审核的槽位——智能体不能运行任何脚本。请用户在"
-                           f"{_CONFIG_NAME} 里审核并登记。" if not slots else
-                           "只有上列槽位可运行；其余一律拒绝。")},
+                  "note": (tr("没有已审核的槽位——智能体不能运行任何脚本。请用户在"
+                           f"{_CONFIG_NAME} 里审核并登记。", "No vetted slots -- the agent cannot run any script. The user must vet and register them in "
+f"{_CONFIG_NAME}.") if not slots else
+                           tr("只有上列槽位可运行；其余一律拒绝。", "Only the slots listed above can run; all others are refused."))},
             nanonis_calls=[],
         )
 
@@ -229,18 +239,19 @@ class GetScriptData(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读一个 Nanonis 脚本录进 Acquire Buffer 的数据。脚本以实时速度把若干通道写进 buffer 1 或 2；"
-                "每一次 'sweep' 是脚本里定义的一趟（sweep 从 0 起算）。返回一个由采集通道构成的 2-D 数组。"
+                tr("读一个 Nanonis 脚本录进 Acquire Buffer 的数据。脚本以实时速度把若干通道写进 buffer 1 或 2；"
+                "每一次 'sweep' 是脚本里定义的一趟（sweep 从 0 起算）。返回一个由采集通道构成的 2-D 数组。", "Read the data a Nanonis script recorded into the Acquire Buffer. The script writes several channels into buffer 1 or 2 at real-time speed; "
+"each 'sweep' is one pass defined in the script (sweeps count from 0). Returns a 2-D array of the acquired channels.")
             ),
             parameters=[
                 ParameterSpec(
                     name="buffer", type="int",
-                    description="Acquire Buffer 编号：1 或 2",
+                    description=tr("Acquire Buffer 编号：1 或 2", "Acquire Buffer number: 1 or 2"),
                     required=True, min_value=1, max_value=2,
                 ),
                 ParameterSpec(
                     name="sweep", type="int",
-                    description="sweep 序号（0 起算）",
+                    description=tr("sweep 序号（0 起算）", "sweep number (counting from 0)"),
                     required=False, default=0, min_value=0, max_value=100000,
                 ),
             ],
@@ -271,11 +282,11 @@ class GetScriptChannels(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读某个脚本 Acquire Buffer 的通道列表。",
+            description=tr("读某个脚本 Acquire Buffer 的通道列表。", "Read the channel list of a script Acquire Buffer."),
             parameters=[
                 ParameterSpec(
                     name="buffer", type="int",
-                    description="Acquire Buffer 编号：1 或 2",
+                    description=tr("Acquire Buffer 编号：1 或 2", "Acquire Buffer number: 1 or 2"),
                     required=True, min_value=1, max_value=2,
                 ),
             ],
@@ -306,7 +317,7 @@ class RunNanonisScript(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "在**实时控制器**上运行一个 Nanonis 脚本。只有用户审过的槽位（config/nanonis_scripts.json）"
+                tr("在**实时控制器**上运行一个 Nanonis 脚本。只有用户审过的槽位（config/nanonis_scripts.json）"
                 "才允许运行 —— 先调 ListNanonisScripts。\n"
                 "\n"
                 "**用它之前先读这一段。** 跑起来的脚本是在控制器上执行的，不走 TCP，所以 **MAST 的各层安全在它内部都不生效**："
@@ -315,19 +326,29 @@ class RunNanonisScript(BaseSkill):
                 "\n"
                 "\n"
                 "请先把脚本部署上去（DeployNanonisScript）。如果它带参数，运行之前把参数载入它的 LUT（LoadScriptLUT）"
-                "。"
+                "。", "Run a Nanonis script on the **real-time controller**. Only slots vetted by the user (config/nanonis_scripts.json) "
+"may run -- call ListNanonisScripts first.\n"
+"\n"
+"**Read this paragraph before using it.** A running script executes on the controller, not over TCP, so **none of MAST's safety layers is in effect inside it**: "
+"the global bias / current / Z bounds are not enforced, the operating-mode gate is not consulted, and **the abort gate cannot stop it**. "
+"Pressing abort only makes MAST stop sending commands; it cannot stop a script already running on the controller. The only thing that can stop it is StopNanonisScript."
+"\n"
+"\n"
+"Deploy the script first (DeployNanonisScript). If it takes parameters, load them into its LUT before running (LoadScriptLUT)"
+".")
             ),
             parameters=[
                 ParameterSpec(
                     name="slot", type="int",
-                    description="脚本槽位（1 起算）。必须在过审名单里。",
+                    description=tr("脚本槽位（1 起算）。必须在过审名单里。", "Script slot (counting from 1). Must be in the vetted list."),
                     required=True, min_value=1, max_value=64,
                 ),
                 ParameterSpec(
                     name="wait_until_finished", type="bool",
                     description=(
-                        "阻塞直到脚本跑完。对一段有界的序列，通常 True 才对；False 会让它继续跑着 —— 那样一来，"
-                        "停下它就是你的责任。"
+                        tr("阻塞直到脚本跑完。对一段有界的序列，通常 True 才对；False 会让它继续跑着 —— 那样一来，"
+                        "停下它就是你的责任。", "Block until the script finishes. For a bounded sequence, True is usually right; False lets it keep running -- and then "
+"stopping it is your responsibility.")
                     ),
                     required=False, default=True,
                 ),
@@ -370,8 +391,9 @@ class RunNanonisScript(BaseSkill):
             skill_name="RunNanonisScript", success=True,
             data={"slot": slot, "script_name": entry.get("name", ""),
                   "wait_until_finished": bool(wait),
-                  "warning": ("脚本在 RT 控制器上运行——MAST 的安全门与中止门"
-                              "对它不生效。要停它只能用 StopNanonisScript。")},
+                  "warning": (tr("脚本在 RT 控制器上运行——MAST 的安全门与中止门"
+                              "对它不生效。要停它只能用 StopNanonisScript。", "The script is running on the RT controller -- MAST's safety gate and abort gate "
+"do not apply to it. The only way to stop it is StopNanonisScript."))},
             nanonis_calls=[rec],
         )
 
@@ -386,8 +408,9 @@ class StopNanonisScript(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "停掉正在实时控制器上跑的脚本。这是**唯一**能停下一个正在跑的脚本的东西 —— abort 闸门停不了它，"
-                "因为脚本并不在发 TCP 调用。因此它从不受闸门管辖、也从不被拒绝，包括在 abort 已经锁住的时候。"
+                tr("停掉正在实时控制器上跑的脚本。这是**唯一**能停下一个正在跑的脚本的东西 —— abort 闸门停不了它，"
+                "因为脚本并不在发 TCP 调用。因此它从不受闸门管辖、也从不被拒绝，包括在 abort 已经锁住的时候。", "Stop a script running on the real-time controller. This is the **only** thing that can stop a running script -- the abort gate cannot, "
+"because the script is not making TCP calls. So it is never governed by a gate and never refused, including when abort is already latched.")
             ),
             parameters=[],
             estimated_duration_s=0.5,
@@ -413,13 +436,14 @@ class DeployNanonisScript(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "把一个过审的脚本槽位部署到实时控制器上（编译 + 推送）。部署并不会运行它 —— 之后请调 RunNanonisScript。"
-                "只有过审的槽位才允许被部署。"
+                tr("把一个过审的脚本槽位部署到实时控制器上（编译 + 推送）。部署并不会运行它 —— 之后请调 RunNanonisScript。"
+                "只有过审的槽位才允许被部署。", "Deploy a vetted script slot to the real-time controller (compile + push). Deploying does not run it -- call RunNanonisScript afterwards. "
+"Only vetted slots may be deployed.")
             ),
             parameters=[
                 ParameterSpec(
                     name="slot", type="int",
-                    description="脚本槽位（1 起算）。必须已过审。",
+                    description=tr("脚本槽位（1 起算）。必须已过审。", "Script slot (counting from 1). Must already be vetted."),
                     required=True, min_value=1, max_value=64,
                 ),
             ],
@@ -455,12 +479,12 @@ class UndeployNanonisScript(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "把一个脚本槽位从实时控制器上撤下来。撤掉一个脚本从来不是有风险的那个方向，所以它从不受闸门管辖。"
+                tr("把一个脚本槽位从实时控制器上撤下来。撤掉一个脚本从来不是有风险的那个方向，所以它从不受闸门管辖。", "Take a script slot off the real-time controller. Removing a script is never the risky direction, so it is never governed by a gate.")
             ),
             parameters=[
                 ParameterSpec(
                     name="slot", type="int",
-                    description="脚本槽位（1 起算）",
+                    description=tr("脚本槽位（1 起算）", "Script slot (counting from 1)"),
                     required=True, min_value=1, max_value=64,
                 ),
             ],
@@ -491,27 +515,32 @@ class LoadScriptLUT(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "把一组数值载入某个脚本的查找表（Look-Up Table）—— 也就是脚本以实时速度逐项走过的那个数组。"
+                tr("把一组数值载入某个脚本的查找表（Look-Up Table）—— 也就是脚本以实时速度逐项走过的那个数组。"
                 "延时扫描就是这么工作的：把延时值载进去，脚本自己走完它们。\n"
                 "\n"
                 "LUT 是你在这里真正能撰写的**那一样**东西（脚本本身是用户的）。所以它的取值范围由过审条目框定："
                 "一个声明了 lut_min/lut_max 的槽位，会拒绝范围之外的值。一个 LUT 以毫米为单位的延时线脚本，"
-                "喂进去以微米计的数字，就会把台子开到硬限位上 —— 而 MAST 看不到脚本，也就无从知道它想要的是哪一种。"
+                "喂进去以微米计的数字，就会把台子开到硬限位上 —— 而 MAST 看不到脚本，也就无从知道它想要的是哪一种。", "Load a set of values into the Look-Up Table (LUT) of a script -- the array the script steps through item by item at real-time speed. "
+"That is how a delay scan works: load the delay values, and the script walks through them itself.\n"
+"\n"
+"The LUT is the **one** thing you can really author here (the script itself is the user's). So its value range is bounded by the vetted entry: "
+"a slot that declares lut_min/lut_max refuses values outside the range. For a delay-line script whose LUT is in millimetres, "
+"feeding it numbers in micrometres would drive the stage into the hard limit -- and MAST cannot see the script, so it cannot know which one it wants.")
             ),
             parameters=[
                 ParameterSpec(
                     name="slot", type="int",
-                    description="这些值是**给哪一个**过审脚本槽位用的",
+                    description=tr("这些值是**给哪一个**过审脚本槽位用的", "**Which** vetted script slot these values are for"),
                     required=True, min_value=1, max_value=64,
                 ),
                 ParameterSpec(
                     name="lut_index", type="int",
-                    description="LUT 编号（1 起算）",
+                    description=tr("LUT 编号（1 起算）", "LUT number (counting from 1)"),
                     required=True, min_value=1, max_value=16,
                 ),
                 ParameterSpec(
                     name="values", type="str",
-                    description="逗号分隔的数值（例如 '0, 0.5, 1.0, 1.5'）",
+                    description=tr("逗号分隔的数值（例如 '0, 0.5, 1.0, 1.5'）", "Comma-separated values (e.g. '0, 0.5, 1.0, 1.5')"),
                     required=True,
                 ),
             ],
@@ -529,16 +558,17 @@ class LoadScriptLUT(BaseSkill):
             return refusal
         if not entry.get("allow_lut_write", False):
             return _refuse("LoadScriptLUT", slot,
-                           f"拒绝：槽位 {slot}（{entry.get('name', '?')}）"
-                           "未被批准接受智能体写入 LUT（allow_lut_write=false）。")
+                           tr(f"拒绝：槽位 {slot}（{entry.get('name', '?')}）"
+                           "未被批准接受智能体写入 LUT（allow_lut_write=false）。", f"Refused: slot {slot} ({entry.get('name', '?')}) "
+"has not been approved to accept LUT writes from the agent (allow_lut_write=false)."))
 
         try:
             vals = [float(x) for x in str(params["values"]).replace(",", " ").split()]
         except ValueError:
             return _fail("LoadScriptLUT",
-                         f"values 解析失败：{params['values']!r}（应为逗号分隔的数值）", [])
+                         tr(f"values 解析失败：{params['values']!r}（应为逗号分隔的数值）", f"Failed to parse values: {params['values']!r} (should be comma-separated numbers)"), [])
         if not vals:
-            return _fail("LoadScriptLUT", "values 为空", [])
+            return _fail("LoadScriptLUT", tr("values 为空", "values is empty"), [])
 
         lo, hi = entry.get("lut_min"), entry.get("lut_max")
         if lo is not None or hi is not None:
@@ -548,9 +578,11 @@ class LoadScriptLUT(BaseSkill):
             if bad:
                 return _refuse(
                     "LoadScriptLUT", slot,
-                    f"拒绝：LUT 值 {bad[:5]} 超出槽位 {slot} 声明的范围 "
+                    tr(f"拒绝：LUT 值 {bad[:5]} 超出槽位 {slot} 声明的范围 "
                     f"[{lo:g}, {hi:g}]（该范围由用户在审核脚本时写定——"
-                    "它知道脚本把这些数当什么单位用，MAST 不知道）。")
+                    "它知道脚本把这些数当什么单位用，MAST 不知道）。", f"Refused: LUT values {bad[:5]} are outside the range declared for slot {slot} "
+f"[{lo:g}, {hi:g}] (the range was fixed by the user when vetting the script -- "
+"they know what unit the script uses these numbers in; MAST does not)."))
 
         calls = []
         rec = context.safe_call("Script_LUTOpen")
@@ -578,7 +610,7 @@ class LoadScriptLUT(BaseSkill):
             skill_name="LoadScriptLUT", success=True,
             data={"slot": slot, "lut_index": lut, "n_values": len(vals),
                   "min": min(vals), "max": max(vals),
-                  "note": "需 DeployScriptLUT 才会推送到 RT 控制器。"},
+                  "note": tr("需 DeployScriptLUT 才会推送到 RT 控制器。", "Needs DeployScriptLUT to be pushed to the RT controller.")},
             nanonis_calls=calls,
         )
 
@@ -593,23 +625,24 @@ class DeployScriptLUT(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "把一个 LUT 部署到实时控制器上，好让正在跑的脚本能逐项走它。请先载入数值（LoadScriptLUT）"
-                "。"
+                tr("把一个 LUT 部署到实时控制器上，好让正在跑的脚本能逐项走它。请先载入数值（LoadScriptLUT）"
+                "。", "Deploy a LUT to the real-time controller so a running script can step through it item by item. Load the values first (LoadScriptLUT)"
+".")
             ),
             parameters=[
                 ParameterSpec(
                     name="lut_index", type="int",
-                    description="LUT 编号（1 起算）",
+                    description=tr("LUT 编号（1 起算）", "LUT number (counting from 1)"),
                     required=True, min_value=1, max_value=16,
                 ),
                 ParameterSpec(
                     name="wait_until_finished", type="bool",
-                    description="阻塞直到部署完成",
+                    description=tr("阻塞直到部署完成", "Block until deployment is complete"),
                     required=False, default=True,
                 ),
                 ParameterSpec(
                     name="timeout_ms", type="int",
-                    description="部署超时（ms）；-1 = 一直等下去",
+                    description=tr("部署超时（ms）；-1 = 一直等下去", "Deployment timeout (ms); -1 = wait indefinitely"),
                     unit="ms", required=False, default=10000,
                     min_value=-1, max_value=600000,
                 ),
@@ -643,18 +676,19 @@ class SetScriptChannels(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "设定某个脚本的 Acquire Buffer 记录哪些信号通道。仅仅是配置 —— 它改变的是「测什么」"
-                "，绝不改变仪器做什么。"
+                tr("设定某个脚本的 Acquire Buffer 记录哪些信号通道。仅仅是配置 —— 它改变的是「测什么」"
+                "，绝不改变仪器做什么。", "Set which signal channels the Acquire Buffer of a script records. Configuration only -- it changes \"what is measured\""
+", never what the instrument does.")
             ),
             parameters=[
                 ParameterSpec(
                     name="buffer", type="int",
-                    description="Acquire Buffer 编号：1 或 2",
+                    description=tr("Acquire Buffer 编号：1 或 2", "Acquire Buffer number: 1 or 2"),
                     required=True, min_value=1, max_value=2,
                 ),
                 ParameterSpec(
                     name="channels", type="str",
-                    description="信号序号，逗号分隔（例如 '0,24'）",
+                    description=tr("信号序号，逗号分隔（例如 '0,24'）", "Signal numbers, comma-separated (e.g. '0,24')"),
                     required=True,
                 ),
             ],
@@ -669,9 +703,9 @@ class SetScriptChannels(BaseSkill):
             chs = [int(x) for x in str(params["channels"]).replace(",", " ").split()]
         except ValueError:
             return _fail("SetScriptChannels",
-                         f"channels 解析失败：{params['channels']!r}", [])
+                         tr(f"channels 解析失败：{params['channels']!r}", f"Failed to parse channels: {params['channels']!r}"), [])
         if not chs:
-            return _fail("SetScriptChannels", "channels 为空", [])
+            return _fail("SetScriptChannels", tr("channels 为空", "channels is empty"), [])
         rec = context.safe_call("Script_ChsSet", buf, chs)
         if rec.error:
             return _fail("SetScriptChannels", rec.error, [rec])
@@ -690,33 +724,34 @@ class SetScriptAutosave(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "运行结束后把脚本 Acquire Buffer 里的数据自动存盘。任何长序列都建议开 —— 缓冲区是有限的，"
-                "而没存下来的数据就等于没测过。"
+                tr("运行结束后把脚本 Acquire Buffer 里的数据自动存盘。任何长序列都建议开 —— 缓冲区是有限的，"
+                "而没存下来的数据就等于没测过。", "Automatically save the data in the script Acquire Buffer to disk when the run ends. Recommended for any long sequence -- the buffer is finite, "
+"and data that was not saved is as good as never measured.")
             ),
             parameters=[
                 ParameterSpec(
                     name="buffer", type="int",
-                    description="Acquire Buffer 编号：1 或 2",
+                    description=tr("Acquire Buffer 编号：1 或 2", "Acquire Buffer number: 1 or 2"),
                     required=True, min_value=1, max_value=2,
                 ),
                 ParameterSpec(
                     name="sweep", type="int",
-                    description="要保存的 sweep 编号；-1 = 全部 sweep",
+                    description=tr("要保存的 sweep 编号；-1 = 全部 sweep", "Sweep number to save; -1 = all sweeps"),
                     required=False, default=-1, min_value=-1, max_value=100000,
                 ),
                 ParameterSpec(
                     name="all_sweeps_same_file", type="bool",
-                    description="把每一趟 sweep 都放进同一个文件",
+                    description=tr("把每一趟 sweep 都放进同一个文件", "Put every sweep into the same file"),
                     required=False, default=True,
                 ),
                 ParameterSpec(
                     name="folder_path", type="str",
-                    description="Nanonis 机器上的文件夹（留空 = 会话目录）",
+                    description=tr("Nanonis 机器上的文件夹（留空 = 会话目录）", "Folder on the Nanonis machine (empty = session directory)"),
                     required=False, default="",
                 ),
                 ParameterSpec(
                     name="basename", type="str",
-                    description="文件基名",
+                    description=tr("文件基名", "File basename"),
                     required=False, default="mast_script",
                 ),
             ],

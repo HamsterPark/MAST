@@ -41,6 +41,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from mast.i18n import tr
+
 #: 覆盖层加载出来的模块挂在这个包下（**不**替换 ``sys.modules`` 里的内置条目）。
 OVERLAY_PKG = "mast.skills._overlay"
 
@@ -98,26 +100,29 @@ def is_valid_rel(rel: str) -> tuple[bool, str]:
     """
     s = normalise_rel(rel)
     if not s.endswith(".py"):
-        return False, "不是 .py 文件"
+        return False, tr("不是 .py 文件", "Not a .py file")
     if s.startswith("/") or re.match(r"^[A-Za-z]:", s):
-        return False, "不能用绝对路径"
+        return False, tr("不能用绝对路径", "Absolute paths are not allowed")
     parts = s[:-3].split("/")
     if any(p in ("", ".", "..") for p in parts):
-        return False, "路径里有 . 或 ..（禁止穿越）"
+        return False, tr("路径里有 . 或 ..（禁止穿越）",
+                         "Path contains . or .. (traversal is not allowed)")
     if parts[0] == PACKS_DIR:
         # _packs/<id>/rest…：第一段是包 id，可以带连字符
         if len(parts) < 3:
-            return False, f"{PACKS_DIR}/ 下要形如 {PACKS_DIR}/<包id>/<模块路径>.py"
+            return False, tr(f"{PACKS_DIR}/ 下要形如 {PACKS_DIR}/<包id>/<模块路径>.py",
+                             f"Under {PACKS_DIR}/ the path must look like {PACKS_DIR}/<pack id>/<module path>.py")
         rest = parts[2:]
     elif parts[0] == NEW_DIR:
         rest = parts[1:]
         if not rest:
-            return False, f"{NEW_DIR}/ 下要有文件名"
+            return False, tr(f"{NEW_DIR}/ 下要有文件名", f"A file name is required under {NEW_DIR}/")
     else:
         rest = parts
     for p in rest:
         if not _SAFE_SEG.match(p):
-            return False, f"路径段 {p!r} 不是合法的 Python 标识符"
+            return False, tr(f"路径段 {p!r} 不是合法的 Python 标识符",
+                             f"Path segment {p!r} is not a valid Python identifier")
     return True, ""
 
 

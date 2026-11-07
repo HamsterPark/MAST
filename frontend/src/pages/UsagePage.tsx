@@ -3,41 +3,42 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { Badge, Card, ErrorNote, Section, Spinner } from "../components/ui";
 import { Accordion, useToast } from "../components/controls";
+import { langTag, tr } from "@/lib/i18n";
 
-// 用量·花销 — records the cost of every paid API call (LLM turns across all
+// Usage & cost — records the cost of every paid API call (LLM turns across all
 // agents + main chat, voice TTS/ASR, document OCR) and aggregates the spend.
 // Data comes from the mast.billing ledger via /api/usage/*. Prices are an
-// EDITABLE estimate (see the 价格表 section) — the ledger stores whether each
+// EDITABLE estimate (see the price-book section) — the ledger stores whether each
 // row was authoritatively priced, surfaced here with a ≈ badge.
 
 const RANGES = [
-  { value: "today", label: "今日" },
-  { value: "7d", label: "近 7 天" },
-  { value: "30d", label: "近 30 天" },
-  { value: "all", label: "全部" },
+  { value: "today", label: tr("今日", "Today") },
+  { value: "7d", label: tr("近 7 天", "Last 7 days") },
+  { value: "30d", label: tr("近 30 天", "Last 30 days") },
+  { value: "all", label: tr("全部", "All") },
 ];
 
 const KIND_LABEL: Record<string, string> = {
-  llm: "对话 LLM",
-  tts: "语音合成 TTS",
-  asr: "语音识别 ASR",
-  ocr: "文献 OCR",
-  embedding: "向量 Embedding",
+  llm: tr("对话 LLM", "Chat LLM"),
+  tts: tr("语音合成 TTS", "Speech synthesis (TTS)"),
+  asr: tr("语音识别 ASR", "Speech recognition (ASR)"),
+  ocr: tr("文献 OCR", "Literature OCR"),
+  embedding: tr("向量 Embedding", "Embedding"),
 };
 
 const SOURCE_LABEL: Record<string, string> = {
-  orchestrator: "编排 Orchestrator",
-  instrument_control: "仪器控制 IC",
-  experiment_design: "实验设计 XD",
-  data_processing: "数据处理 DP",
-  literature: "文献 Lit",
-  paper_writing: "论文写作",
-  paper_review: "论文评审",
-  chat: "主聊天",
-  quickask: "查询助手",
-  voice: "语音",
+  orchestrator: tr("编排 Orchestrator", "Orchestrator"),
+  instrument_control: tr("仪器控制 IC", "Instrument control (IC)"),
+  experiment_design: tr("实验设计 XD", "Experiment design (XD)"),
+  data_processing: tr("数据处理 DP", "Data processing (DP)"),
+  literature: tr("文献 Lit", "Literature"),
+  paper_writing: tr("论文写作", "Paper writing"),
+  paper_review: tr("论文评审", "Paper review"),
+  chat: tr("主聊天", "Main chat"),
+  quickask: tr("查询助手", "Query assistant"),
+  voice: tr("语音", "Voice"),
   ocr: "OCR",
-  adhoc: "临时调用",
+  adhoc: tr("临时调用", "Ad hoc"),
 };
 
 function money(cost: number, currency: string): string {
@@ -58,21 +59,23 @@ function Totals({ data }: { data: any }) {
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       {currencies.length === 0 && (
         <Card>
-          <div className="text-sm text-mast-muted">本区间暂无花销</div>
+          <div className="text-sm text-mast-muted">{tr("本区间暂无花销", "No spend in this period")}</div>
         </Card>
       )}
       {currencies.map((cur) => {
         const t = byCur[cur];
         return (
           <Card key={cur}>
-            <div className="text-xs text-mast-muted">{cur} 花销</div>
+            <div className="text-xs text-mast-muted">{tr(`${cur} 花销`, `${cur} spend`)}</div>
             <div className="mt-1 font-mono text-2xl font-semibold text-mast-text">
               {money(t.cost, cur)}
             </div>
             <div className="mt-1 text-xs text-mast-muted">
-              {fmtInt(t.count)} 次调用
+              {tr(`${fmtInt(t.count)} 次调用`, `${fmtInt(t.count)} calls`)}
               {t.estimated_cost > 0 && (
-                <span className="ml-1 text-mast-warn">· 含估算 {money(t.estimated_cost, cur)}</span>
+                <span className="ml-1 text-mast-warn">
+                  · {tr("含估算", "incl. estimated")} {money(t.estimated_cost, cur)}
+                </span>
               )}
             </div>
           </Card>
@@ -80,11 +83,13 @@ function Totals({ data }: { data: any }) {
       })}
       {data.combined_cny != null && currencies.length > 1 && (
         <Card>
-          <div className="text-xs text-mast-muted">折算合计 ≈¥</div>
+          <div className="text-xs text-mast-muted">{tr("折算合计 ≈¥", "Converted total ≈¥")}</div>
           <div className="mt-1 font-mono text-2xl font-semibold text-mast-accent">
             ¥{Number(data.combined_cny).toFixed(2)}
           </div>
-          <div className="mt-1 text-xs text-mast-muted">按 1 USD ≈ {data.usd_to_cny} CNY 折算</div>
+          <div className="mt-1 text-xs text-mast-muted">
+            {tr(`按 1 USD ≈ ${data.usd_to_cny} CNY 折算`, `Converted at 1 USD ≈ ${data.usd_to_cny} CNY`)}
+          </div>
         </Card>
       )}
     </div>
@@ -111,9 +116,9 @@ function Breakdown({
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-mast-muted">
-                <th className="py-1 pr-2 font-normal">名称</th>
-                <th className="py-1 pr-2 text-right font-normal">花销</th>
-                <th className="py-1 pr-2 text-right font-normal">次数</th>
+                <th className="py-1 pr-2 font-normal">{tr("名称", "Name")}</th>
+                <th className="py-1 pr-2 text-right font-normal">{tr("花销", "Spend")}</th>
+                <th className="py-1 pr-2 text-right font-normal">{tr("次数", "Calls")}</th>
                 <th className="py-1 text-right font-normal">tokens (in/out)</th>
               </tr>
             </thead>
@@ -149,34 +154,34 @@ function Breakdown({
 
 // ── recent calls ─────────────────────────────────────────────────────────────
 function Recent({ events }: { events: any[] }) {
-  if (events.length === 0) return <div className="text-xs text-mast-muted">暂无调用记录</div>;
+  if (events.length === 0) return <div className="text-xs text-mast-muted">{tr("暂无调用记录", "No calls recorded")}</div>;
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-mast-muted">
-            <th className="py-1 pr-3 font-normal">时间</th>
-            <th className="py-1 pr-3 font-normal">类型</th>
-            <th className="py-1 pr-3 font-normal">模型</th>
-            <th className="py-1 pr-3 font-normal">来源</th>
-            <th className="py-1 pr-3 text-right font-normal">用量</th>
-            <th className="py-1 text-right font-normal">花销</th>
+            <th className="py-1 pr-3 font-normal">{tr("时间", "Time")}</th>
+            <th className="py-1 pr-3 font-normal">{tr("类型", "Type")}</th>
+            <th className="py-1 pr-3 font-normal">{tr("模型", "Model")}</th>
+            <th className="py-1 pr-3 font-normal">{tr("来源", "Source")}</th>
+            <th className="py-1 pr-3 text-right font-normal">{tr("用量", "Usage")}</th>
+            <th className="py-1 text-right font-normal">{tr("花销", "Spend")}</th>
           </tr>
         </thead>
         <tbody>
           {events.map((e, i) => (
             <tr key={i} className="border-t border-mast-border">
               <td className="whitespace-nowrap py-1 pr-3 text-xs text-mast-muted">
-                {new Date(e.ts * 1000).toLocaleString("zh-CN", { hour12: false })}
+                {new Date(e.ts * 1000).toLocaleString(langTag(), { hour12: false })}
               </td>
               <td className="py-1 pr-3 text-xs text-mast-text">{KIND_LABEL[e.kind] ?? e.kind}</td>
               <td className="py-1 pr-3 font-mono text-xs text-mast-text">{e.model}</td>
               <td className="py-1 pr-3 text-xs text-mast-muted">{SOURCE_LABEL[e.source] ?? e.source}</td>
               <td className="py-1 pr-3 text-right font-mono text-xs text-mast-muted">
                 {e.kind === "tts"
-                  ? `${fmtInt(e.chars)} 字`
+                  ? tr(`${fmtInt(e.chars)} 字`, `${fmtInt(e.chars)} chars`)
                   : e.kind === "asr"
-                    ? `${Math.round(e.seconds)} 秒`
+                    ? tr(`${Math.round(e.seconds)} 秒`, `${Math.round(e.seconds)} s`)
                     : `${fmtInt(e.input_tokens)}/${fmtInt(e.output_tokens)}`}
               </td>
               <td className="py-1 text-right font-mono text-xs text-mast-text">
@@ -215,10 +220,11 @@ function PricingEditor() {
       return data;
     },
     onSuccess: () => {
-      toast("价格已保存（后续调用按新价计费）", "ok");
+      toast(tr("价格已保存（后续调用按新价计费）", "Prices saved (later calls are billed at the new prices)"), "ok");
       qc.invalidateQueries({ queryKey: ["usage"] });
     },
-    onError: (e) => toast(`保存失败：${String((e as Error)?.message ?? e)}`, "err"),
+    onError: (e) =>
+      toast(tr(`保存失败：${String((e as Error)?.message ?? e)}`, `Save failed: ${String((e as Error)?.message ?? e)}`), "err"),
   });
 
   const setField = (i: number, field: string, val: string) =>
@@ -230,18 +236,28 @@ function PricingEditor() {
   return (
     <div>
       <p className="mb-2 text-xs text-mast-muted">
-        单价均为<strong>估算默认值</strong>（各家随档位 / 上下文 / 缓存变动）。你付账，你改价——改后仅影响<strong>之后</strong>的调用记账。LLM/OCR 按每百万 token；TTS 按每百万字符；ASR 按每分钟。
+        {tr("单价均为", "All unit prices are ")}
+        <strong>{tr("估算默认值", "estimated defaults")}</strong>
+        {tr(
+          "（各家随档位 / 上下文 / 缓存变动）。你付账，你改价——改后仅影响",
+          " (providers vary them by tier / context / caching). You pay, so you can edit them; changes only affect billing of ",
+        )}
+        <strong>{tr("之后", "later")}</strong>
+        {tr(
+          "的调用记账。LLM/OCR 按每百万 token；TTS 按每百万字符；ASR 按每分钟。",
+          " calls. LLM/OCR are per million tokens; TTS per million characters; ASR per minute.",
+        )}
       </p>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-mast-muted">
-              <th className="py-1 pr-2 font-normal">模型</th>
-              <th className="py-1 pr-2 font-normal">币种</th>
-              <th className="py-1 pr-2 text-right font-normal">输入/1M</th>
-              <th className="py-1 pr-2 text-right font-normal">输出/1M</th>
-              <th className="py-1 pr-2 text-right font-normal">字符/1M</th>
-              <th className="py-1 text-right font-normal">每分钟</th>
+              <th className="py-1 pr-2 font-normal">{tr("模型", "Model")}</th>
+              <th className="py-1 pr-2 font-normal">{tr("币种", "Currency")}</th>
+              <th className="py-1 pr-2 text-right font-normal">{tr("输入/1M", "Input/1M")}</th>
+              <th className="py-1 pr-2 text-right font-normal">{tr("输出/1M", "Output/1M")}</th>
+              <th className="py-1 pr-2 text-right font-normal">{tr("字符/1M", "Chars/1M")}</th>
+              <th className="py-1 text-right font-normal">{tr("每分钟", "Per minute")}</th>
             </tr>
           </thead>
           <tbody>
@@ -271,7 +287,7 @@ function PricingEditor() {
           disabled={save.isPending}
           className="rounded-md border border-mast-accent bg-mast-accent-soft px-3 py-1.5 text-sm font-medium text-mast-accent hover:opacity-90 disabled:opacity-50"
         >
-          {save.isPending ? "保存中…" : "保存价格表"}
+          {save.isPending ? tr("保存中…", "Saving…") : tr("保存价格表", "Save price book")}
         </button>
       </div>
       {node}
@@ -311,19 +327,30 @@ export default function UsagePage() {
       return data;
     },
     onSuccess: (d) => {
-      toast(`已清空 ${d?.deleted ?? 0} 条记录`, "ok");
+      toast(tr(`已清空 ${d?.deleted ?? 0} 条记录`, `Cleared ${d?.deleted ?? 0} records`), "ok");
       setConfirmReset(false);
       qc.invalidateQueries({ queryKey: ["usage"] });
     },
-    onError: (e) => toast(`重置失败：${String((e as Error)?.message ?? e)}`, "err"),
+    onError: (e) =>
+      toast(tr(`重置失败：${String((e as Error)?.message ?? e)}`, `Reset failed: ${String((e as Error)?.message ?? e)}`), "err"),
   });
 
   return (
     <div>
-      <Section title="用量·花销">
+      <Section title={tr("用量·花销", "Usage & cost")}>
         <p className="mb-4 text-sm text-mast-muted">
-          <strong>接口花销记录器</strong> — 统计每一次付费接口调用的花销：全 Agent + 主聊天的 LLM、语音 TTS/ASR、文献 OCR。
-          金额按<strong>可编辑的价格表</strong>估算，不同币种分开合计（¥ 与 $）。带 <Badge tone="WARN">≈</Badge> 表示该项用了兜底/未定价，数字仅供参考。
+          <strong>{tr("接口花销记录器", "API cost recorder")}</strong>
+          {tr(
+            " — 统计每一次付费接口调用的花销：全 Agent + 主聊天的 LLM、语音 TTS/ASR、文献 OCR。金额按",
+            " — tracks the cost of every paid API call: LLM calls from all agents and the main chat, voice TTS/ASR, and literature OCR. Amounts are estimated from an ",
+          )}
+          <strong>{tr("可编辑的价格表", "editable price book")}</strong>
+          {tr("估算，不同币种分开合计（¥ 与 $）。带 ", "; currencies are totalled separately (¥ and $). A ")}
+          <Badge tone="WARN">≈</Badge>
+          {tr(
+            " 表示该项用了兜底/未定价，数字仅供参考。",
+            " badge means the item used a fallback or unpriced rate, so the number is indicative only.",
+          )}
         </p>
 
         {/* range selector */}
@@ -347,19 +374,19 @@ export default function UsagePage() {
           <div className="ml-auto">
             {confirmReset ? (
               <span className="flex items-center gap-2 text-sm">
-                <span className="text-mast-warn">确认清空全部记录？</span>
+                <span className="text-mast-warn">{tr("确认清空全部记录？", "Clear all records?")}</span>
                 <button
                   onClick={() => reset.mutate()}
                   disabled={reset.isPending}
                   className="rounded-md border border-mast-danger-border bg-mast-danger-bg px-2 py-1 text-xs text-mast-danger"
                 >
-                  确认重置
+                  {tr("确认重置", "Confirm reset")}
                 </button>
                 <button
                   onClick={() => setConfirmReset(false)}
                   className="rounded-md border border-mast-border px-2 py-1 text-xs text-mast-muted"
                 >
-                  取消
+                  {tr("取消", "Cancel")}
                 </button>
               </span>
             ) : (
@@ -367,7 +394,7 @@ export default function UsagePage() {
                 onClick={() => setConfirmReset(true)}
                 className="rounded-md border border-mast-border px-2 py-1 text-xs text-mast-muted hover:text-mast-text"
               >
-                清空记录
+                {tr("清空记录", "Clear records")}
               </button>
             )}
           </div>
@@ -382,14 +409,18 @@ export default function UsagePage() {
             <Totals data={summary.data} />
 
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <Breakdown title="按供应商 Provider" rows={summary.data.by_provider ?? []} />
-              <Breakdown title="按类型 Kind" rows={summary.data.by_kind ?? []} labelMap={KIND_LABEL} />
-              <Breakdown title="按模型 Model" rows={summary.data.by_model ?? []} />
-              <Breakdown title="按来源 Agent/来源" rows={summary.data.by_source ?? []} labelMap={SOURCE_LABEL} />
+              <Breakdown title={tr("按供应商 Provider", "By provider")} rows={summary.data.by_provider ?? []} />
+              <Breakdown title={tr("按类型 Kind", "By kind")} rows={summary.data.by_kind ?? []} labelMap={KIND_LABEL} />
+              <Breakdown title={tr("按模型 Model", "By model")} rows={summary.data.by_model ?? []} />
+              <Breakdown
+                title={tr("按来源 Agent/来源", "By source (agent)")}
+                rows={summary.data.by_source ?? []}
+                labelMap={SOURCE_LABEL}
+              />
             </div>
 
             <Card>
-              <div className="mb-2 text-sm font-medium text-mast-text">最近调用</div>
+              <div className="mb-2 text-sm font-medium text-mast-text">{tr("最近调用", "Recent calls")}</div>
               {recent.isPending ? <Spinner /> : recent.isError ? (
                 <ErrorNote error={recent.error} />
               ) : (
@@ -397,7 +428,7 @@ export default function UsagePage() {
               )}
             </Card>
 
-            <Accordion title="价格表 Pricing（可编辑 · 估算默认值）" defaultOpen={false}>
+            <Accordion title={tr("价格表 Pricing（可编辑 · 估算默认值）", "Price book (editable · estimated defaults)")} defaultOpen={false}>
               <PricingEditor />
             </Accordion>
           </div>

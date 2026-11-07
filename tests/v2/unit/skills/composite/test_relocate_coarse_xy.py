@@ -1,10 +1,43 @@
-"""RelocateCoarseXY verifies clearance before moving the sample stage.
+"""RelocateCoarseXY: the guarded way to slide the sample stage to fresh surface.
 
-Synthetic tests exercise pressure, drive settings, direction, motion monitoring
-and completed-movement bookkeeping. The model ramps Z over successive polls
-and gives the motor a response independent of the configured direction.
-Reversing configuration must reverse the verdict with equal displacement
-magnitude; waiting a fixed time cannot substitute for convergence."""
+The gap this closes: before an xy move, the tip must be retracted by a known
+number of coarse steps to avoid a crash — nothing else enforced that.
+
+``MotorMove(direction='x+')`` checks only that the FINE-Z PIEZO is at its high
+limit — one or two microns, and the check passes when the state is unknown. What
+a sliding stage actually presents is sample tilt, vertical runout and the tip's
+own length: tens of microns. Nothing else was checked either: not the chamber
+pressure, not the drive voltage, nothing during the move, and no record of where
+the stage had already been.
+
+Every test below is one of those gaps, asserted as a REFUSAL rather than as a
+happy path, because a relocation that proceeds when it should not is the failure
+that costs a tip.
+
+WHY THE FAKE RIG HAS PHYSICS
+=========================================
+A fake rig without physics cannot catch a broken clearance self-check. The stand-in
+answered ``ZCtrl_ZPosGet`` with a CONSTANT, so the Z piezo was a rig on which
+feedback arrives instantly and never moves — the one rig on which "sleep 1.5 s,
+then read" is correct. On a real machine the loop needs seconds to find the
+surface, both readings were taken mid-ramp, and the verdict was a measure of the
+wait rather than of the gap. Reversing ``retract_motor_dir`` did not reverse the
+answer, which is the definition of not measuring the thing.
+
+So ``_Rig`` models the two facts a constant cannot:
+
+  * **Z takes time.** The piezo ramps toward its resting place a bounded amount
+    per poll, so any check that reads too early reads a number in transit.
+  * **The motor has a TRUE direction**, independent of what the config claims.
+    ``away_code`` is the rig's wiring; ``retract_motor_dir`` is the operator's
+    belief about it. Making them disagree is the only way to test a guard whose
+    entire job is to catch that disagreement.
+
+The load-bearing test is ``test_reversing_the_configured_direction_reverses_the
+_verdict``. A check that fails in one direction only cannot distinguish "the
+config is wrong" from "the check is broken" — which is exactly how the defect
+hid for as long as it did.
+"""
 from __future__ import annotations
 
 import pytest
@@ -194,7 +227,8 @@ def _rig(monkeypatch):
     ip.set_profile({"xy_prewithdraw_steps": 100, "xy_move_chunk_steps": 50,
                     "xy_site_spacing_steps": 200, "xy_axis_step_budget": 5000,
                     "z_recede_min_nm": 1.0, "retract_motor_dir": "z+",
-                    "z_extend_sign": "+1"})
+                    "z_extend_sign": "+1",
+                    "vacuum_interlock_mode": "gauge_or_attest"})
     coarse_drive.set_persist_sink(None)
     coarse_drive.declare(200.0)
     vac.set_pressure_source(lambda: vac.PressureSample(
@@ -384,7 +418,15 @@ def test_the_piezo_is_withdrawn_before_every_coarse_step():
 # ── The self-check that has to be able to answer BOTH ways ──────────────────
 
 def test_reversing_the_configured_direction_reverses_the_verdict():
-    """On a fixed synthetic model, reversing retract_motor_dir must reverse the verdict while preserving displacement magnitude."""
+    """THE acceptance criterion, and the one the old code could not meet.
+
+    Same rig, same wiring, same everything — only ``retract_motor_dir`` flips.
+    An earlier check returned "approaching" both ways, with only
+    the magnitude changing, because both numbers were read
+    off a ramp that had not finished. A check that fails in one direction only
+    cannot tell a miswired rig from a broken check, so it must be able to say
+    BOTH words on demand — otherwise "approaching" carries no information.
+    """
     from mast.core import instrument_profile as ip
 
     verdicts, dz = {}, {}
@@ -414,12 +456,16 @@ def test_reversing_the_configured_direction_reverses_the_verdict():
     #   same magnitude, opposite sign  → the check is measuring a DISPLACEMENT
     #   different magnitude, no flip   → it is measuring the RAMP
     #
-    # Equal synthetic steps in opposite directions must have equal magnitudes.
+    # The second line is not hypothetical: it is what the real machine returned
+    # earlier (both "approaching" with different magnitudes). One coarse step is
+    # one coarse step whichever way it points, so the magnitudes MUST agree —
+    # and that makes this assertion a test of whether the judge works at all,
+    # not merely of whether it passed.
     assert dz["z+"] == pytest.approx(-dz["z-"], rel=1e-9), (
         f"|dz| differs between directions ({dz['z+']*1e9:.1f} nm vs "
         f"{dz['z-']*1e9:.1f} nm). One coarse step is the same distance either "
         "way; unequal magnitudes mean the number is coming from something other "
-        "than the completed step, such as an unfinished ramp."
+        "than the step — on the real rig it was the position of an unfinished ramp."
     )
 
 
@@ -829,29 +875,38 @@ def test_a_failed_reapproach_says_the_move_already_happened():
 
 
 def test_the_failure_message_does_not_narrate_the_bookkeeping():
-    """The phase reports completed movement, not a ledger update performed later by a separate component."""
+    """It used to hardcode 「坐标代次已经推进」—— and on the instrument it had not.
+
+    The recorder runs elsewhere, after this returns, and can fail on its own.
+    A phase may state what it WATCHED (the stage moved N steps); it may not
+    state what some other component will do about it afterwards."""
     res = RelocateCoarseXY().run_composite(_failed_reapproach(),
-                                           _params(reapproach=True, steps=240))
+                                           _params(reapproach=True, steps=301))
     err = res.error or ""
     assert "坐标代次已经推进" not in err
-    assert "240 步" in err, "说了「移动完成」就要说清楚移动了多少"
+    assert "301 步" in err, "说了「移动完成」就要说清楚移动了多少"
     assert "get_coarse_map" in err, "要给一个能查证的去处,而不是让人信这句话"
 
 
 # ── the ledger survives a failure that came AFTER the move ──────────────────
 
 def test_a_failed_reapproach_does_not_erase_the_lateral_move_from_the_ledger():
-    """A failed re-approach must still pass the completed synthetic lateral displacement to the recorder."""
+    """A case where 301 steps physically happened, the composite failed
+    at re-approach, and the odometer / coarse map / coord_epoch were all left
+    describing the position the sample had LEFT.
+
+    This is the whole point of the fix, asserted end-to-end: the composite's own
+    failed result must still be admissible to the recorder."""
     from mast.core.runtime import lateral_coarse_move_info
 
-    params = _params(reapproach=True, steps=240)
+    params = _params(reapproach=True, steps=301)
     res = RelocateCoarseXY().run_composite(_failed_reapproach(), params)
     assert res.success is False
     info = lateral_coarse_move_info(
         {"skill": "RelocateCoarseXY", "success": res.success,
          "data": res.data, "params": params})
     assert info is not None, "换区实际发生了,账本却收不到"
-    assert info["steps"] == 240
+    assert info["steps"] == 301
     assert info["partial"] is True, "记下来了,但不能记成一次干净的换区"
 
 
@@ -859,7 +914,7 @@ def test_the_ledger_is_fed_the_outcome_not_the_request():
     """Watchdog abort mid-move: the odometer must get the steps actually taken.
 
     ``xy_move_chunk_steps`` is 50 by default, so a rig that trips the current
-    watch after the first chunk moved 50 of the 240 asked for."""
+    watch after the first chunk moved 50 of the 301 asked for."""
     from mast.core.runtime import lateral_coarse_move_info
 
     ctx = _healthy_rig()
@@ -871,11 +926,11 @@ def test_the_ledger_is_fed_the_outcome_not_the_request():
         return 1e-9 if ctx.lateral_moves >= 1 else None
 
     ctx.current_hook = _hook
-    params = _params(reapproach=True, steps=240)
+    params = _params(reapproach=True, steps=301)
     res = RelocateCoarseXY().run_composite(ctx, params)
     assert res.success is False
     taken = res.data["lateral_steps_taken"]
-    assert 0 < taken < 240, f"expected a partial move, got {taken}"
+    assert 0 < taken < 301, f"expected a partial move, got {taken}"
     info = lateral_coarse_move_info(
         {"skill": "RelocateCoarseXY", "success": False,
          "data": res.data, "params": params})
@@ -915,7 +970,11 @@ def test_dry_run_exercises_every_phase_without_commanding_a_lateral_move():
 
 
 def test_dry_run_never_ages_a_single_coordinate():
-    """Intended dry-run steps must not advance the coordinate epoch or create a coarse-map position."""
+    """A rehearsal must not advance ``coord_epoch`` or add a
+    coarse-map site: it reports the steps it WOULD have taken in ``steps``, and
+    the recorder read that key without ever asking whether anything moved. A run
+    whose entire purpose is to touch no hardware was invalidating every recorded
+    coordinate on the sample."""
     from mast.core.runtime import lateral_coarse_move_info
 
     params = _params(dry_run=True, steps=120)
@@ -942,3 +1001,58 @@ def test_an_invalid_axis_or_direction_is_refused_loudly(bad):
     res = RelocateCoarseXY().run_composite(ctx, _params(**bad))
     assert res.success is False
     assert not ctx.calls, "must not touch the instrument on a malformed request"
+
+
+# ── Motor group (the Group argument was a literal 0) ────────────
+#
+# A PMD4 drives several motor groups (e.g. STM coarse + mirrors / beam
+# deflection / lenses). Every coarse step of this composite must use the
+# configured STM group — and, with no nanonis_motor_groups.json, exactly the
+# old group 0.
+
+def _motor_groups(tmp_path, monkeypatch, body):
+    from mast.instruments import motor_groups as mg
+
+    p = tmp_path / mg.CONFIG_FILENAME
+    if body is not None:
+        p.write_text(body, encoding="utf-8")
+    monkeypatch.setattr(mg, "config_path", lambda: p)
+    mg.reset_for_tests()
+    return mg
+
+
+def test_every_coarse_step_uses_group_0_without_a_motor_group_file(tmp_path, monkeypatch):
+    _motor_groups(tmp_path, monkeypatch, None)
+    ctx = _healthy_rig()
+    res = RelocateCoarseXY().run_composite(ctx, _params())
+    assert res.success, res.error
+    assert ctx.lateral() and {c[1][2] for c in ctx.moves()} == {0}
+
+
+def test_every_coarse_step_uses_the_configured_stm_group(tmp_path, monkeypatch):
+    _motor_groups(tmp_path, monkeypatch, '{"stm_coarse_group": 2, "groups": []}')
+    ctx = _healthy_rig()
+    res = RelocateCoarseXY().run_composite(ctx, _params())
+    assert res.success, res.error
+    assert {c[1][2] for c in ctx.moves()} == {2}
+
+
+def test_an_unreadable_motor_group_file_refuses_before_anything_moves(tmp_path, monkeypatch):
+    _motor_groups(tmp_path, monkeypatch, "{not json")
+    ctx = _healthy_rig()
+    res = RelocateCoarseXY().run_composite(ctx, _params())
+    assert res.success is False
+    assert not ctx.moves(), "a broken group file must not fall back to group 0"
+    assert "nanonis_motor_groups.json" in (res.error or "")
+
+
+def test_an_unverified_optical_drive_restore_blocks_the_relocation(tmp_path, monkeypatch):
+    mg = _motor_groups(tmp_path, monkeypatch, None)
+    mg.latch_drive_not_restored(expected=(300.0, 50.0), last_read=None, reason="test")
+    try:
+        ctx = _healthy_rig()       # reads back 1000 Hz / 120 V ≠ the latched 300 / 50
+        res = RelocateCoarseXY().run_composite(ctx, _params())
+        assert res.success is False and not ctx.moves()
+        assert "还原" in (res.error or "")
+    finally:
+        mg.reset_for_tests()

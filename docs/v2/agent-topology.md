@@ -2,7 +2,7 @@
 
 MAST connects research planning, instrument execution, data analysis and writing
 through an orchestrator and shared artifact contracts. This map describes the
-retained implementation in the public 6.5.0 source edition. Start with
+retained implementation in the public source edition. Start with
 [the repository guide](../../AGENTS.md) for execution boundaries and validation.
 Paths in code spans below are relative to the repository root.
 

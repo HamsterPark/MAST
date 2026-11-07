@@ -24,6 +24,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -40,35 +41,35 @@ class LocateStepEdge(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "在一张 .sxm 的形貌通道里找出最主要的那道台阶边,报出边上一点的扫描坐标"
+                tr("在一张 .sxm 的形貌通道里找出最主要的那道台阶边,报出边上一点的扫描坐标"
                 "与边的方向。只读文件,不碰硬件。verdict 取 'step_edge' / 'no_step' / "
                 "'undecidable'。一帧里分不出两个够大的台面、或者边不直(弯边、几道台阶叠在"
                 "一起),就回 undecidable —— 编出来的一条边会让整排谱落在错地方,而每条谱"
-                "都会「成功」。角度同时给图像坐标与扫描坐标两个版本。"
+                "都会「成功」。角度同时给图像坐标与扫描坐标两个版本。", "Find the dominant step edge in the topography channel of a .sxm, and report the scan coordinates of a point on the edge and the edge direction. Reads the file only, does not touch hardware. verdict is 'step_edge' / 'no_step' / 'undecidable'. If a frame does not show two terraces large enough, or the edge is not straight (curved edge, several steps bunched together), it returns undecidable - an invented edge would put a whole row of spectra in the wrong place, and every spectrum would \"succeed\". The angle is given in both image coordinates and scan coordinates.")
             ),
             estimated_duration_s=3.0,
             composition_level=2,
             tags=["analysis", "step", "terrace", "edge", "geometry", "scan", "read"],
             parameters=[
                 ParameterSpec(name="scan_path", type="str",
-                              description=".sxm 扫描文件路径。", required=True),
+                              description=tr(".sxm 扫描文件路径。", "Path of the .sxm scan file."), required=True),
                 ParameterSpec(name="channel", type="str",
-                              description="用哪一路通道,形貌一般是 Z。",
+                              description=tr("用哪一路通道,形貌一般是 Z。", "Which channel to use; topography is usually Z."),
                               required=False, default="Z"),
                 ParameterSpec(name="direction", type="str",
-                              description="用正扫还是反扫的那一幅。",
+                              description=tr("用正扫还是反扫的那一幅。", "Use the forward or the backward scan image."),
                               required=False, default="forward",
                               allowed_values=["forward", "backward"]),
                 # 刻意没有 default:缺席就用判据自己的值,写死在这里等于把它抄了两遍。
                 ParameterSpec(name="edge_sigma", type="float",
                               description=(
-                                  "边候选的门限:比梯度中位数高出这么多个稳健 σ(缺省 6)。"
-                                  "调小能找到更弱的边,代价是噪声更容易冒充台阶。"),
+                                  tr("边候选的门限:比梯度中位数高出这么多个稳健 σ(缺省 6)。"
+                                  "调小能找到更弱的边,代价是噪声更容易冒充台阶。", "Edge candidate threshold: this many robust sigmas above the gradient median (default 6). Lowering it finds weaker edges, at the cost of noise more easily posing as a step.")),
                               required=False, min_value=1.0, max_value=50.0),
                 ParameterSpec(name="max_curvature", type="float",
                               description=(
-                                  "边界像素离拟合直线的 RMS 距离上限,以帧短边为单位"
-                                  "(0.06 = 6%)。超过就判 undecidable。"),
+                                  tr("边界像素离拟合直线的 RMS 距离上限,以帧短边为单位"
+                                  "(0.06 = 6%)。超过就判 undecidable。", "Upper limit of the RMS distance of boundary pixels from the fitted line, in units of the frame's short side (0.06 = 6%). Beyond it the verdict is undecidable.")),
                               required=False, min_value=0.005, max_value=0.5),
             ],
         )
@@ -79,25 +80,25 @@ class LocateStepEdge(BaseSkill):
 
         path = str(params.get("scan_path") or "")
         if not path or not Path(path).exists():
-            return SkillResult(skill_name=_NAME, success=False, error=f"文件不存在: {path}")
+            return SkillResult(skill_name=_NAME, success=False, error=tr(f"文件不存在: {path}", f"File does not exist: {path}"))
         try:
             import numpy as np
 
             from mast.io.nanonis_files import read_sxm, sxm_oriented_frames
             from mast.vision.step_edge import locate_step_edge
         except ImportError as exc:
-            return SkillResult(skill_name=_NAME, success=False, error=f"缺依赖: {exc}")
+            return SkillResult(skill_name=_NAME, success=False, error=tr(f"缺依赖: {exc}", f"Missing dependency: {exc}"))
         try:
             scan = read_sxm(path)
         except Exception as exc:  # noqa: BLE001
-            return SkillResult(skill_name=_NAME, success=False, error=f".sxm 读取失败: {exc}")
+            return SkillResult(skill_name=_NAME, success=False, error=tr(f".sxm 读取失败: {exc}", f"Failed to read .sxm: {exc}"))
 
         channel = str(params.get("channel") or "Z")
         fr = sxm_oriented_frames(scan, channel)
         arr = fr.get(str(params.get("direction") or "forward"))
         if arr is None:
             return SkillResult(skill_name=_NAME, success=False,
-                               error=f"文件里没有可用的 {channel!r} 通道数据")
+                               error=tr(f"文件里没有可用的 {channel!r} 通道数据", f"The file has no usable {channel!r} channel data"))
         arr = np.asarray(arr, dtype=float)
 
         kw = {}
@@ -131,13 +132,13 @@ class LocateStepEdge(BaseSkill):
             data["edge_x_m"] = cx_m + (float(res.x_px) - (nx - 1) / 2.0) * float(nm_per_px) * 1e-9
             data["edge_y_m"] = cy_m - (float(res.y_px) - (ny - 1) / 2.0) * float(nm_per_px) * 1e-9
         if res.verdict == "step_edge":
-            summary = (f"台阶边过 ({data.get('edge_x_m', 0) * 1e9:.1f}, "
+            summary = (tr(f"台阶边过 ({data.get('edge_x_m', 0) * 1e9:.1f}, "
                        f"{data.get('edge_y_m', 0) * 1e9:.1f}) nm,扫描系方向 "
-                       f"{res.angle_scan_deg:.1f}°,高 {res.step_height_m * 1e12:.0f} pm")
+                       f"{res.angle_scan_deg:.1f}°,高 {res.step_height_m * 1e12:.0f} pm", f"Step edge passes through ({data.get('edge_x_m', 0) * 1e9:.1f}, {data.get('edge_y_m', 0) * 1e9:.1f}) nm, direction in scan frame {res.angle_scan_deg:.1f} deg, height {res.step_height_m * 1e12:.0f} pm"))
         elif res.verdict == "no_step":
-            summary = "这一帧里没有两个够大的台面 —— 没有台阶边可报"
+            summary = tr("这一帧里没有两个够大的台面 —— 没有台阶边可报", "There are no two large enough terraces in this frame - no step edge to report")
         else:
-            summary = f"判不了:{'、'.join(res.reasons) or '未知'}"
+            summary = tr(f"判不了:{'、'.join(res.reasons) or '未知'}", f"Cannot decide: {', '.join(res.reasons) or 'unknown'}")
         return SkillResult(skill_name=_NAME, success=True, data=data, summary=summary)
 
 

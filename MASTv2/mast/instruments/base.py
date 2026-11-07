@@ -17,25 +17,49 @@ philosophy: hard checks live below the LLM, not beside it.
 Threading: one controller = one serial link = one lock. All axis calls on
 a controller serialise through ``controller._io_lock`` so concurrent skill
 threads cannot interleave protocol transactions.
+
+Abort: every wait loop (settle, homing) takes an optional ``check_abort``.
+Both predicate shapes used in MAST are accepted — ``ExecutionContext.check_abort``
+*returns* True, the satellite hub's contract (§6) *raises*. Either way the axis is
+stopped before control returns, so an operator stop never leaves a stage
+walking towards a target nobody wants any more.
+
+Beyond move / stop / position (manual control panel, contract §13.1): a driver
+declares in :attr:`MotionAxis.SUPPORTS` what else its vendor documents —
+``home``, ``velocity`` (:meth:`MotionAxis.set_velocity`, refused above the
+configured ``max_velocity``, never clamped), ``servo``
+(:meth:`MotionAxis.set_servo`) — and :meth:`MotionAxis.status_details` reports
+whatever the controller can answer. Anything undocumented raises
+:class:`OperationNotSupported` instead of being guessed.
 """
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from typing import Callable
 
 __all__ = [
     "InstrumentError",
     "InstrumentUnavailable",
     "TravelLimitError",
     "MotionTimeout",
+    "MotionAborted",
+    "OperationNotSupported",
+    "AbortCheck",
     "AxisConfig",
     "AxisStatus",
     "MotionAxis",
     "MotionController",
+    "serial_open_hint",
 ]
+
+#: An abort predicate: returns truthy to abort, or raises (the exception is
+#: re-raised after the motion has been stopped). ``None`` = never abort.
+AbortCheck = Callable[[], object]
 
 
 # ── errors ────────────────────────────────────────────────────────────────
@@ -53,12 +77,32 @@ class InstrumentUnavailable(InstrumentError):
     """
 
 
+def serial_open_hint(port: object) -> str:
+    """Who may be holding *port* (``core.port_guard``), appended to the error of
+    an open that FAILED — asked only afterwards, never by opening the port. ``""``
+    when nothing is known; never raises (a hint must not change the error path)."""
+    try:
+        from mast.core.port_guard import serial_open_hint as _hint
+
+        return _hint(str(port or ""))
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 class TravelLimitError(InstrumentError):
     """Requested target lies outside the configured soft travel limits."""
 
 
 class MotionTimeout(InstrumentError):
     """Axis did not reach the target / finish homing within the deadline."""
+
+
+class MotionAborted(InstrumentError):
+    """The caller's abort predicate fired; the axis was told to stop first."""
+
+
+class OperationNotSupported(InstrumentError):
+    """This driver has no documented way to do it — not a parameter problem."""
 
 
 # ── configuration & status ────────────────────────────────────────────────
@@ -81,6 +125,9 @@ class AxisConfig:
     unit: str = "um"          # native unit label, documentation + UI only
     default_speed: float | None = None   # native unit / s, driver-specific
     settle_s: float = 0.0     # extra settle wait after on-target, seconds
+    #: native unit / s: :meth:`MotionAxis.set_velocity` refuses anything above it
+    #: (None = only the driver's documented bound applies)
+    max_velocity: float | None = None
 
     def __post_init__(self) -> None:
         if not (self.min_pos < self.max_pos):
@@ -88,6 +135,10 @@ class AxisConfig:
                 f"axis {self.name!r}: min_pos {self.min_pos} must be < "
                 f"max_pos {self.max_pos}"
             )
+        if self.max_velocity is not None and not (
+                math.isfinite(self.max_velocity) and self.max_velocity > 0):
+            raise ValueError(
+                f"axis {self.name!r}: max_velocity {self.max_velocity} must be > 0")
 
 
 @dataclass
@@ -111,6 +162,12 @@ class MotionAxis(ABC):
     spirit — drivers must NOT override ``move_abs`` / ``move_rel``.
     """
 
+    #: what kind of axis this is: "linear" | "rotation" | "openloop"
+    KIND = "linear"
+    #: documented operations beyond move / stop / position: "home", "velocity",
+    #: "servo". The manual panel offers exactly these (tests pin each against
+    #: the driver's overrides).
+    SUPPORTS: frozenset[str] = frozenset()
     #: default polling cadence for wait-until-on-target loops (seconds)
     POLL_INTERVAL_S = 0.05
     #: default motion deadline when the caller gives none (seconds)
@@ -128,16 +185,20 @@ class MotionAxis(ABC):
         *,
         wait: bool = True,
         timeout: float | None = None,
+        check_abort: AbortCheck | None = None,
     ) -> AxisStatus:
         """Move to *position* (native unit). Raises :class:`TravelLimitError`
         if the target is outside the soft limits; blocks until on-target
-        when ``wait`` (raising :class:`MotionTimeout` on deadline)."""
+        when ``wait`` (raising :class:`MotionTimeout` on deadline, or
+        :class:`MotionAborted` once ``check_abort`` fires — after stopping)."""
         target = float(position)
         self._check_limits(target)
+        self._abort_point(check_abort, f"move to {target}", stop=False)
         with self._controller._io_lock:
             self._move_abs_raw(target)
         if wait:
-            return self.wait_until_settled(target, timeout=timeout)
+            return self.wait_until_settled(target, timeout=timeout,
+                                           check_abort=check_abort)
         return self.get_status()
 
     def move_rel(
@@ -146,11 +207,13 @@ class MotionAxis(ABC):
         *,
         wait: bool = True,
         timeout: float | None = None,
+        check_abort: AbortCheck | None = None,
     ) -> AxisStatus:
         """Relative move. Resolved against a fresh position reading so the
         limit check covers the true final target."""
         current = self.get_position()
-        return self.move_abs(current + float(delta), wait=wait, timeout=timeout)
+        return self.move_abs(current + float(delta), wait=wait, timeout=timeout,
+                             check_abort=check_abort)
 
     def get_position(self) -> float:
         with self._controller._io_lock:
@@ -166,14 +229,61 @@ class MotionAxis(ABC):
         with self._controller._io_lock:
             self._stop_raw()
 
-    def home(self, *, wait: bool = True, timeout: float | None = None) -> AxisStatus:
+    def status_details(self) -> dict:
+        """Everything the controller can report about this axis: the
+        :class:`AxisStatus` fields plus the driver's extras (velocity, servo,
+        limit switches …). A field the controller cannot answer is left out;
+        nothing here moves the axis."""
+        st = self.get_status()
+        out: dict = {"position": st.position, "moving": st.moving,
+                     "on_target": st.on_target, "homed": st.homed}
+        with self._controller._io_lock:
+            try:
+                out.update(self._status_details_raw() or {})
+            except InstrumentUnavailable:
+                raise
+            except Exception as exc:  # noqa: BLE001 - the position read above stands
+                out["details_error"] = f"{type(exc).__name__}: {exc}"
+        return out
+
+    def set_velocity(self, velocity: float) -> float | None:
+        """Set the closed-loop velocity (native unit / s) for later moves.
+        Refused — never clamped — when not > 0 or above the configured
+        ``max_velocity``. Returns the value read back (None if the controller
+        cannot read it back)."""
+        v = float(velocity)
+        cfg = self.config
+        if not (math.isfinite(v) and v > 0):
+            raise InstrumentError(f"axis {cfg.name!r}: velocity {velocity} must be > 0")
+        if cfg.max_velocity is not None and v > cfg.max_velocity:
+            raise InstrumentError(
+                f"axis {cfg.name!r}: velocity {v:g} {cfg.unit}/s above the configured "
+                f"max_velocity {cfg.max_velocity:g} {cfg.unit}/s — refused (not clamped)")
+        with self._controller._io_lock:
+            return self._set_velocity_raw(v)
+
+    def set_servo(self, on: bool) -> bool | None:
+        """Closed-loop servo on/off. Returns the state read back (None if the
+        controller cannot read it back)."""
+        with self._controller._io_lock:
+            return self._set_servo_raw(bool(on))
+
+    def home(
+        self,
+        *,
+        wait: bool = True,
+        timeout: float | None = None,
+        check_abort: AbortCheck | None = None,
+    ) -> AxisStatus:
         """Reference/zero the axis (drivers without a homing concept raise
         InstrumentError). Position afterwards is defined by the hardware."""
+        self._abort_point(check_abort, "homing", stop=False)
         with self._controller._io_lock:
             self._home_raw()
         if wait:
             deadline = time.monotonic() + (timeout or self.DEFAULT_TIMEOUT_S)
             while time.monotonic() < deadline:
+                self._abort_point(check_abort, "homing")
                 status = self.get_status()
                 if not status.moving and (status.homed is not False):
                     return status
@@ -185,7 +295,11 @@ class MotionAxis(ABC):
         return self.get_status()
 
     def wait_until_settled(
-        self, target: float, *, timeout: float | None = None
+        self,
+        target: float,
+        *,
+        timeout: float | None = None,
+        check_abort: AbortCheck | None = None,
     ) -> AxisStatus:
         """Poll until the controller reports on-target/not-moving, then apply
         the configured extra ``settle_s``. Falls back to a position-delta
@@ -193,6 +307,7 @@ class MotionAxis(ABC):
         deadline = time.monotonic() + (timeout or self.DEFAULT_TIMEOUT_S)
         status = self.get_status()
         while time.monotonic() < deadline:
+            self._abort_point(check_abort, f"move to {target}")
             status = self.get_status()
             if status.on_target is True:
                 break
@@ -206,9 +321,49 @@ class MotionAxis(ABC):
                 f"(pos={status.position}, moving={status.moving})"
             )
         if self.config.settle_s > 0:
-            time.sleep(self.config.settle_s)
+            self._sleep_checked(self.config.settle_s, check_abort,
+                                f"settle after move to {target}")
             status = self.get_status()
         return status
+
+    # -- abort plumbing --------------------------------------------------------
+
+    def _abort_point(self, check_abort: AbortCheck | None, what: str, *,
+                     stop: bool = True) -> None:
+        """Consult *check_abort*; on abort stop the axis (unless nothing was
+        started yet) and raise. A predicate that raises is honoured the same
+        way and its own exception propagates — the hub contract's shape."""
+        if check_abort is None:
+            return
+        try:
+            fired = bool(check_abort())
+        except BaseException:
+            if stop:
+                self._stop_quietly()
+            raise
+        if fired:
+            if stop:
+                self._stop_quietly()
+            raise MotionAborted(
+                f"axis {self.config.name!r}: {what} aborted"
+                + (" — stop sent" if stop else " before any motion")
+            )
+
+    def _sleep_checked(self, seconds: float, check_abort: AbortCheck | None,
+                       what: str) -> None:
+        end = time.monotonic() + max(0.0, float(seconds))
+        while True:
+            self._abort_point(check_abort, what)
+            left = end - time.monotonic()
+            if left <= 0:
+                return
+            time.sleep(min(self.POLL_INTERVAL_S, left))
+
+    def _stop_quietly(self) -> None:
+        try:
+            self.stop()
+        except Exception:  # noqa: BLE001 - the abort itself must still surface
+            pass
 
     # -- limit enforcement (Layer-0) ---------------------------------------
 
@@ -238,6 +393,19 @@ class MotionAxis(ABC):
         raise InstrumentError(
             f"axis {self.config.name!r}: driver has no homing support"
         )
+
+    def _status_details_raw(self) -> dict:
+        return {}
+
+    def _set_velocity_raw(self, velocity: float) -> float | None:
+        raise OperationNotSupported(
+            f"axis {self.config.name!r} ({type(self).__name__}): no documented velocity "
+            "setting in this driver")
+
+    def _set_servo_raw(self, on: bool) -> bool | None:
+        raise OperationNotSupported(
+            f"axis {self.config.name!r} ({type(self).__name__}): no documented servo "
+            "switch in this driver")
 
 
 # ── controller ────────────────────────────────────────────────────────────
@@ -287,6 +455,12 @@ class MotionController(ABC):
         if not self._connected:
             self.connect()
         return dict(self._axes)
+
+    def open_axes(self) -> dict[str, MotionAxis]:
+        """The axes while connected, ``{}`` otherwise — never connects (for readers
+        that must not open a device, e.g. the manual panel's live readout)."""
+        with self._io_lock:
+            return dict(self._axes) if self._connected else {}
 
     def axis(self, name: str) -> MotionAxis:
         if not self._connected:

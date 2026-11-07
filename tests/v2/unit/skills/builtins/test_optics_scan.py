@@ -245,14 +245,34 @@ class TestOpticalStageScan2D:
         ctx = FakeCtx()
         res = OpticalStageScan().execute(ctx, {
             "device1": "stage", "axis1": "x", "start1": 0.0, "stop1": 10.0, "points1": 3,
-            "trigger_enable": True, "trigger_port": 0, "trigger_line": 2, **_FAST,
+            "trigger_enable": True, "trigger_port": 1, "trigger_line": 2, **_FAST,
         })
         assert res.success
         assert sum(1 for m, _ in ctx.calls if m == "DigLines_PropsSet") == 1
         assert sum(1 for m, _ in ctx.calls if m == "DigLines_Pulse") == 3
 
+    def test_trigger_defaults_to_port_b_and_refuses_port_a(self, rig):
+        """Port A is the PMD4 control link on a PMD4 rig."""
+        ctx = FakeCtx()
+        res = OpticalStageScan().execute(ctx, {
+            "device1": "stage", "axis1": "x", "start1": 0.0, "stop1": 10.0, "points1": 2,
+            "trigger_enable": True, **_FAST,
+        })
+        assert res.success and res.data["triggered_line"] == {"port": 1, "line": 2}
+        ctx = FakeCtx()
+        res = OpticalStageScan().execute(ctx, {
+            "device1": "stage", "axis1": "x", "start1": 0.0, "stop1": 10.0, "points1": 2,
+            "trigger_enable": True, "trigger_port": 0, **_FAST,
+        })
+        assert not res.success and "Port A" in res.error
+        assert not [m for m, _ in ctx.calls if m.startswith("DigLines")]
+
     def test_abort_keeps_partial(self, rig):
-        ctx = FakeCtx(abort_after=2)
+        # Abort is also honoured inside each move's wait and inside
+        # the per-point sampling loop, so one point costs 5 checks here (scan
+        # loop + move pre-check + one settle poll + 2 samples). 10 checks = two
+        # complete points; the 11th (scan loop, point 3) fires the abort.
+        ctx = FakeCtx(abort_after=10)
         res = OpticalStageScan().execute(ctx, {
             "device1": "stage", "axis1": "x", "start1": 0.0, "stop1": 40.0,
             "points1": 5, **_FAST,

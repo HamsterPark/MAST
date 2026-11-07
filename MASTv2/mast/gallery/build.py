@@ -24,6 +24,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
+from mast.i18n import tr
 from mast.gallery import config as _config
 from mast.gallery import inventory as _inv
 from mast.gallery import paths as _paths
@@ -39,7 +40,8 @@ STATUS_KEYS = ("running", "phase", "started", "finished", "done", "total", "n_fi
                "n_changed", "n_render", "n_analysis", "n_failed", "errors", "log", "message",
                "degraded", "detail")
 
-TIMING_LABEL = {"frame": "帧", "spectrum": "谱", "grid": "网格", "analysis": "判据"}
+TIMING_LABEL = {"frame": tr("帧", "frame"), "spectrum": tr("谱", "spectrum"),
+                "grid": tr("网格", "grid"), "analysis": tr("判据", "criteria")}
 
 
 def now_str() -> str:
@@ -223,7 +225,7 @@ def _run_task(t: Task, thumbs: Path, cancel: threading.Event) -> dict:
                 out["analysis"] = a
                 out["timing"]["analysis"] = time.perf_counter() - t1
                 if a.get("err"):
-                    out.setdefault("error", "判据：" + str(a["err"]))
+                    out.setdefault("error", tr("判据：", "Criteria: ") + str(a["err"]))
         elif t.kind == "s":
             t0 = time.perf_counter()
             try:
@@ -267,7 +269,7 @@ def run_build(force: bool = False, workers: int | None = None, only: str | None 
     timing: dict[str, list] = defaultdict(lambda: [0.0, 0])
     t_start = time.perf_counter()
     prog.update(running=True, phase="inventory", started=prog.snapshot()["started"] or now_str(),
-                finished=None, done=0, total=0, message="清点文件…", detail=None)
+                finished=None, done=0, total=0, message=tr("清点文件…", "Taking inventory of files…"), detail=None)
     inv: dict = {}
     render: dict = {}
     analysis: dict = {}
@@ -281,10 +283,11 @@ def run_build(force: bool = False, workers: int | None = None, only: str | None 
         analysis = _read_cache(lay, "analysis.json")
         dups_cache = _read_cache(lay, "dups.json")
         if not cfg.roots:
-            prog.log("还没有配置数据根（设置里加一个再构建）")
+            prog.log(tr("还没有配置数据根（设置里加一个再构建）", "No data root configured yet (add one in Settings, then build)"))
         missing = [r.name for r in cfg.roots if r.enabled and not os.path.isdir(r.path)]
         if missing:
-            prog.log("这些数据根现在不存在，保留它们已有的条目：" + "、".join(missing))
+            prog.log(tr("这些数据根现在不存在，保留它们已有的条目：", "These data roots do not exist right now; keeping their existing entries: ")
+                     + tr("、", ", ").join(missing))
 
         files, scopes = _inv.walk_roots(cfg, only=only or None, state=lay.state)
         groups = _inv.collapse(files)
@@ -295,10 +298,11 @@ def run_build(force: bool = False, workers: int | None = None, only: str | None 
             analysis.pop(rid, None)
             _remove_thumbs(lay, rid)
         for iid, why in failed:
-            prog.error(iid, "读头信息失败：" + why)
+            prog.error(iid, tr("读头信息失败：", "Failed to read header: ") + why)
         prog.update(n_new=len(new_ids), n_changed=len(changed_ids))
-        prog.log("清点%s：%d 个文件 → %d 条（副本折叠后）；新 %d · 变动 %d · 消失 %d · 读失败 %d"
-                 % (f"（{only}）" if only else "", len(files), len(groups), len(new_ids),
+        prog.log(tr("清点%s：%d 个文件 → %d 条（副本折叠后）；新 %d · 变动 %d · 消失 %d · 读失败 %d",
+                    "Inventory%s: %d files -> %d entries (after folding copies); new %d · changed %d · gone %d · read failed %d")
+                 % (tr(f"（{only}）", f" ({only})") if only else "", len(files), len(groups), len(new_ids),
                     len(changed_ids), len(removed), len(failed)))
         _save_cache(lay, "inventory.json", inv)
 
@@ -308,8 +312,9 @@ def run_build(force: bool = False, workers: int | None = None, only: str | None 
         for t in tasks:
             kinds[t.kind] += 1
         prog.update(phase="render", total=len(tasks), done=0,
-                    message=f"渲染与判据：{len(tasks)} 个任务")
-        prog.log("任务 %d 个（帧 %d · 谱 %d · 网格 %d），workers %d"
+                    message=tr(f"渲染与判据：{len(tasks)} 个任务", f"Rendering and criteria: {len(tasks)} tasks"))
+        prog.log(tr("任务 %d 个（帧 %d · 谱 %d · 网格 %d），workers %d",
+                    "%d tasks (frames %d · spectra %d · grids %d), workers %d")
                  % (len(tasks), kinds["f"], kinds["s"], kinds["g"], nworkers))
         try:
             if tasks:
@@ -344,12 +349,12 @@ def run_build(force: bool = False, workers: int | None = None, only: str | None 
             _save_cache(lay, "render.json", render)
             _save_cache(lay, "analysis.json", analysis)
 
-        prog.update(phase="dups", message="识别重复保存与同一次采集的片段…")
+        prog.update(phase="dups", message=tr("识别重复保存与同一次采集的片段…", "Identifying duplicate saves and fragments of one acquisition…"))
         dup, dcache = find_repeat_saves(inv, render, dups_cache)
         seg = acquisition_fragments(inv, render, dup)
         _save_cache(lay, "dups.json", dcache)
 
-        prog.update(phase="index", message="写索引…")
+        prog.update(phase="index", message=tr("写索引…", "Writing index…"))
         items = build_items(inv, render, analysis, dup, seg, enabled, lay.thumbs)
         roots = [{"name": r.name, "path": r.path, "enabled": r.enabled,
                   "exists": os.path.isdir(r.path)} for r in cfg.roots]
@@ -358,21 +363,23 @@ def run_build(force: bool = False, workers: int | None = None, only: str | None 
         for key in ("frame", "spectrum", "grid", "analysis"):
             secs, n = timing.get(key, [0.0, 0])
             if n:
-                prog.log("%s %d 个，平均 %.3f s/个（workers %d）" % (TIMING_LABEL[key], n, secs / n, nworkers))
+                prog.log(tr("%s %d 个，平均 %.3f s/个（workers %d）", "%s: %d, mean %.3f s each (workers %d)")
+                         % (TIMING_LABEL[key], n, secs / n, nworkers))
         n_f = sum(1 for i in items if i["k"] == "f")
         n_s = sum(1 for i in items if i["k"] == "s")
         n_g = sum(1 for i in items if i["k"] == "g")
         final = "cancelled" if cancel.is_set() else "done"
-        msg = ("已取消；" if final == "cancelled" else "") + \
-            "索引 %d 条（帧 %d · 谱 %d · 网格 %d），重复保存 %d，用时 %.0f s" % (
+        msg = (tr("已取消；", "Cancelled; ") if final == "cancelled" else "") + \
+            tr("索引 %d 条（帧 %d · 谱 %d · 网格 %d），重复保存 %d，用时 %.0f s",
+               "Index: %d entries (frames %d · spectra %d · grids %d), duplicate saves %d, took %.0f s") % (
                 len(items), n_f, n_s, n_g, len(dup), time.perf_counter() - t_start)
         prog.log(msg)
         prog.update(running=False, phase=final, finished=now_str(), n_files=len(items), message=msg)
     except Exception as exc:  # noqa: BLE001
         logger.exception("gallery build failed")
-        prog.log(f"构建失败：{type(exc).__name__}: {exc}")
+        prog.log(tr(f"构建失败：{type(exc).__name__}: {exc}", f"Build failed: {type(exc).__name__}: {exc}"))
         prog.update(running=False, phase="error", finished=now_str(),
-                    message=f"构建失败：{exc}", detail=f"{type(exc).__name__}: {exc}")
+                    message=tr(f"构建失败：{exc}", f"Build failed: {exc}"), detail=f"{type(exc).__name__}: {exc}")
     out = prog.snapshot()
     out["timing"] = {k: {"n": n, "total_s": round(s, 2), "avg_s": round(s / n, 3) if n else 0.0}
                      for k, (s, n) in timing.items()}
@@ -389,11 +396,12 @@ def _print(line: str) -> None:
 
 def _cmd_build(a) -> int:
     res = run_build(force=a.force, workers=a.workers, only=a.only, progress=Progress(echo=_print))
-    _print("阶段 %s · 索引 %d 条 · 新 %d · 变动 %d · 渲染 %d · 判据 %d · 失败 %d · %.1f s"
+    _print(tr("阶段 %s · 索引 %d 条 · 新 %d · 变动 %d · 渲染 %d · 判据 %d · 失败 %d · %.1f s",
+              "Phase %s · %d indexed · %d new · %d changed · %d rendered · %d analysed · %d failed · %.1f s")
            % (res["phase"], res["n_files"], res["n_new"], res["n_changed"], res["n_render"],
               res["n_analysis"], res["n_failed"], res["elapsed_s"]))
     for e in res["errors"][:20]:
-        _print(f"  失败 {e['id']}：{e['why']}")
+        _print(tr(f"  失败 {e['id']}：{e['why']}", f"  failed {e['id']}: {e['why']}"))
     return 0 if res["phase"] in ("done", "cancelled") else 1
 
 
@@ -421,13 +429,13 @@ def _cmd_config(a) -> int:
         changed = True
     if changed:
         _config.save_config(cfg)
-    _print(f"状态目录：{_paths.state_dir()}")
+    _print(tr(f"状态目录：{_paths.state_dir()}", f"State directory: {_paths.state_dir()}"))
     for r in cfg.roots:
         _print("  %s %s → %s%s" % ("●" if r.enabled else "○", r.name, r.path,
-                                   "" if os.path.isdir(r.path) else "（不存在）"))
+                                   "" if os.path.isdir(r.path) else tr("（不存在）", " (missing)")))
     if not cfg.roots:
-        _print("  （没有数据根）")
-    _print(f"workers：{cfg.workers}")
+        _print(tr("  （没有数据根）", "  (no data roots)"))
+    _print(tr(f"workers：{cfg.workers}", f"workers: {cfg.workers}"))
     return 0
 
 
@@ -437,7 +445,8 @@ def _cmd_import(a) -> int:
     with open(a.path, encoding="utf-8") as fh:
         doc = json.load(fh)
     res = marks.import_marks(doc, key_prefix=a.prefix)
-    _print("导入：单条 %d · 系列 %d · 目录 %d · 新标签 %d · 索引里找不到 %d · rev %d"
+    _print(tr("导入：单条 %d · 系列 %d · 目录 %d · 新标签 %d · 索引里找不到 %d · rev %d",
+              "Import: %d items · %d series · %d day dirs · %d new tags · %d not found in the index · rev %d")
            % (res["items"], res["series"], res["days"], res["tags_added"], res["unmatched"], res["rev"]))
     return 0
 
@@ -446,24 +455,27 @@ def _cmd_status(a) -> int:
     from mast.gallery import index, marks
 
     lay = _paths.layout()
-    _print(f"状态目录：{lay.state}{'' if lay.state.is_dir() else '（还不存在）'}")
+    _print(tr(f"状态目录：{lay.state}{'' if lay.state.is_dir() else '（还不存在）'}",
+              f"State directory: {lay.state}{'' if lay.state.is_dir() else ' (does not exist yet)'}"))
     cfg = _config.load_config(lay)
     for r in cfg.roots:
         _print("  %s %s → %s%s" % ("●" if r.enabled else "○", r.name, r.path,
-                                   "" if os.path.isdir(r.path) else "（不存在）"))
+                                   "" if os.path.isdir(r.path) else tr("（不存在）", " (missing)")))
     doc = index.read_index(lay)
     if doc:
-        _print("索引：%s · 帧 %d · 谱 %d · 网格 %d · 最新一批 %s" % (
+        _print(tr("索引：%s · 帧 %d · 谱 %d · 网格 %d · 最新一批 %s",
+                  "Index: %s · frames %d · spectra %d · grids %d · latest batch %s") % (
             doc.get("generated"), doc.get("n_frames", 0), doc.get("n_spectra", 0),
             doc.get("n_grids", 0), doc.get("last_batch")))
     else:
-        _print("索引：还没有构建过")
+        _print(tr("索引：还没有构建过", "Index: not built yet"))
     try:
         m = marks.load_marks(lay)
-        _print("标记：rev %d · 单条 %d · 系列 %d · 更新于 %s" % (
+        _print(tr("标记：rev %d · 单条 %d · 系列 %d · 更新于 %s",
+                  "Marks: rev %d · items %d · series %d · updated %s") % (
             m.get("rev", 0), len(m.get("items") or {}), len(m.get("series") or {}), m.get("updated") or "—"))
     except Exception as exc:  # noqa: BLE001
-        _print(f"标记：读不了（{exc}）")
+        _print(tr(f"标记：读不了（{exc}）", f"Marks: unreadable ({exc})"))
     return 0
 
 
@@ -473,21 +485,28 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:  # noqa: BLE001
         pass
     ap = argparse.ArgumentParser(prog="python -m mast.gallery",
-                                 description="MAST 数据图库：增量预处理 / 数据根 / 导入标记")
+                                 description=tr("MAST 数据图库：增量预处理 / 数据根 / 导入标记",
+                                               "MAST data gallery: incremental preprocessing / data roots / import marks"))
     sub = ap.add_subparsers(dest="cmd", required=True)
-    b = sub.add_parser("build", help="增量构建（只处理新增与变动的文件）")
-    b.add_argument("--force", action="store_true", help="忽略渲染/判据缓存，全部重出")
+    b = sub.add_parser("build", help=tr("增量构建（只处理新增与变动的文件）",
+                                        "Incremental build (only new and changed files)"))
+    b.add_argument("--force", action="store_true",
+                   help=tr("忽略渲染/判据缓存，全部重出", "Ignore the render / analysis caches and redo everything"))
     b.add_argument("--workers", type=int, default=None)
-    b.add_argument("--only", default=None, help="只处理这个 id 前缀，如 SPM/2001/200109/20010910")
-    c = sub.add_parser("config", help="查看/修改数据根")
+    b.add_argument("--only", default=None,
+                   help=tr("只处理这个 id 前缀，如 SPM/2026/202609/20260910",
+                           "Only process this id prefix, e.g. SPM/2001/200109/20010910"))
+    c = sub.add_parser("config", help=tr("查看/修改数据根", "Show / edit the data roots"))
     c.add_argument("--add-root", action="append", default=[], metavar="NAME=PATH")
     c.add_argument("--remove-root", action="append", default=[], metavar="NAME")
     c.add_argument("--workers", type=int, default=None)
     c.add_argument("--list", action="store_true")
-    m = sub.add_parser("import-marks", help="把一份 marks.json 合并进来")
+    m = sub.add_parser("import-marks", help=tr("把一份 marks.json 合并进来", "Merge a marks.json into the gallery"))
     m.add_argument("path")
-    m.add_argument("--prefix", default="", help="键前缀，如旧版兼容格式导入时的 SPM/")
-    sub.add_parser("status", help="状态目录、数据根、索引与标记概况")
+    m.add_argument("--prefix", default="",
+                   help=tr("键前缀，如原图库导入时的 SPM/", "Key prefix, e.g. SPM/ as used when importing a legacy-format marks file"))
+    sub.add_parser("status", help=tr("状态目录、数据根、索引与标记概况",
+                                     "Summary of the state directory, data roots, index and marks"))
     a = ap.parse_args(argv)
     return {"build": _cmd_build, "config": _cmd_config, "import-marks": _cmd_import,
             "status": _cmd_status}[a.cmd](a)

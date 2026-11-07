@@ -74,8 +74,9 @@ SIX WAYS TO GET THIS WRONG, ALL OF WHICH ARE REAL
 
 WHAT HAPPENS WITH NO GAUGE
 ==========================
-Operator decision (2026-07-31): **默认拒绝，但用户可以签字**. Default mode is
-``gauge_or_attest`` — a valid reading permits; otherwise the operator may sign a
+The profile default (``vacuum_interlock_mode``) is ``off``: nothing is blocked,
+but the verdict is still computed and reported. Enabling the interlock is a
+profile choice. In ``gauge_or_attest`` mode — a valid reading permits; otherwise the operator may sign a
 time-limited statement ("已通大气" / "已抽至高真空但真空计不可用") and that
 permits until it expires. The attestation is process-local and dies with the
 process, like ``safety_escalation``'s refusal: a restart is a change of scene,
@@ -96,6 +97,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -138,8 +140,9 @@ DEFAULT_ATTESTATION_TTL_S = 8 * 3600.0
 MODES = ("gauge_or_attest", "gauge_only", "off")
 
 ATTESTATION_REASONS: dict[str, str] = {
-    "vented_to_atmosphere": "已通大气（腔体在常压）",
-    "high_vacuum_gauge_unavailable": "已抽至高真空，但真空计不可用",
+    "vented_to_atmosphere": tr("已通大气（腔体在常压）", "Vented to atmosphere (chamber at ambient pressure)"),
+    "high_vacuum_gauge_unavailable": tr("已抽至高真空，但真空计不可用",
+                                        "Pumped to high vacuum, but the vacuum gauge is unavailable"),
 }
 
 #: Sensor classes that are REAL pressure gauges. An allow-list, not a deny-list:
@@ -202,7 +205,7 @@ class Attestation:
         return max(0.0, float(self.ttl_s) - self.age_s(now))
 
     def label(self) -> str:
-        return ATTESTATION_REASONS.get(self.reason, self.reason or "未说明原因")
+        return ATTESTATION_REASONS.get(self.reason, self.reason or tr("未说明原因", "no reason given"))
 
 
 @dataclass(frozen=True)
@@ -269,18 +272,31 @@ def gauge_config_problem(*, min_pa: float, full_scale_pa: float,
     if min_pa <= 0 or full_scale_pa <= 0:
         return ""
     if min_pa >= full_scale_pa:
-        return (f"真空计量程配置有误：下限 {min_pa:.3g} Pa ≥ 上限 "
-                f"{full_scale_pa:.3g} Pa。在设置里把这两个数按规的实际量程填对。")
+        return tr(f"真空计量程配置有误：下限 {min_pa:.3g} Pa ≥ 上限 "
+                  f"{full_scale_pa:.3g} Pa。在设置里把这两个数按规的实际量程填对。",
+                  f"Vacuum gauge range is misconfigured: lower limit {min_pa:.3g} Pa >= upper "
+                  f"limit {full_scale_pa:.3g} Pa. Enter the gauge's actual range for these "
+                  "two numbers in Settings.")
     if min_pa >= max_pa:
-        return (f"这只真空计的量程下限是 {min_pa:.3g} Pa，高于粗动允许上限 "
-                f"{max_pa:.3g} Pa —— **它永远无法证明压强足够低**，"
-                f"因此在只有这只规的情况下粗动会一直被拒绝。这不是故障："
-                f"粗糙真空规（Pirani / 电容薄膜规）本来就看不到那么低。"
-                f"需要一只冷阴极规或电离规，或者由用户签署「当前气压安全」。")
+        return tr(f"这只真空计的量程下限是 {min_pa:.3g} Pa，高于粗动允许上限 "
+                  f"{max_pa:.3g} Pa —— **它永远无法证明压强足够低**，"
+                  f"因此在只有这只规的情况下粗动会一直被拒绝。这不是故障："
+                  f"粗糙真空规（Pirani / 电容薄膜规）本来就看不到那么低。"
+                  f"需要一只冷阴极规或电离规，或者由用户签署「当前气压安全」。",
+                  f"This gauge's range floor is {min_pa:.3g} Pa, above the allowed coarse-motion "
+                  f"limit of {max_pa:.3g} Pa -- **it can never prove the pressure is low "
+                  "enough**, so with only this gauge coarse motion will always be refused. "
+                  "This is not a fault: rough-vacuum gauges (Pirani / capacitance manometer) "
+                  "simply cannot see that low. A cold-cathode or ionisation gauge is needed, "
+                  "or the user must sign 'current pressure is safe'.")
     if full_scale_pa * _OVERRANGE_FRACTION <= max_pa:
-        return (f"真空计满量程 {full_scale_pa:.3g} Pa 太低：还没到粗动允许上限 "
-                f"{max_pa:.3g} Pa 就已经算超量程，判据永远给不出「通过」。"
-                f"核对量程配置，或调低允许上限。")
+        return tr(f"真空计满量程 {full_scale_pa:.3g} Pa 太低：还没到粗动允许上限 "
+                  f"{max_pa:.3g} Pa 就已经算超量程，判据永远给不出「通过」。"
+                  f"核对量程配置，或调低允许上限。",
+                  f"The gauge full scale of {full_scale_pa:.3g} Pa is too low: it already "
+                  f"counts as over-range before reaching the allowed coarse-motion limit of "
+                  f"{max_pa:.3g} Pa, so the criterion can never pass. Check the range "
+                  "configuration, or lower the allowed limit.")
     return ""
 
 
@@ -299,8 +315,10 @@ def gauge_verdict(
     them is specific to a gauge model — the model-specific part is entirely in
     ``min_pa`` / ``full_scale_pa``, which the operator sets."""
     if sample is None:
-        return False, ("没有可用的真空计读数 —— 无法判断当前是否处在放电区间"
-                       f"（{CORONA_ZONE_PA[0]:g}–{CORONA_ZONE_PA[1]:g} Pa）。"), {}
+        return False, tr("没有可用的真空计读数 —— 无法判断当前是否处在放电区间"
+                         f"（{CORONA_ZONE_PA[0]:g}–{CORONA_ZONE_PA[1]:g} Pa）。",
+                         "No usable vacuum gauge reading -- cannot tell whether the pressure is "
+                         f"in the corona zone ({CORONA_ZONE_PA[0]:g}-{CORONA_ZONE_PA[1]:g} Pa)."), {}
 
     cls = (sample.sensor_class or "").strip()
     detail: dict[str, Any] = {"sensor": sample.sensor_name, "sensor_class": cls}
@@ -308,41 +326,65 @@ def gauge_verdict(
     # 1. A stand-in is not a gauge. It reports value=0.0, which reads as a
     #    perfect vacuum to anything that only looks at the number.
     if cls in PLACEHOLDER_CLASSES:
-        return False, ("真空计是**占位实现**（未接真实真空计）。它的读数恒为 0，"
-                       "这不是「完美真空」而是「没有数据」—— 拒绝粗动。"), detail
+        return False, tr("真空计是**占位实现**（未接真实真空计）。它的读数恒为 0，"
+                         "这不是「完美真空」而是「没有数据」—— 拒绝粗动。",
+                         "The vacuum gauge is a **placeholder implementation** (no real gauge "
+                         "connected). Its reading is always 0, which is not 'perfect vacuum' "
+                         "but 'no data' -- coarse motion refused."), detail
     if cls and cls not in REAL_GAUGE_CLASSES:
-        return False, (f"传感器类型 {cls} 不在已知真空计名单里，不能用它的读数授权粗动。"
-                       "新增真空计驱动时要做两件事：把类名加进 "
-                       "vacuum_interlock.REAL_GAUGE_CLASSES，"
-                       "并在设置里填这只规的**量程上下限**"
-                       "（vacuum_gauge_min_pa / vacuum_gauge_full_scale_pa）——"
-                       "判据本身与规的型号无关，型号相关的只有这两个数。"), detail
+        return False, tr(f"传感器类型 {cls} 不在已知真空计名单里，不能用它的读数授权粗动。"
+                         "新增真空计驱动时要做两件事：把类名加进 "
+                         "vacuum_interlock.REAL_GAUGE_CLASSES，"
+                         "并在设置里填这只规的**量程上下限**"
+                         "（vacuum_gauge_min_pa / vacuum_gauge_full_scale_pa）——"
+                         "判据本身与规的型号无关，型号相关的只有这两个数。",
+                         f"Sensor class {cls} is not in the list of known vacuum gauges, so its "
+                         "reading cannot authorise coarse motion. When adding a gauge driver, "
+                         "do two things: add the class name to "
+                         "vacuum_interlock.REAL_GAUGE_CLASSES, and enter this gauge's "
+                         "**range limits** in Settings "
+                         "(vacuum_gauge_min_pa / vacuum_gauge_full_scale_pa) -- the criterion "
+                         "itself is independent of the gauge model; only these two numbers "
+                         "depend on it."), detail
 
     # 2. Status. `unavailable` deliberately does NOT trip the alarm path; here it
     #    must, because "the gauge cannot see" is precisely the case we refuse.
     status = (sample.status or "").strip().lower()
     if status != "ok":
-        human = {"unavailable": "读不到（串口掉线/未接）", "error": "帧校验失败",
-                 "warning": "告警", "alarm": "告警"}.get(status, status or "未知")
-        return False, (f"真空计状态为「{human}」，不是有效读数 —— 拒绝粗动。"
-                       "读不到 ≠ 真空好。"), detail
+        human = {"unavailable": tr("读不到（串口掉线/未接）", "unreadable (serial port down / not connected)"),
+                 "error": tr("帧校验失败", "frame check failed"),
+                 "warning": tr("告警", "warning"), "alarm": tr("告警", "alarm")
+                 }.get(status, status or tr("未知", "unknown"))
+        return False, tr(f"真空计状态为「{human}」，不是有效读数 —— 拒绝粗动。"
+                         "读不到 ≠ 真空好。",
+                         f"Vacuum gauge status is '{human}', not a valid reading -- coarse "
+                         "motion refused. Unreadable != good vacuum."), detail
 
     # 3. Unit.
     pa = to_pascal(sample.value, sample.unit)
     if pa is None:
-        return False, (f"真空计读数无法换算成 Pa（值 {sample.value!r} 单位 "
-                       f"{sample.unit!r}）—— 拒绝粗动。Pa 与 mbar 差 100 倍，"
-                       "猜错方向正好落进放电区。"), detail
+        return False, tr(f"真空计读数无法换算成 Pa（值 {sample.value!r} 单位 "
+                         f"{sample.unit!r}）—— 拒绝粗动。Pa 与 mbar 差 100 倍，"
+                         "猜错方向正好落进放电区。",
+                         f"The vacuum gauge reading cannot be converted to Pa (value "
+                         f"{sample.value!r}, unit {sample.unit!r}) -- coarse motion refused. "
+                         "Pa and mbar differ by a factor of 100; guessing wrong lands right "
+                         "in the corona zone."), detail
     detail["pressure_pa"] = pa
 
     # 4. Age.
     age = sample.age_s(now)
     detail["age_s"] = age
     if age is None:
-        return False, "真空计读数没有时间戳，无法判断新旧 —— 拒绝粗动。", detail
+        return False, tr("真空计读数没有时间戳，无法判断新旧 —— 拒绝粗动。",
+                         "The vacuum gauge reading has no timestamp, so its age cannot be "
+                         "judged -- coarse motion refused."), detail
     if age > max_age_s:
-        return False, (f"真空计读数已经是 {age:.0f} 秒前的了（上限 {max_age_s:.0f} 秒）"
-                       "—— 抽气/放气时压强变化很快，旧读数不能给现在授权。"), detail
+        return False, tr(f"真空计读数已经是 {age:.0f} 秒前的了（上限 {max_age_s:.0f} 秒）"
+                         "—— 抽气/放气时压强变化很快，旧读数不能给现在授权。",
+                         f"The vacuum gauge reading is already {age:.0f} s old (limit "
+                         f"{max_age_s:.0f} s) -- pressure changes fast during pumping or "
+                         "venting, so an old reading cannot authorise the present."), detail
 
     # 5a. Over range. At/near full scale the gauge cannot distinguish "just over"
     #     from "atmosphere" — and the DL-7 frame parser does not validate the
@@ -350,9 +392,12 @@ def gauge_verdict(
     #     number.
     if full_scale_pa > 0 and pa >= full_scale_pa * _OVERRANGE_FRACTION:
         detail["over_range"] = True
-        return False, (f"真空计读数 {pa:.3g} Pa 已到量程上限附近"
-                       f"（满量程 {full_scale_pa:.3g} Pa）—— 这意味着「超量程、判断不了」，"
-                       "不是「刚好卡在阈值下」。拒绝粗动。"), detail
+        return False, tr(f"真空计读数 {pa:.3g} Pa 已到量程上限附近"
+                         f"（满量程 {full_scale_pa:.3g} Pa）—— 这意味着「超量程、判断不了」，"
+                         "不是「刚好卡在阈值下」。拒绝粗动。",
+                         f"The vacuum gauge reading of {pa:.3g} Pa is near the top of its range "
+                         f"(full scale {full_scale_pa:.3g} Pa) -- this means 'over range, cannot "
+                         "tell', not 'just under the threshold'. Coarse motion refused."), detail
 
     # 5b. UNDER range — the half that was missing, and the one a non-DL-7 gauge
     #     exposes. A gauge below its floor is not reporting a low pressure, it is
@@ -378,26 +423,44 @@ def gauge_verdict(
     if min_pa > 0 and pa <= min_pa * _UNDERRANGE_FACTOR:
         detail["under_range"] = True
         if min_pa >= max_pa:
-            return False, (
+            return False, tr(
                 f"真空计读数 {pa:.3g} Pa 已到量程**下限**附近"
                 f"（下限 {min_pa:.3g} Pa）—— 这是规在触底，不是「真空非常好」。"
                 f"而这只规的下限本身就高于粗动允许上限 {max_pa:.3g} Pa，"
                 "所以它**永远无法证明**压强足够低。"
-                "需要一只量程更低的规（冷阴极/电离规），或由用户签署。"), detail
+                "需要一只量程更低的规（冷阴极/电离规），或由用户签署。",
+                f"The vacuum gauge reading of {pa:.3g} Pa is near the **bottom** of its range "
+                f"(lower limit {min_pa:.3g} Pa) -- the gauge is bottoming out, not showing "
+                "'very good vacuum'. And this gauge's lower limit is itself above the allowed "
+                f"coarse-motion limit of {max_pa:.3g} Pa, so it **can never prove** the "
+                "pressure is low enough. A gauge with a lower range (cold-cathode / "
+                "ionisation) is needed, or a user signature."), detail
         # Floor is below the limit ⇒ "even at my floor we are already safe".
         detail["under_range_safe"] = True
-        return True, (f"真空计已到量程下限（{min_pa:.3g} Pa）以下 —— 真实压强比它更低，"
-                      f"而下限本身已经远低于允许上限 {max_pa:.3g} Pa，"
-                      f"距放电区下沿 {CORONA_ZONE_PA[0]:g} Pa 还有数个数量级。"), detail
+        return True, tr(f"真空计已到量程下限（{min_pa:.3g} Pa）以下 —— 真实压强比它更低，"
+                        f"而下限本身已经远低于允许上限 {max_pa:.3g} Pa，"
+                        f"距放电区下沿 {CORONA_ZONE_PA[0]:g} Pa 还有数个数量级。",
+                        f"The vacuum gauge is below its range floor ({min_pa:.3g} Pa) -- the true "
+                        f"pressure is lower still, and the floor itself is far below the allowed "
+                        f"limit of {max_pa:.3g} Pa, several orders of magnitude under the lower "
+                        f"edge of the corona zone ({CORONA_ZONE_PA[0]:g} Pa)."), detail
 
     if pa > max_pa:
-        band = ("，已经进入放电区间" if pa >= CORONA_ZONE_PA[0] else "")
-        return False, (f"当前压强 {pa:.3g} Pa 高于粗动允许上限 {max_pa:.3g} Pa{band}"
-                       f"（放电区 {CORONA_ZONE_PA[0]:g}–{CORONA_ZONE_PA[1]:g} Pa）"
-                       "—— 拒绝粗动，等抽到更低再动。"), detail
+        band = (tr("，已经进入放电区间", ", already inside the corona zone")
+                if pa >= CORONA_ZONE_PA[0] else "")
+        return False, tr(f"当前压强 {pa:.3g} Pa 高于粗动允许上限 {max_pa:.3g} Pa{band}"
+                         f"（放电区 {CORONA_ZONE_PA[0]:g}–{CORONA_ZONE_PA[1]:g} Pa）"
+                         "—— 拒绝粗动，等抽到更低再动。",
+                         f"Current pressure {pa:.3g} Pa is above the allowed coarse-motion limit "
+                         f"of {max_pa:.3g} Pa{band} (corona zone "
+                         f"{CORONA_ZONE_PA[0]:g}-{CORONA_ZONE_PA[1]:g} Pa) -- coarse motion "
+                         "refused; wait until it is pumped lower."), detail
 
-    return True, (f"当前压强 {pa:.3g} Pa ≤ 允许上限 {max_pa:.3g} Pa，"
-                  f"远低于放电区下沿 {CORONA_ZONE_PA[0]:g} Pa（读数 {age:.0f} 秒前）。"), detail
+    return True, tr(f"当前压强 {pa:.3g} Pa ≤ 允许上限 {max_pa:.3g} Pa，"
+                    f"远低于放电区下沿 {CORONA_ZONE_PA[0]:g} Pa（读数 {age:.0f} 秒前）。",
+                    f"Current pressure {pa:.3g} Pa <= allowed limit {max_pa:.3g} Pa, far below "
+                    f"the lower edge of the corona zone ({CORONA_ZONE_PA[0]:g} Pa) "
+                    f"(reading {age:.0f} s old)."), detail
 
 
 def assess(
@@ -438,7 +501,9 @@ def assess(
     if mode == "gauge_only":
         tail = ""
         if attestation is not None:
-            tail = "（本机模式为「只认真空计」，用户签署在此模式下无效。）"
+            tail = tr("（本机模式为「只认真空计」，用户签署在此模式下无效。）",
+                      " (This machine is in 'gauge only' mode; a user signature is not valid "
+                      "in this mode.)")
         return Verdict(allow=False, reason=reason + tail, source="none",
                        pressure_pa=pa, age_s=age, mode=mode, over_range=over,
                        detail=detail)
@@ -446,30 +511,43 @@ def assess(
     if mode == "off":
         return Verdict(
             allow=True,
-            reason=("【真空互锁已被关闭】不阻断，但判据如下：" + reason
-                    + " —— 关闭互锁不代表没有风险，只代表这次没人检查。"),
+            reason=(tr("【真空互锁已被关闭】不阻断，但判据如下：",
+                       "[Vacuum interlock is OFF] Not blocking, but the criterion says: ")
+                    + reason
+                    + tr(" —— 关闭互锁不代表没有风险，只代表这次没人检查。",
+                         " -- turning the interlock off does not remove the risk, it only "
+                         "means nobody checked this time.")),
             source="disabled", pressure_pa=pa, age_s=age, mode=mode,
             over_range=over, detail=detail)
 
     if live_att is not None:
         return Verdict(
             allow=True,
-            reason=(f"真空计不可用：{reason} 但用户已签署「{live_att.label()}」"
-                    f"（{live_att.signed_by or '未署名'}，还剩 "
-                    f"{live_att.remaining_s(now) / 3600.0:.1f} 小时）—— 按签署放行。"),
+            reason=tr(f"真空计不可用：{reason} 但用户已签署「{live_att.label()}」"
+                      f"（{live_att.signed_by or '未署名'}，还剩 "
+                      f"{live_att.remaining_s(now) / 3600.0:.1f} 小时）—— 按签署放行。",
+                      f"Vacuum gauge unavailable: {reason} but the user has signed "
+                      f"'{live_att.label()}' ({live_att.signed_by or 'unsigned'}, "
+                      f"{live_att.remaining_s(now) / 3600.0:.1f} h remaining) -- allowed "
+                      "on the strength of the signature."),
             source="attestation", pressure_pa=pa, age_s=age, mode=mode,
             over_range=over, attested=True,
             attestation_remaining_s=live_att.remaining_s(now), detail=detail)
 
     expired_note = ""
     if attestation is not None:
-        expired_note = (f"（用户此前签署过「{attestation.label()}」，"
-                        f"但已在 {attestation.age_s(now) / 3600.0:.1f} 小时前过期。）")
+        expired_note = tr(f"（用户此前签署过「{attestation.label()}」，"
+                          f"但已在 {attestation.age_s(now) / 3600.0:.1f} 小时前过期。）",
+                          f" (The user previously signed '{attestation.label()}', but it "
+                          f"expired {attestation.age_s(now) / 3600.0:.1f} h ago.)")
     return Verdict(
         allow=False,
         reason=(reason + expired_note
-                + " 若确认当前气压安全（例如腔体已通大气），"
-                  "请用户在界面上签署一次「当前气压安全」再重试。"),
+                + tr(" 若确认当前气压安全（例如腔体已通大气），"
+                     "请用户在界面上签署一次「当前气压安全」再重试。",
+                     " If the current pressure is confirmed safe (for example the chamber "
+                     "is vented), have the user sign 'current pressure is safe' once in the "
+                     "UI and retry.")),
         source="none", pressure_pa=pa, age_s=age, mode=mode, over_range=over,
         detail=detail)
 

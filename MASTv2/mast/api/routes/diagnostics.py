@@ -1,10 +1,11 @@
 """GET /api/diagnostics — the refusal ledger, read by a human.
 
-Some failures were previously impossible to diagnose, because the system
-recorded what SUCCEEDS and nothing about what is REFUSED — a call refused
-outright, a run stopping partway through, and an agent spinning on a
-precondition or safety gate looked identical from outside, with no way to
-tell which layer or state was responsible.
+Before this ledger the system recorded what SUCCEEDS and nothing about what is
+REFUSED, so symptoms such as these could not be diagnosed:
+
+    - an approach call fails      ← refused by WHICH layer? on what state?
+    - a run stops at STS point 5  ← executed and failed? skipped? aborted?
+    - an agent spins on a precondition or safety-gate failure
 
 ``core.diagnostics`` now writes every refusal and every skip. This is the window
 onto it. Degrade-safe: an empty ledger means nothing has been refused — which is a
@@ -35,6 +36,7 @@ _REFUSALS = ("precondition_block", "safety_block", "mode_block",
 _STEPS = ("step_skip", "step_fail", "step_abort")
 # 「本来会打断工作、现在只通知」的那一类。刻意**不并进 _REFUSALS**
 # —— 拒绝和放行是两件相反的事,混在一个筛选里会让「今天被拦了几次」这个问题答不出来。
+# 「本来会拦几次」就是这个分组要回答的查询。
 _NOTICES = ("notice_only",)
 
 

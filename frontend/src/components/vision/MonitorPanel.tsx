@@ -5,11 +5,12 @@ import { Card, ErrorNote, DegradedNote } from "@/components/ui";
 import { Button } from "@/components/controls";
 import { useToast } from "@/components/controls";
 import { TimeTraceChart } from "@/components/experimental/TimeTraceChart";
+import { tr } from "@/lib/i18n";
 
-// 长期监控 — periodic single-channel reads appended to a CSV by a core daemon.
+// Long-term monitor — periodic single-channel reads appended to a CSV by a core daemon.
 // Typed replacement for gui/exp_capture.build_monitor_panel:
 //  · channel (string: index or 'current') + interval slider
-//  · 开始监控 / 停止监控 (POST monitor/start | monitor/stop)
+//  · start / stop monitoring (POST monitor/start | monitor/stop)
 //  · live status (GET monitor/status, poll 2s) — running / count / last value / csv path
 // The daemon lives in the core; closing this page does NOT stop it.
 
@@ -41,8 +42,7 @@ export function MonitorPanel() {
   const st = status.data;
   const running = st?.running ?? false;
 
-  // Improvement 1 — real channel dropdown, reusing the capture tab's channel list
-  // (was a free-text index box because the monitor had no channel enumeration).
+  // Channel dropdown, reusing the capture tab's channel list.
   const signals = useQuery({
     queryKey: ["experimental", "signals"],
     queryFn: async () => {
@@ -54,7 +54,7 @@ export function MonitorPanel() {
   });
   const channels = signals.data?.channels ?? [];
 
-  // Improvement 2 — live chart. The monitor daemon reports only the LAST value per
+  // Live chart. The monitor daemon reports only the LAST value per
   // poll, so accumulate a client-side series (one point per NEW sample = count
   // change) while this page is open. The full history is always in the CSV.
   const [series, setSeries] = useState<{ t: number[]; v: number[] }>({ t: [], v: [] });
@@ -89,9 +89,9 @@ export function MonitorPanel() {
     },
     onSuccess: (d) => {
       if (d.ok) {
-        toast("已开始监控");
+        toast(tr("已开始监控", "Monitoring started"));
         clearSeries();
-      } else toast(d.message || "无法开始监控", "err");
+      } else toast(d.message || tr("无法开始监控", "Could not start monitoring"), "err");
       qc.invalidateQueries({ queryKey: ["experimental", "monitor", "status"] });
     },
     onError: (e) => toast(String((e as Error)?.message ?? e), "err"),
@@ -104,8 +104,8 @@ export function MonitorPanel() {
       return data;
     },
     onSuccess: (d) => {
-      if (d.ok) toast("已停止监控");
-      else toast(d.message || "停止失败", "err");
+      if (d.ok) toast(tr("已停止监控", "Monitoring stopped"));
+      else toast(d.message || tr("停止失败", "Stop failed"), "err");
       qc.invalidateQueries({ queryKey: ["experimental", "monitor", "status"] });
     },
     onError: (e) => toast(String((e as Error)?.message ?? e), "err"),
@@ -115,25 +115,26 @@ export function MonitorPanel() {
     <div className="space-y-3">
       {node}
       <p className="text-xs text-mast-muted">
-        长期监控 / Long-term monitor — 每隔设定秒数读取一次所选信号通道，持续追加到 CSV
-        长期保存。后台线程记录，切走本页也继续，直到点「停止监控」或程序退出。适合过夜观察漂移 /
-        稳定性。
+        {tr(
+          "长期监控 / Long-term monitor — 每隔设定秒数读取一次所选信号通道，持续追加到 CSV 长期保存。后台线程记录，切走本页也继续，直到点「停止监控」或程序退出。适合过夜观察漂移 / 稳定性。",
+          "Long-term monitor — reads the selected signal channel at the set interval and appends each reading to a CSV. A background thread does the recording, so it keeps running when you leave this page, until you press “Stop monitoring” or the program exits. Suited to overnight drift and stability checks.",
+        )}
       </p>
 
       {status.isError && <ErrorNote error={status.error} />}
-      {st?.degraded && <DegradedNote what="长期监控" />}
+      {st?.degraded && <DegradedNote what={tr("长期监控", "Long-term monitor")} />}
 
       <Card className="space-y-3">
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1 text-xs">
-            <span className="text-mast-muted">监控通道</span>
+            <span className="text-mast-muted">{tr("监控通道", "Monitor channel")}</span>
             <select
               value={channel}
               onChange={(e) => setChannel(e.target.value)}
               disabled={running}
               className="w-60 rounded-md border border-mast-border bg-mast-bg px-2 py-1.5 text-sm disabled:opacity-50"
             >
-              <option value="current">current（隧道电流）</option>
+              <option value="current">{tr("current（隧道电流）", "current (tunneling current)")}</option>
               {channels.map((c) => (
                 <option key={c.index} value={String(c.index)}>
                   {c.index}: {c.name}
@@ -143,10 +144,10 @@ export function MonitorPanel() {
             </select>
             <span className="text-mast-muted">
               {signals.isLoading
-                ? "加载通道…"
+                ? tr("加载通道…", "Loading channels…")
                 : signals.data?.degraded
-                  ? "⚠ 未连硬件，为默认通道列表"
-                  : `${channels.length} 个通道`}
+                  ? tr("⚠ 未连硬件，为默认通道列表", "⚠ No hardware connected; showing the default channel list")
+                  : tr(`${channels.length} 个通道`, `${channels.length} channels`)}
               {" · "}
               <button
                 type="button"
@@ -154,12 +155,12 @@ export function MonitorPanel() {
                 disabled={running || signals.isFetching}
                 className="text-mast-accent hover:underline disabled:opacity-50"
               >
-                刷新
+                {tr("刷新", "Refresh")}
               </button>
             </span>
           </label>
           <label className="flex flex-1 flex-col gap-1 text-xs">
-            <span className="text-mast-muted">采样间隔：{intervalS.toFixed(1)} 秒/点</span>
+            <span className="text-mast-muted">{tr(`采样间隔：${intervalS.toFixed(1)} 秒/点`, `Sampling interval: ${intervalS.toFixed(1)} s/point`)}</span>
             <input
               type="range"
               min={0.5}
@@ -176,44 +177,44 @@ export function MonitorPanel() {
             onClick={() => startMut.mutate()}
             disabled={running || startMut.isPending}
           >
-            {startMut.isPending ? "启动中…" : "开始监控"}
+            {startMut.isPending ? tr("启动中…", "Starting…") : tr("开始监控", "Start monitoring")}
           </Button>
           <Button variant="danger" onClick={() => stopMut.mutate()} disabled={!running || stopMut.isPending}>
-            {stopMut.isPending ? "停止中…" : "停止监控"}
+            {stopMut.isPending ? tr("停止中…", "Stopping…") : tr("停止监控", "Stop monitoring")}
           </Button>
         </div>
       </Card>
 
       <Card>
         <div className="mb-2 flex items-center gap-2">
-          <span className="text-sm font-semibold">监控状态</span>
+          <span className="text-sm font-semibold">{tr("监控状态", "Monitor status")}</span>
           <span
             className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs ${
               running ? "bg-mast-auto-bg text-mast-auto" : "bg-mast-bg text-mast-muted"
             }`}
           >
             <span className={`h-1.5 w-1.5 rounded-full ${running ? "bg-mast-auto" : "bg-mast-muted"}`} />
-            {running ? "运行中" : "未运行"}
+            {running ? tr("运行中", "Running") : tr("未运行", "Not running")}
           </span>
         </div>
         {!st?.started && !running ? (
-          <p className="text-sm text-mast-muted">未开始监控。</p>
+          <p className="text-sm text-mast-muted">{tr("未开始监控。", "Monitoring has not started.")}</p>
         ) : (
           <>
-            <Reading label="通道" value={st?.channel || "—"} />
-            <Reading label="采样间隔" value={st ? `${st.interval_s.toFixed(1)} s` : "—"} />
-            <Reading label="已采集点数" value={st?.count ?? 0} />
+            <Reading label={tr("通道", "Channel")} value={st?.channel || "—"} />
+            <Reading label={tr("采样间隔", "Sampling interval")} value={st ? `${st.interval_s.toFixed(1)} s` : "—"} />
+            <Reading label={tr("已采集点数", "Points collected")} value={st?.count ?? 0} />
             <Reading
-              label="最新值"
+              label={tr("最新值", "Latest value")}
               value={
                 st?.last_value != null
                   ? `${st.last_value.toPrecision(6)}${st.unit ? " " + st.unit : ""}`
                   : "—"
               }
             />
-            <Reading label="最新时间" value={st?.last_t || "—"} />
+            <Reading label={tr("最新时间", "Latest time")} value={st?.last_t || "—"} />
             <Reading
-              label="CSV 路径"
+              label={tr("CSV 路径", "CSV path")}
               value={
                 st?.csv_path ? (
                   <span className="font-mono text-xs" title={st.csv_path}>
@@ -229,25 +230,31 @@ export function MonitorPanel() {
         )}
       </Card>
 
-      {/* Improvement 2 — real-time chart of the monitored channel */}
+      {/* Real-time chart of the monitored channel */}
       <Card>
         <div className="mb-2 flex items-center justify-between">
-          <span className="text-sm font-semibold">实时曲线</span>
+          <span className="text-sm font-semibold">{tr("实时曲线", "Live trace")}</span>
           {series.v.length > 0 && (
             <button
               type="button"
               onClick={clearSeries}
               className="text-xs text-mast-muted hover:text-mast-accent"
             >
-              清空
+              {tr("清空", "Clear")}
             </button>
           )}
         </div>
         {series.v.length === 0 ? (
           <p className="py-6 text-center text-sm text-mast-muted">
             {running
-              ? `等待采样点…（每 ${intervalS.toFixed(1)} 秒一个）`
-              : "开始监控后，这里实时显示所选通道随时间的曲线。"}
+              ? tr(
+                  `等待采样点…（每 ${intervalS.toFixed(1)} 秒一个）`,
+                  `Waiting for samples… (one every ${intervalS.toFixed(1)} s)`,
+                )
+              : tr(
+                  "开始监控后，这里实时显示所选通道随时间的曲线。",
+                  "Once monitoring starts, the selected channel is plotted here over time.",
+                )}
           </p>
         ) : (
           <>
@@ -258,7 +265,10 @@ export function MonitorPanel() {
               channelName={st?.channel || channel}
             />
             <p className="mt-1 text-xs text-mast-faint">
-              本页打开期间累积的 {series.v.length} 个点（横轴＝经过秒数）；完整历史见 CSV。
+              {tr(
+                `本页打开期间累积的 ${series.v.length} 个点（横轴＝经过秒数）；完整历史见 CSV。`,
+                `${series.v.length} points accumulated while this page was open (x axis = elapsed seconds); the full history is in the CSV.`,
+              )}
             </p>
           </>
         )}

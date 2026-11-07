@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import time
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -38,23 +39,24 @@ class CaptureSignalBuffer(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "高速率采集单个 Nanonis 信号的时间序列。要亚毫秒 RTT 就用 "
+                tr("高速率采集单个 Nanonis 信号的时间序列。要亚毫秒 RTT 就用 "
                 "channel='current'/'z'/'bias'；要走通用的 Signals_ValGet "
-                "路径就传信号索引字符串（'0'..'127'）（受 TCP Tap 限制，~50 Hz 封顶）。"
+                "路径就传信号索引字符串（'0'..'127'）（受 TCP Tap 限制，~50 Hz 封顶）。",
+                "Acquire a time series of a single Nanonis signal at a high rate. For sub-millisecond RTT use channel='current'/'z'/'bias'; to take the generic Signals_ValGet path pass a signal index string ('0'..'127') (limited by the TCP Tap, capped at ~50 Hz).")
             ),
             parameters=[
                 ParameterSpec(
                     name="channel",
                     type="str",
                     description=(
-                        "快速路径用 'current' / 'z' / 'bias'；通用路径用数字信号索引 0-127。"
+                        tr("快速路径用 'current' / 'z' / 'bias'；通用路径用数字信号索引 0-127。", "Use 'current' / 'z' / 'bias' for the fast path; use a numeric signal index 0-127 for the generic path.")
                     ),
                     required=False, default="current",
                 ),
                 ParameterSpec(
                     name="duration_s",
                     type="float",
-                    description="采集窗口，单位秒。",
+                    description=tr("采集窗口，单位秒。", "Acquisition window, in seconds."),
                     unit="s", required=False, default=1.0,
                     min_value=0.01, max_value=60.0,
                 ),
@@ -62,8 +64,9 @@ class CaptureSignalBuffer(BaseSkill):
                     name="poll_hz",
                     type="float",
                     description=(
-                        "目标轮询速率。受 TCP RTT 封顶（快速路径最高 ~2 kHz， Signals_ValGet 上 ~50 "
-                        "Hz）。"
+                        tr("目标轮询速率。受 TCP RTT 封顶（快速路径最高 ~2 kHz， Signals_ValGet 上 ~50 "
+                        "Hz）。",
+                        "Target polling rate. Capped by the TCP RTT (fast path up to ~2 kHz, ~50 Hz on Signals_ValGet).")
                     ),
                     unit="Hz", required=False, default=1000.0,
                     min_value=1.0, max_value=4000.0,
@@ -72,8 +75,9 @@ class CaptureSignalBuffer(BaseSkill):
                     name="include_samples",
                     type="bool",
                     description=(
-                        "为 True（默认）时返回完整样本列表。为 False 时只返回 min/max/mean/std + "
-                        "长度。"
+                        tr("为 True（默认）时返回完整样本列表。为 False 时只返回 min/max/mean/std + "
+                        "长度。",
+                        "When True (default) the full sample list is returned. When False only min/max/mean/std + length.")
                     ),
                     required=False, default=True,
                 ),
@@ -183,16 +187,18 @@ class CaptureSignalBuffer(BaseSkill):
         # constant-signal condition rather than presenting a plausible scalar alone.
         if n >= 8 and smax == smin:
             data["anomaly"] = (
-                f"⚠ {n} 个采样点的值**完全相同**（{smin:.6g} {unit}，std=0）。"
+                tr(f"⚠ {n} 个采样点的值**完全相同**（{smin:.6g} {unit}，std=0）。"
                 "真实物理信号不会逐位重复。最可能的原因：读数被缓存/冻结、"
                 "通道未连接、或该通道当前并未在采集。"
-                "**不要把这些数字当作测量结果使用**，先确认信号源。"
+                "**不要把这些数字当作测量结果使用**，先确认信号源。",
+                f"WARNING: {n} sample points have **exactly identical** values ({smin:.6g} {unit}, std=0). A real physical signal never repeats bit for bit. Most likely causes: the reading is cached/frozen, the channel is not connected, or the channel is not currently acquiring. **Do not use these numbers as a measurement result**; first confirm the signal source.")
             )
         elif n >= 8 and smean != 0 and (smax - smin) / abs(smean) < 1e-9:
             data["anomaly"] = (
-                f"⚠ {n} 个采样点的极差仅 {smax - smin:.3g} {unit}"
+                tr(f"⚠ {n} 个采样点的极差仅 {smax - smin:.3g} {unit}"
                 f"（相对均值 {(smax - smin) / abs(smean):.1e}），近乎恒定。"
-                "可能是读数被缓存或通道未在采集；请先确认信号源再使用这些数字。"
+                "可能是读数被缓存或通道未在采集；请先确认信号源再使用这些数字。",
+                f"WARNING: the range of {n} sample points is only {smax - smin:.3g} {unit} (relative to the mean {(smax - smin) / abs(smean):.1e}), nearly constant. The reading may be cached or the channel may not be acquiring; confirm the signal source before using these numbers.")
             )
         if include_samples:
             data["samples"] = samples

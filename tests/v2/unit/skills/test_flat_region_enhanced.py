@@ -158,13 +158,14 @@ def test_rotation_moves_the_reported_coordinate(tmp_path):
     assert straight.data["scan_angle_deg"] == pytest.approx(0.0)
     assert turned.data["scan_angle_deg"] == pytest.approx(90.0)
 
-    # 同一像素窗,旋转 90° 后坐标应绕帧中心转过去
+    # 同一像素窗,旋转 90° 后坐标应绕帧中心转过去。正 SCAN_ANGLE 是顺时针(见 tests/v2/unit/io/test_px_to_m_rotation.py):帧内偏移 (dx, dy) 落到仪器
+    # 坐标 R(−θ)·(dx, dy),θ=90° 时是 (dy, −dx)。不是逆时针的 (−dy, dx)。
     dx0 = straight.data["center_x_m"] - straight.data["scan_center_x_m"]
     dy0 = straight.data["center_y_m"] - straight.data["scan_center_y_m"]
     dx1 = turned.data["center_x_m"] - turned.data["scan_center_x_m"]
     dy1 = turned.data["center_y_m"] - turned.data["scan_center_y_m"]
-    assert dx1 == pytest.approx(-dy0, abs=1e-12)
-    assert dy1 == pytest.approx(dx0, abs=1e-12)
+    assert dx1 == pytest.approx(dy0, abs=1e-12)
+    assert dy1 == pytest.approx(-dx0, abs=1e-12)
 
 
 def test_rotation_preserves_the_distance_from_the_frame_centre(tmp_path):

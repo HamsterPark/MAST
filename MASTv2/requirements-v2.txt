@@ -140,3 +140,13 @@ pyserial>=3.5
 # 在仪器上不存在」那类静默失效。实测 collect_all 收到 datas=120 / hidden=95，
 # 其中 23 条是模板数据。
 python-docx>=1.2,<2
+
+# --- WITec Suite COM Automation (optical station, docs/v2/design/optical_station_witec.md) ---
+# WITec Control is an official COM automation server; mast/instruments/witec/comtypes_client.py
+# talks to it through comtypes (pure Python, Windows only). The type-library wrappers are
+# generated at run time into <data root>/artifacts/witec/comtypes_gen (MAST_COMTYPES_GEN_DIR
+# overrides): the frozen app's own comtypes.gen is not writable. Absent → a witec_com device
+# reports "dependency missing" and nothing else is affected. Packaging: mast2.spec must
+# collect_all("comtypes"); comtypes.client and comtypes.tools.* are imported lazily and the
+# static analysis misses them.
+comtypes>=1.4; sys_platform == "win32"

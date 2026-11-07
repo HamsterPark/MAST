@@ -114,7 +114,7 @@ class ScanFileEntry(BaseModel):
     ``copies``/``locations`` describe the automatic ingest into the experiment
     folder: one measurement exists as several byte-identical files, and this
     listing used to show one card per copy — identical name, size and timestamp
-    on each, so the operator could not tell them apart .
+    on each, so the operator could not tell them apart.
     Copies are folded into ONE entry that says how many there are and where they
     live. Nothing is dropped: ``locations`` names every member, so a wrong fold is
     visible on screen rather than silently hiding a file."""
@@ -143,15 +143,15 @@ class LatestScansResponse(BaseModel):
     count: int = 0
     search_dirs: list[str] = Field(default_factory=list)
     degraded: bool = False
-    # ── type filtering (2026-08-04, 的残余) ──────────────────────
+    # ── type filtering (2026-08-04) ──────────────────────
     # ``scans`` is the newest ``n`` of the REQUESTED extensions. The two fields
     # below describe the whole discovery result, not that slice, so a client can
     # show honest chip counts without asking for every file on disk.
     #
     # This exists because filtering client-side on a server-truncated list is a
-    # lie: ask for 60 files, get 60 .dat, filter to .sxm, show "SXM (0)" while
-    # 26 sit right there. That is exactly, and it comes back wherever
-    # the truncation and the filter live on opposite sides of the wire.
+    # wrong: ask for 60 files, get 60 .dat, filter to .sxm, show "SXM (0)" while
+    # 26 sit right there. The same problem recurs wherever the truncation and
+    # the filter live on opposite sides of the wire.
     counts_by_ext: dict[str, int] = Field(
         default_factory=dict,
         description="files per extension across the FULL discovery result, before the n-slice",

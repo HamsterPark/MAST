@@ -17,6 +17,7 @@ lying. Provenance and the restart question now live in ``mast.api.safety_view``.
 from __future__ import annotations
 
 import logging
+from mast.i18n import tr
 
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field
@@ -152,15 +153,15 @@ def clear_emergency(request: Request,
 
     ## 为什么必须有这个端点
 
-    ``POST /safety/emergency-stop`` **挂**闩;在 2026-08-13 之前,全系统**没有
+    ``POST /safety/emergency-stop`` **挂**闩;若没有这个端点,全系统**没有
     任何东西解**它 —— ``MASTApp.clear_emergency_latch()`` 存在但没有路由、没有
     按钮,是死代码。而闩会被三个来源自动挂上(急停按钮、任意 E_STOP 事件、
     环境告警),其中两个不需要人参与。
 
-    这类情况真会发生:``main`` 端口抖了 21 秒,环境监控把「这一次读不到」判成
+    曾出现过:``main`` 端口短暂抖动,环境监控把「这一次读不到」判成
     硬故障 ⇒ 退针 + 挂闩;通知用的 E_STOP 又因为 reason 不在白名单里被静默
-    丢掉,此后每一次仪器调用都只回一句
-    「用户已中止本次运行」,别的什么都看不到。连接 21 秒后就自愈了,针和仪器全程完好,机器却
+    丢掉。界面上看不到任何反应,而此后每一次仪器调用都回一句
+    「用户已中止本次运行」。连接很快就自愈了,针和仪器全程完好,机器却
     锁死到进程重启为止。**能停不能解的开关不是安全措施,是死锁。**
 
     ## 它不做什么
@@ -238,7 +239,7 @@ def reconnect_role(request: Request,
 # 闩族 —— 一次看全所有「挂上就拒绝/就停」的东西
 #
 # 上面那两个急停路由是**一个**闩的三件套(可读 / 可解 / 解了连带放开下游)。
-# 2026-08-14 交接文档 §2 点名的是**五处**同形状,而其余四处各缺各的:有的能解
+# 同形状的共**五处**,其余四处各缺各的:有的能解
 # 不能读(重连口在,连接健康度全仓零读者),有的读不到也解不掉(空转记账),
 # 有的释放口只是别的动作的副作用(看门狗要靠「开始一个新任务」才重新布防)。
 #
@@ -286,17 +287,17 @@ def _app_of(request: Request):
 
 def _emergency_latch(app) -> LatchState:
     st = LatchState(
-        id="emergency", name="急停闩",
-        effect="新任务无法启动,仪器动作全被拒(拒绝语会说是用户中止的)",
+        id="emergency", name=tr("急停闩", "Emergency-stop latch"),
+        effect=tr("新任务无法启动,仪器动作全被拒(拒绝语会说是用户中止的)", "New tasks cannot start and all instrument actions are refused (the refusal text says the user aborted)"),
         release="POST /api/safety/clear-emergency", release_actor="operator")
     fn = getattr(app, "emergency_latch_state", None)
     if not callable(fn):
-        st.unreadable_reason = "没有活的 app / emergency_latch_state 钩子"
+        st.unreadable_reason = tr("没有活的 app / emergency_latch_state 钩子", "No live app / emergency_latch_state hook")
         return st
     try:
         d = fn() or {}
     except Exception as exc:  # noqa: BLE001
-        st.unreadable_reason = f"读取抛异常:{type(exc).__name__}: {exc}"
+        st.unreadable_reason = tr(f"读取抛异常:{type(exc).__name__}: {exc}", f"Read raised an exception: {type(exc).__name__}: {exc}")
         return st
     st.latched = bool(d.get("latched"))
     st.why = str(d.get("why") or "")
@@ -313,24 +314,24 @@ def _stall_latch(_app) -> LatchState:
     在这个端点之前,这个状态在系统里没有任何地方看得见,也没有任何东西能解。
     """
     st = LatchState(
-        id="stall_guard", name="空转记账（stall-guard 升级阶梯）",
-        effect="上膛的签名下一次再失败会当场终止该回合,且不再提示智能体;"
-               "记账按进程累计,不随运行重置",
+        id="stall_guard", name=tr("空转记账（stall-guard 升级阶梯）", "Stall accounting (stall-guard escalation ladder)"),
+        effect=tr("上膛的签名下一次再失败会当场终止该回合,且不再提示智能体;"
+               "记账按进程累计,不随运行重置", "An armed signature ends the turn on the spot the next time it fails, with no further hint to the agent; the accounting accumulates per process and is not reset between runs"),
         release="POST /api/safety/clear-stall-guard", release_actor="operator")
     try:
         from mast.agents._shared.stall_guard_mw import latch_rows
         rows = latch_rows()
     except Exception as exc:  # noqa: BLE001
-        st.unreadable_reason = f"读取抛异常:{type(exc).__name__}: {exc}"
+        st.unreadable_reason = tr(f"读取抛异常:{type(exc).__name__}: {exc}", f"Read raised an exception: {type(exc).__name__}: {exc}")
         return st
     armed = [r for r in rows if r.get("armed")]
     st.latched = bool(armed)
     if armed:
         first = armed[0]
-        st.why = (f"{first.get('agent')} 的 `{first.get('tool')}` 已上膛"
+        st.why = (tr(f"{first.get('agent')} 的 `{first.get('tool')}` 已上膛"
                   f"（提示 {first.get('escalation')} 次,"
-                  f"最后一次同错失败 {first.get('last_count')} 连）"
-                  + (f"，另有 {len(armed) - 1} 条" if len(armed) > 1 else ""))
+                  f"最后一次同错失败 {first.get('last_count')} 连）", f"{first.get('agent')} `{first.get('tool')}` is armed (hinted {first.get('escalation')} times, last failed {first.get('last_count')} times in a row with the same error)")
+                  + (tr(f"，另有 {len(armed) - 1} 条", f", plus {len(armed) - 1} more") if len(armed) > 1 else ""))
         st.since = min((float(r.get("first_seen") or 0.0) for r in armed),
                        default=None) or None
     # 上膛的**一条都不省**(那是要回答的问题);还在爬阶梯的截断,并且**说出来**
@@ -348,30 +349,30 @@ def _comms_latch(app) -> LatchState:
     `ConnectionPool.comms_snapshot()` 早就存在,**全仓零读者**(生产方接好了、
     消费方不存在的那一族)。这里是它的第一个读者。"""
     st = LatchState(
-        id="comms_breaker", name="Nanonis TCP 通信熔断",
-        effect="短路一切 safe_call:立即返回「通信中断」而不再碰 socket"
-               "（刻意的 —— 端口很脆,重锤会把它锤到要重启 Nanonis）",
-        release="冷却到期自动放一个探针;或 POST /api/safety/reconnect-role",
-        release_actor="自动(冷却) + operator")
+        id="comms_breaker", name=tr("Nanonis TCP 通信熔断", "Nanonis TCP comms breaker"),
+        effect=tr("短路一切 safe_call:立即返回「通信中断」而不再碰 socket"
+               "（刻意的 —— 端口很脆,重锤会把它锤到要重启 Nanonis）", "Short-circuits every safe_call: returns \"communication lost\" immediately without touching the socket again (deliberate: the port is fragile, and hammering it can force a Nanonis restart)"),
+        release=tr("冷却到期自动放一个探针;或 POST /api/safety/reconnect-role", "A probe is let through automatically when the cooldown expires; or POST /api/safety/reconnect-role"),
+        release_actor=tr("自动(冷却) + operator", "Automatic (cooldown) + operator"))
     pool = getattr(app, "_pool", None)
     fn = getattr(pool, "comms_snapshot", None)
     if not callable(fn):
-        st.unreadable_reason = "没有活的连接池 / comms_snapshot 钩子"
+        st.unreadable_reason = tr("没有活的连接池 / comms_snapshot 钩子", "No live connection pool / comms_snapshot hook")
         return st
     try:
         snap = dict(fn() or {})
     except Exception as exc:  # noqa: BLE001
-        st.unreadable_reason = f"读取抛异常:{type(exc).__name__}: {exc}"
+        st.unreadable_reason = tr(f"读取抛异常:{type(exc).__name__}: {exc}", f"Read raised an exception: {type(exc).__name__}: {exc}")
         return st
     state = str(snap.get("state") or "")
     if not state:
-        st.unreadable_reason = "熔断器没有报出 state 字段"
+        st.unreadable_reason = tr("熔断器没有报出 state 字段", "The breaker did not report a state field")
         return st
     st.latched = state.upper() != "CLOSED"
     if st.latched:
-        st.why = (f"连续 {snap.get('streak')} 次 TCP 级失败"
-                  f"（阈值 {snap.get('fail_threshold')}）"
-                  + (f"：{snap.get('last_reason')}" if snap.get("last_reason") else ""))
+        st.why = (tr(f"连续 {snap.get('streak')} 次 TCP 级失败"
+                  f"（阈值 {snap.get('fail_threshold')}）", f"{snap.get('streak')} consecutive TCP-level failures (threshold {snap.get('fail_threshold')})")
+                  + (tr(f"：{snap.get('last_reason')}", f": {snap.get('last_reason')}") if snap.get("last_reason") else ""))
     st.detail = snap
     return st
 
@@ -381,23 +382,23 @@ def _watchdog_latch(app) -> LatchState:
     **不再监视了**(一次性,触发退针后就停)。把它和「拒绝一切」的闩并成一个
     bool 会让人读反,所以 effect 里写清楚。"""
     st = LatchState(
-        id="watchdog_anomaly", name="安全看门狗异常闩（反向：挂着=网已撤）",
-        effect="一次性闩:触发过一次 tip-crash 退针之后看门狗停止监视,"
-               "**不再拒绝任何动作,但也不再保护**,直到重新布防",
-        release="POST /api/safety/rearm-watchdog（开始新任务时也会自动重新布防）",
-        release_actor="operator + 自动(开始新任务)")
+        id="watchdog_anomaly", name=tr("安全看门狗异常闩（反向：挂着=网已撤）", "Safety watchdog anomaly latch (inverted: latched = net removed)"),
+        effect=tr("一次性闩:触发过一次 tip-crash 退针之后看门狗停止监视,"
+               "**不再拒绝任何动作,但也不再保护**,直到重新布防", "One-shot latch: after one tip-crash withdraw has fired, the watchdog stops watching, **no longer refuses any action, and no longer protects** until re-armed"),
+        release=tr("POST /api/safety/rearm-watchdog（开始新任务时也会自动重新布防）", "POST /api/safety/rearm-watchdog (also re-armed automatically when a new task starts)"),
+        release_actor=tr("operator + 自动(开始新任务)", "operator + automatic (new task start)"))
     ex = getattr(app, "_executor", None)
     wd = getattr(ex, "_watchdog", None) if ex is not None else None
     if wd is None:
-        st.unreadable_reason = "没有活的 executor / watchdog"
+        st.unreadable_reason = tr("没有活的 executor / watchdog", "No live executor / watchdog")
         return st
     try:
         st.latched = bool(getattr(wd, "is_anomaly_triggered", False))
     except Exception as exc:  # noqa: BLE001
-        st.unreadable_reason = f"读取抛异常:{type(exc).__name__}: {exc}"
+        st.unreadable_reason = tr(f"读取抛异常:{type(exc).__name__}: {exc}", f"Read raised an exception: {type(exc).__name__}: {exc}")
         return st
     if st.latched:
-        st.why = "看门狗触发过一次异常退针,尚未重新布防"
+        st.why = tr("看门狗触发过一次异常退针,尚未重新布防", "The watchdog fired an abnormal withdraw once and has not been re-armed")
     return st
 
 

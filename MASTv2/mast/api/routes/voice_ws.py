@@ -95,6 +95,15 @@ def _hitl_factory(ctx: Any):
 @router.websocket("/ws/voice")
 async def ws_voice(ws: WebSocket) -> None:
     await ws.accept()
+    # Voice drives the built-in chat on the internal LLM: refuse while legacy
+    # features are off — one error frame (same shape as the session's), then a
+    # policy-violation close, before anything reaches a provider (2026-11-04).
+    from mast.legacy_gate import REFUSAL_CODE, internal_llm_enabled, refusal_message
+    if not internal_llm_enabled():
+        await ws.send_json({"type": "error", "code": REFUSAL_CODE,
+                            "message": refusal_message("voice")})
+        await ws.close(code=1008)
+        return
     ctx = ws.app.state.ctx
     engine = getattr(ctx, "conversation_engine", None)
     voice_cfg = _voice_cfg(ctx)

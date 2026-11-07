@@ -11,7 +11,7 @@ Top-level entry point is :func:`build_environment_sensors`, called from the GUI
 3. Always append the helium / noise placeholders, and a vacuum / temperature
    placeholder for any kind not found — so the Lab Console Environment panel
    keeps showing every row honestly (``N/A`` when no hardware), and the program
-   runs with nothing connected (requirement #7).
+   runs with nothing connected.
 
 Nothing here raises: a bad config entry is logged and skipped, a probe failure
 is swallowed, and the worst case still returns the placeholder set.
@@ -24,7 +24,7 @@ from typing import Iterable
 
 from mast.environment.alarm import AlarmSpec
 from mast.environment.base import EnvironmentSensor
-from mast.environment.config import load_config, normalise_sensor
+from mast.environment.config import autodetect_policy, load_config, normalise_sensor
 from mast.environment.dl7_vacuum import DL7VacuumSensor, probe_dl7
 from mast.environment.lakeshore_temp import (
     HEALTH_CLEAN,
@@ -262,6 +262,12 @@ def autodetect_sensors(skip_ports: set[str] | None = None,
         dev = (info.device or "").upper()
         if not dev or dev in skip:
             continue
+        # One INFO line per port we are about to write to. Previously these
+        # probes left no trace at all (a failed one logged nothing), so nobody could
+        # tell from the log that MAST had sent ``*IDN?`` and a Modbus frame to a
+        # laser or a temperature controller on that port.
+        logger.info("autodetect: probing %s (%s)", info.device,
+                    (info.description or "no description").strip() or "no description")
         try:
             # Lakeshore FIRST, deliberately. Identifying it costs one ASCII
             # query ("*IDN?"), which a Modbus gauge ignores on a CRC mismatch.
@@ -286,6 +292,9 @@ def autodetect_sensors(skip_ports: set[str] | None = None,
                         port=info.device, baudrate=DL7_BAUD, bytesize=8,
                         parity="N", stopbits=1, timeout=0.4))))
                 skip.add(dev)
+            else:
+                logger.debug("autodetect: %s answered neither as a Lakeshore nor as a DL-7",
+                             info.device)
         except Exception as exc:  # pragma: no cover - probing is best-effort
             logger.debug("autodetect: probe of %s failed: %s", info.device, exc)
     return found
@@ -324,9 +333,12 @@ def build_environment_sensors(*, include_placeholders: bool = True,
     try:
         configured, used_ports = build_sensors_from_config(cfg, transports)
         sensors.extend(configured)
-        if cfg.get("autodetect", True):
+        scan, why = autodetect_policy(cfg)
+        if scan:
             sensors.extend(autodetect_sensors(skip_ports=used_ports,
                                               transports=transports))
+        else:
+            logger.info("autodetect: serial scan skipped - %s", why)
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("environment: sensor assembly failed: %s", exc)
         sensors = []
@@ -430,6 +442,9 @@ def discover_devices(*, timeout: float = 0.5) -> list[dict]:
         port = info.device or ""
         if not port:
             continue
+        # An operator-started scan, but the same writes to the port as the boot-time
+        # auto-detection: it gets the same trace.
+        logger.info("autodetect: probing %s (manual device scan)", port)
         entry: dict = {
             "port": port,
             "description": info.description or "",

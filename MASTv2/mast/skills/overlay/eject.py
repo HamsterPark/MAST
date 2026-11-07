@@ -43,6 +43,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from mast.i18n import tr
 from mast.skills.overlay import paths
 
 logger = logging.getLogger(__name__)
@@ -334,26 +335,49 @@ def _warning(dotted: str, skills: set[str], sites: list[ImportSite],
     binds = [s for s in sites if s.binds_skill]
     if not skills and unknown:
         # 三态的第三态。折进「没有技能类」就会说出最重的那句判断，而它可能是反的。
-        return ("判断不了这个模块里有没有技能类：" + "、".join(sorted(unknown)[:4])
-                + " 的基类解析不到（多半是从本仓之外或动态构造的）。"
-                + "覆盖之前请先确认它们是不是 BaseSkill 的子类 —— 如果不是，"
-                "覆盖这个模块不会有任何效果。")
+        return tr("判断不了这个模块里有没有技能类：" + "、".join(sorted(unknown)[:4])
+                  + " 的基类解析不到（多半是从本仓之外或动态构造的）。"
+                  + "覆盖之前请先确认它们是不是 BaseSkill 的子类 —— 如果不是，"
+                  "覆盖这个模块不会有任何效果。",
+                  "Cannot tell whether this module has skill classes: the base classes of "
+                  + ", ".join(sorted(unknown)[:4])
+                  + " cannot be resolved (probably defined outside this repo or built "
+                  "dynamically). Before overriding, check whether they subclass BaseSkill - "
+                  "if not, overriding this module will have no effect.")
     if not skills:
         n = len(sites)
         head = "这个模块里没有技能类（没有 BaseSkill / CompositeSkillGraph 的子类）。"
+        head_en = ("This module has no skill classes (no subclass of BaseSkill / "
+                   "CompositeSkillGraph). ")
         if n:
-            return (head + "它是被 " + str(n) + " 处直接 import 的辅助模块 —— 常量、"
-                    "函数、基类。覆盖层换的是「注册表里注册的技能类」，而这些 import "
-                    "拿的是模块对象上的引用，热重载碰不到它们：覆盖这个模块「一处都"
-                    "不会生效」。要改它，仍然得发版本。")
-        return head + "覆盖层只对注册进注册表的技能类生效 —— 请确认这确实是你要改的东西。"
+            return tr(head + "它是被 " + str(n) + " 处直接 import 的辅助模块 —— 常量、"
+                      "函数、基类。覆盖层换的是「注册表里注册的技能类」，而这些 import "
+                      "拿的是模块对象上的引用，热重载碰不到它们：覆盖这个模块「一处都"
+                      "不会生效」。要改它，仍然得发版本。",
+                      head_en + "It is a helper module (constants, functions, base classes) "
+                      "imported directly in " + str(n) + " places. An overlay replaces the "
+                      "skill classes registered in the registry, while those imports hold "
+                      "references on the module object that hot reload cannot reach: "
+                      "overriding this module takes effect nowhere. Changing it still "
+                      "requires a release.")
+        return tr(head + "覆盖层只对注册进注册表的技能类生效 —— 请确认这确实是你要改的东西。",
+                  head_en + "An overlay only affects skill classes registered in the "
+                  "registry - make sure this is really what you want to change.")
     if binds:
         files = sorted({s.file for s in binds})
-        return ("有 " + str(len(binds)) + " 处直接 import 了这个模块的技能类（"
-                + "、".join(files[:4]) + ("…" if len(files) > 4 else "")
-                + "）。那些入口拿的是模块上的旧引用，热重载换不动 —— 它们会继续跑"
-                "内置版，其余走注册表的路径会用覆盖版。要一起改，得发版本。")
-    return ("没有任何地方直接 import 这个模块的技能类 —— 覆盖之后全线生效。")
+        return tr("有 " + str(len(binds)) + " 处直接 import 了这个模块的技能类（"
+                  + "、".join(files[:4]) + ("…" if len(files) > 4 else "")
+                  + "）。那些入口拿的是模块上的旧引用，热重载换不动 —— 它们会继续跑"
+                  "内置版，其余走注册表的路径会用覆盖版。要一起改，得发版本。",
+                  str(len(binds)) + " places import this module's skill classes directly ("
+                  + ", ".join(files[:4]) + ("..." if len(files) > 4 else "")
+                  + "). Those entry points hold the old reference on the module and hot "
+                  "reload cannot swap it - they keep running the built-in version, while "
+                  "paths through the registry use the overlay. Changing them all requires "
+                  "a release.")
+    return tr("没有任何地方直接 import 这个模块的技能类 —— 覆盖之后全线生效。",
+              "Nothing imports this module's skill classes directly - an overlay takes "
+              "effect everywhere.")
 
 
 def eject(dotted: str, *, overwrite: bool = False) -> EjectResult:
@@ -366,8 +390,11 @@ def eject(dotted: str, *, overwrite: bool = False) -> EjectResult:
     res = EjectResult(dotted=dotted)
     rel = paths.rel_for_module(dotted)
     if not rel:
-        res.reason = (dotted + " 不是可覆盖的技能模块 —— 覆盖层只覆盖 "
-                      + paths.SKILLS_PKG + ".* 下的模块（架构代码改动仍需发版本）。")
+        res.reason = tr(dotted + " 不是可覆盖的技能模块 —— 覆盖层只覆盖 "
+                        + paths.SKILLS_PKG + ".* 下的模块（架构代码改动仍需发版本）。",
+                        dotted + " is not an overridable skill module - overlays only cover "
+                        "modules under " + paths.SKILLS_PKG + ".* (architecture code changes "
+                        "still need a release).")
         return res
     res.rel = rel
 
@@ -379,7 +406,8 @@ def eject(dotted: str, *, overwrite: bool = False) -> EjectResult:
         res.reason = str(exc)
         return res
     if src_path is None:
-        res.reason = "在 " + str(root) + " 下找不到 " + dotted + " 的源文件。"
+        res.reason = tr("在 " + str(root) + " 下找不到 " + dotted + " 的源文件。",
+                        "Source file for " + dotted + " not found under " + str(root) + ".")
         return res
 
     data = src_path.read_bytes()
@@ -394,13 +422,19 @@ def eject(dotted: str, *, overwrite: bool = False) -> EjectResult:
         except OSError:
             cur = ""
         same = cur == orig_sha
-        res.reason = (
+        res.reason = tr(
             rel + " 已经在覆盖层里了，" +
             ("而且和内置版逐字节相同（上次导出之后没改过）—— 覆盖它是安全的，"
              "请用 overwrite=True。"
              if same else
              "而且里面「已经有改动」（sha 与内置版不同）。覆盖会丢掉那些改动 —— "
-             "请先备份，确认之后再用 overwrite=True。"))
+             "请先备份，确认之后再用 overwrite=True。"),
+            rel + " is already in the overlay layer, " +
+            ("and it is byte-identical to the built-in version (unchanged since the last "
+             "export) - overwriting it is safe, use overwrite=True."
+             if same else
+             "and it already contains changes (its sha differs from the built-in version). "
+             "Overwriting would lose them - back it up first, then use overwrite=True."))
         return res
 
     exported = _toplevel_names(data, dotted)
@@ -445,8 +479,11 @@ def _write_sidecar(rel: str, *, dotted: str, orig_sha: str, orig_rel: str,
         "skill_classes": list(skill_classes),
         "warning": warning,
         "importers": [s.as_dict() for s in importers],
-        "note": ("orig_sha256 是导出时内置版的 sha。升级之后用 drift() 复核："
-                 "内置版变了而覆盖版没跟上，就意味着这份覆盖会把上游的修复盖回去。"),
+        "note": tr("orig_sha256 是导出时内置版的 sha。升级之后用 drift() 复核："
+                   "内置版变了而覆盖版没跟上，就意味着这份覆盖会把上游的修复盖回去。",
+                   "orig_sha256 is the sha of the built-in version at export time. After an upgrade, "
+                   "re-check with drift(): if the built-in version has changed and the overlay has not "
+                   "followed, this overlay would paste over the upstream fix."),
     }
     atomic_write_json(paths.sidecar_path(rel), payload)
 
@@ -495,8 +532,11 @@ def drift(rel: str) -> DriftReport:
     sc = read_sidecar(rel)
     if not sc or not sc.get("orig_sha256"):
         return DriftReport(rel, False, None,
-                           "没有 sidecar —— 这份覆盖不是 eject 出来的（手写的也合法），"
-                           "无从知道它基于哪一版内置代码。")
+                           tr("没有 sidecar —— 这份覆盖不是 eject 出来的（手写的也合法），"
+                              "无从知道它基于哪一版内置代码。",
+                              "No sidecar - this overlay was not produced by eject (hand-written "
+                              "ones are legal too), so there is no way to know which built-in "
+                              "version it is based on."))
     dotted = sc.get("overlay_of") or paths.overlay_of(rel) or ""
     from mast.pyexec import _srcfiles
     try:
@@ -506,15 +546,21 @@ def drift(rel: str) -> DriftReport:
                            "", sc.get("app_version", ""))
     if p is None:
         return DriftReport(rel, True, None,
-                           "这一版里已经没有 " + dotted + " 了 —— 内置模块被删或改名，"
-                           "这份覆盖多半也该跟着处理。",
+                           tr("这一版里已经没有 " + dotted + " 了 —— 内置模块被删或改名，"
+                              "这份覆盖多半也该跟着处理。",
+                              dotted + " no longer exists in this version - the built-in module "
+                              "was removed or renamed, and this overlay should probably be "
+                              "dealt with too."),
                            sc.get("orig_sha256", ""), "", sc.get("app_version", ""))
     cur = _sha(p.read_bytes())
     orig = sc.get("orig_sha256", "")
     return DriftReport(
         rel, True, cur != orig,
-        ("内置版在导出之后改过 —— 这份覆盖可能把上游的修复盖回去了，"
-         "建议重新导出一份再把你的改动挪过去。" if cur != orig else ""),
+        (tr("内置版在导出之后改过 —— 这份覆盖可能把上游的修复盖回去了，"
+            "建议重新导出一份再把你的改动挪过去。",
+            "The built-in version changed after the export - this overlay may overwrite "
+            "upstream fixes. Re-export and move your changes over.")
+         if cur != orig else ""),
         orig, cur, sc.get("app_version", ""))
 
 

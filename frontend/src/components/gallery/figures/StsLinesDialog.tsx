@@ -1,11 +1,14 @@
-// 拉线谱出图弹层（设计 D17 / D22）。
+// Line-scan figure dialog.
 //
-// 由用户选择同一条线的区组、添加站位标注并设置谱的排除范围
-// （设计 T25）。这里让人勾：默认按系列名建议（lib/gallery/figures.ts 的 suggestLineGroups），
-// 线名、站位标注、每组「从第几条起针尖在变」都可以改；「预演站位」只用索引里的坐标跑一遍
-// 服务端的站位推断，看清每组分到几个站位、有没有对不上的，再出图。
+// Which series are blocks of the same line, which station is labelled V/D, and from which
+// spectrum on the tip changed are chosen by the user here: the default grouping is suggested from
+// the series names (suggestLineGroups in lib/gallery/figures.ts), and the line name, station
+// labels and each block's "tip changed from" index can all be edited. "Dry-run stations" runs the
+// server's station inference using only the coordinates in the index, so you can see how many
+// stations each block maps to and whether anything fails to match before exporting.
 //
-// 勾选集合与某次出图完全相同（与顺序无关）时，用那一次的参数预填。
+// When the ticked set is exactly the same as a previous export (order-independent), that
+// export's parameters pre-fill the form.
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -33,6 +36,7 @@ import { useMarksStore } from "../marksStore";
 import { SMALL_BTN, SMALL_SELECT } from "../bits";
 import { startFigureJob } from "./figureJob";
 import { useGalleryFigures } from "./useFigures";
+import { tr } from "@/lib/i18n";
 
 const ACC = "!border-mast-accent !bg-mast-accent !text-mast-accent-ink";
 const CELL = "border-b border-mast-border px-1.5 py-1";
@@ -43,7 +47,7 @@ export function StsLinesDialog({ sid, model, onClose }: { sid: string; model: Ga
   const figures = useGalleryFigures();
   const entries = useMemo(() => allEntries(figures.data?.categories), [figures.data]);
 
-  // 参与的系列：索引里的成员全是谱；索引里一个成员都没有时退回系列自己记的种类。
+  // Participating series: all members in the index are spectra; when the index has no members at all, fall back to the kind the series records itself.
   const members = useMemo(() => {
     const m = new Map<string, GalleryItem[]>();
     for (const [id, s] of Object.entries(series)) m.set(id, seriesMembers(s, model.items));
@@ -78,7 +82,7 @@ export function StsLinesDialog({ sid, model, onClose }: { sid: string; model: Ga
       if (!lineEdited) setForm((f) => ({ ...f, lineName: commonLineName(series, checked) }));
     }
     setPlan(null);
-    // 勾选集合（按内容）或已有出图列表变了才重算；series 对象每次改标记都会换引用。
+    // Recompute only when the ticked set (by content) or the existing figure list changes; the series object changes reference on every mark edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkedKey, entries]);
 
@@ -105,7 +109,7 @@ export function StsLinesDialog({ sid, model, onClose }: { sid: string; model: Ga
       const { data, error } = await api.POST("/api/gallery/figures/sts_lines/plan", {
         body: { series: checked, options: stsLinesOptions(form, checked) },
       });
-      if (error || !data) throw new Error("请求失败");
+      if (error || !data) throw new Error(tr("请求失败", "Request failed"));
       setPlan(data);
     } catch (e) {
       setPlan({ ok: false, degraded: true, detail: (e as Error).message, line_name: "", n_stations: 0, reference: "" });
@@ -131,28 +135,41 @@ export function StsLinesDialog({ sid, model, onClose }: { sid: string; model: Ga
     >
       <div
         role="dialog"
-        aria-label="拉线谱出图"
+        aria-label={tr("拉线谱出图", "STS line figure")}
         className="mt-6 w-full max-w-4xl rounded-mast-card border border-mast-border bg-mast-panel text-mast-text shadow-mast"
       >
         <div className="flex items-center justify-between border-b border-mast-border bg-mast-panel-2 px-4 py-2.5">
-          <h3 className="text-base font-semibold">拉线谱出图</h3>
-          <button type="button" onClick={onClose} className="text-mast-muted hover:text-mast-text" title="关闭（Esc）">
+          <h3 className="text-base font-semibold">{tr("拉线谱出图", "STS line figure")}</h3>
+          <button type="button" onClick={onClose} className="text-mast-muted hover:text-mast-text" title={tr("关闭（Esc）", "Close (Esc)")}>
             ✕
           </button>
         </div>
 
         <div className="space-y-3 p-4 text-[13px]">
           <p className="text-mast-muted">
-            一条线 = 若干个谱系列，每个系列是这条线的一个区组。站位由服务端按谱的位置沿线投影推断，区组之间的漂移自动对齐；
-            默认勾上了与本系列「同一条线」的系列（系列名去掉「区组k」与末尾括号后相同）。出四张图：分区组比较的热图与瀑布、站位均值的热图与瀑布。
+            {tr(
+              "一条线 = 若干个谱系列，每个系列是这条线的一个区组。站位由服务端按谱的位置沿线投影推断，区组之间的漂移自动对齐；默认勾上了与本系列「同一条线」的系列（系列名去掉「区组k」与末尾括号后相同）。出四张图：分区组比较的热图与瀑布、站位均值的热图与瀑布。",
+              "A line is several spectrum series, each series being one block of the line. The server infers stations by projecting the spectrum positions along the line and aligns drift between blocks automatically. Series on the \"same line\" as this one are ticked by default (same series name once the block label \"区组k\" and trailing parentheses are removed). Four figures are produced: per-block heatmap and waterfall, and per-station-average heatmap and waterfall.",
+            )}
           </p>
-          {prefillFrom && <div className="text-mast-info">已按 {prefillFrom} 那次出图的参数预填。</div>}
+          {prefillFrom && (
+            <div className="text-mast-info">
+              {tr(`已按 ${prefillFrom} 那次出图的参数预填。`, `Pre-filled from the parameters of the export at ${prefillFrom}.`)}
+            </div>
+          )}
 
           <div className="max-h-72 overflow-auto rounded-[3px] border border-mast-border">
             <table className="w-full border-collapse">
               <thead>
                 <tr className="text-left">
-                  {["", "系列", "区组", "条数", "评级", "从第几条起针尖在变"].map((h, i) => (
+                  {[
+                    "",
+                    tr("系列", "Series"),
+                    tr("区组", "Block"),
+                    tr("条数", "Count"),
+                    tr("评级", "Rating"),
+                    tr("从第几条起针尖在变", "Tip changed from #"),
+                  ].map((h, i) => (
                     <th key={i} className={`${CELL} sticky top-0 bg-mast-panel-2 font-semibold`}>
                       {h}
                     </th>
@@ -182,8 +199,8 @@ export function StsLinesDialog({ sid, model, onClose }: { sid: string; model: Ga
                           <input
                             className={`${SMALL_SELECT} w-16 font-mono`}
                             value={form.badFrom[id] ?? ""}
-                            placeholder="无"
-                            title="按采集顺序、从 0 数；从这一条起画红虚线 / 红字，不进均值"
+                            placeholder={tr("无", "none")}
+                            title={tr("按采集顺序、从 0 数；从这一条起画红虚线 / 红字，不进均值", "Counted from 0 in acquisition order; from this spectrum on, drawn as red dashes / red text and excluded from the average")}
                             onChange={(e) => setForm((f) => ({ ...f, badFrom: { ...f.badFrom, [id]: e.target.value } }))}
                           />
                         )}
@@ -194,7 +211,7 @@ export function StsLinesDialog({ sid, model, onClose }: { sid: string; model: Ga
                 {!ordered.length && (
                   <tr>
                     <td colSpan={6} className={`${CELL} text-mast-muted`}>
-                      没有谱系列。
+                      {tr("没有谱系列。", "No spectrum series.")}
                     </td>
                   </tr>
                 )}
@@ -204,7 +221,7 @@ export function StsLinesDialog({ sid, model, onClose }: { sid: string; model: Ga
 
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-1">
-              线名
+              {tr("线名", "Line name")}
               <input
                 className={`${SMALL_SELECT} w-[26rem] max-w-full`}
                 value={form.lineName}
@@ -220,16 +237,18 @@ export function StsLinesDialog({ sid, model, onClose }: { sid: string; model: Ga
                 checked={form.excludeRejected}
                 onChange={(e) => setForm((f) => ({ ...f, excludeRejected: e.target.checked }))}
               />
-              均值里剔除评级为「排除」的系列
+              {tr("均值里剔除评级为「排除」的系列", "Exclude series rated \"Exclude\" from the average")}
             </label>
           </div>
 
           <div>
-            <div className="mb-1 text-mast-muted">站位标注（图上黄圈与纵轴文字，例如 5 → V）：</div>
+            <div className="mb-1 text-mast-muted">
+              {tr("站位标注（图上黄圈与纵轴文字，例如 5 → V）：", "Station labels (yellow circles and y-axis text on the figure, e.g. 5 → V):")}
+            </div>
             <div className="space-y-1">
               {form.marks.map((r, i) => (
                 <div key={i} className="flex items-center gap-1.5">
-                  站位
+                  {tr("站位", "Station")}
                   <input
                     className={`${SMALL_SELECT} w-14 font-mono`}
                     value={r.station}
@@ -242,7 +261,7 @@ export function StsLinesDialog({ sid, model, onClose }: { sid: string; model: Ga
                     className={SMALL_BTN}
                     onClick={() => setForm((f) => ({ ...f, marks: f.marks.filter((_, k) => k !== i) }))}
                   >
-                    删除
+                    {tr("删除", "Delete")}
                   </button>
                 </div>
               ))}
@@ -251,20 +270,20 @@ export function StsLinesDialog({ sid, model, onClose }: { sid: string; model: Ga
                 className={SMALL_BTN}
                 onClick={() => setForm((f) => ({ ...f, marks: [...f.marks, { station: "", label: "" }] }))}
               >
-                + 加一行
+                {tr("+ 加一行", "+ Add row")}
               </button>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2 border-t border-mast-border pt-3">
             <button type="button" className={SMALL_BTN} disabled={!checked.length || !!busy} onClick={() => void doPlan()}>
-              {busy === "plan" ? "预演中…" : "预演站位"}
+              {busy === "plan" ? tr("预演中…", "Dry-running…") : tr("预演站位", "Dry-run stations")}
             </button>
             <button type="button" className={clsx(SMALL_BTN, ACC)} disabled={!checked.length || !!busy} onClick={() => void doRun()}>
-              {busy === "run" ? "发起中…" : `出图（${checked.length} 个区组）`}
+              {busy === "run" ? tr("发起中…", "Starting…") : tr(`出图（${checked.length} 个区组）`, `Export (${checked.length} blocks)`)}
             </button>
             <button type="button" className={SMALL_BTN} onClick={onClose}>
-              取消
+              {tr("取消", "Cancel")}
             </button>
           </div>
 
@@ -289,7 +308,8 @@ function PlanTable({
   if (plan.degraded || !plan.ok) {
     return (
       <div className="rounded-[3px] border border-mast-warn-border bg-mast-warn-bg px-3 py-2 text-mast-warn">
-        预演没有结果：{plan.detail || warnings.join("；") || "未知原因"}
+        {tr("预演没有结果：", "Dry run produced no result: ")}
+        {plan.detail || warnings.join(tr("；", "; ")) || tr("未知原因", "unknown reason")}
       </div>
     );
   }
@@ -301,14 +321,24 @@ function PlanTable({
   return (
     <div className="rounded-[3px] border border-mast-border bg-mast-bg px-3 py-2">
       <div>
-        线名 <b>{plan.line_name || "—"}</b> · 站位 <b>{plan.n_stations}</b> 个 · 步长{" "}
-        {plan.step_nm != null ? `${fmtNumber(plan.step_nm)} nm` : "—"} · 参照 {names[plan.reference]?.name ?? (plan.reference || "—")}
-        {dir.length === 2 ? ` · 方向 (${fmtNumber(dir[0] ?? 0)}, ${fmtNumber(dir[1] ?? 0)})` : ""}
+        {tr("线名", "Line name")} <b>{plan.line_name || "—"}</b> · {tr("站位", "stations")} <b>{plan.n_stations}</b>
+        {tr(" 个", "")} · {tr("步长", "step")}{" "}
+        {plan.step_nm != null ? `${fmtNumber(plan.step_nm)} nm` : "—"} · {tr("参照", "reference")}{" "}
+        {names[plan.reference]?.name ?? (plan.reference || "—")}
+        {dir.length === 2
+          ? tr(` · 方向 (${fmtNumber(dir[0] ?? 0)}, ${fmtNumber(dir[1] ?? 0)})`, ` · direction (${fmtNumber(dir[0] ?? 0)}, ${fmtNumber(dir[1] ?? 0)})`)
+          : ""}
       </div>
       <table className="mt-1.5 w-full border-collapse">
         <thead>
           <tr className="text-left">
-            {["区组", "条数", "分到站位", "对不上", "漂移偏移 nm"].map((h) => (
+            {[
+              tr("区组", "Block"),
+              tr("条数", "Count"),
+              tr("分到站位", "Assigned"),
+              tr("对不上", "Unmatched"),
+              tr("漂移偏移 nm", "Drift offset nm"),
+            ].map((h) => (
               <th key={h} className={`${CELL} font-semibold`}>
                 {h}
               </th>
@@ -324,7 +354,7 @@ function PlanTable({
                 <td className={`${CELL} font-mono`}>{b.n}</td>
                 <td className={`${CELL} font-mono`}>{b.assigned?.length ?? 0}</td>
                 <td className={clsx(CELL, "font-mono", unmatched.length > 0 && "text-mast-danger")}>
-                  {unmatched.length ? `${unmatched.length}：${unmatched.map(short).join(" · ")}` : "0"}
+                  {unmatched.length ? `${unmatched.length}${tr("：", ": ")}${unmatched.map(short).join(" · ")}` : "0"}
                 </td>
                 <td className={`${CELL} font-mono`}>{fmtNumber(b.offset_nm)}</td>
               </tr>

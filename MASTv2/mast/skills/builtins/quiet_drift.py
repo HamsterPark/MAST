@@ -35,6 +35,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -55,35 +56,35 @@ class CharacteriseQuietDrift(BaseSkill):
             category=SkillCategory.COMPOSITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "停扫描、静置若干分钟，再从 aux 历史做 0.001–1 Hz 的谱。"
-                "比从扫描图里找频率分辨率高一个量级，且没有帧长造成的谱泄漏。"
+                tr("停扫描、静置若干分钟，再从 aux 历史做 0.001–1 Hz 的谱。"
+                "比从扫描图里找频率分辨率高一个量级，且没有帧长造成的谱泄漏。", "Stop scanning, let the system rest for a few minutes, then compute a 0.001-1 Hz spectrum from the aux history. This gives an order of magnitude better frequency resolution than looking in scan images, with no spectral leakage from the frame length.")
             ),
             parameters=[
                 ParameterSpec(
                     name="minutes", type="float", unit="min", required=False,
                     default=30.0, min_value=2.0, max_value=240.0,
-                    description=("静置多久。要量 T 秒的周期，至少给 %.0f*T 秒；"
-                                 "30 分钟够 60 s 的东西（30 个周期）" % _MIN_CYCLES),
+                    description=(tr("静置多久。要量 T 秒的周期，至少给 %.0f*T 秒；"
+                                 "30 分钟够 60 s 的东西（30 个周期）", "How long to rest. To measure a period of T seconds, give at least %.0f*T seconds; 30 minutes is enough for a 60 s feature (30 periods)") % _MIN_CYCLES),
                 ),
                 ParameterSpec(
                     name="stop_scan", type="bool", required=False, default=True,
-                    description=("先停扫描。**默认 True** —— 扫描时 Z 里装的是"
-                                 "形貌和慢轴运动，做出来的谱是扫描器自己的"),
+                    description=(tr("先停扫描。**默认 True** —— 扫描时 Z 里装的是"
+                                 "形貌和慢轴运动，做出来的谱是扫描器自己的", "Stop the scan first. **Default True**: while scanning, Z carries topography and slow-axis motion, so the resulting spectrum is the scanner's own")),
                 ),
                 ParameterSpec(
                     name="column", type="str", required=False, default="z_m",
-                    description="要分析的 aux 列（z_m / amp_m / df_hz / bias_v）",
+                    description=tr("要分析的 aux 列（z_m / amp_m / df_hz / bias_v）", "Which aux column to analyse (z_m / amp_m / df_hz / bias_v)"),
                 ),
                 ParameterSpec(
                     name="analyse_only", type="bool", required=False, default=False,
-                    description=("跳过等待，直接分析**最近** minutes 分钟的历史。"
-                                 "机器已经静置过时用它，不必再占机时"),
+                    description=(tr("跳过等待，直接分析**最近** minutes 分钟的历史。"
+                                 "机器已经静置过时用它，不必再占机时", "Skip the wait and analyse the **most recent** minutes of history directly. Use it when the machine has already been resting, to avoid spending more instrument time")),
                 ),
                 ParameterSpec(
                     name="max_scanning_fraction", type="float", required=False,
                     default=0.02, min_value=0.0, max_value=1.0,
-                    description=("整段里允许有多少比例在扫描。超过就判这段不干净 "
-                                 "—— 不是失败，是**这段数据回答不了这个问题**"),
+                    description=(tr("整段里允许有多少比例在扫描。超过就判这段不干净 "
+                                 "—— 不是失败，是**这段数据回答不了这个问题**", "What fraction of the whole window may be scanning. Above this the window is judged not clean - not a failure, but **this data cannot answer the question**")),
                 ),
             ],
             estimated_duration_s=1800.0,
@@ -107,7 +108,7 @@ class CharacteriseQuietDrift(BaseSkill):
                 try:
                     context.run("StopScan", {})
                 except Exception as exc:  # noqa: BLE001
-                    logger.warning("%s: StopScan 失败: %s", name, exc)
+                    logger.warning(tr("%s: StopScan 失败: %s", "%s: StopScan failed: %s"), name, exc)
             t0 = time.time()
             # 用基类的可中断等待 —— 直接 sleep 会让 abort 按钮变成摆设
             self.abortable_sleep(context, minutes * 60.0)
@@ -115,21 +116,21 @@ class CharacteriseQuietDrift(BaseSkill):
             if t_end_target - t0 < minutes * 60.0 * 0.9:
                 return SkillResult(
                     skill_name=name, success=False,
-                    error="等待被中断（只过了 %.1f 分钟，要 %.1f）—— 这段太短，"
-                          "做出来的谱分辨不了目标频率。"
+                    error=tr("等待被中断（只过了 %.1f 分钟，要 %.1f）—— 这段太短，"
+                          "做出来的谱分辨不了目标频率。", "Wait interrupted (only %.1f minutes elapsed, %.1f needed) - the window is too short, and the resulting spectrum cannot resolve the target frequency.")
                           % ((t_end_target - t0) / 60.0, minutes))
 
         since = t_end_target - minutes * 60.0
         rows = self._fetch(context, since, t_end_target, column)
         if rows is None:
             return SkillResult(skill_name=name, success=False,
-                               error="取不到 aux 历史（monitoring 没在跑？）")
+                               error=tr("取不到 aux 历史（monitoring 没在跑？）", "Could not get the aux history (is monitoring not running?)"))
         t, y, scanning = rows
         if len(t) < 64:
             return SkillResult(
                 skill_name=name, success=False,
-                error="这段里只有 %d 个 aux 样本，做不了谱。检查 cm_aux_enabled "
-                      "与 cm_aux_keep_hours。" % len(t))
+                error=tr("这段里只有 %d 个 aux 样本，做不了谱。检查 cm_aux_enabled "
+                      "与 cm_aux_keep_hours。", "Only %d aux samples in this window, not enough for a spectrum. Check cm_aux_enabled and cm_aux_keep_hours.") % len(t))
 
         scan_frac = float(np.mean(scanning)) if len(scanning) else 0.0
         span = float(t[-1] - t[0])
@@ -144,9 +145,9 @@ class CharacteriseQuietDrift(BaseSkill):
         }
         if scan_frac > max_scan_frac:
             data["warnings"].append(
-                "这段里有 %.0f%% 的样本处于扫描中 —— 扫描时 Z 装的是形貌与慢轴"
+                tr("这段里有 %.0f%% 的样本处于扫描中 —— 扫描时 Z 装的是形貌与慢轴"
                 "运动，谱峰会是扫描器的节奏而不是环境的。**这段回答不了这个问题**，"
-                "重来一次并确保停扫描。" % (scan_frac * 100))
+                "重来一次并确保停扫描。", "%.0f%% of the samples in this window were taken during a scan - while scanning Z carries topography and slow-axis motion, so the spectral peak would be the scanner's rhythm, not the environment's. **This window cannot answer the question**; redo it and make sure the scan is stopped.") % (scan_frac * 100))
             data["clean"] = False
             return SkillResult(skill_name=name, success=True, data=data)
         data["clean"] = True
@@ -158,17 +159,17 @@ class CharacteriseQuietDrift(BaseSkill):
         if comps:
             top = comps[0]
             data["advice"] = (
-                "最强成分：周期 %.1f s（%.5f Hz），幅度 %.3g，本底的 %.1f 倍。"
+                tr("最强成分：周期 %.1f s（%.5f Hz），幅度 %.3g，本底的 %.1f 倍。"
                 "本段能分辨到 %.0f s 为止（%.0f 秒 / %.0f 个周期）。"
                 "**这一条没有「换扫描角它转不转」的证据** —— 要排除它是样品上的"
-                "结构，配合 AnalyseSlowDrift 跑一批不同扫描角的帧。"
+                "结构，配合 AnalyseSlowDrift 跑一批不同扫描角的帧。", "Strongest component: period %.1f s (%.5f Hz), amplitude %.3g, %.1f times the noise floor. This window resolves up to %.0f s (%.0f s / %.0f periods). **There is no evidence here for \"does it rotate when the scan angle changes\"** - to rule out that it is structure on the sample, run a batch of frames at different scan angles with AnalyseSlowDrift.")
                 % (top["period_s"], top["freq_hz"], top["amplitude"],
                    top["over_floor"], data["longest_resolvable_period_s"],
                    span, _MIN_CYCLES))
         else:
             data["advice"] = (
-                "没有高过本底的周期成分。残差 rms %.3g 就是这段时间里 %s 的慢起伏"
-                "总量 —— 一个干净的否定，比一张勉强凑出来的周期表有用。"
+                tr("没有高过本底的周期成分。残差 rms %.3g 就是这段时间里 %s 的慢起伏"
+                "总量 —— 一个干净的否定，比一张勉强凑出来的周期表有用。", "No periodic component above the noise floor. The residual rms %.3g is the total slow fluctuation of %s over this period - a clean negative is more useful than a periodic table forced out of the data.")
                 % (resid, column))
         return SkillResult(skill_name=name, success=True, data=data)
 
@@ -187,7 +188,7 @@ class CharacteriseQuietDrift(BaseSkill):
             rows, _total, _thinned = store.aux_query(
                 since=since, until=until, limit=200000, max_points=200000)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("aux_query 失败: %s", exc)
+            logger.warning(tr("aux_query 失败: %s", "aux_query failed: %s"), exc)
             return None
         t, y, sc = [], [], []
         for r in rows or []:

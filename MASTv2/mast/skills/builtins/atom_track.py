@@ -6,6 +6,7 @@ vendored from v1 mast/skills/builtins/atom_track.py 2026-04-23. Zero behavioural
 
 from __future__ import annotations
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -25,18 +26,18 @@ class ConfigureAtomTrack(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="配置 Atom Tracking 参数，并启用/禁用各项控制。",
+            description=tr("配置 Atom Tracking 参数，并启用/禁用各项控制。", "Configure Atom Tracking parameters and enable/disable individual controls."),
             parameters=[
                 ParameterSpec(
                     name="integral_gain",
                     type="float",
-                    description="控制器积分增益",
+                    description=tr("控制器积分增益", "Controller integral gain"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="frequency_hz",
                     type="float",
-                    description="调制频率",
+                    description=tr("调制频率", "Modulation frequency"),
                     unit="Hz",
                     required=True,
                     min_value=0.0,
@@ -44,7 +45,7 @@ class ConfigureAtomTrack(BaseSkill):
                 ParameterSpec(
                     name="amplitude_m",
                     type="float",
-                    description="调制幅度",
+                    description=tr("调制幅度", "Modulation amplitude"),
                     unit="m",
                     required=True,
                     min_value=0.0,
@@ -52,7 +53,7 @@ class ConfigureAtomTrack(BaseSkill):
                 ParameterSpec(
                     name="phase_deg",
                     type="float",
-                    description="调制相位",
+                    description=tr("调制相位", "Modulation phase"),
                     unit="deg",
                     required=False,
                     default=0.0,
@@ -62,7 +63,7 @@ class ConfigureAtomTrack(BaseSkill):
                 ParameterSpec(
                     name="switch_off_delay_s",
                     type="float",
-                    description="关闭前的位置平均时间",
+                    description=tr("关闭前的位置平均时间", "Position averaging time before switching off"),
                     unit="s",
                     required=False,
                     default=0.5,
@@ -71,14 +72,14 @@ class ConfigureAtomTrack(BaseSkill):
                 ParameterSpec(
                     name="enable_modulation",
                     type="bool",
-                    description="启用调制",
+                    description=tr("启用调制", "Enable modulation"),
                     required=False,
                     default=True,
                 ),
                 ParameterSpec(
                     name="enable_controller",
                     type="bool",
-                    description="启用控制器",
+                    description=tr("启用控制器", "Enable the controller"),
                     required=False,
                     default=True,
                 ),
@@ -163,7 +164,7 @@ class AtomTrackDriftComp(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="把 Atom Tracking 测得的漂移应用到漂移补偿上。",
+            description=tr("把 Atom Tracking 测得的漂移应用到漂移补偿上。", "Apply the drift measured by Atom Tracking to the drift compensation."),
             estimated_duration_s=1.0,
             composition_level=0,
             tags=["atomtrack", "drift", "compensation", "write"],
@@ -195,12 +196,12 @@ class AtomTrackQuickCompStart(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="通过 Atom Tracking 启动倾斜或漂移补偿。",
+            description=tr("通过 Atom Tracking 启动倾斜或漂移补偿。", "Start tilt or drift compensation via Atom Tracking."),
             parameters=[
                 ParameterSpec(
                     name="compensation_type",
                     type="int",
-                    description="0=倾斜补偿, 1=漂移补偿",
+                    description=tr("0=倾斜补偿, 1=漂移补偿", "0=tilt compensation, 1=drift compensation"),
                     required=True,
                     min_value=0,
                     max_value=1,
@@ -240,12 +241,12 @@ class AtomTrackStatusGet(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取某一项 Atom Tracking 控制（调制、控制器或漂移）的开/关状态。",
+            description=tr("读取某一项 Atom Tracking 控制（调制、控制器或漂移）的开/关状态。", "Read the on/off state of one Atom Tracking control (modulation, controller or drift)."),
             parameters=[
                 ParameterSpec(
                     name="control",
                     type="int",
-                    description="0=调制, 1=控制器, 2=漂移测量",
+                    description=tr("0=调制, 1=控制器, 2=漂移测量", "0=modulation, 1=controller, 2=drift measurement"),
                     required=True,
                     min_value=0,
                     max_value=2,

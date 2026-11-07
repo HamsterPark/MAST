@@ -5,6 +5,20 @@ way a request can go wrong here ends as a :class:`MastError` whose message says
 what to check: is the service running, http or https, self-signed certificate,
 login, an older MAST without the external API, a proxy in the way.
 
+Two situations get a closer look, because a person meets them first and each
+fix costs a reconnect of the MCP server:
+
+* **Connection refused on this machine.** The open MAST window may be only the
+  launcher, whose main service (the API) was never started. The launcher
+  listens on 127.0.0.1 in ``LAUNCHER_PORTS`` for its single-instance check;
+  :func:`launcher_port` sees whether one of them answers, without sending a
+  byte (the launcher acts only on a message, ``BRING_FOREGROUND``).
+* **LAN mode.** MAST then serves https with a self-signed certificate and an
+  HTTP Basic login, on 127.0.0.1 as well. Whichever of the three walls the
+  client hits first (plain http to TLS, an untrusted certificate, a 401), the
+  message names every setting still missing at once, and the alternative of
+  switching LAN access off on this machine.
+
 Proxies are switched off on purpose. MAST is reached on this machine or over a
 VPN; a system proxy (common on Windows desktops) would either break loopback
 requests or carry instrument control through a third party.
@@ -12,14 +26,17 @@ requests or carry instrument control through a third party.
 from __future__ import annotations
 
 import base64
+import errno
 import hashlib
 import http.client
 import json
 import logging
 import os
 import re
+import select
 import socket
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -33,6 +50,90 @@ log = logging.getLogger("mast_mcp.client")
 MAX_JSON_BYTES = 32 * 1024 * 1024
 MAX_ERROR_BYTES = 256 * 1024
 DOWNLOAD_CHUNK = 64 * 1024
+
+#: MAST's own port: only a refusal there makes the launcher worth looking for.
+MAST_PORT = 7862
+#: The MAST launcher's single-instance ports on 127.0.0.1 (``mast2_launcher.py``,
+#: ``LAUNCHER_BRING_FOREGROUND_PORT_RANGE``); it binds the first free one.
+LAUNCHER_PORTS = tuple(range(47860, 47880))
+LAUNCHER_PROBE_S = 0.4
+TLS_PROBE_S = 2.0
+_CONNECT_PENDING = {code for code in (
+    errno.EINPROGRESS, errno.EWOULDBLOCK, errno.EALREADY,
+    getattr(errno, "WSAEWOULDBLOCK", None), getattr(errno, "WSAEINPROGRESS", None),
+    getattr(errno, "WSAEALREADY", None)) if code is not None}
+
+
+def launcher_port(ports=None, timeout: float | None = None) -> int | None:
+    """The lowest of ``ports`` (default ``LAUNCHER_PORTS``) that accepts a connection on
+    127.0.0.1, or ``None``.
+
+    Nothing is sent and every connection closes at once: the launcher reads what
+    arrives and acts only on a message that starts with ``BRING_FOREGROUND``, so an
+    empty connection brings no window forward. All ports are tried together, because
+    a refused connection to a loopback port can take a second on Windows.
+    """
+    ports = LAUNCHER_PORTS if ports is None else ports
+    timeout = LAUNCHER_PROBE_S if timeout is None else timeout
+    pending: dict = {}
+    found: list[int] = []
+    try:
+        for port in ports:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setblocking(False)
+            code = sock.connect_ex(("127.0.0.1", int(port)))
+            if code == 0:
+                found.append(int(port))
+                sock.close()
+            elif code in _CONNECT_PENDING:
+                pending[sock] = int(port)
+            else:
+                sock.close()
+        deadline = time.monotonic() + timeout
+        while pending:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                break
+            socks = list(pending)
+            _, done, failed = select.select([], socks, socks, left)
+            if not done and not failed:
+                break
+            for sock in failed:
+                pending.pop(sock, None)
+                sock.close()
+            for sock in done:
+                port = pending.pop(sock, None)
+                if port is not None and sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR) == 0:
+                    found.append(port)
+                sock.close()
+    except (OSError, ValueError):
+        pass
+    finally:
+        for sock in pending:
+            sock.close()
+    return min(found) if found else None
+
+
+def serves_tls(host: str, port: int, timeout: float = TLS_PROBE_S) -> bool:
+    """True when ``host:port`` completes a TLS handshake, whatever its certificate.
+
+    Only the handshake: no HTTP request is sent, and the connection closes at once.
+    """
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    try:
+        with socket.create_connection((host, port), timeout=timeout) as raw:
+            with ctx.wrap_socket(raw, server_hostname=None):
+                return True
+    except (OSError, ValueError):            # ssl.SSLError is an OSError
+        return False
+
+
+def _join(items: list[str]) -> str:
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
 
 
 class MastError(Exception):
@@ -239,11 +340,12 @@ class MastClient:
         if status == 401:
             if self.config.user:
                 msg = ("MAST rejected the configured login (MAST_USER / MAST_PASSWORD). "
-                       "Check the user name and password of MAST's LAN access.")
+                       "Check the user name and password of MAST's LAN access: the MAST "
+                       "launcher shows the user name and sets a new password "
+                       "(修改账号密码, change login).")
             else:
                 msg = ("MAST asked for a login: it runs in LAN mode, which uses HTTP Basic. "
-                       "Set the plugin options mast_user and mast_password "
-                       "(MAST_USER / MAST_PASSWORD).")
+                       + self.lan_mode_help(https=False, login=True, insecure=False))
             return MastError("auth", msg, status=status, payload=payload)
         if status == 404 and not resp.header("X-MAST-Ext-Version") and (
                 payload is None or detail in ("Not Found", "")):
@@ -281,6 +383,72 @@ class MastClient:
         return MastError(code or f"http_{status}", f"{where} failed (HTTP {status}): {detail}",
                          status=status, payload=payload)
 
+    def _port(self) -> int:
+        try:
+            port = urllib.parse.urlsplit(self.config.url).port
+        except ValueError:
+            port = None
+        return port or (443 if self.config.scheme == "https" else 80)
+
+    def _refused_text(self) -> str:
+        """Connection refused: on this machine, is it only the launcher that is open?"""
+        head = f"Cannot connect to MAST at {self.config.url} (connection refused)."
+        if not self.config.loopback:
+            return (head + " Is the MAST service running on that PC, is the port right, and is "
+                    "the VPN up? LAN mode serves https.")
+        found = launcher_port() if self._port() == MAST_PORT else None
+        if found is not None:
+            return (head + f" Nothing serves port {MAST_PORT} on this machine, but port {found}, "
+                    "where the MAST launcher listens for itself, answers: the launcher seems to "
+                    "be open with its main service not running. Click 「启动主服务」 (Start main "
+                    "service) in the launcher window; once the service is up, call this tool "
+                    "again — the MCP server needs no restart.")
+        return (head + " Is MAST running? An open MAST launcher window is not enough: its main "
+                "service has to be started (「启动主服务」, Start main service). Check the port "
+                "too, and http vs https (LAN mode serves https).")
+
+    def lan_mode_help(self, *, https: bool, login: bool, insecure: bool) -> str:
+        """How to reach a MAST in LAN mode, every setting still missing named at once.
+
+        ``https``, ``login`` and ``insecure``: what this failure showed to be needed (a
+        TLS port, a login, an untrusted certificate); what is already set is left out.
+        On this machine the other way out is to switch LAN access off.
+        """
+        cfg = self.config
+        parts = urllib.parse.urlsplit(cfg.url)
+        settings: list[str] = []
+        options: list[str] = []
+        if https and cfg.scheme != "https":
+            settings.append("MAST_URL=" + urllib.parse.urlunsplit(
+                ("https", parts.netloc, parts.path, "", "")))
+            options.append("mast_url")
+        if login and not cfg.user:
+            settings.append("MAST_USER and MAST_PASSWORD (the LAN-access login set in the MAST "
+                            "launcher)")
+            options += ["mast_user", "mast_password"]
+        if insecure and cfg.verify_tls:
+            settings.append("MAST_VERIFY_TLS=false (or install MAST's self-signed certificate on "
+                            "this machine)")
+            options.append("verify_tls")
+        keep = ""
+        if settings:
+            these = "these are the options" if len(options) > 1 else "this is the option"
+            keep = (("Set all at once: " if len(settings) > 1 else "Set ") + "; ".join(settings)
+                    + f". In the Claude Code plugin {these} {_join(options)}. Then restart the MCP "
+                    "server (Claude Code: /mcp, reconnect mast; Codex: a new session).")
+        if not cfg.loopback:
+            return keep
+        plain = urllib.parse.urlunsplit(("http", parts.netloc, parts.path, "", ""))
+        off = ("On this machine, untick LAN access in the MAST launcher (局域网 / 远程访问 → "
+               "启用) and restart its main service (重启主服务). MAST then serves plain http on "
+               "this machine only, and " + (f"{cfg.url} works without reconnecting."
+                                            if cfg.scheme == "http" else
+                                            f"MAST_URL={plain} works after restarting the MCP "
+                                            "server."))
+        if not keep:
+            return off
+        return f"Two ways out:\n1. {off}\n2. Keep LAN mode. {keep}"
+
     def transport_error(self, reason, timeout: float) -> MastError:
         url = self.config.url
         https_hint = ("; if MAST runs in LAN mode the address must start with https://"
@@ -288,24 +456,33 @@ class MastClient:
         if isinstance(reason, ssl.SSLCertVerificationError):
             return MastError("tls_verify", (
                 f"The TLS certificate of {url} is not trusted "
-                f"({getattr(reason, 'verify_message', '') or reason}). The instrument PC "
-                "normally uses a self-signed certificate: set the plugin option verify_tls "
-                "to false (MAST_VERIFY_TLS=false), or install that certificate."))
+                f"({getattr(reason, 'verify_message', '') or reason}): MAST in LAN mode uses its "
+                "own, self-signed certificate. "
+                + self.lan_mode_help(https=False, login=True, insecure=True)))
         if isinstance(reason, ssl.SSLError):
-            return MastError("tls", (
-                f"TLS handshake with {url} failed ({reason}). If MAST on that port serves "
-                "plain http, use http:// in MAST_URL."))
+            if self.config.loopback:
+                parts = urllib.parse.urlsplit(url)
+                plain = urllib.parse.urlunsplit(("http", parts.netloc, parts.path, "", ""))
+                fix = ("If MAST on that port serves plain http (LAN access off in the MAST "
+                       f"launcher), set MAST_URL={plain} and restart the MCP server (Claude "
+                       "Code: /mcp, reconnect mast).")
+            else:
+                fix = "If MAST on that port serves plain http, use http:// in MAST_URL."
+            return MastError("tls", f"TLS handshake with {url} failed ({reason}). {fix}")
         if isinstance(reason, (socket.timeout, TimeoutError)):
             return MastError("timeout", f"MAST at {url} did not answer within {timeout:.0f} s.",
                              transient=True)
         if isinstance(reason, ConnectionRefusedError):
-            return MastError("unreachable", (
-                f"Cannot connect to MAST at {url} (connection refused). Is the MAST service "
-                "running? Check the port too, and http vs https (LAN mode serves https)."))
+            return MastError("unreachable", self._refused_text())
         if isinstance(reason, socket.gaierror):
             return MastError("unreachable", f"Cannot resolve the host in MAST_URL ({url}): {reason}.")
         if isinstance(reason, (ConnectionResetError, ConnectionAbortedError,
                                http.client.RemoteDisconnected, http.client.BadStatusLine)):
+            if self.config.scheme == "http" and serves_tls(self.config.host, self._port()):
+                return MastError("lan_mode", (
+                    f"MAST at {url} answers with TLS, not plain http: it runs in LAN mode "
+                    "(https with a self-signed certificate and a login). "
+                    + self.lan_mode_help(https=True, login=True, insecure=True)))
             return MastError("dropped", (
                 f"MAST at {url} closed the connection without an HTTP answer{https_hint}."),
                 transient=True)

@@ -285,20 +285,32 @@ def test_set_default_recv_timeout_rejects_nonsense():
         nanonis_patch.set_default_recv_timeout(original)
 
 
-def test_connection_pool_publishes_its_configured_timeout():
+def test_connection_pool_publishes_its_configured_timeout(unused_tcp_ports):
     """connect_all() must hand its recv timeout to the patch, or the patch's
-    own 5 s default would silently override the config."""
+    own 5 s default would silently override the config.
+
+    The four roles point at ports that are guaranteed to have no listener
+    (``unused_tcp_ports``). The defaults 6501–6504 used to be "nothing listening"
+    only by assumption — with a Nanonis simulator running, this test
+    really connected to it and held ports another session was using.
+    """
     from mast.config import NanonisConfig
     from mast.core import nanonis_patch
     from mast.core.connection import ConnectionPool
 
     original = nanonis_patch._default_recv_timeout_s
+    main, monitor, data, emergency = unused_tcp_ports(4)
+    pool = None
     try:
-        cfg = NanonisConfig(host="127.0.0.1", timeout_s=3.5)
+        cfg = NanonisConfig(host="127.0.0.1", timeout_s=3.5, port_main=main,
+                            port_monitor=monitor, port_data=data, port_emergency=emergency)
         pool = ConnectionPool(cfg)
-        pool.connect_all()  # every port fails (nothing listening) — that's fine
+        results = pool.connect_all()  # every port fails (nothing listening) — that's fine
+        assert results == {"main": False, "monitor": False, "data": False, "emergency": False}
         assert nanonis_patch._default_recv_timeout_s == 3.5
     finally:
+        if pool is not None:
+            pool.close_all()
         nanonis_patch.set_default_recv_timeout(original)
 
 

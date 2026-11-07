@@ -48,6 +48,7 @@ import math
 import time
 from typing import Any, Optional
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -130,23 +131,25 @@ class CharacteriseCurrentNoise(CompositeSkillGraph):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "一键测出这台机器的电流噪声基线：扫一遍设定电流、再扫一遍偏压，"
+                tr("一键测出这台机器的电流噪声基线：扫一遍设定电流、再扫一遍偏压，"
                 "在每个工况上读电流监控已经录下的 2 kHz 段，算出涨落幅度、宽度分布、"
                 "噪声谱与每条谱线的机制归因，存成基线供实时判据当分母用。"
                 "同时采 Z 位移通道并算出 Z-电流相干性与衰减常数 kappa。"
                 "会改设定点与偏压（含负偏压；结束后恢复原工作点）。"
-                "典型耗时 = 点数 ×（settle + 采集）≈ 20-30 分钟。"
+                "典型耗时 = 点数 ×（settle + 采集）≈ 20-30 分钟。",
+                "Measure this machine's current-noise baseline in one click: sweep the setpoint current, then sweep the bias; at each operating condition read the 2 kHz segments the current monitor has already recorded, and compute the fluctuation amplitude, width distribution, noise spectrum and the mechanism attribution of each spectral line, then store it as a baseline for the real-time criteria to use as the denominator. It also acquires the Z displacement channel and computes the Z-current coherence and the decay constant kappa. It changes the setpoint and bias (including negative bias; the original working point is restored afterwards). Typical duration = points x (settle + acquisition) ≈ 20-30 minutes.")
             ),
             parameters=[
                 ParameterSpec(
                     name="setpoints_a",
                     type="str",
                     description=(
-                        "设定电流列表，JSON 数组，单位安培。"
+                        tr("设定电流列表，JSON 数组，单位安培。"
                         "留空用默认的 [20p, 50p, 100p, 200p, 500p, 1n]。"
                         "**要跨至少一个数量级** —— 加性项(前放)与乘性项(振动)"
                         "只有在电流跨度够大时才分得开，点太密而范围太窄会拟合出"
-                        "一条没有分辨力的曲线。"
+                        "一条没有分辨力的曲线。",
+                        "List of setpoint currents, JSON array, in amperes. Empty uses the default [20p, 50p, 100p, 200p, 500p, 1n]. **It must span at least one order of magnitude** - the additive term (preamp) and the multiplicative term (vibration) can only be separated when the current span is large enough; points that are too dense over too narrow a range fit a curve with no resolving power.")
                     ),
                     required=False, default="",
                 ),
@@ -154,64 +157,70 @@ class CharacteriseCurrentNoise(CompositeSkillGraph):
                     name="biases_v",
                     type="str",
                     description=(
-                        "偏压列表，JSON 数组，单位伏特。留空用默认 [0.04, 0.2, 0.5]。"
+                        tr("偏压列表，JSON 数组，单位伏特。留空用默认 [0.04, 0.2, 0.5]。"
                         "传 '[]' 则跳过偏压组 —— 那样仍然得到可用的基线曲线，"
-                        "但**没有机制归因**（分不开机械振动与偏压线拾取）。"
+                        "但**没有机制归因**（分不开机械振动与偏压线拾取）。",
+                        "List of biases, JSON array, in volts. Empty uses the default [0.04, 0.2, 0.5]. Pass '[]' to skip the bias group - you still get a usable baseline curve, but **no mechanism attribution** (mechanical vibration cannot be separated from bias-line pickup).")
                     ),
                     required=False, default="",
                 ),
                 ParameterSpec(
                     name="seconds_per_point", type="float",
-                    description="每个工况采多久（秒）。75 s ≈ 70 段，PSD 平均已经很稳。",
+                    description=tr("每个工况采多久（秒）。75 s ≈ 70 段，PSD 平均已经很稳。", "How long to acquire at each operating point (seconds). 75 s ≈ 70 segments, enough for the PSD average to be stable."),
                     unit="s", required=False, default=75.0,
                     min_value=20.0, max_value=600.0,
                 ),
                 ParameterSpec(
                     name="settle_s", type="float",
-                    description="改完工况等多久再开始采（秒）。要盖过 Z 反馈的整定。",
+                    description=tr("改完工况等多久再开始采（秒）。要盖过 Z 反馈的整定。", "How long to wait after changing the operating point before acquiring (seconds). It must outlast the Z feedback settling."),
                     unit="s", required=False, default=25.0,
                     min_value=5.0, max_value=300.0,
                 ),
                 ParameterSpec(
                     name="z_burst_s", type="float",
                     description=(
-                        "每个工况额外采多久的 Z + 电流同步 burst（秒）。0 = 不采 Z。"
+                        tr("每个工况额外采多久的 Z + 电流同步 burst（秒）。0 = 不采 Z。"
                         "默认 30 s。它把示波器的 B 路改成 Z，而电流监控"
                         "**只认 A 路**（pump.channel_is_ours 位置 1 刻意不判，"
                         "因为 zburst 每 30 min 就会合法地改它），所以电流采集不受影响；"
-                        "代价只是 burst 期间与泵抢 data 角色锁，可能丢几帧。"
+                        "代价只是 burst 期间与泵抢 data 角色锁，可能丢几帧。",
+                        "How long the extra synchronous Z + current burst runs at each operating point (seconds). 0 = do not acquire Z. Default 30 s. It switches the oscilloscope's B channel to Z, while the current monitor **only recognises the A channel** (pump.channel_is_ours deliberately does not check position 1, because zburst legitimately changes it every 30 min), so current acquisition is unaffected; the only cost is competing with the pump for the data role lock during the burst, which may drop a few frames.")
                     ),
                     unit="s", required=False, default=30.0,
                     min_value=0.0, max_value=300.0,
                 ),
                 ParameterSpec(
                     name="label", type="str",
-                    description="给这份基线起个名字，例如「干净针尖 Au(111) 无磁场位」。",
+                    description=tr("给这份基线起个名字，例如「干净针尖 Au(111) 无磁场位」。", "Give this baseline a name, e.g. 'clean tip Au(111) zero-field spot'."),
                     required=False, default="",
                 ),
                 ParameterSpec(
                     name="note", type="str",
-                    description="条件备注：针尖、样品、扫描位、磁场、两个腔的泵开关。",
+                    description=tr("条件备注：针尖、样品、扫描位、磁场、两个腔的泵开关。", "Condition notes: tip, sample, scan position, magnetic field, pump switches of the two chambers."),
                     required=False, default="",
                 ),
                 ParameterSpec(
                     name="allow_while_scanning", type="bool",
-                    description=("允许在扫描进行中采集。**默认 False** —— 扫描段"
-                                 "量到的是样品形貌，不是仪器噪声。"),
+                    description=(tr("允许在扫描进行中采集。**默认 False** —— 扫描段"
+                                 "量到的是样品形貌，不是仪器噪声。",
+                                 "Allow acquisition while a scan is in progress. **Default False** - during a scan what is measured is the sample topography, not the instrument noise.")),
                     required=False, default=False,
                 ),
                 ParameterSpec(
                     name="activate", type="bool",
                     description=(
-                        "跑完是否立刻启用这份基线做实时判据。默认 true。"
-                        "设 false 则只记录，需要人工在设置里选用。"
+                        tr("跑完是否立刻启用这份基线做实时判据。默认 true。"
+                        "设 false 则只记录，需要人工在设置里选用。",
+                        "Whether to enable this baseline for real-time criteria immediately after the run. Default true. If false it is only recorded and a person must select it in the settings.")
                     ),
                     required=False, default=True,
                 ),
                 ParameterSpec(
                     name="max_bias_v", type="float",
                     description=(
-                        "偏压绝对值上限，默认 2 V；默认偏压组只到 0.5 V。这些是工作流设置，使用前应确认适合当前结状态。"
+                        tr("偏压绝对值上限。默认 2 V。在某些结上 1 V 已经会让结"
+                        "不稳定（可逆），所以默认偏压组只到 0.5 V。",
+                        "Upper limit of the absolute bias. Default 2 V. On some junctions 1 V already makes the junction unstable (reversible), so the default bias group goes only up to 0.5 V.")
                     ),
                     unit="V", required=False, default=2.0,
                     min_value=0.01, max_value=10.0,
@@ -354,40 +363,41 @@ class CharacteriseCurrentNoise(CompositeSkillGraph):
         target_sp = params.get("setpoint_a")
 
         if not self._sleep(settle, ctx):
-            return SkillResult(skill_name=name, success=False, error="已中止")
+            return SkillResult(skill_name=name, success=False, error=tr("已中止", "Aborted"))
 
         st = self._read_state(ctx)
         z = st.get("z_pos_m")
         i_now = st.get("current_a")
         if z is None or abs(z) > _Z_LIMIT_M:
             return SkillResult(skill_name=name, success=False,
-                               error=f"Z={z} 超出安全行程 ±{_Z_LIMIT_M} m，中止表征")
+                               error=tr(f"Z={z} 超出安全行程 ±{_Z_LIMIT_M} m，中止表征", f"Z={z} is outside the safe travel ±{_Z_LIMIT_M} m, characterisation aborted"))
         if i_now is None:
             return SkillResult(skill_name=name, success=False,
-                               error="电流读不到 —— 拒绝把一个读不到的工况记进基线")
+                               error=tr("电流读不到 —— 拒绝把一个读不到的工况记进基线", "Current cannot be read - refusing to record an unreadable operating point into the baseline"))
         # 比较电流幅度与正值 setpoint，避免把负偏压下的电流符号误当成跟踪误差。
         if target_sp and abs(abs(i_now) - abs(target_sp)) / abs(target_sp) > _FOLLOW_TOL:
             return SkillResult(
                 skill_name=name, success=False,
-                error=(f"电流 |{i_now:.4g}| A 与设定点 |{target_sp:.4g}| A 相差超过 "
-                       f"{_FOLLOW_TOL:.0%} —— 结没有跟上，这个点测出来的不是基线"))
+                error=(tr(f"电流 |{i_now:.4g}| A 与设定点 |{target_sp:.4g}| A 相差超过 "
+                       f"{_FOLLOW_TOL:.0%} —— 结没有跟上，这个点测出来的不是基线",
+                       f"Current |{i_now:.4g}| A differs from the setpoint |{target_sp:.4g}| A by more than {_FOLLOW_TOL:.0%} - the junction did not keep up, so this point does not measure the baseline")))
 
         t0 = time.time()
         if not self._sleep(secs, ctx):
-            return SkillResult(skill_name=name, success=False, error="已中止")
+            return SkillResult(skill_name=name, success=False, error=tr("已中止", "Aborted"))
         t1 = time.time()
         st_after = self._read_state(ctx)
 
         store = get_store()
         if store is None:
             return SkillResult(skill_name=name, success=False,
-                               error="拿不到电流监控存储 —— 监控没在跑？")
+                               error=tr("拿不到电流监控存储 —— 监控没在跑？", "Cannot get the current-monitor store - is the monitor not running?"))
         try:
             segs = (store.segments_query(since=t0, until=t1, limit=2000)
                     or {}).get("segments") or []
         except Exception as exc:  # noqa: BLE001
             return SkillResult(skill_name=name, success=False,
-                               error=f"段落查询失败: {exc}")
+                               error=tr(f"段落查询失败: {exc}", f"Segment query failed: {exc}"))
         runs: list = []
         seg_ids: list[int] = []
         fs = 0.0
@@ -409,8 +419,9 @@ class CharacteriseCurrentNoise(CompositeSkillGraph):
         if len(runs) < 5:
             return SkillResult(
                 skill_name=name, success=False,
-                error=(f"这个工况只取到 {len(runs)} 段全速率数据（需要 ≥5）。"
-                       "监控可能没在采，或者原始波形已被清理。"))
+                error=(tr(f"这个工况只取到 {len(runs)} 段全速率数据（需要 ≥5）。"
+                       "监控可能没在采，或者原始波形已被清理。",
+                       f"Only {len(runs)} full-rate segments were obtained for this operating point (need >=5). The monitor may not be acquiring, or the raw waveforms may have been cleaned up.")))
 
         det = np.concatenate([B._detrend_linear(r)[0] for r in runs])
         w = B.width_stats(np.concatenate(runs))
@@ -447,7 +458,7 @@ class CharacteriseCurrentNoise(CompositeSkillGraph):
                                  np.asarray(coupling["coherence"]))
             else:
                 z_summary = {"available": False,
-                             "detail": "双通道 burst 没采到 —— 通道被占或被改动"}
+                             "detail": tr("双通道 burst 没采到 —— 通道被占或被改动", "The dual-channel burst was not acquired - the channel is occupied or was changed")}
 
         metrics = {
             "bias_v": st.get("bias_v"), "setpoint_a": target_sp,
@@ -484,7 +495,7 @@ class CharacteriseCurrentNoise(CompositeSkillGraph):
             # 否则后续拟合无法区分未测到的工况与已测到但丢失的工况。
             return SkillResult(
                 skill_name=name, success=False,
-                error="拿不到 baseline_id —— 这个工况点测出来了却无处可存")
+                error=tr("拿不到 baseline_id —— 这个工况点测出来了却无处可存", "Cannot get a baseline_id - this operating point was measured but has nowhere to be stored"))
         pid = None
         if bid:
             pid = store.add_baseline_point(
@@ -507,8 +518,9 @@ class CharacteriseCurrentNoise(CompositeSkillGraph):
             # 在结果里长得一模一样。存储层按设计吞异常，所以只有这里能把它变成一句话。
             return SkillResult(
                 skill_name=name, success=False,
-                error=(f"工况点测到了（{len(runs)} 段，I={i_mean:.4g} A）但写不进基线 "
-                       f"#{bid} —— 看服务日志里 add_baseline_point 那条 debug"))
+                error=(tr(f"工况点测到了（{len(runs)} 段，I={i_mean:.4g} A）但写不进基线 "
+                       f"#{bid} —— 看服务日志里 add_baseline_point 那条 debug",
+                       f"The operating point was measured ({len(runs)} segments, I={i_mean:.4g} A) but cannot be written to baseline #{bid} - see the add_baseline_point debug line in the service log")))
         pts = list(self._executor.progress.partial_data.get("points", []))
         pts.append({**metrics, "sweep": params.get("sweep"), "lines": lines})
         self._executor.set_partial("points", pts)
@@ -561,7 +573,7 @@ class CharacteriseCurrentNoise(CompositeSkillGraph):
         store = get_store()
         if not pts:
             return SkillResult(skill_name=_PHASE_FINISH, success=False,
-                               error="一个工况点都没测到")
+                               error=tr("一个工况点都没测到", "Not a single operating point was measured"))
 
         # 跨点拟合与归因走 baseline.build_models —— 与导入外部测量的那条路
         # 用的是同一份实现。两份的话就是同一批数据出两组系数，而差异要等到有人
@@ -587,9 +599,10 @@ class CharacteriseCurrentNoise(CompositeSkillGraph):
         if sigma_model is None:
             return SkillResult(
                 skill_name=_PHASE_FINISH, success=False,
-                error=("设定点扫描的有效点不足 3 个，拟合不出 sigma 曲线。"
+                error=(tr("设定点扫描的有效点不足 3 个，拟合不出 sigma 曲线。"
                        "基线已记录为 aborted —— 它测到的点仍然保留，但不会被"
-                       "判据使用（一份没有曲线的基线等于没有基线）。"))
+                       "判据使用（一份没有曲线的基线等于没有基线）。",
+                       "Fewer than 3 valid points in the setpoint scan; the sigma curve cannot be fitted. The baseline has been recorded as aborted - the points it measured are kept, but the criteria will not use it (a baseline without a curve is the same as no baseline).")))
         return SkillResult(skill_name=_PHASE_FINISH, success=True,
                            data={"baseline_id": bid, "status": status,
                                  "sigma_model": sigma_model.to_dict(),
@@ -650,9 +663,10 @@ class CharacteriseCurrentNoise(CompositeSkillGraph):
         if scanning is True and not bool(params.get("allow_while_scanning", False)):
             return SkillResult(
                 skill_name=self._skill_name(), success=False,
-                error=("仪器正在扫描 —— 现在量到的是这块样品的形貌起伏，不是"
+                error=(tr("仪器正在扫描 —— 现在量到的是这块样品的形貌起伏，不是"
                        "仪器噪声，拿它当基线会把形貌写进「正常」。先停扫描"
-                       "（StopScan），或显式传 allow_while_scanning=true。"),
+                       "（StopScan），或显式传 allow_while_scanning=true。",
+                       "The instrument is scanning - what is measured now is the topographic undulation of this sample, not instrument noise; using it as a baseline would write topography into 'normal'. Stop the scan first (StopScan), or pass allow_while_scanning=true explicitly.")),
                 data={"scanning": True})
         self._scanning_at_start = scanning
         self._params = dict(params or {})
@@ -693,7 +707,7 @@ class CharacteriseCurrentNoise(CompositeSkillGraph):
         if not ok:
             return SkillResult(skill_name=self._skill_name(), success=False,
                                error=executor.progress.aborted_reason
-                               or "表征未跑完（已恢复原工作点）",
+                               or tr("表征未跑完（已恢复原工作点）", "Characterisation did not finish (original working point restored)"),
                                data=data)
         return SkillResult(skill_name=self._skill_name(), success=True, data=data)
 

@@ -36,6 +36,8 @@ import time
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
+from mast.i18n import tr
+
 logger = logging.getLogger(__name__)
 
 _SCHEMA = """
@@ -244,14 +246,34 @@ CREATE TABLE IF NOT EXISTS noise_baseline_point (
 CREATE INDEX IF NOT EXISTS idx_bpoint_baseline ON noise_baseline_point(baseline_id);
 """
 
-#: Schema versions add columns through generated ALTER statements.
-#: 11: bias columns; 10: Z and current cross statistics; 9: noise baselines.
-#: Baseline arrays are retained independently of rolling acquisition data.
-#: 8: agent delivery is separate from user acknowledgement.
-#: 7: excitation is nullable; 6: modulation state is nullable; 5: lock-in channels.
-#: 4: amplitude zero and ring-age fields replace the retired collapse edge.
-#: Historical columns remain readable; 3: junction age; 2: auxiliary samples.
-#: Tables are created on open and missing columns are added without deleting old data.
+#: 11 = ``aux_samples`` 加入偏压五列（2026-08-19）。
+#:      老库由 ``_aux_column_spec()`` 生成的 ALTER 补上。
+#: 10 = ``noise_baseline_point`` 加入 Z 通道与 Z-电流联合量（2026-08-18）：
+#:      z_sigma_m / z_step_rms_m / z_white_m2hz / z_ptp_m / z_fwhm_m /
+#:      z_mean_m / z_n_runs / coh_fraction / coh_n_pairs / kappa_per_m /
+#:      apparent_barrier_ev / z_psd_path / coh_path。老库由
+#:      ``_baseline_point_column_spec()`` 生成的 ALTER 补上。
+#: 9 = ``noise_baseline`` / ``noise_baseline_point`` 加入（2026-08-18，电流噪声基线）。
+#:     新表靠 ``CREATE TABLE IF NOT EXISTS`` 自动出现；两张表的补列清单由
+#:     ``_baseline_column_spec()`` / ``_baseline_point_column_spec()`` 从写入方的
+#:     列常量生成。基线的 npy 落 ``<data_dir>/baseline/``，**不参与滚动清理**。
+#: 8 = ``alerts`` 加入 ``delivered_agent`` / ``delivered_ts``（2026-08-10，告警送达
+#:     断在最后一米）。与既有的 ``acked`` **是两个主体**，理由写在建表语句上面。
+#:     老库由 ``_alert_column_spec()`` 生成的 ALTER 补上。
+#: 7 = ``aux_samples`` 加入 ``amp_excited``（2026-08-06，进针期
+#:     归零判据加「激励开」前置）。**三态**：1/0/NULL，NULL 是「没问过或没读到」
+#:     —— 塌成两态会让一行「判不了」的样本读起来像「判过了，没事」。
+#: 6 = ``aux_samples`` 加入 ``lockin_mod_on``（2026-08-06）。**三态**：1/0/NULL，NULL 是
+#:     「没读到」而不是「关闭」—— 塌成两态会让人把真 dI/dV 当噪声底扔掉。
+#: 5 = ``aux_samples`` 加入 lock-in 三列（2026-08-05）。老库由 ``_aux_column_spec()`` 生成的 ALTER 补上。
+#: 4 = ``amp_collapse_edge`` 退役，换成 ``amp_zero`` / ``amp_zero_hold_s`` /
+#:     ``amp_ring_age_s`` / ``amp_gate_open`` / ``amp_blanked``（2026-08-04，
+#:     振幅判据改成「只在进针期间判归零」）。
+#:     老库里的 ``amp_collapse_edge`` **不删**：那一列的历史值是另一套判据产出的，
+#:     删掉等于销毁记录，留着又不会被写入方碰到。
+#: 3 = ``aux_samples`` 加入落针年龄与漂移衰减列（2026-08-04）。
+#: 2 = ``aux_samples`` 加入（2026-08-03）。新表靠 ``CREATE TABLE IF NOT EXISTS``
+#: 在每次打开时自动补上，老库不需要迁移脚本 —— 版本号在这里只是如实记账。
 _SCHEMA_VERSION = 11
 
 #: Feature columns in the order the writer binds them.
@@ -643,7 +665,21 @@ class CurrentMonitorStore:
 
     def _add_missing_columns(self, table: str,
                              columns: Sequence[tuple[str, str]]) -> None:
-        """Add missing columns from the writer declarations. CREATE TABLE IF NOT EXISTS does not migrate existing tables; adding a field requires a corresponding ALTER, with errors surfaced instead of silently discarding new samples."""
+        """Add columns an older DB is missing. Caller holds the lock.
+
+        ``CREATE TABLE IF NOT EXISTS`` does NOT widen an existing table, and the
+        writers here build their INSERT column list from a module constant — so a
+        DB created by an earlier version would make every insert fail against an
+        unknown column, and these writers swallow their exceptions by design.
+        The result would be a table that quietly stops growing: exactly the
+        fail-silent shape this package keeps having to design against.
+
+        注意：``_init_schema`` 只是无条件跑一遍
+        ``CREATE ... IF NOT EXISTS``，``schema_versions`` 写死版本号且仅缺行时插一次
+        —— **它不是闸门**；版本变了并不会自动重建，
+        没加列的升级之所以安全，只因为那次确实没加列，真加了列时没有任何东西兜底。
+        `aux_samples` 加 ``junction_age_s`` / ``z_drift_*`` 就是这种情形。
+        """
         try:
             have = {r["name"] for r in self._conn.execute(
                 f"PRAGMA table_info({table})")}
@@ -822,7 +858,8 @@ class CurrentMonitorStore:
                         " LIMIT ? OFFSET ?", args + [int(limit), int(offset)],
                     ).fetchall()]
         except Exception as exc:  # noqa: BLE001 — 见 StoreQueryFailed
-            raise StoreQueryFailed(f"aux_query 失败: {exc}") from exc
+            raise StoreQueryFailed(
+                tr(f"aux_query 失败: {exc}", f"aux_query failed: {exc}")) from exc
         if not max_points or len(rows) <= max_points:
             return rows, total, False
         return _thin_by_severity(rows, int(max_points), key="verdict"), total, True
@@ -1379,7 +1416,8 @@ class CurrentMonitorStore:
                     " LIMIT ? OFFSET ?", args + [int(limit), int(offset)],
                 ).fetchall()]
         except Exception as exc:  # noqa: BLE001 — 见 StoreQueryFailed
-            raise StoreQueryFailed(f"features_query 失败: {exc}") from exc
+            raise StoreQueryFailed(
+                tr(f"features_query 失败: {exc}", f"features_query failed: {exc}")) from exc
 
         if not max_points or len(rows) <= max_points:
             return rows, total, False
@@ -1424,7 +1462,8 @@ class CurrentMonitorStore:
                     "   WHERE source='human' AND segment_id IS NOT NULL) AS labeled"
                 ).fetchone()
         except Exception as exc:  # noqa: BLE001 — 见 StoreQueryFailed
-            raise StoreQueryFailed(f"segments_query 失败: {exc}") from exc
+            raise StoreQueryFailed(
+                tr(f"segments_query 失败: {exc}", f"segments_query failed: {exc}")) from exc
 
         for r in rows:
             r.pop("envelope", None)             # blob never goes over the wire
@@ -1551,7 +1590,7 @@ class CurrentMonitorStore:
         spike is the one that shrinks the data.
 
         采集**中断**的地方，``i_min_a`` / ``i_max_a`` 里放一个 ``None``
-        （需求：数据中断的时候不应强行连线）。前端把 null 画成空洞，
+        （避免在数据中断处强行连线）。前端把 null 画成空洞，
         线和中间那片带子一起断开。判据见 :func:`trace_gap_marks` —— 它必须在这一层
         判，因为「段内的包络步长」和「段之间的停顿」只有这里分得开。
         """
@@ -1571,7 +1610,8 @@ class CurrentMonitorStore:
         except Exception as exc:  # noqa: BLE001 — 见 StoreQueryFailed。**注意下一行**:
             # ``not rows`` 那条仍然回 ``empty`` —— 那是「查过了，这段窗口里没有段」，
             # 一个答得上来的答案。两条路径长得像，说的是相反的两句话。
-            raise StoreQueryFailed(f"live_tail 失败: {exc}") from exc
+            raise StoreQueryFailed(
+                tr(f"live_tail 失败: {exc}", f"live_tail failed: {exc}")) from exc
         if not rows:
             return dict(empty)
 
@@ -1670,7 +1710,8 @@ class CurrentMonitorStore:
                 ).fetchall()]
             return rows, total
         except Exception as exc:  # noqa: BLE001 — 见 StoreQueryFailed：读不折叠
-            raise StoreQueryFailed(f"alerts_query 失败: {exc}") from exc
+            raise StoreQueryFailed(
+                tr(f"alerts_query 失败: {exc}", f"alerts_query failed: {exc}")) from exc
 
     def alert_evidence_png(self, alert_id: int) -> Optional[bytes]:
         try:
@@ -1695,7 +1736,8 @@ class CurrentMonitorStore:
                     args + [int(limit)],
                 ).fetchall()]
         except Exception as exc:  # noqa: BLE001 — 见 StoreQueryFailed
-            raise StoreQueryFailed(f"labels_query 失败: {exc}") from exc
+            raise StoreQueryFailed(
+                tr(f"labels_query 失败: {exc}", f"labels_query failed: {exc}")) from exc
 
     def storage_stats(self) -> dict:
         try:
@@ -1716,12 +1758,25 @@ class CurrentMonitorStore:
         except Exception as exc:  # noqa: BLE001 — 见 StoreQueryFailed
             # 旧行为回的是一整套 0:「0 段、0 字节」是关于磁盘的**正面断言**,
             # 而它同时也是「库打不开」。面板照着这套 0 画出来的是一个空盘。
-            raise StoreQueryFailed(f"storage_stats 失败: {exc}") from exc
+            raise StoreQueryFailed(
+                tr(f"storage_stats 失败: {exc}", f"storage_stats failed: {exc}")) from exc
 
     # ── retention ───────────────────────────────────────────────────────────
 
     def sweep_aux(self, keep_hours: float) -> int:
-        """按 keep_hours 删除过期辅助采样，返回删除行数。辅助采样按年龄保留，不与波形文件共用容量淘汰预算；采样率提高会增加保留期内的存储量。"""
+        """Drop aux rows older than ``keep_hours``. Returns rows removed.
+
+        Age only, no size rule. 一行 aux 现在是 38 列，落盘约 **338 B/行**，
+        所以一年 1 Hz 约 **10.7 GB**。
+
+        段落的 .npy 是 288 MB/**小时**，比 aux 大两个数量级以上，
+        所以把 aux 挂进同一个字节预算，只会让一块满了的盘先删便宜的
+        那一样。按年龄滚删，容量由 ``cm_aux_keep_hours`` 一个旋钮决定，看得见。
+
+        出厂 168 h × 5 Hz ≈ 302 万行 ≈ **1.0 GB**
+        （1 Hz 时是 204 MB）。盘紧的话调 ``cm_aux_keep_hours``：
+        34 h 对应 204 MB。
+        """
         try:
             cutoff = time.time() - max(0.0, float(keep_hours)) * 3600.0
             with self._lock:

@@ -40,6 +40,7 @@ from typing import Any, Iterable, Sequence
 import numpy as np
 
 from mast.io.exp_map import MapMarker, epoch_of_row, markers_from_rows
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -308,7 +309,7 @@ def build_avoid_circles(
             mr = _finite(m.meta.get(META_AVOID_RADIUS)) if isinstance(m.meta, dict) else None
             if mr is not None and mr > 0:
                 out.append(AvoidCircle(float(m.x_m), float(m.y_m), float(mr),
-                                       "manual_avoid", m.label or "人工标避让区"))
+                                       "manual_avoid", m.label or tr("人工标避让区", "Operator-marked keep-out zone")))
         if len(out) >= cfg.max_avoid_circles:
             logger.debug("avoid-circle cap %d reached", cfg.max_avoid_circles)
             break
@@ -618,13 +619,13 @@ def pick_next_position(
 
     x, y, ring = chosen
     if cfg.strategy == "perimeter_inward":
-        where = f"外圈向内第 {ring + 1} 环"
+        where = tr(f"外圈向内第 {ring + 1} 环", f"ring {ring + 1} counting inward from the outer edge")
     else:
-        where = "压电中心" if ring == 0 else f"中心螺旋第 {ring} 圈"
+        where = tr("压电中心", "piezo centre") if ring == 0 else tr(f"中心螺旋第 {ring} 圈", f"turn {ring} of the central spiral")
     bits = [where, f"({x * 1e9:.0f}, {y * 1e9:.0f}) nm"]
     if hit_circles:
-        bits.append(f"跳过 {hit_circles} 个撞上避让区的候选点")
-    reason = "；".join(bits)
+        bits.append(tr(f"跳过 {hit_circles} 个撞上避让区的候选点", f"skipped {hit_circles} candidate points that hit avoid zones"))
+    reason = tr("；", "; ").join(bits)
     return NextPosition(x_m=x, y_m=y, strategy=cfg.strategy, reason=reason,
                         ring_index=ring, candidates_left=max(0, n_ok - 1)), \
         max(0, n_ok - 1)
@@ -677,11 +678,11 @@ def pick_next_positions(
                for px, py in taken):
             continue
         taken.append((x, y))
-        where = (f"外圈向内第 {ring + 1} 环" if cfg.strategy == "perimeter_inward"
-                 else ("压电中心" if ring == 0 else f"中心螺旋第 {ring} 圈"))
+        where = (tr(f"外圈向内第 {ring + 1} 环", f"ring {ring + 1} counting inward from the outer edge") if cfg.strategy == "perimeter_inward"
+                 else (tr("压电中心", "piezo centre") if ring == 0 else tr(f"中心螺旋第 {ring} 圈", f"turn {ring} of the central spiral")))
         picked.append(NextPosition(
             x_m=x, y_m=y, strategy=cfg.strategy,
-            reason=f"{where}；({x * 1e9:.0f}, {y * 1e9:.0f}) nm",
+            reason=f"{where}{tr('；', '; ')}({x * 1e9:.0f}, {y * 1e9:.0f}) nm",
             ring_index=ring, candidates_left=0))
     return picked
 
@@ -831,30 +832,36 @@ def coarse_move_advice(
 ) -> CoarseMoveAdvice:
     """Should we relocate to a fresh patch of surface, and why.
 
-    Reasons are written once, in Chinese, and shown verbatim to both the agent
+    Reasons are written once, in Chinese, and shown unchanged to both the agent
     and the operator — so that when the two disagree about what to do next, at
     least they are disagreeing about the same sentence."""
     if not cfg.has_xy_coarse_motion:
         return CoarseMoveAdvice(
             suggest=False,
-            reasons=["本仪器没有 XY 粗动马达：换区只能靠插拔样品，"
-                     "当前压电范围内的表面要省着用。"],
+            reasons=[tr("本仪器没有 XY 粗动马达：换区只能靠插拔样品，"
+                        "当前压电范围内的表面要省着用。",
+                        "This instrument has no XY coarse motor: changing area is only possible by swapping the sample, "
+                        "so use the surface within the current piezo range sparingly.")],
             usable_unscanned_frac=usable_unscanned_frac,
             candidates_left=candidates_left)
 
     reasons: list[str] = []
     if next_position is None:
-        reasons.append("当前策略下已没有可用的候选位置（全部被避让区占据或已扫过）。")
+        reasons.append(tr("当前策略下已没有可用的候选位置（全部被避让区占据或已扫过）。", "No candidate positions are left under the current strategy (all are covered by avoid zones or already scanned)."))
     if usable_unscanned_frac < cfg.min_usable_unscanned_frac:
         reasons.append(
-            f"可用且未扫的面积只剩 {usable_unscanned_frac * 100:.1f}%"
-            f"（低于 {cfg.min_usable_unscanned_frac * 100:.0f}% 阈值）。")
+            tr(f"可用且未扫的面积只剩 {usable_unscanned_frac * 100:.1f}%"
+               f"（低于 {cfg.min_usable_unscanned_frac * 100:.0f}% 阈值）。",
+               f"Only {usable_unscanned_frac * 100:.1f}% of the usable area is unscanned "
+               f"(below the {cfg.min_usable_unscanned_frac * 100:.0f}% threshold)."))
     if blocked is not None and cfg.strategy == "center_first":
         frac = _center_zone_blocked_frac(blocked, cfg)
         if frac > cfg.center_zone_blocked_frac:
             reasons.append(
-                f"中心区已有 {frac * 100:.0f}% 被破坏区覆盖，"
-                "「中心优先」策略在这里已失去意义（中心本是压电蠕变最小的地方）。")
+                tr(f"中心区已有 {frac * 100:.0f}% 被破坏区覆盖，"
+                   "「中心优先」策略在这里已失去意义（中心本是压电蠕变最小的地方）。",
+                   f"{frac * 100:.0f}% of the central zone is covered by damage zones, "
+                   "so the \"centre first\" strategy has lost its point here (the centre is where piezo creep is smallest)."))
     return CoarseMoveAdvice(suggest=bool(reasons), reasons=reasons,
                             usable_unscanned_frac=usable_unscanned_frac,
                             candidates_left=candidates_left)
@@ -874,6 +881,14 @@ def _center_zone_blocked_frac(blocked: np.ndarray, cfg: AnalysisConfig) -> float
 
 # ── Queries ─────────────────────────────────────────────────────────────────
 
+def is_manual_spectrum_label(label: str | None) -> bool:
+    """A manual marker that records a spectrum. The label is stored in the language
+    MAST was running in when the marker was written (``io/exp_map.py``), so both the
+    Chinese and the English wording count — old rows and new rows alike."""
+    text = label or ""
+    return "谱" in text or "spectr" in text.lower()
+
+
 def sts_coverage(
     markers: Iterable[MapMarker], cfg: AnalysisConfig
 ) -> tuple[list[tuple[float, float]], int]:
@@ -887,7 +902,7 @@ def sts_coverage(
         if not m.has_xy:
             continue
         is_sts = m.kind == "sts" or (
-            m.kind == "manual" and "谱" in (m.label or ""))
+            m.kind == "manual" and is_manual_spectrum_label(m.label))
         if not is_sts:
             continue
         total += 1

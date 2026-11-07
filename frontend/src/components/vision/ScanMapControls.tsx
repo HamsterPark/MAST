@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { tr } from "@/lib/i18n";
 import { RadioGroup, Toggle } from "@/components/controls";
 import { useUiStore } from "@/store";
 import {
@@ -15,10 +16,10 @@ import {
 /**
  * The map's view controls: preset layer sets, per-layer switches, view range.
  *
- * The map accumulated eight kinds of overlay on one canvas, and the operator
- * had no way to take any of them off. Presets are the quick answer (「精简」 for
- * a crowded surface, 「规划聚焦」 when the question is where to go next); the
- * switches underneath are for everything the three presets do not happen to be.
+ * The map draws eight kinds of overlay on one canvas, so each must be switchable.
+ * Presets are the quick answer (a minimal set for a crowded surface, a planning
+ * set when the question is where to go next); the switches underneath cover
+ * every combination the presets do not.
  *
  * A preset is a SETTER, not a mode — clicking one writes the eight booleans and
  * then every switch is independent again, so the highlight is derived from the
@@ -41,7 +42,7 @@ export function ScanMapControls({ compact = false }: { compact?: boolean }) {
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="flex items-center gap-2">
-          <span className="text-xs text-mast-muted">显示</span>
+          <span className="text-xs text-mast-muted">{tr("显示", "Show")}</span>
           <div className="inline-flex flex-wrap gap-[3px] rounded-mast-ctl border border-mast-border bg-mast-panel-2 p-[3px]">
             {MAP_PRESETS.map((p) => (
               <button
@@ -64,7 +65,7 @@ export function ScanMapControls({ compact = false }: { compact?: boolean }) {
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="text-xs text-mast-muted">范围</span>
+          <span className="text-xs text-mast-muted">{tr("范围", "Range")}</span>
           <RadioGroup<MapViewMode>
             value={viewMode}
             onChange={setViewMode}
@@ -78,8 +79,10 @@ export function ScanMapControls({ compact = false }: { compact?: boolean }) {
           className="rounded border border-dashed border-mast-border px-2 py-1 text-xs text-mast-muted hover:text-mast-text"
           aria-expanded={open}
         >
-          {open ? "▾" : "▸"} 图层
-          {hiddenCount > 0 ? ` · 已隐藏 ${hiddenCount} 层` : ""}
+          {open ? "▾" : "▸"} {tr("图层", "Layers")}
+          {hiddenCount > 0
+            ? tr(` · 已隐藏 ${hiddenCount} 层`, ` · ${hiddenCount} hidden`)
+            : ""}
         </button>
       </div>
 
@@ -127,7 +130,7 @@ function LayerSwitch({
       <div className="flex shrink-0 items-center gap-1.5">
         {/* The knob position and accent colour must not be the only indicator
             of state — same rule the monitoring settings follow. */}
-        <span className="text-[11px] text-mast-muted">{on ? "开" : "关"}</span>
+        <span className="text-[11px] text-mast-muted">{on ? tr("开", "On") : tr("关", "Off")}</span>
         <Toggle checked={on} onChange={onChange} label={MAP_LAYER_LABELS[id]} />
       </div>
     </div>

@@ -3,20 +3,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Badge, Card, DegradedNote, EmptyNote, ErrorNote, Spinner } from "@/components/ui";
 import { Button, useToast } from "@/components/controls";
+import { tr } from "@/lib/i18n";
 
-/** 覆盖历史 — every override category's current payload + timestamped backups,
- *  with restore-by-timestamp. Mirrors the old ConfigOverrideRegistry history.
+/** Override history: every override category's current payload plus timestamped
+ *  backups, with restore-by-timestamp (ConfigOverrideRegistry history).
  *  GET /api/admin/overrides/{category}, /history; POST .../restore/{ts}. */
 
 const CATEGORIES: { id: string; label: string }[] = [
-  { id: "safety_limits", label: "安全限值" },
-  { id: "checks", label: "全局检查规则" },
-  { id: "constraints", label: "材料约束" },
-  { id: "skill", label: "技能覆盖" },
-  { id: "knowledge", label: "知识库" },
-  { id: "guidance", label: "技能指导" },
-  { id: "encyclopedia", label: "百科配置" },
-  { id: "agent", label: "智能体" },
+  { id: "safety_limits", label: tr("安全限值", "Safety limits") },
+  { id: "checks", label: tr("全局检查规则", "Global check rules") },
+  { id: "constraints", label: tr("材料约束", "Material constraints") },
+  { id: "skill", label: tr("技能覆盖", "Skill overrides") },
+  { id: "knowledge", label: tr("知识库", "Knowledge base") },
+  { id: "guidance", label: tr("技能指导", "Skill guidance") },
+  { id: "encyclopedia", label: tr("百科配置", "Encyclopedia config") },
+  { id: "agent", label: tr("智能体", "Agent") },
 ];
 
 export function OverrideHistory() {
@@ -58,10 +59,10 @@ export function OverrideHistory() {
       queryClient.invalidateQueries({ queryKey: ["override", category] });
       queryClient.invalidateQueries({ queryKey: ["override", category, "history"] });
       queryClient.invalidateQueries({ queryKey: ["safety", "limits"] });
-      res?.degraded ? toast("恢复未生效（内核未接入）。", "err")
-        : toast(res?.reloaded ? "已恢复并热重载。" : "已恢复。", "ok");
+      res?.degraded ? toast(tr("恢复未生效（内核未接入）。", "Restore not applied (core not attached)."), "err")
+        : toast(res?.reloaded ? tr("已恢复并热重载。", "Restored and hot-reloaded.") : tr("已恢复。", "Restored."), "ok");
     },
-    onError: (e) => toast(`恢复失败：${String((e as Error)?.message ?? e)}`, "err"),
+    onError: (e) => toast(`${tr("恢复失败：", "Restore failed: ")}${String((e as Error)?.message ?? e)}`, "err"),
   });
 
   return (
@@ -86,13 +87,13 @@ export function OverrideHistory() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>
           <div className="mb-2 flex items-center gap-2">
-            <span className="text-sm font-medium text-mast-text">当前覆盖内容</span>
+            <span className="text-sm font-medium text-mast-text">{tr("当前覆盖内容", "Current override")}</span>
             {ovrQ.data && !ovrQ.data.degraded &&
-              (ovrQ.data.has_override ? <Badge tone="INFO">已覆盖</Badge> : <Badge tone="AUTO">使用默认</Badge>)}
+              (ovrQ.data.has_override ? <Badge tone="INFO">{tr("已覆盖", "Overridden")}</Badge> : <Badge tone="AUTO">{tr("使用默认", "Using default")}</Badge>)}
           </div>
           {ovrQ.isPending && <Spinner />}
           {ovrQ.error && <ErrorNote error={ovrQ.error} />}
-          {ovrQ.data?.degraded && <DegradedNote what="覆盖读取" />}
+          {ovrQ.data?.degraded && <DegradedNote what={tr("覆盖读取", "Override read")} />}
           {ovrQ.data && !ovrQ.data.degraded && (
             <pre className="max-h-96 overflow-auto rounded-md bg-mast-bg p-3 text-xs text-mast-text">
               {JSON.stringify(ovrQ.data.data ?? {}, null, 2)}
@@ -101,13 +102,13 @@ export function OverrideHistory() {
         </Card>
 
         <Card>
-          <span className="mb-2 block text-sm font-medium text-mast-text">历史备份</span>
+          <span className="mb-2 block text-sm font-medium text-mast-text">{tr("历史备份", "Backup history")}</span>
           {histQ.isPending && <Spinner />}
           {histQ.error && <ErrorNote error={histQ.error} />}
-          {histQ.data?.degraded && <DegradedNote what="历史读取" />}
+          {histQ.data?.degraded && <DegradedNote what={tr("历史读取", "History read")} />}
           {histQ.data && !histQ.data.degraded && (
             (histQ.data.entries ?? []).length === 0 ? (
-              <EmptyNote label="暂无历史备份" />
+              <EmptyNote label={tr("暂无历史备份", "No backups yet")} />
             ) : (
               <ul className="space-y-1">
                 {histQ.data.entries!.map((e) => (
@@ -117,7 +118,7 @@ export function OverrideHistory() {
                       <div className="truncate text-xs text-mast-muted">{e.filename}</div>
                     </div>
                     <Button variant="primary" disabled={restore.isPending} onClick={() => restore.mutate(e.timestamp)}>
-                      恢复
+                      {tr("恢复", "Restore")}
                     </Button>
                   </li>
                 ))}

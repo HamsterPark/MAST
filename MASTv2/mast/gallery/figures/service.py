@@ -15,6 +15,7 @@ import time
 
 from mast.gallery import paths as _paths
 from mast.gallery.figures import common as C
+from mast.i18n import tr
 
 LOG_KEEP = 50
 ERRORS_KEEP = 200
@@ -54,7 +55,7 @@ class JobProgress:
             if len(self._s["errors"]) < ERRORS_KEEP:
                 self._s["errors"] = self._s["errors"] + [{"id": str(item), "why": str(why)[:300]}]
         if self._echo is not None:
-            self._echo(f"  ✗ {item}：{why}")
+            self._echo(tr(f"  ✗ {item}：{why}", f"  ✗ {item}: {why}"))
 
     def step(self) -> None:
         with self._lock:
@@ -82,10 +83,11 @@ def _plan_units(kind: str, ids: list[str], series: list[str], options: dict, lay
     def need(i: str, k: str) -> dict:
         it = by.get(i)
         if it is None:
-            raise C.JobError("索引里没有这一项（数据根变了，或者还没构建）")
+            raise C.JobError(tr("索引里没有这一项（数据根变了，或者还没构建）", "This item is not in the index (the data root changed, or it has not been built yet)"))
         if it.get("k") != k:
-            raise C.JobError("类型不对：要%s，这是%s" % ({"f": "帧", "s": "谱", "g": "网格谱"}[k],
-                                                  {"f": "帧", "s": "谱", "g": "网格谱"}.get(it.get("k"), "?")))
+            kind_names = {"f": tr("帧", "frame"), "s": tr("谱", "spectrum"), "g": tr("网格谱", "grid spectrum")}
+            raise C.JobError(tr("类型不对：要%s，这是%s", "Wrong type: expected %s, got %s") % (kind_names[k],
+                                                  kind_names.get(it.get("k"), "?")))
         return it
 
     units: list[tuple[str, object]] = []
@@ -113,36 +115,36 @@ def _plan_units(kind: str, ids: list[str], series: list[str], options: dict, lay
         from mast.gallery.figures import lines
 
         if not series:
-            raise C.JobError("拉线谱出图要至少一个谱系列")
-        units.append(("拉线谱 " + "、".join(series),
+            raise C.JobError(tr("拉线谱出图要至少一个谱系列", "Line-spectra figures need at least one spectrum series"))
+        units.append((tr("拉线谱 ", "Line spectra ") + tr("、", ", ").join(series),
                       lambda: lines.make_lines(lay, doc, marks, list(series), options, cache)))
     elif kind == "sts_stitch":
         from mast.gallery.figures import stitch
 
         if ids:
-            units.append(("拼接 " + "、".join(ids[:3]) + ("…" if len(ids) > 3 else ""),
+            units.append((tr("拼接 ", "Stitch ") + tr("、", ", ").join(ids[:3]) + ("…" if len(ids) > 3 else ""),
                           lambda: stitch.make_stitch(lay, doc, marks, list(ids), options, cache, report)))
         elif options.get("group_by_dir", True):
             groups = stitch.single_groups(doc, marks)
             if not groups:
-                raise C.JobError("没有「带标记、是谱、不在任何系列里」的单根谱")
+                raise C.JobError(tr("没有「带标记、是谱、不在任何系列里」的单根谱", "No single spectra that are marked, are spectra, and belong to no series"))
             for d, gids in groups:
-                units.append(("拼接 " + d, lambda gids=gids, d=d: stitch.make_stitch(
+                units.append((tr("拼接 ", "Stitch ") + d, lambda gids=gids, d=d: stitch.make_stitch(
                     lay, doc, marks, gids, dict(options, group_dir=d), cache, report)))
         else:
-            raise C.JobError("拼接出图要给谱的 id，或者 group_by_dir")
+            raise C.JobError(tr("拼接出图要给谱的 id，或者 group_by_dir", "Stitch figures need spectrum ids, or group_by_dir"))
     elif kind in ("series_slides", "series_stack"):
         from mast.gallery.figures import series as S
 
         if len(series) != 1:
-            raise C.JobError("旋转系列出图一次一个帧系列")
+            raise C.JobError(tr("旋转系列出图一次一个帧系列", "Rotation-series figures take one frame series at a time"))
         sid = series[0]
         if kind == "series_slides":
-            units.append(("16:9 拼图 " + sid, lambda: S.make_slides(lay, doc, marks, sid, options)))
+            units.append((tr("16:9 拼图 ", "16:9 montage ") + sid, lambda: S.make_slides(lay, doc, marks, sid, options)))
         else:
-            units.append(("叠加 " + sid, lambda: S.make_stack(lay, doc, marks, sid, options, cancel)))
+            units.append((tr("叠加 ", "Stack ") + sid, lambda: S.make_stack(lay, doc, marks, sid, options, cancel)))
     else:
-        raise C.JobError(f"不认识的出图类型：{kind}")
+        raise C.JobError(tr(f"不认识的出图类型：{kind}", f"Unknown figure type: {kind}"))
     return units
 
 
@@ -158,18 +160,18 @@ def run_job(kind: str, ids=(), series=(), options=None, *, state=None,
     options = dict(options or {})
     prog.update(running=True, phase="running", kind=kind, done=0, total=0, made=[], errors=[],
                 started=prog.snapshot()["started"] or C.now_str(), finished=None,
-                message="准备中…", detail=None)
+                message=tr("准备中…", "Preparing..."), detail=None)
     try:
         if kind not in KINDS:
-            raise C.JobError(f"不认识的出图类型：{kind}")
+            raise C.JobError(tr(f"不认识的出图类型：{kind}", f"Unknown figure type: {kind}"))
         doc = _index.read_index(lay)
         if not doc or not doc.get("items"):
-            raise C.JobError("图库还没有索引 —— 先在「数据根与构建」里构建一次")
+            raise C.JobError(tr("图库还没有索引 —— 先在「数据根与构建」里构建一次", "The gallery has no index yet - build it once under \"Data root & build\" first"))
         marks = _marks.load_marks(lay)
         cache: dict = {}
         units = _plan_units(kind, list(ids), list(series), options, lay, doc, marks, cache, cancel, prog.error)
-        prog.update(total=len(units), message=f"出图：{len(units)} 项")
-        prog.log(f"{kind}：{len(units)} 项")
+        prog.update(total=len(units), message=tr(f"出图：{len(units)} 项", f"Making figures: {len(units)} items"))
+        prog.log(tr(f"{kind}：{len(units)} 项", f"{kind}: {len(units)} items"))
         for label, fn in units:
             if cancel.is_set():
                 break
@@ -188,17 +190,17 @@ def run_job(kind: str, ids=(), series=(), options=None, *, state=None,
             prog.step()
         snap = prog.snapshot()
         final = "cancelled" if cancel.is_set() else "done"
-        msg = ("已取消；" if final == "cancelled" else "") + "出了 %d 项，失败 %d 项" % (
+        msg = (tr("已取消；", "Cancelled; ") if final == "cancelled" else "") + tr("出了 %d 项，失败 %d 项", "%d made, %d failed") % (
             len(snap["made"]), len(snap["errors"]))
         prog.log(msg)
         prog.update(running=False, phase=final, finished=C.now_str(), message=msg)
     except C.JobError as exc:
-        prog.log(f"出图失败：{exc}")
+        prog.log(tr(f"出图失败：{exc}", f"Figure job failed: {exc}"))
         prog.update(running=False, phase="error", finished=C.now_str(), message=str(exc), detail=str(exc))
     except Exception as exc:  # noqa: BLE001
-        prog.log(f"出图失败：{type(exc).__name__}: {exc}")
+        prog.log(tr(f"出图失败：{type(exc).__name__}: {exc}", f"Figure job failed: {type(exc).__name__}: {exc}"))
         prog.update(running=False, phase="error", finished=C.now_str(),
-                    message=f"出图失败：{exc}", detail=f"{type(exc).__name__}: {exc}")
+                    message=tr(f"出图失败：{exc}", f"Figure job failed: {exc}"), detail=f"{type(exc).__name__}: {exc}")
     return prog.snapshot()
 
 
@@ -233,7 +235,7 @@ def start(kind: str, ids=(), series=(), options=None) -> dict:
         lay = _paths.layout()
         cancel_ev = threading.Event()
         prog = JobProgress()
-        prog.update(running=True, phase="running", kind=kind, started=C.now_str(), message="准备中…")
+        prog.update(running=True, phase="running", kind=kind, started=C.now_str(), message=tr("准备中…", "Preparing..."))
         th = threading.Thread(target=run_job, args=(kind, list(ids), list(series), dict(options or {})),
                               kwargs={"state": lay.state, "progress": prog, "cancel": cancel_ev},
                               name="gallery-figures", daemon=True)
@@ -247,7 +249,7 @@ def cancel() -> dict:
         th, ev, prog = _SLOT
         if _alive(th) and ev is not None:
             ev.set()
-            prog.update(message="正在取消…（正在出的这一张会出完）")
+            prog.update(message=tr("正在取消…（正在出的这一张会出完）", "Cancelling... (the figure being made will finish)"))
     return get_status()
 
 

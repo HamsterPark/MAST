@@ -21,6 +21,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.skills.base import BaseSkill
 from mast.skills.verify import values_match, verify_z_controller
 from mast.skills.verify import z_off_or_reason as _z_off_or_reason
@@ -57,7 +58,7 @@ class GetZPosition(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取当前的 Z piezo 位置。",
+            description=tr("读取当前的 Z piezo 位置。", "Read the current Z piezo position."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["z", "position", "read"],
@@ -79,8 +80,11 @@ class GetZPosition(BaseSkill):
             return SkillResult(
                 skill_name="GetZPosition",
                 success=False,
-                error=("读到的 Z 位置不是一个数(回包解不出) —— 拒绝把它当成读数。"
-                       "多半是 Nanonis 数值字段的元组包装没解开。"),
+                error=tr("读到的 Z 位置不是一个数(回包解不出) —— 拒绝把它当成读数。"
+                         "多半是 Nanonis 数值字段的元组包装没解开。",
+                         "The Z position read is not a number (the reply cannot be decoded) -- "
+                         "refusing to treat it as a reading. Most likely the tuple wrapping of the "
+                         "Nanonis numeric field was not unwrapped."),
                 nanonis_calls=[record],
             )
         return SkillResult(
@@ -100,12 +104,13 @@ class SetSetpoint(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置 Z controller 的隧道电流 setpoint。",
+            description=tr("设置 Z controller 的隧道电流 setpoint。",
+                           "Set the tunnelling-current setpoint of the Z controller."),
             parameters=[
                 ParameterSpec(
                     name="setpoint_a",
                     type="float",
-                    description=(
+                    description=tr(
                         "隧道电流 setpoint，是一个**安培量**（SI）。"
                         "STM 的 setpoint 极小：1 pA … 100 nA；常见值"
                         "是 100 pA。请写成**带 SI 前缀的字符串** —— "
@@ -114,7 +119,16 @@ class SetSetpoint(BaseSkill):
                         "'1.5' 都会被拒绝。这是刻意的 —— 一个丢了数量级的裸数字"
                         "仍然是个合法数字，"
                         "于是 1.5（= 1.5 安培，约为真实 setpoint 的 ~1e10×）"
-                        "就会一路畅通无阻。你若想说的是 1.5 nA，请写 '1.5n'。"
+                        "就会一路畅通无阻。你若想说的是 1.5 nA，请写 '1.5n'。",
+                        "Tunnelling-current setpoint, an **ampere quantity** (SI). "
+                        "An STM setpoint is tiny: 1 pA ... 100 nA; a common value "
+                        "is 100 pA. Write it as a **string with an SI prefix** -- "
+                        "'50p' means 50 pA, '1n' means 1 nA, '100p' means 100 pA. "
+                        "WARNING: here the prefix is **not** optional: exponent notation and a bare "
+                        "'1.5' are both rejected. This is deliberate -- a bare number that lost its "
+                        "order of magnitude is still a valid number, "
+                        "so 1.5 (= 1.5 amperes, ~1e10x a real setpoint) "
+                        "would sail straight through. If you mean 1.5 nA, write '1.5n'.",
                     ),
                     unit="A",
                     required=True,
@@ -161,9 +175,12 @@ class SetSetpoint(BaseSkill):
                     "setpoint_a": setpoint_a,
                     "readback_ok": None,
                     "readback_unavailable": True,
-                    "note": (
+                    "note": tr(
                         "设定点已写入,但回读失败,无法确认硬件真的接受了这个值。"
-                        "进针前请在 Nanonis 面板上人工核对。"
+                        "进针前请在 Nanonis 面板上人工核对。",
+                        "The setpoint was written, but the readback failed, so it cannot be confirmed "
+                        "that the hardware really accepted this value. Verify manually on the "
+                        "Nanonis panel before approaching.",
                     ),
                 },
                 nanonis_calls=calls,
@@ -180,10 +197,13 @@ class SetSetpoint(BaseSkill):
                 skill_name="SetSetpoint",
                 success=False,
                 error=(
-                    f"写后回读不一致 —— 硬件里的设定点不是刚才请求的值: {detail}。"
-                    + ("已还原为写入前的值。" if restored
-                       else "无法还原为写入前的值。")
-                    + "**不要进针**,先在 Nanonis 面板上人工核对设定点。"
+                    tr(f"写后回读不一致 —— 硬件里的设定点不是刚才请求的值: {detail}。",
+                       f"Readback after write does not match -- the setpoint in the hardware is not "
+                       f"the value just requested: {detail}. ")
+                    + (tr("已还原为写入前的值。", "Restored to the pre-write value.") if restored
+                       else tr("无法还原为写入前的值。", "Could not restore the pre-write value."))
+                    + tr("**不要进针**,先在 Nanonis 面板上人工核对设定点。",
+                         " **Do not approach**; first verify the setpoint manually on the Nanonis panel.")
                 ),
                 data={
                     "requested": setpoint_a,
@@ -218,7 +238,8 @@ class GetSetpoint(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取当前的隧道电流 setpoint（Z controller）。",
+            description=tr("读取当前的隧道电流 setpoint（Z controller）。",
+                           "Read the current tunnelling-current setpoint (Z controller)."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["z", "setpoint", "read"],
@@ -259,12 +280,13 @@ class ZControllerOnOff(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="启用或禁用 Z controller（feedback 环路）。",
+            description=tr("启用或禁用 Z controller（feedback 环路）。",
+                           "Enable or disable the Z controller (feedback loop)."),
             parameters=[
                 ParameterSpec(
                     name="enable",
                     type="bool",
-                    description="True 为启用，False 为禁用",
+                    description=tr("True 为启用，False 为禁用", "True to enable, False to disable"),
                     required=True,
                 ),
             ],
@@ -314,20 +336,27 @@ class ZControllerOnOff(BaseSkill):
             budget = v.get("switch_off_delay_s")
             timing = ""
             if isinstance(waited, (int, float)):
-                timing = f" 已等待 {waited:.2f}s"
+                timing = tr(f" 已等待 {waited:.2f}s", f" Waited {waited:.2f}s")
                 if isinstance(budget, (int, float)) and budget > 0:
-                    timing += f"（本机声明的 switch-off 延迟 {budget:.2f}s）"
+                    timing += tr(f"（本机声明的 switch-off 延迟 {budget:.2f}s）",
+                                 f" (this machine's declared switch-off delay {budget:.2f}s)")
                     if waited < budget * 0.9:
-                        timing += ("——**等待时间短于机器自己声明的延迟**，"
-                                   "这更像是判早了而不是写入没生效")
+                        timing += tr("——**等待时间短于机器自己声明的延迟**，"
+                                     "这更像是判早了而不是写入没生效",
+                                     " -- **the wait was shorter than the machine's own declared delay**; "
+                                     "this looks more like judging too early than like the write not taking effect")
                     else:
-                        timing += "——已等满声明的延迟，写入很可能确实没生效"
+                        timing += tr("——已等满声明的延迟，写入很可能确实没生效",
+                                     " -- the full declared delay was waited; the write most likely really did not take effect")
                 else:
-                    timing += "（本机未声明 switch-off 延迟）"
+                    timing += tr("（本机未声明 switch-off 延迟）",
+                                 " (no switch-off delay declared on this machine)")
             return SkillResult(
                 skill_name="ZControllerOnOff", success=False,
-                error=(f"Z 反馈开关未生效：要求 {'ON' if enable else 'OFF'}，"
-                       f"实时控制器回报 {'ON' if v['on'] else 'OFF'}。{timing}"),
+                error=tr(f"Z 反馈开关未生效：要求 {'ON' if enable else 'OFF'}，"
+                         f"实时控制器回报 {'ON' if v['on'] else 'OFF'}。{timing}",
+                         f"Z feedback switch did not take effect: requested {'ON' if enable else 'OFF'}, "
+                         f"real-time controller reports {'ON' if v['on'] else 'OFF'}.{timing}"),
                 data={"z_controller_on": v["on"], "requested": enable,
                       "verified": True,
                       "waited_s": waited, "switch_off_delay_s": budget},
@@ -341,8 +370,10 @@ class ZControllerOnOff(BaseSkill):
                 skill_name="ZControllerOnOff", success=True,
                 data={"z_controller_on": None, "requested": enable,
                       "verified": False, "verify_error": v["error"]},
-                summary=(f"已下发 Z 反馈 {'ON' if enable else 'OFF'}，"
-                         f"但无法读回确认（{v['error']}）——请勿据此认定它已生效。"),
+                summary=tr(f"已下发 Z 反馈 {'ON' if enable else 'OFF'}，"
+                           f"但无法读回确认（{v['error']}）——请勿据此认定它已生效。",
+                           f"Z feedback {'ON' if enable else 'OFF'} was sent, "
+                           f"but the readback failed ({v['error']}) -- do not assume it took effect."),
                 nanonis_calls=calls,
             )
 
@@ -388,25 +419,34 @@ class TryEngageController(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description=(
+            description=tr(
                 "在**不做**粗动 auto-approach 的前提下，靠打开 Z-controller 尝试"
                 "进入隧道状态。若隧道电流达到 ~setpoint，说明针已进上，feedback "
                 "保持开启；否则把 controller 重新关掉，并在结果里置 "
                 "needs_auto_approach=True。当收到含糊的「进针/engage」请求时，"
-                "**先**用它，再考虑退回 AutoApproach。"
+                "**先**用它，再考虑退回 AutoApproach。",
+                "Try to enter the tunnelling state by switching the Z-controller on, **without** "
+                "doing a coarse auto-approach. If the tunnelling current reaches ~setpoint, the tip "
+                "is engaged and feedback stays on; otherwise the controller is switched off again "
+                "and needs_auto_approach=True is set in the result. When an ambiguous "
+                "\"approach/engage\" request arrives, use this **first**, and only then consider "
+                "falling back to AutoApproach.",
             ),
             parameters=[
                 ParameterSpec(
                     name="settle_s", type="float",
-                    description="一边轮询电流、一边让 feedback 稳定下来的秒数。",
+                    description=tr("一边轮询电流、一边让 feedback 稳定下来的秒数。",
+                                   "Seconds to let the feedback settle while polling the current."),
                     required=False, default=1.5, min_value=0.1, max_value=30.0),
                 ParameterSpec(
                     name="poll_hz", type="int",
-                    description="稳定期间每秒轮询电流的次数。",
+                    description=tr("稳定期间每秒轮询电流的次数。",
+                                   "Number of current polls per second during settling."),
                     required=False, default=10, min_value=1, max_value=100),
                 ParameterSpec(
                     name="engage_fraction", type="float",
-                    description="|current| 必须达到 setpoint 的这个比例，才算进上针。",
+                    description=tr("|current| 必须达到 setpoint 的这个比例，才算进上针。",
+                                   "|current| must reach this fraction of the setpoint for the tip to count as engaged."),
                     required=False, default=0.5, min_value=0.05, max_value=1.0),
             ],
             estimated_duration_s=2.5,
@@ -535,15 +575,23 @@ class TryEngageController(BaseSkill):
             # is still closed (we know, and it is bad), None when the read failed (we
             # do not know). Collapsing both into None would throw away the one that
             # tells the operator their OFF write is not landing.
-            why = (f"实时控制器回报 Z 反馈仍然闭合（Z-Controller 模块可能已显示 Off——"
-                   "两者不是一回事，Nanonis 手册要求以实时控制器为准）"
+            why = (tr("实时控制器回报 Z 反馈仍然闭合（Z-Controller 模块可能已显示 Off——"
+                      "两者不是一回事，Nanonis 手册要求以实时控制器为准）",
+                      "the real-time controller reports the Z feedback is still closed (the "
+                      "Z-Controller module may already show Off -- the two are not the same thing; "
+                      "the Nanonis manual says to trust the real-time controller)")
                    if v["verified"] else
-                   f"无法确认 Z 反馈是否已断开（ZCtrl_OnOffGet 读取失败：{v['error']}）")
+                   tr(f"无法确认 Z 反馈是否已断开（ZCtrl_OnOffGet 读取失败：{v['error']}）",
+                      f"cannot confirm whether the Z feedback is off (ZCtrl_OnOffGet read failed: {v['error']})"))
             return SkillResult(
                 skill_name="TryEngageController", success=False,
-                error=(f"未能建立隧穿（峰值 |I|={peak:.2e} A < {threshold:.2e} A），"
-                       f"但也**不能**建议粗进针：{why}。"
-                       "反馈环还在的时候跑开环粗进针马达就是撞针。"),
+                error=tr(f"未能建立隧穿（峰值 |I|={peak:.2e} A < {threshold:.2e} A），"
+                         f"但也**不能**建议粗进针：{why}。"
+                         "反馈环还在的时候跑开环粗进针马达就是撞针。",
+                         f"Failed to establish tunnelling (peak |I|={peak:.2e} A < {threshold:.2e} A), "
+                         f"but coarse approach also **cannot** be recommended: {why}. "
+                         "Running the open-loop coarse approach motor while the feedback loop is "
+                         "still closed is a tip crash."),
                 data={"engaged": False, "z_controller_on": v["on"],
                       "z_controller_verified": v["verified"],
                       "needs_auto_approach": False,   # ← the fail-closed bit
@@ -573,12 +621,13 @@ class SetZPosition(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="直接设置 Z piezo 位置。Z controller 必须处于 OFF。",
+            description=tr("直接设置 Z piezo 位置。Z controller 必须处于 OFF。",
+                           "Set the Z piezo position directly. The Z controller must be OFF."),
             parameters=[
                 ParameterSpec(
                     name="z_pos_m",
                     type="float",
-                    description="Z 位置，单位米",
+                    description=tr("Z 位置，单位米", "Z position, in metres"),
                     unit="m",
                     required=True,
                     # ±10 µm 包络:这是设 **绝对** Z 的唯一入口,此前没有任何
@@ -622,12 +671,13 @@ class SetTipLift(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置 Z controller 关闭时针尖回撤的量。",
+            description=tr("设置 Z controller 关闭时针尖回撤的量。",
+                           "Set how far the tip retracts when the Z controller is switched off."),
             parameters=[
                 ParameterSpec(
                     name="tip_lift_m",
                     type="float",
-                    description="针尖抬起量，单位米",
+                    description=tr("针尖抬起量，单位米", "Tip lift amount, in metres"),
                     unit="m",
                     required=True,
                     # Fine-Z config: ±1 µm hard cap (mirrors TipShape's tip_lift_m
@@ -669,7 +719,7 @@ class GetTipLift(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取当前的针尖抬起量。",
+            description=tr("读取当前的针尖抬起量。", "Read the current tip lift amount."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["z", "tip_lift", "read"],
@@ -690,8 +740,11 @@ class GetTipLift(BaseSkill):
             return SkillResult(
                 skill_name="GetTipLift",
                 success=False,
-                error=("读到的 tip lift 不是一个数(回包解不出) —— 拒绝把它当成读数。"
-                       "扎针深度用错数量级的后果落在针尖上,宁可失败。"),
+                error=tr("读到的 tip lift 不是一个数(回包解不出) —— 拒绝把它当成读数。"
+                         "扎针深度用错数量级的后果落在针尖上,宁可失败。",
+                         "The tip lift read is not a number (the reply cannot be decoded) -- refusing "
+                         "to treat it as a reading. A poke depth with the wrong order of magnitude "
+                         "lands on the tip, so failing is preferable."),
                 nanonis_calls=[record],
             )
         return SkillResult(
@@ -711,20 +764,24 @@ class SetZLimitsEnabled(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="启用或禁用 Z 位置的安全限位。",
+            description=tr("启用或禁用 Z 位置的安全限位。", "Enable or disable the Z position safety limits."),
             parameters=[
                 ParameterSpec(
                     name="enabled",
                     type="bool",
-                    description=(
+                    description=tr(
                         "True 为启用 Z 限位，False 为禁用。默认为 "
                         "True：不带参数、走默认的调用会**启用** Z 软限位"
                         "（除非用户显式传 "
-                        "enabled=False，否则它们应当保持开启）。"
+                        "enabled=False，否则它们应当保持开启）。",
+                        "True enables the Z limits, False disables them. Default is "
+                        "True: a call with no argument **enables** the Z soft limits "
+                        "(they should stay on unless the user explicitly passes "
+                        "enabled=False).",
                     ),
                     # Default ON (safety fix): a bare/defaulted call enables the
                     # Z soft-limits. Disabling requires an explicit enabled=False
-                    # (the disable path is intentionally NOT gated — see audit #4).
+                    # (the disable path is intentionally NOT gated).
                     required=False,
                     default=True,
                 ),
@@ -764,7 +821,7 @@ class GetZLimitsEnabled(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取 Z 位置安全限位是否启用。",
+            description=tr("读取 Z 位置安全限位是否启用。", "Read whether the Z position safety limits are enabled."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["z", "limits", "safety", "read"],
@@ -790,8 +847,10 @@ class GetZLimitsEnabled(BaseSkill):
             return SkillResult(
                 skill_name="GetZLimitsEnabled",
                 success=False,
-                error=("读不到 Z 限位的启用状态(回包解不出一个数)—— "
-                       "**不要**把它当成「限位已关闭」。"),
+                error=tr("读不到 Z 限位的启用状态(回包解不出一个数)—— "
+                         "**不要**把它当成「限位已关闭」。",
+                         "Cannot read whether the Z limits are enabled (the reply cannot be decoded "
+                         "to a number) -- **do not** treat it as \"limits are off\"."),
                 nanonis_calls=[record],
             )
         return SkillResult(
@@ -816,7 +875,8 @@ class GetZCtrlList(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取 Z controller 列表，以及当前生效的 controller 索引。",
+            description=tr("读取 Z controller 列表，以及当前生效的 controller 索引。",
+                           "Read the Z controller list and the index of the currently active controller."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["z", "controller", "list", "read"],
@@ -872,7 +932,8 @@ class GetHomeProps(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取 Z controller 的 Home 位置模式与数值。",
+            description=tr("读取 Z controller 的 Home 位置模式与数值。",
+                           "Read the Home position mode and value of the Z controller."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["z", "home", "read"],
@@ -924,12 +985,13 @@ class SetHomeProps(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置 Z controller 的 Home 位置模式与数值。",
+            description=tr("设置 Z controller 的 Home 位置模式与数值。",
+                           "Set the Home position mode and value of the Z controller."),
             parameters=[
                 ParameterSpec(
                     name="rel_or_abs",
                     type="int",
-                    description="0=不变，1=绝对，2=相对",
+                    description=tr("0=不变，1=绝对，2=相对", "0=no change, 1=absolute, 2=relative"),
                     required=True,
                     min_value=0,
                     max_value=2,
@@ -937,7 +999,7 @@ class SetHomeProps(BaseSkill):
                 ParameterSpec(
                     name="home_position_m",
                     type="float",
-                    description="Home 位置，单位米",
+                    description=tr("Home 位置，单位米", "Home position, in metres"),
                     unit="m",
                     required=True,
                     # Fine-Z config: ±1 µm cap (the Home position is a fine-Z
@@ -986,12 +1048,13 @@ class SetSwitchOffDelay(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置 Z controller 的关断延时，单位秒。",
+            description=tr("设置 Z controller 的关断延时，单位秒。",
+                           "Set the switch-off delay of the Z controller, in seconds."),
             parameters=[
                 ParameterSpec(
                     name="delay_s",
                     type="float",
-                    description="关断延时，单位秒",
+                    description=tr("关断延时，单位秒", "Switch-off delay, in seconds"),
                     unit="s",
                     required=True,
                     min_value=0.0,
@@ -1030,7 +1093,8 @@ class GetWithdrawRate(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取 Z controller 的退针 slew rate，单位 m/s。",
+            description=tr("读取 Z controller 的退针 slew rate，单位 m/s。",
+                           "Read the withdraw slew rate of the Z controller, in m/s."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["z", "withdraw", "rate", "read"],

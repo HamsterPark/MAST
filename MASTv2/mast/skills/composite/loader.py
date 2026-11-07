@@ -106,8 +106,7 @@ def load_spec_skills(registry, store: CompositeVersionStore | None = None,
         try:
             from mast.skills.composite.templates import seed_templates
             # Pass the registry so a stale seeded template that references
-            # non-existent skills gets repaired rather than surviving forever
-            # ().
+            # non-existent skills gets repaired rather than surviving forever.
             seed_templates(store, registry)
         except Exception as exc:  # pragma: no cover - best-effort
             logger.debug("seed_templates failed: %s", exc)
@@ -171,7 +170,7 @@ def load_spec_skills(registry, store: CompositeVersionStore | None = None,
     return loaded
 
 
-# ── refused specs, readable instead of log-only () ──
+# ── refused specs, readable instead of log-only ──
 #
 # A refused spec simply does not appear in the skill list, so the UI cannot
 # distinguish "this composite is broken" from "this composite was never

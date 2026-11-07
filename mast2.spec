@@ -153,6 +153,11 @@ for sub in (
     #   行为：模型自己判何时结束。冻结包与源码跑出两种停机时机，而两边都说自己
     #   正常。
     "mast.goals",
+    # mast.legacy_gate —— 内置 LLM 的总开关（legacy_features_enabled）。
+    #   所有引用都在函数体里（make_chat_model、runtime.setup、各条路由、OCR、语音）。
+    #   漏了它，冻结包里 setup() 第一次碰到门控就 ImportError，而 make_chat_model
+    #   在旧版功能打开时也建不出模型 —— 源码里一切正常，只有安装版坏。
+    "mast.legacy_gate",
     "mast.agents",
     "mast.agents._shared",
     "mast.agents.orchestrator",
@@ -207,6 +212,30 @@ for sub in (
     # 函数体里的惰性 import（路由在包坏掉时要能 degraded 而不是让整个 app 起不来），
     # PyInstaller 的静态分析看不见 —— 漏了不会报错，只会让打包版的「数据图库」永远 degraded。
     "mast.gallery",
+    # 7.0 的 VISTA 视觉 harness（docs/v2/architecture/mast7_vista.md）：帧档案、放大镜、
+    # 读数、测量、笔记、服务端执行的「一动一观」闸门，以及 runner 子包（无人值守运行器）。
+    # 同一个形状：外部面按需才 import 它（没有 VISTA 客户端时不该把它拖起来）。漏了不会
+    # 在构建或启动时报错，只会让 /api/ext/v1/vista/* 一调用就失败 —— 而那要等到第一次
+    # 用外部 agent 连仪器。下面 mast_hidden 的直接名单里还有一道（理由见那里）。
+    "mast.vista",
+    # 外部 agent 网关。上面的 "mast.api" 已经递归覆盖它；单独点名是因为 7.0 的整个外部面
+    # （vista / wait / detectors / literature / runner）都在这棵子树里，而 ext/app.py 用
+    # importlib.import_module(f"mast.api.ext.{name}") 按名字装后四个路由 —— 名字是拼出来
+    # 的，静态分析**确实**看不见；缺了只记一条 warning，那几组端点在打包版里就不存在。
+    # 所以它只能靠这里的递归收集，不让它再多依赖「mast.api 整棵递归成功」这一个前提。
+    "mast.api.ext",
+    # TERS 光学侧（docs/v2/design/ters_satellite_integration.md）：卫星枢纽与实时数据通道。
+    # 两个包的生产引用几乎全是函数内惰性 import —— 路由 handler 里的 get_satellite_hub()、
+    # runtime 急停/关停钩子里的 emergency_stop_all()、卫星事件转发里的 get_live_hub()，
+    # 静态分析看不见。漏了的表现最糟：急停钩子吞掉 ImportError，**E-STOP 不再停光谱机的
+    # 设备**，界面上一切正常；卫星连不上则只表现为「卫星离线」。sim 子包是参考卫星（演示与
+    # 行为参照），体量小，一并带上。
+    "mast.satellite",
+    "mast.live",
+    # 光路图（docs/v2/design/optical_layout.md）：模型、追迹、存储、叙述、出图。网页路由与外部面
+    # 在 import 时就拉它（store / links），但出图（render，matplotlib）与叙述（summary）是
+    # 处理函数里的惰性 import；下面的直接名单里还有一道。
+    "mast.optical_layout",
 ):
     try:
         mast_hidden += collect_submodules(sub)
@@ -218,13 +247,69 @@ mast_hidden += [
     "mast._runtime_paths",
     "mast.core.platform_patch",
     "mast.core.nanonis_patch",
+    # 7.0：不经 collect_submodules 再点名一次。collect_submodules 要在构建机上**真的
+    # import** 一个包才列得出它的子模块；import 失败只记一条 warning，整棵子树被跳过，
+    # 构建照样成功。直接写进 hiddenimports 的名字由 PyInstaller 读源码去找、顺着它的
+    # import 走，不要求构建期能 import。runner 是 vista 的子包，这里单独列出，
+    # 免得它的 __init__ 在构建期出一次错就让 /runner/start 在仪器电脑上 ImportError。
+    "mast.vista",
+    "mast.vista.runner",
+    # 同上：不经 collect_submodules 再点名一次（理由见上面收集清单里的 TERS 那一段）。
+    # 枢纽的端点、文件接收与 LiveHub 转发是被包内按名字惰性拉起的，逐个点名。
+    "mast.satellite",
+    "mast.satellite.hub",
+    "mast.satellite.endpoint",
+    "mast.satellite.files",
+    "mast.satellite.live_bridge",
+    "mast.satellite.admin",
+    "mast.satellite.sim",
+    "mast.live",
+    "mast.core.port_guard",
+    # 手动控制面板（契约 §13.1）的描述与读数聚合。api/routes/manual.py 只在 handler 里惰性
+    # import 它（三类提供者各自失败只降级，不让路由起不来），静态分析看不见。漏了的表现：
+    # 打包版里 GET /api/manual/devices 与 /readouts 一调用就 ModuleNotFoundError，
+    # 光学台「手动控制」一节整个空白，而开发态一切正常。
+    "mast.manual",
+    # 光路图：出图与叙述只在端点的函数体里 import（render 还带着 matplotlib 的 Agg 画布），
+    # 静态分析看不见的话，打包版的 render.png 一调用就 ModuleNotFoundError。
+    "mast.optical_layout",
+    "mast.optical_layout.render",
+    "mast.optical_layout.summary",
+    "mast.optical_layout.links",
+]
+# 端口归属检查（mast.core.port_guard）用 psutil 列 TCP 连接与进程。7.0.1 的冻结包里已经有它
+# （mast.pyexec 的函数内 import 把它带了进来），这里显式点名，免得哪天 pyexec 不再用它时
+# 端口检查在仪器电脑上静默退化成「检查没跑成」。
+mast_hidden.append("psutil")
+
+# 远程 AI（启动器里的「Remote AI」一节）：启动器在函数里 import mast_mcp.remote_server。
+# mast_mcp 住在 integrations/claude-code/server（同一份也以源文件形式随插件装进安装目录，
+# 给本机 Claude Code 的 stdio 服务用）；冻结版的启动器要自己带一份，连同它用到、而 MAST
+# 别处没人 import 的标准库（http.server、socketserver）。漏了的表现：勾上「远程 AI」
+# 只在日志里留一行 ModuleNotFoundError，开发态一切正常。截屏用的 PIL.ImageGrab 在
+# take_screenshot 里惰性导入，静态分析看不见，一并点名。
+MCP_SERVER_ROOT = os.path.join(REPO_ROOT, "integrations", "claude-code", "server")
+if MCP_SERVER_ROOT not in sys.path:
+    sys.path.insert(1, MCP_SERVER_ROOT)
+try:
+    mast_hidden += collect_submodules("mast_mcp")
+except Exception:
+    pass
+mast_hidden += [
+    "mast_mcp", "mast_mcp.stdio_rpc", "mast_mcp.http_rpc", "mast_mcp.config",
+    "mast_mcp.client", "mast_mcp.tools", "mast_mcp.vista_surface", "mast_mcp.resources",
+    "mast_mcp.computer", "mast_mcp.remote_server",
+    "http.server", "socketserver", "PIL.ImageGrab",
 ]
 
 
 # ---- third-party deps PyInstaller often misses ------------------------------
 extra_datas: list[tuple[str, str]] = []
 extra_binaries: list[tuple[str, str]] = []
-extra_hidden: list[str] = []
+extra_hidden: list[str] = [
+    # Sibling of mast2_launcher.py — seven-language UI strings for _tr().
+    "launcher_i18n_catalog",
+]
 
 for pkg in (
     # Web service stack (Gradio REMOVED in the TS rewrite — FastAPI serves the
@@ -268,31 +353,22 @@ for pkg in (
     "fitz",
     "aiosqlite",
     "nanonis_spm",
-    # --- Phase 9 M12 vision stack (DINOv3-ViT-L/16 + LoRA + 3 heads) ---
-    # torch/timm load the backbone; peft loads the LoRA; transformers +
-    # accelerate are hard transitive deps of peft; safetensors +
-    # huggingface_hub read the bundled offline backbone cache. timm's model
-    # registry + transformers' lazy submodules are dynamic, so collect_all is
-    # required (PyInstaller static analysis misses them).
-    "torch",
-    "torchvision",
-    "timm",
-    "peft",
-    "transformers",
-    "accelerate",
-    "safetensors",
-    "huggingface_hub",
-    "tokenizers",
+    # Phase 9 vision stack (torch/timm/peft/transformers/accelerate/safetensors/
+    # huggingface_hub/tokenizers) was ~4.0 GB of the frozen bundle and is NO LONGER
+    # bundled: the vision model weights do not ship (vision is gated behind the
+    # legacy-features switch and falls back to a mock backend when there are no
+    # weights), so the whole torch family was pure dead weight. It is ALSO listed
+    # in `excludes` below — removing it from this collect_all loop is not enough,
+    # because ~30 mast.* modules plus scipy/sklearn import torch statically and
+    # PyInstaller's Analysis would otherwise pull it back in. To ship vision again,
+    # add the weights and restore torch (prefer a separate add-on over the base
+    # installer). sympy/mpmath were only reached through torch, so they go too.
     "regex",
-    # torch import-time transitive deps (filelock/fsspec/jinja2/networkx/sympy
-    # per `torch` Requires). sympy + networkx do dynamic submodule imports that
-    # PyInstaller's static analysis misses, so collect_all them explicitly;
-    # mpmath is sympy's runtime dep.
-    "sympy",
-    "mpmath",
+    # torch's transitive deps that have their own (non-torch) uses: jinja2 and
+    # fsspec have natural references and are tiny; networkx is small and kept.
+    # filelock was only used by torch/HF, so it is dropped with them.
     "networkx",
     "jinja2",
-    "filelock",
     "fsspec",
     # Environment sensors (DL-7 vacuum / Lakeshore temperature over serial).
     # collect_all picks up serial.tools.list_ports_windows (the conditional
@@ -316,6 +392,11 @@ for pkg in (
     # (与 mast.monitoring 那条注释同一个教训)。lxml 是它的 C 扩展依赖。
     "docx",
     "lxml",
+    # WITec optical station: the COM client (mast/instruments/witec/comtypes_client.py)
+    # imports comtypes.client lazily and comtypes generates its type-library wrappers
+    # with comtypes.tools.* at run time; the static analysis sees none of it. Without
+    # this the frozen app's witec_com device can only say "dependency missing".
+    "comtypes",
 ):
     try:
         d, b, h = collect_all(pkg)
@@ -324,6 +405,14 @@ for pkg in (
         extra_hidden += h
     except Exception:
         pass
+
+# The loop above skips a package that is not installed. For comtypes that would ship
+# an optical-station build that cannot reach WITec Control, so say it out loud.
+if sys.platform == "win32":
+    import importlib.util as _ilu
+    if _ilu.find_spec("comtypes") is None:
+        print("WARNING: comtypes is not installed in the build environment; the frozen "
+              "app will not reach WITec Control (pip install \"comtypes>=1.4\")", file=sys.stderr)
 
 
 # ---- knowledge / logo data files --------------------------------------------
@@ -340,6 +429,17 @@ data_files = [
     # frozen build. Never registered here after the gui→webui rename.
     (os.path.join(MASTV2_ROOT, "mast", "webui", "skill_zh.json"),
      os.path.join("mast", "webui")),
+    # VISTA 运行器的 PreCompact / Stop 钩子。它不是被 import 的：claude CLI 把它当**脚本**
+    # 交给随包运行时去跑，所以冻结版里它必须是一个**文件**，就在 paths.py 旁边
+    # （mast.vista.runner.paths.resolve_hook_script 找的是 <_MEIPASS>/mast/vista/runner/）。
+    # 只进 PYZ 不够；缺了它运行器拒绝启动。不在 _OPTIONAL_DATA 里：缺了就让构建失败。
+    (os.path.join(MASTV2_ROOT, "mast", "vista", "runner", "compact_hook.py"),
+     os.path.join("mast", "vista", "runner")),
+    # 位点标注页模板。PrepareSiteMarkingPage 用 Path(__file__).with_name(...) 读它，冻结版里
+    # 它得是 <_MEIPASS>/mast/skills/builtins/ 下的一个文件；漏了的话打包版生成标注页时读模板
+    # 失败。不在 _OPTIONAL_DATA 里：缺了就让构建失败。
+    (os.path.join(MASTV2_ROOT, "mast", "skills", "builtins", "site_marking_template.html"),
+     os.path.join("mast", "skills", "builtins")),
     (os.path.join(REPO_ROOT, "logo", "MAST2_logo.png"), "logo"),
     (os.path.join(REPO_ROOT, "logo", "MAST2_logo.ico"), "logo"),
     # OTA update server's self-signed LAN cert (PUBLIC certificate, NO private
@@ -348,6 +448,13 @@ data_files = [
     # _MEIPASS/update_server_ca.pem. Dropped by the exists() filter if absent
     # (then clients rely on a manually-placed <data>/api key/update_server_ca.pem).
     (os.path.join(REPO_ROOT, "installer", "update_server_ca.pem"), "."),
+    # The standalone SSH-setup helper (setup-ai-ssh.ps1). The launcher's
+    # "Set up AI remote access" button runs it (elevated) so a non-technical
+    # user can turn on remote AI access with one click. It is independent of
+    # MAST — the button is only a convenience launcher. Resolved at runtime via
+    # _resource_path("setup-ai-ssh.ps1"); required, so a missing file fails the
+    # build rather than shipping a dead button.
+    (os.path.join(REPO_ROOT, "setup-ai-ssh.ps1"), "."),
 ]
 # Bundle any prompts/ directories under mast.llm or mast.knowledge
 for _root, _, _files in os.walk(os.path.join(MASTV2_ROOT, "mast", "llm", "prompts")):
@@ -489,7 +596,7 @@ print("   前端 SPA 资源 %d 个文件已收入" % _spa_n)
 
 a = Analysis(
     [os.path.join(REPO_ROOT, "mast2_launcher.py")],
-    pathex=[MASTV2_ROOT],
+    pathex=[MASTV2_ROOT, MCP_SERVER_ROOT],
     binaries=extra_binaries,
     datas=extra_datas + data_files,
     hiddenimports=sorted(set(mast_hidden + extra_hidden)),
@@ -506,10 +613,26 @@ a = Analysis(
         # NOTE: mast.io is NOT excluded — v2's mast/io/ (mosaic / exp_map /
         # plan_overlay / signal_fft) backs the vision + scan-map API routes.
         # mast.data likewise kept (used by v2 data processing).
-        # ML stack: Phase 9 ships the M12 DINOv3 vision model, so torch +
-        # timm + peft (+ transformers/accelerate, hard transitive deps of peft)
-        # are now BUNDLED (see collect_all loop below). Only the genuinely
-        # unused pieces stay excluded to keep the bundle from ballooning.
+        # ML stack: the vision model weights do NOT ship, so the whole torch
+        # family is excluded (saves ~4.0 GB in the frozen bundle). These are
+        # listed here, not merely removed from the collect_all loop above,
+        # because ~30 mast.* modules plus scipy/sklearn import torch statically
+        # and Analysis would otherwise pull it back in. Every torch consumer is
+        # gated behind the legacy switch and needs weight files; without weights
+        # they fall back to a mock backend, so excluding torch does not change
+        # default behaviour. (--selftest-vision then reports FAIL, as it already
+        # does without weights — mark it N/A in the release manifest.)
+        "torch",
+        "torchvision",
+        "torchgen",
+        "functorch",
+        "timm",
+        "peft",
+        "transformers",
+        "accelerate",
+        "safetensors",
+        "huggingface_hub",
+        "tokenizers",
         "torchaudio",
         "torchao",
         "triton",
@@ -532,10 +655,13 @@ a = Analysis(
         "PySide2",
         "PySide6",
         "wx",
-        # Heavy science extras. NOTE: sympy is NOT excluded — torch._dynamo /
-        # torch.fx.experimental.symbolic_shapes import it at import time (via
-        # timm→torchvision→torch._dynamo), so excluding it breaks `import timm`
-        # in the frozen build (caught by --selftest-vision).
+        # sympy/mpmath were only reached through torch (torch._dynamo /
+        # torch.fx.experimental.symbolic_shapes); with torch gone they are
+        # excluded too. MAST code never imports them directly — only scipy's
+        # and networkx's dev/test modules do.
+        "sympy",
+        "mpmath",
+        # Heavy science extras.
         "pandas.tests",
         "scipy.io.tests",
     ],

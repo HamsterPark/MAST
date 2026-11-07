@@ -29,6 +29,7 @@ import logging
 import threading
 from datetime import datetime
 from typing import Any
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -42,23 +43,30 @@ logger = logging.getLogger(__name__)
 TIP_MATERIALS: tuple[str, ...] = (
     "W", "PtIr", "Pt", "Ir", "Fe", "Ni", "Co", "Cr", "Au", "Ag", "Nb", "other")
 
-#: 制备方式(要求的四种 + unknown)。
+#: 制备方式(四种 + unknown)。
 TIP_FABRICATIONS: tuple[str, ...] = ("etched", "cut", "ground", "fib", "unknown")
 
 #: 针尖形态。qPlus 与普通金属丝针尖在"能承受什么"上差别最大。
 TIP_FORMS: tuple[str, ...] = ("stm_wire", "qplus")
 
 MATERIAL_LABELS: dict[str, str] = {
-    "W": "钨 (W)", "PtIr": "铂铱 (Pt/Ir)", "Pt": "铂 (Pt)", "Ir": "铱 (Ir)",
-    "Fe": "铁 (Fe)", "Ni": "镍 (Ni)", "Co": "钴 (Co)", "Cr": "铬 (Cr)",
-    "Au": "金 (Au)", "Ag": "银 (Ag)", "Nb": "铌 (Nb)", "other": "其它",
+    "W": tr("钨 (W)", "Tungsten (W)"), "PtIr": tr("铂铱 (Pt/Ir)", "Platinum-iridium (Pt/Ir)"),
+    "Pt": tr("铂 (Pt)", "Platinum (Pt)"), "Ir": tr("铱 (Ir)", "Iridium (Ir)"),
+    "Fe": tr("铁 (Fe)", "Iron (Fe)"), "Ni": tr("镍 (Ni)", "Nickel (Ni)"),
+    "Co": tr("钴 (Co)", "Cobalt (Co)"), "Cr": tr("铬 (Cr)", "Chromium (Cr)"),
+    "Au": tr("金 (Au)", "Gold (Au)"), "Ag": tr("银 (Ag)", "Silver (Ag)"),
+    "Nb": tr("铌 (Nb)", "Niobium (Nb)"), "other": tr("其它", "Other"),
 }
 FABRICATION_LABELS: dict[str, str] = {
-    "etched": "电化学腐蚀", "cut": "钳子剪切", "ground": "机械打磨",
-    "fib": "FIB 切割", "unknown": "制备方式未记录",
+    "etched": tr("电化学腐蚀", "Electrochemically etched"),
+    "cut": tr("钳子剪切", "Cut with pliers"),
+    "ground": tr("机械打磨", "Mechanically ground"),
+    "fib": tr("FIB 切割", "FIB cut"),
+    "unknown": tr("制备方式未记录", "Fabrication not recorded"),
 }
 FORM_LABELS: dict[str, str] = {
-    "stm_wire": "普通 STM 金属丝针尖", "qplus": "qPlus 型针尖(石英音叉)",
+    "stm_wire": tr("普通 STM 金属丝针尖", "Standard STM wire tip"),
+    "qplus": tr("qPlus 型针尖(石英音叉)", "qPlus tip (quartz tuning fork)"),
 }
 
 #: 归一映射:用户/模型可能写的各种写法 → 词表值。键一律小写无空格无连字符。
@@ -401,14 +409,14 @@ def format_tip_block(
             #
             # 两处都不成立了，而且它造成了真实伤害：
             #
-            #   · **事实上就是错的**：qPlus 针尖在 nm 尺度下可以安全地扎针，
-            #     这个误解从源头上污染了我们的系统。
+            #   · **事实上就是错的**。nm 尺度下 qPlus 针尖完全可以扎，
+            #     这个误解会从源头上污染模型的判断。
             #   · **默认值也早就不是「拒绝」了**（08-16 改的，见
             #     ``_tip_policy._guard_on``），所以这句话连描述现状都不对。
             #
             # 后果不是「多一句废话」：模型每一轮都读到「有毁掉传感器的风险 +
             # 默认拒绝」，于是它在该动手的时候回来问「要不要扎针」——
-            # 现场反馈:原文案过于犹疑，读起来只是在吓唬人。
+            # 原文案过于犹疑，读起来只是在吓唬人。
             #
             # ⇒ 这里写**真正要注意的那两件事**，而不是一句吓唬人的话。
             #   把危险说过头，和把危险瞒下来，一样是在污染判断。

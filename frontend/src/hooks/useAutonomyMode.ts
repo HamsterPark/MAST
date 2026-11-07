@@ -36,10 +36,9 @@ export function useAutonomyMode() {
 
   const setMode = useMutation({
     mutationFn: async (m: AutonomyMode) => {
-      // BOUND THE REQUEST — an unbounded await behind the mode switch could hang.
-      // TopBar disables all three mode buttons while this is pending. With no
-      // timeout, a POST that never settles leaves isPending true FOREVER — the
-      // operating-mode control goes permanently dead, with no error and no way
+      // Bound the request. TopBar disables all three mode buttons while this is
+      // pending. With no timeout, a POST that never settles leaves isPending true
+      // forever and the operating-mode control stays dead, with no error and no way
       // back. An unbounded await behind a disabled control is a freeze.
       const ctrl = new AbortController();
       const timer = window.setTimeout(() => ctrl.abort(), MODE_POST_TIMEOUT_MS);
@@ -50,9 +49,10 @@ export function useAutonomyMode() {
           signal: ctrl.signal,
         });
         if (error) throw error;
-        // 一次被拒绝的写入(`ok:false`)以前会走 onSuccess:乐观更新留在屏幕上,
-        // 直到 onSettled 的重取悄悄把它换回去 —— 用户看到模式先变后变回来,
-        // 没有任何一句话说为什么。抛出来,让 onError 立刻回滚。
+        // A rejected write (`ok:false`) would otherwise reach onSuccess: the optimistic
+        // update stays on screen until the refetch in onSettled silently reverts it, so
+        // the mode flips and flips back with no explanation. Throw so onError rolls back
+        // immediately.
         const problem = settingsWriteProblem(data);
         if (problem) throw new Error(problem);
         return data;

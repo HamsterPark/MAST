@@ -7,33 +7,35 @@ import {
 } from "@/lib/stickToBottom";
 
 /**
- * 新内容来了就跟到底部 —— **但只在用户本来就在底部的时候**。
+ * Follows new content to the bottom, **but only when the user was already at the bottom**.
  *
- * 判断与找容器的逻辑都在 `@/lib/stickToBottom`(纯函数,有单测);这里只负责
- * 把它接到 React 上。为什么要这样拆:那两件事各自都能悄悄坏掉,而它们坏掉的
- * 症状是滚动条会不受控地被拉回去 —— 一个截图看不出、typecheck 抓不到的毛病。
+ * The decision and the container lookup live in `@/lib/stickToBottom` (pure functions with unit
+ * tests); this hook only wires them to React. They are split because each can break silently,
+ * and the symptom (the scrollbar being yanked away while scrolling) is invisible in a screenshot
+ * and not caught by the type checker.
  *
- * ## 与 `scrollIntoView()` 的区别(这是修的那个 bug)
+ * ## Difference from `scrollIntoView()`
  *
- * `scrollIntoView()` 会把**每一个可滚动祖先**都滚到目标可见 —— 聊天面板一个、
- * 整页一个,于是用户看到「两个滚动条都被拉回去」。这里只对最近的那一个
- * 容器设 `scrollTop`,上面的祖先一律不碰。
+ * `scrollIntoView()` scrolls **every scrollable ancestor** until the target is visible: the chat
+ * panel and the whole page both jump back. Here `scrollTop` is set only on the nearest container
+ * and ancestors above it are never touched.
  *
- * ## 用户翻上去之后
+ * ## After the user scrolls up
  *
- * `stickRef` 记的是**上一次滚动事件时**在不在底部。用户一往上翻它就变 false,
- * 跟随随即停止;翻回底部又变 true,跟随自动恢复 —— 不需要任何按钮。
+ * `stickRef` records whether the container was at the bottom at the last scroll event. Scrolling
+ * up makes it false and following stops; scrolling back to the bottom makes it true and following
+ * resumes automatically, with no button needed.
  */
 export function useStickToBottom(
   anchor: React.RefObject<HTMLElement | null>,
   deps: unknown[],
   enabled = true,
 ) {
-  // 初值 true:第一次渲染时用户还没滚过,理应跟着最新的走。
+  // Initially true: on the first render the user has not scrolled yet, so follow the latest content.
   const stick = useRef(true);
   const box = useRef<Element | null>(null);
 
-  // 监听容器的滚动,只更新「在不在底部」这一个布尔。
+  // Listen to the container's scroll and update a single boolean: at the bottom or not.
   useEffect(() => {
     if (!enabled) return;
     const el = nearestScrollable(anchor.current);
@@ -43,7 +45,7 @@ export function useStickToBottom(
       stick.current = isAtBottom(el as unknown as ScrollMetrics);
     };
     onScroll();
-    // passive:这个回调一行赋值,绝不该有能力拖慢滚动本身。
+    // passive: this callback is one assignment and must never be able to slow scrolling itself.
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
   }, [anchor, enabled]);
@@ -52,8 +54,8 @@ export function useStickToBottom(
     if (!enabled || !stick.current) return;
     const el = box.current ?? nearestScrollable(anchor.current);
     if (!el) return;
-    // 直接设 scrollTop 而不是 smooth 动画:内容在连续追加时,一个还没跑完的
-    // 平滑滚动会和下一条消息打架,表现为画面来回抖。
+    // Set scrollTop directly rather than animating: while content keeps appending, an unfinished
+    // smooth scroll fights the next message and the view jitters.
     el.scrollTop = el.scrollHeight;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, enabled]);

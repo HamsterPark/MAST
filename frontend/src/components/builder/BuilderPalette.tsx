@@ -1,27 +1,51 @@
 import { useMemo, useState } from "react";
 import clsx from "clsx";
+import { tr } from "@/lib/i18n";
 import type { NodeKind } from "./builderSpec";
 import { paletteHiddenCount, paletteHides } from "@/lib/skillMarket";
 
-// Control-flow nodes are FIRST-CLASS in the palette (not buried in a modal) so
-// it is immediately obvious the builder supports 判断/循环/变量/决策, not just
-// skills. Each is click-to-add (at end) AND draggable into any container slot
-// (dataTransfer "text/nodekind", mirrored by BuilderCanvas' drop handlers).
+// Control-flow nodes are first-class in the palette (not buried in a modal) so
+// it is obvious the builder supports branching, loops, variables and decisions,
+// not just skills. Each is click-to-add (at end) AND draggable into any container
+// slot (dataTransfer "text/nodekind", mirrored by BuilderCanvas' drop handlers).
 const CONTROL_FLOW: { kind: NodeKind; label: string; hint: string }[] = [
-  { kind: "if", label: "⑂ if 分支", hint: "条件为真/假走不同分支（then / else）" },
-  { kind: "loop", label: "↻ loop 循环", hint: "重复 N 次 / 遍历序列 / while 条件循环（body）" },
-  { kind: "set", label: "≔ set 变量", hint: "设置/更新一个变量，供后续表达式引用" },
-  { kind: "llm", label: "🤖 llm 决策", hint: "受限路由 / 结构化输出的 LLM 决策节点" },
-  { kind: "human", label: "✋ human 人工", hint: "暂停等待用户决策" },
-  { kind: "agent", label: "🤝 agent 委托", hint: "委托给文献/分析/写作等子 agent" },
+  {
+    kind: "if",
+    label: tr("⑂ if 分支", "⑂ if branch"),
+    hint: tr("条件为真/假走不同分支（then / else）", "Take a different branch when the condition is true / false (then / else)"),
+  },
+  {
+    kind: "loop",
+    label: tr("↻ loop 循环", "↻ loop"),
+    hint: tr("重复 N 次 / 遍历序列 / while 条件循环（body）", "Repeat N times / iterate a sequence / while-condition loop (body)"),
+  },
+  {
+    kind: "set",
+    label: tr("≔ set 变量", "≔ set variable"),
+    hint: tr("设置/更新一个变量，供后续表达式引用", "Set or update a variable for later expressions to reference"),
+  },
+  {
+    kind: "llm",
+    label: tr("🤖 llm 决策", "🤖 llm decision"),
+    hint: tr("受限路由 / 结构化输出的 LLM 决策节点", "LLM decision node with constrained routing / structured output"),
+  },
+  {
+    kind: "human",
+    label: tr("✋ human 人工", "✋ human"),
+    hint: tr("暂停等待用户决策", "Pause and wait for an operator decision"),
+  },
+  {
+    kind: "agent",
+    label: tr("🤝 agent 委托", "🤝 agent delegate"),
+    hint: tr("委托给文献/分析/写作等子 agent", "Delegate to a sub-agent (literature / analysis / writing, etc.)"),
+  },
 ];
 
-// Skill catalog palette for the builder. Ports the old builder-ui.jsx Palette:
-// fuzzy search · category/source facet chips · grouped-by-domain collapsible list ·
-// favorites (★, local-only) · staging basket (🧺, per-draft) · double-click /
-// drag to add. Backed by GET /api/builder/catalog (richer than /api/skills/catalog:
-// carries zh / category / level / tags — exactly the fields the old Palette
-// displayed and searched over: name + 中文名, fuzzy over name/zh/domain/tags).
+// Skill catalog palette for the builder: fuzzy search · category/source facet
+// chips · grouped-by-domain collapsible list · favorites (★, local-only) ·
+// staging basket (🧺, per-draft) · double-click / drag to add. Backed by
+// GET /api/builder/catalog (richer than /api/skills/catalog: carries zh /
+// category / level / tags; search is fuzzy over name / zh / domain / tags).
 
 export interface CatalogEntry {
   name: string;
@@ -36,10 +60,11 @@ export interface CatalogEntry {
   tags?: string[];
   composition_level?: string | null;
   summary?: string | null;
-  /** 在用户的订阅面上吗。**字段缺席时不过滤**（fail-open）—— 一个旧的/降级的
-   *  响应不该让 palette 空掉。 */
+  /** Whether the skill is on the user subscription surface. When the field is
+   *  absent nothing is filtered (fail-open): an old or degraded response must
+   *  not empty the palette. */
   subscribed?: boolean;
-  /** 必装项（不可退订）。这里只用来显示，判据真源在后端。 */
+  /** Mandatory skill (cannot be unsubscribed). Display only; the backend is the source of truth. */
   mandatory?: boolean;
 }
 
@@ -57,19 +82,19 @@ const SAFETY_DOT: Record<string, string> = {
   dangerous: "var(--mast-danger)",
 };
 
-// OLD builder-ui.jsx Palette facets (verbatim): category row 读/写/组合/分析,
-// then source row 内置/论文/用户组合. (No safety facet row in the old palette.)
+// Facet rows: category (read / write / composite / analysis), then source
+// (built-in / paper / user composite). There is no safety facet row.
 const CATEGORY_FACETS: { val: string; label: string }[] = [
-  { val: "READ", label: "读" },
-  { val: "WRITE", label: "写" },
-  { val: "COMPOSITE", label: "组合" },
-  { val: "ANALYSIS", label: "分析" },
+  { val: "READ", label: tr("读", "Read") },
+  { val: "WRITE", label: tr("写", "Write") },
+  { val: "COMPOSITE", label: tr("组合", "Composite") },
+  { val: "ANALYSIS", label: tr("分析", "Analysis") },
 ];
 
 const SOURCE_FACETS: { val: string; label: string }[] = [
-  { val: "builtin", label: "内置" },
-  { val: "paper", label: "论文" },
-  { val: "user_composite", label: "用户组合" },
+  { val: "builtin", label: tr("内置", "Built-in") },
+  { val: "paper", label: tr("论文", "Paper") },
+  { val: "user_composite", label: tr("用户组合", "User composite") },
 ];
 
 export function BuilderPalette({
@@ -99,12 +124,14 @@ export function BuilderPalette({
   const [cat, setCat] = useState("");
   const [src, setSrc] = useState("");
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  // 默认只看订阅 —— palette 是「他要用的那些」，市场是「本机有的全部」。
-  // 未定制时（出厂态）每一条都是已订阅，所以这个默认对新机器是恒真的，不改变行为。
+  // Default to subscribed skills only: the palette shows what the user works with,
+  // the market shows everything installed. In the factory state every entry is
+  // subscribed, so this default changes nothing on a fresh machine.
   const [subOnly, setSubOnly] = useState(true);
 
-  /** 被订阅过滤挡掉的条数。**必须显示出来** —— 静默截断会被读成「市场里只有这些」，
-   *  而这里的后果更实在：他会以为本机没有那个技能，转头去写一个重复的。 */
+  /** Number of entries hidden by the subscription filter. It must be shown: a
+   *  silent cut-off reads as "this is all there is" and invites writing a
+   *  duplicate of a skill that is already installed. */
   const hiddenBySub = useMemo(
     () => paletteHiddenCount(catalog, subOnly),
     [catalog, subOnly],
@@ -114,7 +141,7 @@ export function BuilderPalette({
     const ql = q.trim().toLowerCase();
     const qt = q.trim();
     return catalog.filter((e) => {
-      // 判据在 lib/skillMarket（可被 node --test 覆盖），不在这里现写一遍。
+      // The predicate lives in lib/skillMarket (covered by node --test), not re-implemented here.
       if (paletteHides(e, subOnly)) return false;
       if (cat && e.category !== cat) return false;
       if (src && e.source !== src) return false;
@@ -145,7 +172,7 @@ export function BuilderPalette({
       onDoubleClick={() => onAddSkill(e.name)}
       onMouseEnter={(ev) => onHover(e.name, ev)}
       onMouseLeave={() => onHover(null)}
-      title="双击添加到工作流末尾；拖到画布同效"
+      title={tr("双击添加到工作流末尾；拖到画布同效", "Double-click to append to the workflow; dragging onto the canvas does the same")}
       className="group flex cursor-grab items-center gap-2 rounded px-2 py-1 text-sm hover:bg-mast-bg"
     >
       <span
@@ -157,19 +184,20 @@ export function BuilderPalette({
           ? "text-mast-muted" : "text-mast-text")}>{e.name}</span>
         {e.zh ? <span className="ml-1 text-mast-muted">{e.zh}</span> : null}
       </span>
-      {/* 未订阅的仍然可以用在工作流里 —— composite 的子步走 ExecutionContext，
-          那条路不看订阅。所以这里是一个**标注**，不是一个禁用。 */}
+      {/* Unsubscribed skills remain usable in workflows (composite sub-steps run
+          through ExecutionContext, which ignores subscriptions), so this is a
+          label, not a disabled state. */}
       {e.subscribed === false && (
         <span
           className="shrink-0 rounded border border-mast-border px-1 text-[10px] text-mast-muted"
-          title="不在你的订阅面上（agent 看不见它，但工作流仍可调用）"
+          title={tr("不在你的订阅面上（agent 看不见它，但工作流仍可调用）", "Not on your subscription list (agents cannot see it, but workflows can still call it)")}
         >
-          未订阅
+          {tr("未订阅", "Not subscribed")}
         </span>
       )}
       <span className="shrink-0 text-[10px] text-mast-muted">L{e.level ?? e.composition_level ?? 0}</span>
       <button
-        title="加入本草稿候选"
+        title={tr("加入本草稿候选", "Add to this draft staging basket")}
         onClick={(ev) => {
           ev.stopPropagation();
           if (!staging.includes(e.name)) setStaging([...staging, e.name]);
@@ -187,7 +215,7 @@ export function BuilderPalette({
           "shrink-0 text-xs",
           favorites.includes(e.name) ? "text-mast-warn" : "text-mast-muted opacity-0 group-hover:opacity-100",
         )}
-        title={favorites.includes(e.name) ? "取消收藏" : "收藏"}
+        title={favorites.includes(e.name) ? tr("取消收藏", "Remove from favorites") : tr("收藏", "Add to favorites")}
       >
         ★
       </button>
@@ -219,7 +247,10 @@ export function BuilderPalette({
       <input
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder={`搜索 ${catalog.length} 个技能…（名称/中文/标签/域）`}
+        placeholder={tr(
+          `搜索 ${catalog.length} 个技能…（名称/中文/标签/域）`,
+          `Search ${catalog.length} skills… (name / Chinese name / tag / domain)`,
+        )}
         className="rounded-md border border-mast-border bg-mast-bg px-2.5 py-1.5 text-sm text-mast-text outline-none focus:border-mast-accent"
       />
       {onAddAtEnd && (
@@ -227,15 +258,15 @@ export function BuilderPalette({
           onClick={onAddAtEnd}
           className="rounded-md border border-mast-accent/60 bg-mast-accent/10 px-2.5 py-1.5 text-sm font-medium text-mast-accent hover:bg-mast-accent/20"
         >
-          ＋ 添加节点到末尾
+          {tr("＋ 添加节点到末尾", "＋ Add node at end")}
         </button>
       )}
 
-      {/* 控制流节点 — first-class, so 判断/循环 are obviously available */}
+      {/* Control-flow nodes — first-class, so branching and loops are obviously available */}
       {onAddKind && (
         <div className="rounded-md border border-mast-border bg-mast-bg p-2">
           <div className="mb-1.5 text-[11px] font-medium text-mast-muted">
-            控制流 · 判断 / 循环 / 变量（点击加到末尾，或拖入分支槽）
+            {tr("控制流 · 判断 / 循环 / 变量（点击加到末尾，或拖入分支槽）", "Control flow · branch / loop / variable (click to append, or drag into a branch slot)")}
           </div>
           <div className="flex flex-wrap gap-1">
             {CONTROL_FLOW.map((c) => (
@@ -244,7 +275,7 @@ export function BuilderPalette({
                 draggable
                 onDragStart={(ev) => ev.dataTransfer.setData("text/nodekind", c.kind)}
                 onClick={() => onAddKind(c.kind)}
-                title={c.hint + "（双击/拖拽同效）"}
+                title={c.hint + tr("（双击/拖拽同效）", " (double-click / drag works too)")}
                 className="cursor-grab rounded border border-mast-border-strong bg-mast-panel px-2 py-1 text-xs text-mast-text hover:border-mast-accent hover:text-mast-accent"
               >
                 {c.label}
@@ -260,8 +291,8 @@ export function BuilderPalette({
         {SOURCE_FACETS.map((f) => Chip(f.label, f.val, src, setSrc))}
       </div>
 
-      {/* 订阅面 vs 全市场。隐藏了多少**必须说出来** —— 不然他会以为本机没有那个
-          技能，转头去写一个重复的。点这一行就切到全市场。 */}
+      {/* Subscribed vs whole market. The hidden count must be stated, otherwise a
+          missing skill looks uninstalled. Clicking it switches to the whole market. */}
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <button
           type="button"
@@ -273,23 +304,23 @@ export function BuilderPalette({
               : "border-mast-border text-mast-muted",
           )}
         >
-          {subOnly ? "只看订阅" : "全市场"}
+          {subOnly ? tr("只看订阅", "Subscribed only") : tr("全市场", "All skills")}
         </button>
         {subOnly && hiddenBySub > 0 && (
           <button
             type="button"
             onClick={() => setSubOnly(false)}
             className="text-mast-accent underline decoration-dotted"
-            title="订阅列表在「技能 → 市场」维护"
+            title={tr("订阅列表在「技能 → 市场」维护", "The subscription list is managed under Skills → Market")}
           >
-            另有 {hiddenBySub} 个未订阅（点此显示）
+            {tr(`另有 ${hiddenBySub} 个未订阅（点此显示）`, `${hiddenBySub} more not subscribed (click to show)`)}
           </button>
         )}
       </div>
 
       {staging.length > 0 && (
         <div className="rounded border border-mast-border bg-mast-bg p-2">
-          <div className="mb-1 text-xs text-mast-muted">🧺 本草稿候选（点击添加）</div>
+          <div className="mb-1 text-xs text-mast-muted">{tr("🧺 本草稿候选（点击添加）", "🧺 Staging basket (click to add)")}</div>
           <div className="flex flex-wrap gap-1">
             {staging.map((s) => (
               <span
@@ -314,14 +345,14 @@ export function BuilderPalette({
       )}
 
       <div className="min-h-0 flex-1 overflow-auto pr-1">
-        {loading && <p className="px-2 py-1 text-xs text-mast-muted">加载技能目录…</p>}
+        {loading && <p className="px-2 py-1 text-xs text-mast-muted">{tr("加载技能目录…", "Loading skill catalog…")}</p>}
         {!loading && !catalog.length && (
-          <p className="px-2 py-1 text-xs text-mast-muted">技能目录为空（内核未连接？）。</p>
+          <p className="px-2 py-1 text-xs text-mast-muted">{tr("技能目录为空（内核未连接？）。", "Skill catalog is empty (kernel not connected?).")}</p>
         )}
         {favEntries.length > 0 && (
           <div className="mb-2">
             <div className="px-2 py-1 text-xs font-medium text-mast-warn">
-              ★ 收藏 <span className="text-mast-muted">{favEntries.length}</span>
+              {tr("★ 收藏", "★ Favorites")} <span className="text-mast-muted">{favEntries.length}</span>
             </div>
             {favEntries.map(Row)}
           </div>
@@ -343,7 +374,7 @@ export function BuilderPalette({
           );
         })}
       </div>
-      <p className="px-1 text-[11px] text-mast-muted">双击/拖拽添加 · ★收藏 · 🧺存入草稿候选</p>
+      <p className="px-1 text-[11px] text-mast-muted">{tr("双击/拖拽添加 · ★收藏 · 🧺存入草稿候选", "Double-click / drag to add · ★ favorite · 🧺 stage for this draft")}</p>
     </div>
   );
 }

@@ -1,15 +1,16 @@
-// 自动拷贝副本的显示。
+// Display of automatic scan copies.
 //
 // MAST copies every scan into the experiment folder and leaves the original
 // where Nanonis wrote it. That is worth keeping — it is what makes an experiment
-// folder self-contained. What it did to the 数据 tab is show one measurement as
-// several cards with an identical name, size and timestamp, and no way to tell
+// folder self-contained. Without folding, the Data tab would show one measurement
+// as several cards with an identical name, size and timestamp, and no way to tell
 // which was which.
 //
 // The server folds them; this file is how the fold gets DISCLOSED. A collapse
-// the operator cannot see is indistinguishable from files going missing, and
-// this codebase has already recorded that failure twice from the other side
-// (#53/#60 — a listing quietly showing less than the disk holds).
+// the operator cannot see is indistinguishable from files going missing (a
+// listing quietly showing less than the disk holds).
+
+import { tr } from "./i18n.ts";
 
 export interface ScanLocationLike {
   path: string;
@@ -45,20 +46,20 @@ export function parentFolder(path: string): string {
   return parts.length >= 2 ? parts[parts.length - 2]! : "";
 }
 
-/** 位置类型的中文名。Vocabulary matches the server's `file_locations.root_kind`. */
+/** Display name of a location kind. Vocabulary matches the server's `file_locations.root_kind`. */
 export function locationKindLabel(kind: string | undefined): string {
   switch (kind) {
     case "experiment":
     case "experiment_folder":
-      return "实验文件夹";
+      return tr("实验文件夹", "Experiment folder");
     case "quarantine":
-      return "隔离区";
+      return tr("隔离区", "Quarantine");
     case "origin":
-      return "原始位置";
+      return tr("原始位置", "Original location");
     default:
-      // Not "未知位置": an unrecognised kind is a NEW kind we have not been
-      // taught, and calling it unknown reads like the file is lost.
-      return kind ? String(kind) : "位置";
+      // Not "unknown location": an unrecognised kind is a NEW kind we have not
+      // been taught, and calling it unknown reads like the file is lost.
+      return kind ? String(kind) : tr("位置", "Location");
   }
 }
 
@@ -91,7 +92,7 @@ export function copyLocations(entry: ScanEntryLike): ScanLocationLike[] {
  * to no experiment yet. Note the asymmetry — a file WITH an experiment copy is
  * definitely attributed, while "no experiment copy" only means no copy was
  * found on the paths we walked. The grouped view therefore labels this section
- * 未归属 rather than claiming the file belongs to nothing.
+ * "Unattributed" rather than claiming the file belongs to nothing.
  */
 export function isUnattributed(entry: ScanEntryLike): boolean {
   return !copyLocations(entry).some(

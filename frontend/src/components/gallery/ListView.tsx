@@ -1,9 +1,10 @@
-// 列表视图：某目录 / 全部X / 最新一批 / 系列（旧版兼容格式 app.js 的 renderList + renderCards
-// + closeLB 的重排逻辑）。
+// List view: a directory, all items of a kind, the latest batch, or a series.
 //
-// 列表**只在**筛选变了、关大图、服务端文档整份换了（epoch）时重算——不随每一次打分
-// 重算。原版如此，理由写在它的注释里：「筛选依赖标记：关掉大图时再重排，免得翻页时
-// 列表跳」。在「隐藏 ✗」下按 3，那一张若立刻从列表里消失，下一张就跳到了手底下。
+// The list is recomputed *only* when the filters change, the lightbox closes, or the whole
+// server document is replaced (epoch) -- not on every rating. Filters depend on marks, so
+// re-sorting is deferred until the lightbox closes to keep the list from jumping while paging.
+// With "Hide ✗" active, rating an item as excluded would otherwise remove it from the list at
+// once and the next card would jump under the pointer.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -23,7 +24,7 @@ export function scrollToGid(id: string): void {
   try {
     document.querySelector(`[data-gid="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "center" });
   } catch {
-    /* 老浏览器没有 CSS.escape：不滚就算了 */
+    /* Old browsers lack CSS.escape: skip scrolling */
   }
 }
 
@@ -46,8 +47,9 @@ export function ListView({
   const hasSel = useSelectionStore((s) => s.ids.size > 0);
 
   const fac = useMemo(() => facets(base), [base]);
-  // 按**内容**稳定：标签表换了个新对象但内容没变（别处存了一次标签表）时，不该让列表
-  // 重算、卡片网格回到前 150 张。
+  // Stable by *content*: when the tag table is a new object with the same content (saved
+  // elsewhere), the list must not be recomputed and the card grid must not drop back to the
+  // first 150 cards.
   const effKey = JSON.stringify(sanitizeFilters(F, fac, tags));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const effective = useMemo(() => sanitizeFilters(F, fac, tags), [effKey]);
@@ -60,11 +62,11 @@ export function ListView({
       mark: (id) => doc.items[id],
       seriesOf: (id) => seriesOf(doc.series, id),
     });
-    // listVersion / epoch 是「现在按当前标记重排一次」的信号，本身不参与计算。
+    // listVersion / epoch signal "re-sort now with the current marks"; they are not used in the computation itself.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [base, effective, view, listVersion, epoch]);
 
-  // 选中的值在这个列表里不存在：退回「全部」并记住（原版在 filterBar 里改全局 F）。
+  // A selected value does not exist in this list: fall back to "All" and persist that.
   useEffect(() => {
     if (effective.b !== F.b || effective.w !== F.w || effective.pf !== F.pf || effective.tag !== F.tag) {
       useFiltersStore.getState().setF({ b: effective.b, w: effective.w, pf: effective.pf, tag: effective.tag });
@@ -97,7 +99,7 @@ export function ListView({
     }
   }, []);
 
-  // 重排之后滚到时间上最接近刚才那张的位置（原版 closeLB）。
+  // After re-sorting, scroll to the position closest in time to the card that was open.
   useEffect(() => {
     const ps = pendingScroll.current;
     if (!ps) return;

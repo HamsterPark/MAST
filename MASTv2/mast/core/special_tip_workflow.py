@@ -1,7 +1,7 @@
 """特异化针尖的流程表 —— 从「好针尖基础态」再往前走的两条路。
 
 ``noble_tip_workflow`` 把针尖修到基础态(正反扫描线重合、簇单峰且圆)。之后要什么
-样的针尖取决于要做什么实验,要求的头两种是:
+样的针尖取决于要做什么实验,首先支持的两种是:
 
 * **做 STS 的金属性针尖**(:data:`SPECTROSCOPY_TIP`)—— 浅扎出小而圆的簇,打开
   lock-in 测一条谱,看贵金属 (111) 面的肖克利表面态在不在该在的位置。
@@ -50,6 +50,7 @@ from typing import Any
 
 from mast.core.noble_tip_workflow import NobleTipWorkflow
 from mast.core.noble_tip_workflow import resolve as _noble_resolve
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -260,15 +261,26 @@ class AtomicTipWorkflow:
 
         nmpp, scale, _problem = self._scale_plan()
         if scale == "off":
-            return (f"评估帧 {self.eval_frame_nm:g} nm / {self.eval_pixels} px "
-                    f"= {nmpp:.4f} nm/px，超过 {SCALE_OFF_NMPP} nm/px —— 这个尺度上"
-                    f"晶格物理上不可分辨，判据只会说「判不了」。请缩小视野或加大"
-                    f"像素数。")
+            return tr(f"评估帧 {self.eval_frame_nm:g} nm / {self.eval_pixels} px "
+                      f"= {nmpp:.4f} nm/px，超过 {SCALE_OFF_NMPP} nm/px —— 这个尺度上"
+                      f"晶格物理上不可分辨，判据只会说「判不了」。请缩小视野或加大"
+                      f"像素数。",
+                      f"Evaluation frame {self.eval_frame_nm:g} nm / {self.eval_pixels} px "
+                      f"= {nmpp:.4f} nm/px, above {SCALE_OFF_NMPP} nm/px - at this scale "
+                      f"the lattice is physically unresolvable and the criterion can only "
+                      f"say \"cannot judge\". Reduce the field of view or increase the "
+                      f"pixel count.")
         if scale == "reduced":
-            return (f"评估帧 {nmpp:.4f} nm/px 落在过渡带 "
-                    f"[{SCALE_FULL_NMPP}, {SCALE_OFF_NMPP}] —— 判据会给出结论但"
-                    f"证据强度不足以当验收依据。建议 {self.eval_frame_nm:g} nm 用 "
-                    f"{min_pixels_for_scale(float(self.eval_frame_nm) * 1e-9)} px 以上。")
+            return tr(f"评估帧 {nmpp:.4f} nm/px 落在过渡带 "
+                      f"[{SCALE_FULL_NMPP}, {SCALE_OFF_NMPP}] —— 判据会给出结论但"
+                      f"证据强度不足以当验收依据。建议 {self.eval_frame_nm:g} nm 用 "
+                      f"{min_pixels_for_scale(float(self.eval_frame_nm) * 1e-9)} px 以上。",
+                      f"Evaluation frame {nmpp:.4f} nm/px falls in the transition band "
+                      f"[{SCALE_FULL_NMPP}, {SCALE_OFF_NMPP}] - the criterion will give a "
+                      f"verdict, but the evidence is too weak to serve as acceptance "
+                      f"evidence. Suggest at least "
+                      f"{min_pixels_for_scale(float(self.eval_frame_nm) * 1e-9)} px for "
+                      f"{self.eval_frame_nm:g} nm.")
         return ""
 
     def wiggle_params(self) -> dict[str, Any]:

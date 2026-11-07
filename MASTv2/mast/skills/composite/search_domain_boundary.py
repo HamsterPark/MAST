@@ -12,7 +12,7 @@ S3 畴搜索设计 D7/D8/D9/D9b/D10/D13、§3.3、§3.4。
 ⇒ 没有参照系时每一个点都是 ``undetermined(no_reference)``,**这是正确行为,
 不是失败**(设计 D3/R6)。代码不能自己发明「这是 A 相」——同一条纪律在
 ``vision/scan_prep_thresholds`` 里写作「没有那个样品的数据就造一个 profile 出来
-等于伪造标定」。验收 R6 的通过判据逐字就是「全部 ``no_reference`` + M 个指纹」,
+等于伪造标定」。无参照时的通过判据是「全部 ``no_reference`` + M 个指纹」,
 而**出现任何 label 就是停机信号**。
 
 ``mode="bisect"`` 反过来:它**要求**参照系已经标定好——两个端点必须各自判出一个
@@ -111,6 +111,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Iterator
 
 from mast.agents._shared.skill_adapter import wrap_skill
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -287,7 +288,8 @@ def release_center_zone(base, *, frame_size_m: float,
     """
     frame = float(frame_size_m)
     if not (frame > 0):
-        raise ValueError(f"帧尺寸必须为正,收到 {frame_size_m!r}")
+        raise ValueError(tr(f"帧尺寸必须为正,收到 {frame_size_m!r}",
+                            f"Frame size must be positive, got {frame_size_m!r}"))
 
     # 先只解除中心区(间距还没定),这样 effective_half_range_m 已经是真实可用区,
     # 兜底间距才算得对 —— 顺序在这里是承重的。
@@ -300,16 +302,26 @@ def release_center_zone(base, *, frame_size_m: float,
     cfg = replace(released, point_spacing_factor=spacing, ring_width_factor=spacing)
     had_zone = getattr(base, "center_zone_side_m", None)
     if had_zone:
-        why = (
+        why = tr(
             f"粗网格解除了中心区限制(原本 {float(had_zone) * 1e9:.0f} nm 见方):"
             f"那个数是为「一发脉冲盖满中心区 ⇒ 被迫换区」配的,而畴界间距是微米量级,"
             f"照用会把整张网格压进比一条畴界还小的一块地方。整个压电范围都要用上。"
-            f"脉冲避让半径**没有动**——它与中心区是一对,只解一边、不碰另一边。")
+            f"脉冲避让半径**没有动**——它与中心区是一对,只解一边、不碰另一边。",
+            f"The coarse grid lifts the centre-zone limit (it was {float(had_zone) * 1e9:.0f} nm square): "
+            f"that value is paired with 'one pulse covers the whole centre zone, forcing a move', "
+            f"while domain-wall spacing is on the micron scale, so keeping it would squeeze the whole grid "
+            f"into a patch smaller than one domain wall. The full piezo range must be used. "
+            f"The pulse avoidance radius was **not changed**: it is paired with the centre zone, "
+            f"so only one side is lifted and the other is left alone.")
     else:
-        why = ("这台仪器本来就没有中心区限制(没有 XY 粗动的仪器不设),"
-               "网格直接用满整个压电范围。")
-    why += (f" 网格间距 {pitch * 1e9:.0f} nm = 帧宽 {frame * 1e9:.1f} nm 的 "
-            f"{spacing:.1f} 倍。")
+        why = tr("这台仪器本来就没有中心区限制(没有 XY 粗动的仪器不设),"
+                 "网格直接用满整个压电范围。",
+                 "This instrument has no centre-zone limit (instruments without XY coarse motion "
+                 "do not set one); the grid uses the full piezo range directly.")
+    why += tr(f" 网格间距 {pitch * 1e9:.0f} nm = 帧宽 {frame * 1e9:.1f} nm 的 "
+              f"{spacing:.1f} 倍。",
+              f" Grid pitch {pitch * 1e9:.0f} nm = {spacing:.1f} x the frame width "
+              f"of {frame * 1e9:.1f} nm.")
     return cfg, why
 
 
@@ -366,7 +378,7 @@ def cluster_two(items: "list[dict]", *, symmetry_deg: "float | None",
     ``items``: ``[{"index", "fingerprint": [[角度,周期,功率],...], "frame": 路径}, ...]``,
     只放**可比**的指纹(不可比的连距离都算不出来,混进来只会污染分母)。
 
-    做法逐字照设计 D10 第 2 步:**取距离最远的一对当种子,其余归最近**。这是
+    做法照设计 D10 第 2 步:**取距离最远的一对当种子,其余归最近**。这是
     「无监督聚类」不是「分类」——两个簇的名字是 ``cluster_1``/``cluster_2``,
     刻意不叫 A/B:没有人确认过之前,代码里出现一个畴的名字就已经越界了。
 
@@ -378,18 +390,26 @@ def cluster_two(items: "list[dict]", *, symmetry_deg: "float | None",
         return ClusterReport(
             available=False, reason=CLUSTER_NO_SYMMETRY, n_comparable=n,
             symmetry_source=symmetry_source or "none",
-            next_step=("聚类要在晶格对称性的商空间里算距离,而 symmetry_deg"
-                       "(六角 60、矩形 90)是**样品事实**,代码不猜。"
-                       "把它作为参数传进来,或者先建一份参照系。"
-                       "指纹已经照报,拿去人工比对不受影响。"))
+            next_step=tr("聚类要在晶格对称性的商空间里算距离,而 symmetry_deg"
+                         "(六角 60、矩形 90)是**样品事实**,代码不猜。"
+                         "把它作为参数传进来,或者先建一份参照系。"
+                         "指纹已经照报,拿去人工比对不受影响。",
+                         "Clustering measures distance in the quotient space of the lattice symmetry, and "
+                         "symmetry_deg (hexagonal 60, rectangular 90) is a **sample fact** that the code "
+                         "does not guess. Pass it as a parameter, or build a reference first. "
+                         "Fingerprints are still reported, so manual comparison is unaffected."))
     if n < 2:
         return ClusterReport(
             available=False, reason=CLUSTER_TOO_FEW, n_comparable=n,
             symmetry_deg=float(symmetry_deg),
             symmetry_source=symmetry_source or "parameter",
-            next_step=("可比的指纹少于 2 个,分不出两簇。先看每个点的 verdict_reason:"
-                       "scale_gate 要缩视野/加像素,no_atomic_phase 要换点或修针,"
-                       "unknown_frame_angle 要补角度来源。"))
+            next_step=tr("可比的指纹少于 2 个,分不出两簇。先看每个点的 verdict_reason:"
+                         "scale_gate 要缩视野/加像素,no_atomic_phase 要换点或修针,"
+                         "unknown_frame_angle 要补角度来源。",
+                         "Fewer than 2 comparable fingerprints, so two clusters cannot be separated. "
+                         "Check each point's verdict_reason first: scale_gate needs a smaller field "
+                         "of view or more pixels, no_atomic_phase needs another point or tip "
+                         "conditioning, unknown_frame_angle needs an angle source."))
 
     from mast.vision.domain_phase import peak_distance
 
@@ -414,7 +434,9 @@ def cluster_two(items: "list[dict]", *, symmetry_deg: "float | None",
         return ClusterReport(
             available=False, reason=CLUSTER_TOO_FEW, n_comparable=n,
             symmetry_deg=sym, symmetry_source=symmetry_source or "parameter",
-            next_step="任何一对指纹之间都算不出距离(峰表是空的)——先查指纹提取。")
+            next_step=tr("任何一对指纹之间都算不出距离(峰表是空的)——先查指纹提取。",
+                         "No distance can be computed between any pair of fingerprints "
+                         "(the peak table is empty); check fingerprint extraction first."))
 
     (a, b), seed_d = max(dist.items(), key=lambda kv: kv[1])
     members: list[list[int]] = [[a], [b]]
@@ -457,14 +479,21 @@ def cluster_two(items: "list[dict]", *, symmetry_deg: "float | None",
     ratio: "float | None" = None
     ratio_reason = ""
     if inter_min is None:
-        ratio_reason = "两簇之间一对距离都算不出来 —— 分子缺席。"
+        ratio_reason = tr("两簇之间一对距离都算不出来 —— 分子缺席。",
+                          "No distance between the two clusters can be computed; the numerator is missing.")
     elif intra_max is None:
-        # D6 的原话:分母比分子重要。两个单点簇之间的距离再大也说明不了分离度,
+        # 设计 D6:分母比分子重要。两个单点簇之间的距离再大也说明不了分离度,
         # 因为「同一个畴的两帧能差多少」这个数根本没有测过。
-        ratio_reason = ("每簇只有一帧,同簇最大距离**没有样本** —— 分离度的分母"
-                        "缺席,比值无从谈起。同点连扫几帧(或多铺几个点)才有分母。")
+        ratio_reason = tr("每簇只有一帧,同簇最大距离**没有样本** —— 分离度的分母"
+                          "缺席,比值无从谈起。同点连扫几帧(或多铺几个点)才有分母。",
+                          "Each cluster has only one frame, so the within-cluster maximum distance "
+                          "has **no samples**; the denominator of the separation ratio is missing and "
+                          "the ratio is undefined. Scan several frames at the same point (or add more "
+                          "points) to get a denominator.")
     elif intra_max <= 0:
-        ratio_reason = "同簇最大距离是 0(同簇只有重复的同一份指纹),不拿 0 当分母。"
+        ratio_reason = tr("同簇最大距离是 0(同簇只有重复的同一份指纹),不拿 0 当分母。",
+                          "The within-cluster maximum distance is 0 (the cluster holds only repeats of "
+                          "one fingerprint); 0 is not used as a denominator.")
     else:
         ratio = float(inter_min) / float(intra_max)
 
@@ -475,8 +504,11 @@ def cluster_two(items: "list[dict]", *, symmetry_deg: "float | None",
         weights_source=weights_source or "uncalibrated_equal_weights",
         clusters=clusters, inter_min=inter_min, seed_distance=float(seed_d),
         intra_max=intra_max, separation_ratio=ratio, ratio_reason=ratio_reason,
-        next_step=("看两簇的代表帧:它们是两个畴 / 是同一个畴的漂移 / 其中一簇是"
-                   "坏针?确认之后才谈得上固化成参照系 —— 这一步只能由人来。"))
+        next_step=tr("看两簇的代表帧:它们是两个畴 / 是同一个畴的漂移 / 其中一簇是"
+                     "坏针?确认之后才谈得上固化成参照系 —— 这一步只能由人来。",
+                     "Look at the representative frames of the two clusters: are they two domains, "
+                     "drift within one domain, or is one cluster a bad tip? Only after confirming "
+                     "can they be fixed into a reference, and only a person can do that step."))
 
 
 # ── 尺度预检 ──────────────────────────────────────────────────────────────────
@@ -505,20 +537,27 @@ def scale_refusal(size_m: float, pixels: int) -> "dict[str, Any] | None":
     need_px = min_pixels_for_scale(size_m)
     if need_px:
         alternatives.append(
-            f"这个视野({(size_m or 0.0) * 1e9:g} nm)要 {need_px} px 以上"
-            f"(线时必须同比加大,守住每像素驻留)")
+            tr(f"这个视野({(size_m or 0.0) * 1e9:g} nm)要 {need_px} px 以上"
+               f"(线时必须同比加大,守住每像素驻留)",
+               f"This field of view ({(size_m or 0.0) * 1e9:g} nm) needs {need_px} px or more "
+               f"(lines must scale up in proportion to keep the dwell per pixel)"))
     try:
         px = int(pixels)
     except (TypeError, ValueError):
         px = 0
     if px > 0:
         alternatives.append(
-            f"保持 {px} px 的话,视野要小于 {px * SCALE_FULL_NMPP:g} nm")
+            tr(f"保持 {px} px 的话,视野要小于 {px * SCALE_FULL_NMPP:g} nm",
+               f"To keep {px} px, the field of view must be below {px * SCALE_FULL_NMPP:g} nm"))
     return {
         "code": REFUSE_SCALE,
-        "detail": (problem or "这组帧参数进不了原子判据的满权重档")
-                  + " 一帧都没有发出去:扫一张判不了的图,花的不只是机时——"
-                    "流程会把「判不了」读成「这里没有畴」。",
+        "detail": (problem or tr("这组帧参数进不了原子判据的满权重档",
+                                 "These frame parameters cannot reach the full-weight tier of the atomic criterion"))
+                  + tr(" 一帧都没有发出去:扫一张判不了的图,花的不只是机时——"
+                       "流程会把「判不了」读成「这里没有畴」。",
+                       " No frame was sent: scanning an image that cannot be judged costs more than "
+                       "instrument time, because the workflow would read 'cannot judge' as "
+                       "'no domain here'."),
         "alternatives": alternatives,
         "nm_per_px": nmpp,
         "scale": scale,
@@ -553,26 +592,39 @@ def locate_tolerance(frame_size_m: float,
     """
     frame = float(frame_size_m)
     if not (frame > 0):
-        raise ValueError(f"帧尺寸必须为正,收到 {frame_size_m!r}")
+        raise ValueError(tr(f"帧尺寸必须为正,收到 {frame_size_m!r}",
+                            f"Frame size must be positive, got {frame_size_m!r}"))
     try:
         want = float(operator_tolerance_m) if operator_tolerance_m else 0.0
     except (TypeError, ValueError):
         want = 0.0
     if want <= 0:
-        return frame, False, (
+        return frame, False, tr(
             f"定位容差没有指定,取帧宽 {frame * 1e9:.1f} nm —— 这是物理下限:"
-            f"两个中心相距小于一个帧宽的帧看的是同一片表面,指纹必然相同。")
+            f"两个中心相距小于一个帧宽的帧看的是同一片表面,指纹必然相同。",
+            f"No localisation tolerance given; using the frame width {frame * 1e9:.1f} nm, "
+            f"which is the physical floor: two frames whose centres are less than one frame "
+            f"width apart see the same surface, so their fingerprints are necessarily identical.")
     if want < frame:
-        return frame, True, (
+        return frame, True, tr(
             f"定位容差 {want * 1e12:.3g} pm 比帧宽 {frame * 1e9:.1f} nm 还小,"
             f"已夹到帧宽。**这不是压电分不出来**(压电还能细三四个数量级),是"
             f"两个相距不到一个帧宽的帧看的就是同一片表面 —— 指纹必然相同,"
             f"再分下去每一帧都是在和自己比。要更细的定位只能换更小的帧,"
             f"而那会改 nm/px、改 scale_gate 档位、改环像素数:是换一套判据,"
-            f"不是调一个数。")
-    return want, False, (
+            f"不是调一个数。",
+            f"Localisation tolerance {want * 1e12:.3g} pm is below the frame width "
+            f"{frame * 1e9:.1f} nm and was clamped to the frame width. **This is not a piezo "
+            f"limitation** (the piezo is three or four orders of magnitude finer): two frames "
+            f"less than one frame width apart see the same surface, so their fingerprints are "
+            f"necessarily identical, and splitting further would compare every frame with itself. "
+            f"Finer localisation requires a smaller frame, which changes nm/px, the scale_gate "
+            f"tier and the ring pixel count: that is a different criterion, not a tweak of one number.")
+    return want, False, tr(
         f"定位容差 {want * 1e9:.1f} nm(用户给的),大于帧宽 "
-        f"{frame * 1e9:.1f} nm,按用户的数收敛。")
+        f"{frame * 1e9:.1f} nm,按用户的数收敛。",
+        f"Localisation tolerance {want * 1e9:.1f} nm (user supplied) is larger than the frame "
+        f"width {frame * 1e9:.1f} nm; converging to the user's value.")
 
 
 def bracket_gap_m(lo: "tuple[float, float]", hi: "tuple[float, float]") -> float:
@@ -640,15 +692,20 @@ def probe_position_problem(x: float, y: float, *, cfg,
     half = max(float(cfg.frame_size_m) / 2.0, 0.0)
     limit = float(cfg.piezo_half_range_m)
     if abs(float(x)) + half > limit or abs(float(y)) + half > limit:
-        return (f"落点 ({float(x) * 1e9:.0f}, {float(y) * 1e9:.0f}) nm 的帧会伸出压电"
-                f"范围(半程 {limit * 1e9:.0f} nm,帧半宽 {half * 1e9:.1f} nm)。")
+        return tr(f"落点 ({float(x) * 1e9:.0f}, {float(y) * 1e9:.0f}) nm 的帧会伸出压电"
+                  f"范围(半程 {limit * 1e9:.0f} nm,帧半宽 {half * 1e9:.1f} nm)。",
+                  f"The frame at ({float(x) * 1e9:.0f}, {float(y) * 1e9:.0f}) nm would extend beyond "
+                  f"the piezo range (half range {limit * 1e9:.0f} nm, frame half width "
+                  f"{half * 1e9:.1f} nm).")
     # 与既有几何共用同一份实现 —— 这三行在本仓已经有一份,再写一遍就是第二个真源。
     from mast.io.map_analysis import _frame_hits_circle
 
     for c in circles or ():
         if _frame_hits_circle(float(x), float(y), half, c):
-            return (f"落点 ({float(x) * 1e9:.0f}, {float(y) * 1e9:.0f}) nm 的帧压在"
-                    f"避让区上({c.label or c.kind},半径 {c.radius_m * 1e9:.0f} nm)。")
+            return tr(f"落点 ({float(x) * 1e9:.0f}, {float(y) * 1e9:.0f}) nm 的帧压在"
+                      f"避让区上({c.label or c.kind},半径 {c.radius_m * 1e9:.0f} nm)。",
+                      f"The frame at ({float(x) * 1e9:.0f}, {float(y) * 1e9:.0f}) nm overlaps an "
+                      f"avoidance zone ({c.label or c.kind}, radius {c.radius_m * 1e9:.0f} nm).")
     return None
 
 
@@ -669,19 +726,32 @@ def check_bracket_epochs(lo_epoch: "int | None", hi_epoch: "int | None",
     if lo_epoch is None and hi_epoch is None:
         return None
     if lo_epoch is None or hi_epoch is None:
-        return ("两个端点里只有一个盖了坐标代次章"
-                f"(lo={lo_epoch!r}, hi={hi_epoch!r})—— 分不清它们是不是同一片表面上"
-                "的两个点。分不清的时候不许二分:算出来的中点会是一个看上去完全"
-                "正常的米坐标。")
+        return tr("两个端点里只有一个盖了坐标代次章"
+                  f"(lo={lo_epoch!r}, hi={hi_epoch!r})—— 分不清它们是不是同一片表面上"
+                  "的两个点。分不清的时候不许二分:算出来的中点会是一个看上去完全"
+                  "正常的米坐标。",
+                  "Only one of the two endpoints carries a coordinate-epoch stamp "
+                  f"(lo={lo_epoch!r}, hi={hi_epoch!r}), so it cannot be told whether they are two "
+                  "points on the same surface. Bisection is not allowed when this is unclear: the "
+                  "midpoint would be a perfectly normal-looking metre coordinate.")
     if int(lo_epoch) != int(hi_epoch):
-        return (f"两个端点属于不同的坐标代次(lo 第 {int(lo_epoch)} 代、"
-                f"hi 第 {int(hi_epoch)} 代)—— 中间发生过粗动,它们指的是**两片不同的"
-                f"表面**,「在两者之间」这句话没有定义。**不做跨代次换算**:"
-                f"粗动步进是开环的,换算出来的坐标看上去和真坐标一样,而它是编的。")
+        return tr(f"两个端点属于不同的坐标代次(lo 第 {int(lo_epoch)} 代、"
+                  f"hi 第 {int(hi_epoch)} 代)—— 中间发生过粗动,它们指的是**两片不同的"
+                  f"表面**,「在两者之间」这句话没有定义。**不做跨代次换算**:"
+                  f"粗动步进是开环的,换算出来的坐标看上去和真坐标一样,而它是编的。",
+                  f"The two endpoints belong to different coordinate epochs (lo epoch {int(lo_epoch)}, "
+                  f"hi epoch {int(hi_epoch)}): coarse motion happened in between, so they refer to "
+                  f"**two different surfaces** and 'between the two' is undefined. **No cross-epoch "
+                  f"conversion is done**: coarse steps are open loop, and a converted coordinate "
+                  f"looks like a real one but is made up.")
     if current is not None and int(lo_epoch) != int(current):
-        return (f"这一对端点属于第 {int(lo_epoch)} 代坐标系,当前已是第 {int(current)} "
-                f"代 —— 粗动之后这两个米坐标指向另一片表面。请按当前代次重新找一对"
-                f"端点。**不做跨代次换算**。")
+        return tr(f"这一对端点属于第 {int(lo_epoch)} 代坐标系,当前已是第 {int(current)} "
+                  f"代 —— 粗动之后这两个米坐标指向另一片表面。请按当前代次重新找一对"
+                  f"端点。**不做跨代次换算**。",
+                  f"This pair of endpoints belongs to coordinate epoch {int(lo_epoch)}, and the "
+                  f"current epoch is {int(current)}: after coarse motion these two metre coordinates "
+                  f"point at a different surface. Find a new pair of endpoints in the current epoch. "
+                  f"**No cross-epoch conversion is done**.")
     return None
 
 
@@ -710,15 +780,26 @@ def cross_site_downgrade(site_lo: int, site_hi: int, *,
         "label_at_lower_site": label_lo or None,
         "label_at_upper_site": label_hi or None,
         "localised": False,
-        "why_not_metres": (
+        "why_not_metres": tr(
             "压电是米/单代次的,粗动是步/跨代次的。开环步长随驱动幅度、负载、温度"
             "漂移(同样 100 步在 300 K 能比 4 K 远五倍),所以跨站点的位置只能用步"
             "来说。把步数乘一个标称步长报成米坐标,得到的是一个看上去和真坐标一模"
-            "一样的编造值 —— 本仓刻意没有跨代次坐标换算。"),
-        "next_step": (
+            "一样的编造值 —— 本仓刻意没有跨代次坐标换算。",
+            "Piezo positions are in metres within one epoch; coarse positions are in steps across "
+            "epochs. The open-loop step size drifts with drive amplitude, load and temperature "
+            "(the same 100 steps can travel five times further at 300 K than at 4 K), so a "
+            "cross-site position can only be stated in steps. Multiplying the step count by a "
+            "nominal step size and reporting metres would give a fabricated value that looks "
+            "exactly like a real coordinate; this repository deliberately has no cross-epoch "
+            "coordinate conversion."),
+        "next_step": tr(
             f"在站点 {lo} 与 {hi} 之间做一次**半步长**粗动,把新站点插进去,再在新"
             f"站点内铺粗网格(mode='survey')。顺序铺,不能跳着来:粗动记账对间距的"
-            f"要求随 gap_moves 增长,相邻插入放行,回到很早的站点附近会被拒。"),
+            f"要求随 gap_moves 增长,相邻插入放行,回到很早的站点附近会被拒。",
+            f"Make one **half-step** coarse move between sites {lo} and {hi} to insert a new site, "
+            f"then lay a coarse grid inside the new site (mode='survey'). Lay them in order and do "
+            f"not skip around: the coarse-motion bookkeeping requires larger spacing as gap_moves "
+            f"grows, so adjacent insertions are allowed but returning to a site far back is refused."),
     }
 
 
@@ -808,8 +889,10 @@ class BisectMachine:
         it = self.iterations + 1
         if self.undetermined_streak <= 1:
             mx, my = midpoint(self.lo, self.hi)
-            why = ("中点" if not self.undetermined_streak else
-                   "同一个中点**重采一帧**(判不了的第一级:一帧的噪声不该判死一个位置)")
+            why = (tr("中点", "Midpoint") if not self.undetermined_streak else
+                   tr("同一个中点**重采一帧**(判不了的第一级:一帧的噪声不该判死一个位置)",
+                      "Re-scan one frame at the same midpoint (first tier for undetermined: "
+                      "the noise of one frame should not condemn a position)"))
             return BisectProbe(role=ROLE_MID, x_m=mx, y_m=my, iteration=it,
                                gap_m=gap, why=why)
         if self.offsets_used >= int(self.offset_budget):
@@ -820,9 +903,12 @@ class BisectMachine:
                               frame_size_m=self.frame_size_m, attempt=k)
         return BisectProbe(
             role=ROLE_OFFSET, x_m=ox, y_m=oy, iteration=it, gap_m=gap,
-            why=(f"判不了的第二级:沿 lo→hi 的**垂直**方向偏移第 {k} 档"
-                 f"(左右交替,每档一个帧宽)。垂直偏移不改变沿轴位置,"
-                 f"所以它判出来的 label 照样能收窄区间。"))
+            why=tr(f"判不了的第二级:沿 lo→hi 的**垂直**方向偏移第 {k} 档"
+                   f"(左右交替,每档一个帧宽)。垂直偏移不改变沿轴位置,"
+                   f"所以它判出来的 label 照样能收窄区间。",
+                   f"Second tier for undetermined: offset step {k} **perpendicular** to lo->hi "
+                   f"(alternating sides, one frame width per step). A perpendicular offset does "
+                   f"not change the position along the axis, so its label can still narrow the interval."))
 
     def record(self, probe: BisectProbe, *, verdict: str,
                label: "str | None" = None) -> None:
@@ -866,10 +952,15 @@ class BisectMachine:
             # 第三个 label:既不是 lo 那一相也不是 hi 那一相。这是**证据矛盾**,
             # 不是「判不了」—— 把它归进最近的一簇会二分出一条根本不存在的边界。
             # 无人值守时走保守分支(放弃这个 bracket),不猜、也不半夜叫人。
-            self.note = (f"中点判成了第三个相 {lab!r},而这个 bracket 的两端是 "
-                         f"{self.lo_label!r} 与 {self.hi_label!r} —— 这是证据矛盾,"
-                         f"不是判不了。可能是出现了第三个畴,也可能是参照系不全。"
-                         f"该由人看这一帧,不该由二分自己归簇。")
+            self.note = tr(f"中点判成了第三个相 {lab!r},而这个 bracket 的两端是 "
+                           f"{self.lo_label!r} 与 {self.hi_label!r} —— 这是证据矛盾,"
+                           f"不是判不了。可能是出现了第三个畴,也可能是参照系不全。"
+                           f"该由人看这一帧,不该由二分自己归簇。",
+                           f"The midpoint was judged to be a third phase {lab!r}, while the two ends of "
+                           f"this bracket are {self.lo_label!r} and {self.hi_label!r}: this is "
+                           f"contradictory evidence, not 'cannot judge'. A third domain may have "
+                           f"appeared, or the reference may be incomplete. A person should look at "
+                           f"this frame; bisection must not assign a cluster by itself.")
             entry["narrowed"] = "contradiction"
             self._finish(STATE_ABANDONED, END_THIRD_LABEL)
             return
@@ -1044,9 +1135,12 @@ def _replay_bracket(bracket_id: str, rows: list, current_epoch: "int | None") ->
     }
     if ROLE_LO not in ends or ROLE_HI not in ends:
         missing = [r for r in (ROLE_LO, ROLE_HI) if r not in ends]
-        out["problems"].append(
+        out["problems"].append(tr(
             f"这个 bracket 的记录里缺端点 {missing} —— 只有两端都在,「在两者之间」"
-            f"才有定义。先跑一次 survey 拿到一对指纹不同的点。")
+            f"才有定义。先跑一次 survey 拿到一对指纹不同的点。",
+            f"The records of this bracket are missing endpoints {missing}; 'between the two' is "
+            f"only defined when both ends exist. Run a survey first to get a pair of points "
+            f"with different fingerprints."))
         return out
 
     lo_x, lo_y, lo_meta, lo_epoch = ends[ROLE_LO]
@@ -1071,16 +1165,21 @@ def _replay_bracket(bracket_id: str, rows: list, current_epoch: "int | None") ->
 
     lo_label, hi_label = out["lo_label"], out["hi_label"]
     if not lo_label or not hi_label:
-        out["problems"].append(
+        out["problems"].append(tr(
             f"两端里有判不出畴名的(lo={lo_label!r}, hi={hi_label!r})—— 二分要求两端"
             f"各自判出一个相。没有标定过的参照系时每个点都是 undetermined,"
-            f"那时先要做的是建参照系,不是二分。")
+            f"那时先要做的是建参照系,不是二分。",
+            f"One of the ends has no domain name (lo={lo_label!r}, hi={hi_label!r}); bisection "
+            f"needs each end to be judged as a phase. Without a calibrated reference every point is "
+            f"undetermined, and then the first thing to do is build the reference, not bisect."))
         out["end_reason"] = END_NOT_A_PAIR
         return out
     if lo_label == hi_label:
-        out["problems"].append(
+        out["problems"].append(tr(
             f"两端判的是同一个相 {lo_label!r} —— 它们之间没有畴界可找。"
-            f"换一对指纹不同的点。")
+            f"换一对指纹不同的点。",
+            f"Both ends were judged to be the same phase {lo_label!r}, so there is no domain wall "
+            f"between them to find. Use a pair of points with different fingerprints."))
         out["end_reason"] = END_NOT_A_PAIR
         return out
 
@@ -1090,16 +1189,22 @@ def _replay_bracket(bracket_id: str, rows: list, current_epoch: "int | None") ->
     boundary: "tuple[float, float] | None" = None
     for x, y, meta, role in probes:
         if state in TERMINAL_STATES:
-            out["replay_notes"].append(
-                "记录里在终态之后还有采样点 —— 多半是同一个 bracket_id 被复用了。")
+            out["replay_notes"].append(tr(
+                "记录里在终态之后还有采样点 —— 多半是同一个 bracket_id 被复用了。",
+                "The records contain sample points after the terminal state; most likely the same "
+                "bracket_id was reused."))
             break
         mid = midpoint(lo, hi)
         if role == ROLE_MID and (abs(x - mid[0]) > _REPLAY_MATCH_M
                                  or abs(y - mid[1]) > _REPLAY_MATCH_M):
-            out["replay_notes"].append(
+            out["replay_notes"].append(tr(
                 f"记录里的中点 ({x * 1e9:.3f}, {y * 1e9:.3f}) nm 与按记录重算的中点 "
                 f"({mid[0] * 1e9:.3f}, {mid[1] * 1e9:.3f}) nm 对不上 —— 中点规则被改过,"
-                f"或者这条记录不属于这个 bracket。重放按**重算的**中点继续。")
+                f"或者这条记录不属于这个 bracket。重放按**重算的**中点继续。",
+                f"The recorded midpoint ({x * 1e9:.3f}, {y * 1e9:.3f}) nm does not match the midpoint "
+                f"recomputed from the records ({mid[0] * 1e9:.3f}, {mid[1] * 1e9:.3f}) nm: the midpoint "
+                f"rule was changed, or this record does not belong to this bracket. The replay "
+                f"continues with the **recomputed** midpoint."))
         state = STATE_BISECTING
         verdict = str(meta.get("verdict") or "")
         label = _determinate_label(meta)
@@ -1142,7 +1247,7 @@ class SearchDomainBoundary(CompositeSkillGraph):
             version="1.0.0",
             category=SkillCategory.COMPOSITE,
             safety_level=SafetyLevel.CONFIRM,
-            description=(
+            description=tr(
                 "在多畴 / 孪晶 / 多相表面上找**畴界**。两个模式。"
                 "mode='survey' 在压电范围上铺一张**粗网格**，每个格点扫一张"
                 "原子分辨帧，各抽一次方向-周期指纹，再报一次**无监督**的"
@@ -1161,145 +1266,218 @@ class SearchDomainBoundary(CompositeSkillGraph):
                 "而且是**显式拒绝**，不是悄悄降级；跨站点的畴界只能诚实地"
                 "报成「在站点 k 与 k+1 之间，+/-N 步」，永远不报成一个米坐标。"
                 "比原子尺度门更粗的帧，在**发出任何一次扫描之前**就被拒绝；"
-                "扫描角读不出来的帧一律报 undetermined —— 绝不按 0 度处理。"
+                "扫描角读不出来的帧一律报 undetermined —— 绝不按 0 度处理。",
+                "Find **domain walls** on a multi-domain / twinned / multi-phase surface. Two modes. "
+                "mode='survey' lays a **coarse grid** over the piezo range, scans one atomic-resolution frame "
+                "at every grid point, extracts a direction-period fingerprint from each, and reports an "
+                "**unsupervised** two-cluster clustering for a person to look at. It does **not** name "
+                "domains: saying 'this is phase A' needs a user-confirmed reference, and building that "
+                "reference is exactly what the survey produces. Without a reference every point comes back "
+                "as undetermined/no_reference **plus** its fingerprint; that is the correct first-round "
+                "result, not a failure. mode='bisect' locates a domain wall **between** two points whose "
+                "fingerprints were already judged to be two **different** domain names, by repeatedly "
+                "scanning midpoints. It therefore **requires** a calibrated reference and refuses without "
+                "one. It stops at **one frame width**, not at the piezo resolution: two frames whose centres "
+                "are less than one frame width apart see the same surface. If a coarse motion happens during "
+                "bisection, that bracket is **invalidated on the spot** (its metre coordinates now point at "
+                "another surface); it never 'pauses and resumes'. allow_coarse_move=True (search across "
+                "coarse-motion sites) is **not implemented** and is **explicitly refused**, not silently "
+                "downgraded; a cross-site domain wall can only be honestly reported as 'between site k and "
+                "k+1, +/-N steps', never as a metre coordinate. Frames coarser than the atomic scale gate are "
+                "refused **before any scan is sent**; frames whose scan angle cannot be read are always "
+                "reported as undetermined, never treated as 0 degrees."
             ),
             parameters=[
                 ParameterSpec(
                     name="mode", type="str", required=True,
                     allowed_values=list(ALL_MODES),
-                    description=(
+                    description=tr(
                         "'survey' 铺粗网格，报指纹 + 聚类 —— **先做这个**，"
                         "参照系也是这一步建起来的。'bisect' 在两个已知分属"
                         "两个**不同**畴名的点之间定位畴界；它需要一份标定好的"
-                        "参照系，外加一个 bracket_id 或者一对显式的 lo/hi。")),
+                        "参照系，外加一个 bracket_id 或者一对显式的 lo/hi。",
+                        "'survey' lays a coarse grid and reports fingerprints + clustering: **do this first**, "
+                        "the reference is also built from this step. 'bisect' locates a domain wall between two "
+                        "points already known to belong to two **different** domain names; it needs a calibrated "
+                        "reference, plus either a bracket_id or an explicit pair lo/hi.")),
                 ParameterSpec(
                     name="frame_size_m", type="float", unit="m", required=False,
                     min_value=1e-10, max_value=1e-7,
-                    description=(
+                    description=tr(
                         "每张原子帧的边长，单位是**米**（SI），**不是纳米**："
                         "5 nm -> 5n。留空则取工作流的默认值（5 nm）。"
                         "每一帧都必须过得了原子尺度门（< 0.02 nm/px，"
                         "**严格小于** —— atomic_phase.py:266 是 "
                         "`nm_per_px < SCALE_FULL_NMPP`，恰好 0.02 会落到 "
                         "reduced 而被拒），"
-                        "这一条在扫任何东西之前就查。")),
+                        "这一条在扫任何东西之前就查。",
+                        "Edge length of each atomic frame, in **metres** (SI), **not nanometres**: 5 nm -> 5n. "
+                        "Leave empty for the workflow default (5 nm). Every frame must pass the atomic scale gate "
+                        "(< 0.02 nm/px, **strictly less than**: atomic_phase.py:266 is `nm_per_px < SCALE_FULL_NMPP`, "
+                        "exactly 0.02 falls to reduced and is refused); this is checked before anything is scanned.")),
                 ParameterSpec(
                     name="pixels", type="int", unit="px", required=False,
                     min_value=16, max_value=4096,
-                    description=(
+                    description=tr(
                         "每行的像素数。留空就由用户那张按尺度分档的策略表"
                         "决定 —— **只有**用户点了名的时候才传它。不管最后"
-                        "定成多少，都会在第一次扫描之前过一遍尺度检查。")),
+                        "定成多少，都会在第一次扫描之前过一遍尺度检查。",
+                        "Pixels per line. Leave empty to use the user's scale-tiered policy table; pass it **only** "
+                        "when the user named it. Whatever the final value, the scale check runs before the first scan.")),
                 ParameterSpec(
                     name="grid_pitch_m", type="float", unit="m", required=False,
                     min_value=1e-9, max_value=1e-4,
-                    description=(
+                    description=tr(
                         "网格点之间的间距，单位是**米**（SI）。留空则取可用"
                         "压电半程的四分之一。目标不是覆盖，而是**碰到两个"
                         "不同的指纹**，所以这个数按可达区域的尺度定，"
-                        "不按帧的尺度定。")),
+                        "不按帧的尺度定。",
+                        "Spacing between grid points, in **metres** (SI). Leave empty for one quarter of the usable "
+                        "piezo half range. The goal is not coverage but **hitting two different fingerprints**, so "
+                        "this is set by the scale of the reachable area, not by the frame scale.")),
                 ParameterSpec(
                     name="max_points", type="int", required=False, default=9,
                     min_value=2, max_value=36,
-                    description=(
+                    description=tr(
                         "预算：最多扫几个网格点。每一张原子帧都要花掉几分钟，"
                         "所以 36 个点就是好几个小时的机时 —— 这个数是**预算**，"
-                        "不是目标。少于 2 个就聚不了类。")),
+                        "不是目标。少于 2 个就聚不了类。",
+                        "Budget: the maximum number of grid points to scan. Each atomic frame costs several minutes, "
+                        "so 36 points is hours of instrument time; this number is a **budget**, not a target. "
+                        "Fewer than 2 points cannot be clustered.")),
                 ParameterSpec(
                     name="symmetry_deg", type="float", unit="deg", required=False,
                     min_value=1.0, max_value=360.0,
-                    description=(
+                    description=tr(
                         "**这个样品**的晶格对称性（六角 60，矩形 90）。"
                         "指纹之间要能比对，全靠它 —— 它是**样品事实**，"
                         "绝不去猜。不填、又没有载入参照系时，指纹照样报出来，"
-                        "但聚类会跳过，理由写作 'no_symmetry_deg'。")),
+                        "但聚类会跳过，理由写作 'no_symmetry_deg'。",
+                        "The lattice symmetry of **this sample** (hexagonal 60, rectangular 90). Fingerprints can "
+                        "only be compared thanks to it; it is a **sample fact** and is never guessed. If omitted and "
+                        "no reference is loaded, fingerprints are still reported but clustering is skipped, with the "
+                        "reason 'no_symmetry_deg'.")),
                 ParameterSpec(
                     name="reference_version", type="str", required=False,
                     default="",
-                    description=(
+                    description=tr(
                         "拿来判读的畴参照系版本（例如 'v001'）。留空 = 取最新"
                         "的那一份，或者干脆一份都没有。指定的版本不存在时由"
-                        "加载器拒绝，绝不悄悄换成另一份。")),
+                        "加载器拒绝，绝不悄悄换成另一份。",
+                        "Domain reference version to judge against (e.g. 'v001'). Empty = the latest one, or none "
+                        "at all. A version that does not exist is rejected by the loader and never silently "
+                        "replaced by another.")),
                 ParameterSpec(
                     name="sample", type="str", required=False, default="",
-                    description=(
+                    description=tr(
                         "样品名。只有好几个样品的参照系同时存在时才需要"
-                        "（那种情况下它会拒绝，而不是去猜）。")),
+                        "（那种情况下它会拒绝，而不是去猜）。",
+                        "Sample name. Only needed when references for several samples exist at once "
+                        "(in that case it refuses instead of guessing).")),
                 ParameterSpec(
                     name="bracket_id", type="str", required=False, default="",
-                    description=(
+                    description=tr(
                         "mode='bisect' 时：要接着做的那个 bracket 的 id。"
                         "它的状态（两个端点、到目前为止取过的每一个中点、"
                         "以及它们各自的判定）是**从地图 marker 重建出来的**，"
                         "所以一次二分扛得住重启。给这个，**或者**给一对"
-                        "显式的 lo/hi。")),
+                        "显式的 lo/hi。",
+                        "With mode='bisect': id of the bracket to continue. Its state (the two endpoints, every "
+                        "midpoint taken so far and their verdicts) is **rebuilt from the map markers**, so a bisection "
+                        "survives a restart. Give this, **or** an explicit pair lo/hi.")),
                 ParameterSpec(
                     name="lo_x_m", type="float", unit="m", required=False,
                     min_value=-1e-4, max_value=1e-4,
-                    description=(
+                    description=tr(
                         "mode='bisect' 时：**第一个**端点的 x，单位是**米**"
                         "（SI），**不是纳米**：300 nm -> 300n。要开一个新的 "
                         "bracket 就把 lo_x_m/lo_y_m/hi_x_m/hi_y_m 四个都传上；"
-                        "两个端点会先各扫一张，而且必须判回两个**不同**的畴。")),
+                        "两个端点会先各扫一张，而且必须判回两个**不同**的畴。",
+                        "With mode='bisect': x of the **first** endpoint, in **metres** (SI), **not nanometres**: "
+                        "300 nm -> 300n. To open a new bracket pass all four of lo_x_m/lo_y_m/hi_x_m/hi_y_m; the two "
+                        "endpoints are scanned first and must come back as two **different** domains.")),
                 ParameterSpec(
                     name="lo_y_m", type="float", unit="m", required=False,
                     min_value=-1e-4, max_value=1e-4,
-                    description=(
+                    description=tr(
                         "mode='bisect' 时：第一个端点的 y，单位是**米**"
-                        "（SI），**不是纳米**。")),
+                        "（SI），**不是纳米**。",
+                        "With mode='bisect': y of the first endpoint, in **metres** (SI), **not nanometres**.")),
                 ParameterSpec(
                     name="hi_x_m", type="float", unit="m", required=False,
                     min_value=-1e-4, max_value=1e-4,
-                    description=(
+                    description=tr(
                         "mode='bisect' 时：**第二个**端点的 x，单位是**米**"
-                        "（SI），**不是纳米**。")),
+                        "（SI），**不是纳米**。",
+                        "With mode='bisect': x of the **second** endpoint, in **metres** (SI), **not nanometres**.")),
                 ParameterSpec(
                     name="hi_y_m", type="float", unit="m", required=False,
                     min_value=-1e-4, max_value=1e-4,
-                    description=(
+                    description=tr(
                         "mode='bisect' 时：**第二个**端点的 y，单位是**米**"
-                        "（SI），**不是纳米**。")),
+                        "（SI），**不是纳米**。",
+                        "With mode='bisect': y of the **second** endpoint, in **metres** (SI), **not nanometres**.")),
                 ParameterSpec(
                     name="locate_tolerance_m", type="float", unit="m",
                     required=False, min_value=1e-12, max_value=1e-6,
-                    description=(
+                    description=tr(
                         "mode='bisect' 时：两个端点近到这个程度就停，单位是"
                         "**米**（SI）。**会被向上夹到一个帧宽**：两个中心相距"
                         "不到一个帧宽的帧看的是同一片表面，所以它们的指纹"
                         "必然相同。这里的限制**不是**压电分辨率 —— 想再细"
                         "只能换**更小的帧**，而那会改 nm/px、改尺度门的档位、"
-                        "改环像素数，也就是换一套判据，不是换一个数。")),
+                        "改环像素数，也就是换一套判据，不是换一个数。",
+                        "With mode='bisect': stop when the two endpoints are this close, in **metres** (SI). "
+                        "**It is clamped up to one frame width**: two frames whose centres are less than one frame "
+                        "width apart see the same surface, so their fingerprints are necessarily identical. The "
+                        "limit is **not** the piezo resolution; finer localisation needs a **smaller frame**, which "
+                        "changes nm/px, the scale gate tier and the ring pixel count, i.e. a different criterion, "
+                        "not a different number.")),
                 ParameterSpec(
                     name="offset_budget", type="int", required=False,
                     default=DEFAULT_OFFSET_BUDGET, min_value=0, max_value=6,
-                    description=(
+                    description=tr(
                         "mode='bisect' 时：一个中点判不了的时候，**每个 "
                         "bracket** 最多花几张偏移帧。偏移点由几何算出来"
                         "（垂直于 lo->hi，每档一个帧宽，左右交替）—— 一个坐标"
                         "都不去问模型要。预算花完就如实地把这个 bracket 收成 "
-                        "ABANDONED(undetermined)。")),
+                        "ABANDONED(undetermined)。",
+                        "With mode='bisect': when a midpoint cannot be judged, **each bracket** spends at most this "
+                        "many offset frames. Offset points are computed geometrically (perpendicular to lo->hi, one "
+                        "frame width per step, alternating sides); no coordinate is ever requested from a model. "
+                        "When the budget is spent the bracket is honestly closed as ABANDONED(undetermined).")),
                 ParameterSpec(
                     name="max_iterations", type="int", required=False,
                     default=DEFAULT_MAX_ITERATIONS, min_value=1, max_value=40,
-                    description=(
+                    description=tr(
                         "mode='bisect' 时：成功对折次数的上限。每折一次要花掉"
                         "一张原子帧（几分钟）。12 次能把 3 um 的压电范围收到 "
-                        "5 nm 的一帧；再往下 bracket 本身已经比一个帧宽还窄了。")),
+                        "5 nm 的一帧；再往下 bracket 本身已经比一个帧宽还窄了。",
+                        "With mode='bisect': upper limit on successful halvings. Each halving costs one atomic frame "
+                        "(minutes). 12 halvings narrow a 3 um piezo range to one 5 nm frame; below that the bracket "
+                        "itself is already narrower than a frame width.")),
                 ParameterSpec(
                     name="allow_coarse_move", type="bool", required=False,
                     default=False,
-                    description=(
+                    description=tr(
                         "允许这次搜索跨**粗动站点**。**没有实现**：传 true "
                         "会被拒绝并给出理由，绝不悄悄忽略。粗动会让此前收集到"
                         "的每一个米坐标失效，所以那是**另一次**搜索，不是"
                         "一次更大的搜索 —— 而且跨站点的畴界只能报成"
-                        "「在站点 k 与 k+1 之间，+/-N 步」。")),
+                        "「在站点 k 与 k+1 之间，+/-N 步」。",
+                        "Allow this search to span **coarse-motion sites**. **Not implemented**: passing true is "
+                        "refused with a reason, never silently ignored. Coarse motion invalidates every metre "
+                        "coordinate collected before it, so that is **another** search, not a bigger one; and a "
+                        "cross-site domain wall can only be reported as 'between site k and k+1, +/-N steps'.")),
                 ParameterSpec(
                     name="dry_run", type="bool", required=False, default=False,
-                    description=(
+                    description=tr(
                         "把整台状态机跑一遍 —— 配置、网格或 bracket、尺度预检、"
                         "代次检查、参照系载入、容差夹紧、第一个落点 —— 但"
-                        "**一次扫描都不发**。给没有硬件的验收用。")),
+                        "**一次扫描都不发**。给没有硬件的验收用。",
+                        "Run the whole state machine (configuration, grid or bracket, scale pre-check, epoch check, "
+                        "reference loading, tolerance clamping, first landing point) but **send no scan at all**. "
+                        "For acceptance without hardware.")),
             ],
             preconditions=["z_controller_on"],
             estimated_duration_s=1800.0,
@@ -1320,11 +1498,15 @@ class SearchDomainBoundary(CompositeSkillGraph):
         if mode not in ALL_MODES:
             out["refusal"] = {
                 "code": REFUSE_MODE_UNKNOWN,
-                "detail": f"mode 只认 {list(ALL_MODES)},收到 {params.get('mode')!r}。",
+                "detail": tr(f"mode 只认 {list(ALL_MODES)},收到 {params.get('mode')!r}。",
+                             f"mode only accepts {list(ALL_MODES)}, got {params.get('mode')!r}."),
                 "alternatives": [
-                    f"mode='{MODE_SURVEY}':铺粗网格拿指纹 + 聚类(先做这个)",
-                    f"mode='{MODE_BISECT}':在一对已知指纹不同的点之间收敛到畴界"
-                    f"(要求参照系已标定)",
+                    tr(f"mode='{MODE_SURVEY}':铺粗网格拿指纹 + 聚类(先做这个)",
+                       f"mode='{MODE_SURVEY}': lay a coarse grid for fingerprints + clustering (do this first)"),
+                    tr(f"mode='{MODE_BISECT}':在一对已知指纹不同的点之间收敛到畴界"
+                       f"(要求参照系已标定)",
+                       f"mode='{MODE_BISECT}': converge on the domain wall between a pair of points "
+                       f"with known different fingerprints (requires a calibrated reference)"),
                 ],
             }
             return out
@@ -1361,9 +1543,11 @@ class SearchDomainBoundary(CompositeSkillGraph):
 
         out["coord_epoch"] = read_current_epoch()
         if out["coord_epoch"] is None:
-            out["warnings"].append(
+            out["warnings"].append(tr(
                 "当前坐标代次查不到 —— 这一轮没有代次保护。"
-                "「查不到」不等于陈旧,也不等于当前。")
+                "「查不到」不等于陈旧,也不等于当前。",
+                "The current coordinate epoch cannot be read, so this run has no epoch protection. "
+                "'Cannot read' does not mean stale, and does not mean current."))
 
         # ── 参照系(survey 可以没有;bisect 没有就做不了,见 _prepare_bisect) ──
         out.update(self._load_reference(params))
@@ -1394,14 +1578,19 @@ class SearchDomainBoundary(CompositeSkillGraph):
         if not available:
             # 空表和「这片表面确实干净」在几何上分不开 —— 说出来,别让下游把
             # 「读不到历史」读成「没有坑」。
-            out["warnings"].append(
+            out["warnings"].append(tr(
                 "读不到这片表面的历史记录(没有活动实验 / 存储不可用)—— "
-                "网格避开的只有「已知」的坑,而现在一个坑都不知道。")
+                "网格避开的只有「已知」的坑,而现在一个坑都不知道。",
+                "The history of this surface cannot be read (no active experiment / storage "
+                "unavailable); the grid only avoids pits that are 'known', and right now none are known."))
         if out.get("coord_epoch") is not None and epoch_of_markers is not None \
                 and available and int(epoch_of_markers) != int(out["coord_epoch"]):
-            out["warnings"].append(
+            out["warnings"].append(tr(
                 f"地图记录读到的代次是 {epoch_of_markers},权威代次是 "
-                f"{out['coord_epoch']} —— 代次一律以权威计数为准,不从截断的记录窗口里数。")
+                f"{out['coord_epoch']} —— 代次一律以权威计数为准,不从截断的记录窗口里数。",
+                f"The epoch read from the map records is {epoch_of_markers}, the authoritative epoch is "
+                f"{out['coord_epoch']}; the epoch always follows the authoritative counter and is "
+                f"never counted from a truncated record window."))
 
         from mast.io.map_analysis import pick_next_positions
 
@@ -1412,17 +1601,23 @@ class SearchDomainBoundary(CompositeSkillGraph):
         out["points_requested"] = want
         if len(picked) < want:
             # 少给的那几个不许悄悄吞掉。
-            out["warnings"].append(
+            out["warnings"].append(tr(
                 f"网格只排得下 {len(picked)} 个点(要了 {want} 个):"
-                f"可用区被避让圈或压电范围限住了。间距调小或换个站点。")
+                f"可用区被避让圈或压电范围限住了。间距调小或换个站点。",
+                f"The grid only fits {len(picked)} points ({want} requested): the usable area is "
+                f"limited by avoidance circles or the piezo range. Reduce the spacing or change site."))
         if not picked:
             out["refusal"] = {
                 "code": REFUSE_NO_POSITIONS,
-                "detail": ("解除中心区之后,整片压电范围里一个合规的网格点都排不出来。"
-                           "多半是避让圈把可用区吃光了。"),
+                "detail": tr("解除中心区之后,整片压电范围里一个合规的网格点都排不出来。"
+                             "多半是避让圈把可用区吃光了。",
+                             "After lifting the centre zone, not a single valid grid point fits in the "
+                             "whole piezo range. Most likely the avoidance circles consumed the usable area."),
                 "alternatives": [
-                    f"把 grid_pitch_m 调小(当前 {out['grid_pitch_m'] * 1e9:.0f} nm)",
-                    "换一个站点(粗动)之后重来",
+                    tr(f"把 grid_pitch_m 调小(当前 {out['grid_pitch_m'] * 1e9:.0f} nm)",
+                       f"Reduce grid_pitch_m (currently {out['grid_pitch_m'] * 1e9:.0f} nm)"),
+                    tr("换一个站点(粗动)之后重来",
+                       "Change site (coarse motion) and try again"),
                 ],
             }
 
@@ -1438,15 +1633,24 @@ class SearchDomainBoundary(CompositeSkillGraph):
             # 指向的下一步完全不同,所以这里明说。
             out["refusal"] = {
                 "code": REFUSE_NO_REFERENCE,
-                "detail": (
+                "detail": tr(
                     "二分要求**已经标定好的畴参照系**:两个端点必须各自判出一个畴名,"
                     "而且这两个名字不一样,「在两者之间找分界」这句话才有定义。"
                     "现在没有(或参照系未标定 —— match.* 全 0 表示未标定,不是零容差),"
-                    "于是每一帧都会是 undetermined(no_reference),二分永远开不了头。"),
+                    "于是每一帧都会是 undetermined(no_reference),二分永远开不了头。",
+                    "Bisection requires a **calibrated domain reference**: the two endpoints must each be "
+                    "judged as a domain name, and the two names must differ, otherwise 'find the wall "
+                    "between them' is undefined. There is none now (or the reference is uncalibrated: "
+                    "all match.* at 0 means uncalibrated, not zero tolerance), so every frame would be "
+                    "undetermined(no_reference) and bisection could never start."),
                 "alternatives": [
-                    f"mode='{MODE_SURVEY}':先铺网格拿指纹与聚类,人确认两簇是两个畴,"
-                    f"再固化成参照系(设计 D10)",
-                    "已经有参照系文件的话,检查 reference_version / sample 是否指对了",
+                    tr(f"mode='{MODE_SURVEY}':先铺网格拿指纹与聚类,人确认两簇是两个畴,"
+                       f"再固化成参照系(设计 D10)",
+                       f"mode='{MODE_SURVEY}': lay a grid first for fingerprints and clustering, a person "
+                       f"confirms the two clusters are two domains, then fix them into a reference (design D10)"),
+                    tr("已经有参照系文件的话,检查 reference_version / sample 是否指对了",
+                       "If a reference file already exists, check that reference_version / sample point "
+                       "at the right one"),
                 ],
             }
             return
@@ -1482,9 +1686,12 @@ class SearchDomainBoundary(CompositeSkillGraph):
         out["map_history_available"] = bool(available)
         out["avoid_circles"] = build_avoid_circles(markers, cfg)
         if not available:
-            out["warnings"].append(
+            out["warnings"].append(tr(
                 "读不到这片表面的历史记录(没有活动实验 / 存储不可用)—— "
-                "二分落点避开的只有「已知」的坑,而现在一个坑都不知道。")
+                "二分落点避开的只有「已知」的坑,而现在一个坑都不知道。",
+                "The history of this surface cannot be read (no active experiment / storage "
+                "unavailable); bisection landing points only avoid pits that are 'known', and right "
+                "now none are known."))
 
     def _resolve_bracket(self, params: dict, out: dict
                          ) -> "tuple[dict | None, dict | None]":
@@ -1508,9 +1715,13 @@ class SearchDomainBoundary(CompositeSkillGraph):
         if given and len(given) < 4:
             return None, {
                 "code": REFUSE_NO_BRACKET,
-                "detail": ("端点坐标只给了一半 —— lo_x_m / lo_y_m / hi_x_m / hi_y_m "
-                           "四个要么都给,要么都不给。补齐一半的坐标就是在编一个点。"),
-                "alternatives": ["四个坐标都给(米制 SI)", "或者只给 bracket_id"],
+                "detail": tr("端点坐标只给了一半 —— lo_x_m / lo_y_m / hi_x_m / hi_y_m "
+                             "四个要么都给,要么都不给。补齐一半的坐标就是在编一个点。",
+                             "Only some of the endpoint coordinates were given: lo_x_m / lo_y_m / hi_x_m / "
+                             "hi_y_m must be all given or all omitted. Filling in the missing ones would "
+                             "be inventing a point."),
+                "alternatives": [tr("四个坐标都给(米制 SI)", "Give all four coordinates (metres, SI)"),
+                                 tr("或者只给 bracket_id", "Or give only bracket_id")],
             }
         if len(given) == 4:
             lo, hi = (float(lo_x), float(lo_y)), (float(hi_x), float(hi_y))
@@ -1518,11 +1729,16 @@ class SearchDomainBoundary(CompositeSkillGraph):
             if gap <= float(out["locate_tolerance_m"]):
                 return None, {
                     "code": REFUSE_BRACKET_NOT_A_PAIR,
-                    "detail": (
+                    "detail": tr(
                         f"两个端点只相距 {gap * 1e9:.2f} nm,已经不超过定位容差 "
                         f"{float(out['locate_tolerance_m']) * 1e9:.2f} nm —— 它们看的"
-                        f"是同一片表面,指纹必然相同,中间没有可二分的东西。"),
-                    "alternatives": ["换一对离得更远的点(先用 survey 找)"],
+                        f"是同一片表面,指纹必然相同,中间没有可二分的东西。",
+                        f"The two endpoints are only {gap * 1e9:.2f} nm apart, already within the "
+                        f"localisation tolerance {float(out['locate_tolerance_m']) * 1e9:.2f} nm: they see "
+                        f"the same surface, their fingerprints are necessarily identical, and there is "
+                        f"nothing between them to bisect."),
+                    "alternatives": [tr("换一对离得更远的点(先用 survey 找)",
+                                        "Use a pair of points further apart (find them with survey first)")],
                 }
             return {
                 "bracket_id": bid or "",     # 空 = 这一轮现开一个,id 在计划时生成
@@ -1532,20 +1748,28 @@ class SearchDomainBoundary(CompositeSkillGraph):
                 "lo_label": "", "hi_label": "",
                 "iterations": 0, "offsets_used": 0,
                 "gap_m": gap,
-                "note": ("端点坐标由调用方直接给出 —— 它们按**当前代次**理解"
-                         "(用户是现在说的这句话)。两端各扫一帧确认是一对之后"
-                         "才开始二分。"),
+                "note": tr("端点坐标由调用方直接给出 —— 它们按**当前代次**理解"
+                           "(用户是现在说的这句话)。两端各扫一帧确认是一对之后"
+                           "才开始二分。",
+                           "The endpoint coordinates were given directly by the caller and are understood "
+                           "in the **current epoch** (the user said them just now). One frame is scanned at "
+                           "each end to confirm they are a pair before bisection starts."),
             }, None
 
         if not bid:
             return None, {
                 "code": REFUSE_NO_BRACKET,
-                "detail": ("mode='bisect' 要么给 bracket_id(从 marker 重建已有的那一对),"
-                           "要么给四个端点坐标 lo_x_m/lo_y_m/hi_x_m/hi_y_m。"
-                           "两个都没有的话,「在两者之间」里的「两者」是谁没有定义。"),
+                "detail": tr("mode='bisect' 要么给 bracket_id(从 marker 重建已有的那一对),"
+                             "要么给四个端点坐标 lo_x_m/lo_y_m/hi_x_m/hi_y_m。"
+                             "两个都没有的话,「在两者之间」里的「两者」是谁没有定义。",
+                             "mode='bisect' needs either a bracket_id (rebuild an existing pair from "
+                             "markers) or the four endpoint coordinates lo_x_m/lo_y_m/hi_x_m/hi_y_m. "
+                             "With neither, 'the two' in 'between the two' is undefined."),
                 "alternatives": [
-                    f"先跑 mode='{MODE_SURVEY}' 找一对指纹不同的点",
-                    "已经有一对了就把它们的坐标传进来",
+                    tr(f"先跑 mode='{MODE_SURVEY}' 找一对指纹不同的点",
+                       f"Run mode='{MODE_SURVEY}' first to find a pair of points with different fingerprints"),
+                    tr("已经有一对了就把它们的坐标传进来",
+                       "If you already have a pair, pass in their coordinates"),
                 ],
             }
 
@@ -1555,11 +1779,16 @@ class SearchDomainBoundary(CompositeSkillGraph):
         if not available:
             return None, {
                 "code": REFUSE_BRACKET_NOT_FOUND,
-                "detail": (f"读不到实验记录(没有活动实验 / 存储不可用),"
-                           f"重建不了 bracket {bid!r} —— 而二分的状态真源就是记录。"
-                           f"「读不到」不是「没有」。"),
-                "alternatives": ["确认有活动实验之后重来",
-                                 "或者直接给四个端点坐标,不走重建"],
+                "detail": tr(f"读不到实验记录(没有活动实验 / 存储不可用),"
+                             f"重建不了 bracket {bid!r} —— 而二分的状态真源就是记录。"
+                             f"「读不到」不是「没有」。",
+                             f"The experiment records cannot be read (no active experiment / storage "
+                             f"unavailable), so bracket {bid!r} cannot be rebuilt, and the records are the "
+                             f"source of truth for bisection state. 'Cannot read' is not 'none'."),
+                "alternatives": [tr("确认有活动实验之后重来",
+                                    "Retry once an active experiment is confirmed"),
+                                 tr("或者直接给四个端点坐标,不走重建",
+                                    "Or give the four endpoint coordinates directly, without rebuilding")],
             }
         built = rebuild_brackets(markers, current_epoch=out.get("coord_epoch"))
         out["known_bracket_ids"] = sorted(built)
@@ -1567,23 +1796,28 @@ class SearchDomainBoundary(CompositeSkillGraph):
         if bk is None:
             return None, {
                 "code": REFUSE_BRACKET_NOT_FOUND,
-                "detail": (f"记录里没有 bracket_id={bid!r} 的采样点。"
-                           f"已知的 bracket:{sorted(built) or '一个都没有'}。"),
-                "alternatives": [f"用上面列出的某个 id",
-                                 f"先跑 mode='{MODE_SURVEY}' 找一对点"],
+                "detail": tr(f"记录里没有 bracket_id={bid!r} 的采样点。"
+                             f"已知的 bracket:{sorted(built) or '一个都没有'}。",
+                             f"The records have no sample points for bracket_id={bid!r}. "
+                             f"Known brackets: {sorted(built) or 'none'}."),
+                "alternatives": [tr("用上面列出的某个 id", "Use one of the ids listed above"),
+                                 tr(f"先跑 mode='{MODE_SURVEY}' 找一对点",
+                                    f"Run mode='{MODE_SURVEY}' first to find a pair of points")],
             }
         if bk.get("epoch_problem"):
             # D9b 第 1 条。**不夹紧、不换算** —— 换算出来的坐标看上去和真坐标一样。
             return None, {
                 "code": REFUSE_BRACKET_EPOCH_SPLIT,
                 "detail": bk["epoch_problem"],
-                "alternatives": [f"按当前代次重跑 mode='{MODE_SURVEY}' 找一对新端点"],
+                "alternatives": [tr(f"按当前代次重跑 mode='{MODE_SURVEY}' 找一对新端点",
+                                    f"Re-run mode='{MODE_SURVEY}' in the current epoch to find a new pair of endpoints")],
             }
         if bk.get("problems"):
             return None, {
                 "code": REFUSE_BRACKET_NOT_A_PAIR,
                 "detail": "；".join(bk["problems"]),
-                "alternatives": [f"先跑 mode='{MODE_SURVEY}' 找一对指纹不同的点"],
+                "alternatives": [tr(f"先跑 mode='{MODE_SURVEY}' 找一对指纹不同的点",
+                                    f"Run mode='{MODE_SURVEY}' first to find a pair of points with different fingerprints")],
             }
         return {
             "bracket_id": bid,
@@ -1596,10 +1830,14 @@ class SearchDomainBoundary(CompositeSkillGraph):
             "offsets_used": int(bk.get("offsets_used") or 0),
             "gap_m": float(bk.get("gap_m") or 0.0),
             "rebuilt": bk,
-            "note": (f"状态从 {bk['n_markers']} 条 marker 重建("
-                     f"{bk['n_probes']} 个已采的中点/偏移点)—— 不存游标:"
-                     f"composite 的 sidecar 按 (name, run_id) 分键,重启就是新 run_id,"
-                     f"靠它续跑等于没有续跑。"),
+            "note": tr(f"状态从 {bk['n_markers']} 条 marker 重建("
+                       f"{bk['n_probes']} 个已采的中点/偏移点)—— 不存游标:"
+                       f"composite 的 sidecar 按 (name, run_id) 分键,重启就是新 run_id,"
+                       f"靠它续跑等于没有续跑。",
+                       f"State rebuilt from {bk['n_markers']} markers ({bk['n_probes']} midpoint/offset "
+                       f"points already taken); no cursor is stored: the composite sidecar is keyed by "
+                       f"(name, run_id) and a restart is a new run_id, so resuming from it would not "
+                       f"resume anything."),
         }, None
 
     @staticmethod
@@ -1614,25 +1852,38 @@ class SearchDomainBoundary(CompositeSkillGraph):
         if mode == MODE_BISECT:
             return {
                 "code": REFUSE_CROSS_SITE_BISECT,
-                "detail": (
+                "detail": tr(
                     "跨站点的畴界**不能二分**。一次横向粗动之后,bracket 两端的米坐标"
                     "指向的是两片不同的表面,「取中点」这个动作没有定义 —— 算出来的"
                     "中点会是一个看上去完全正常、实际上凭空造出来的坐标。跨站点只能"
                     "报成「站点 k 与 k+1 之间 ±N 步」,那是一套独立的输出形态,"
-                    "不是这个模式的产物。"),
+                    "不是这个模式的产物。",
+                    "A cross-site domain wall **cannot be bisected**. After one lateral coarse move, "
+                    "the metre coordinates of the two bracket ends point at two different surfaces and "
+                    "'take the midpoint' is undefined: the computed midpoint would be a "
+                    "normal-looking coordinate that is in fact made up. A cross-site result can only "
+                    "be reported as 'between site k and k+1, +/-N steps', which is a separate output "
+                    "form and not a product of this mode."),
                 "alternatives": [
-                    "allow_coarse_move=False:在**单个站点内**二分(压电范围内)",
+                    tr("allow_coarse_move=False:在**单个站点内**二分(压电范围内)",
+                       "allow_coarse_move=False: bisect **within a single site** (inside the piezo range)"),
                     form["next_step"],
                 ],
                 "cross_site_form": form,
             }
         return {
             "code": REFUSE_COARSE_NOT_YET,
-            "detail": ("跨站点普查(allow_coarse_move=True)**这一版还没有**,排在下一轮。"
-                       "一次横向粗动之后,已经采到的每一个米坐标都指向另一片表面 —— "
-                       "跨站点的结果只能报成「站点 k 与 k+1 之间 ±N 步」,"
-                       "不能伪装成米坐标,那是一套独立的输出形态。"),
-            "alternatives": ["allow_coarse_move=False:先把当前站点的压电范围铺完",
+            "detail": tr("跨站点普查(allow_coarse_move=True)**这一版还没有**。"
+                         "一次横向粗动之后,已经采到的每一个米坐标都指向另一片表面 —— "
+                         "跨站点的结果只能报成「站点 k 与 k+1 之间 ±N 步」,"
+                         "不能伪装成米坐标,那是一套独立的输出形态。",
+                         "Cross-site survey (allow_coarse_move=True) is **not in this version**. "
+                         "After one lateral coarse move, every metre "
+                         "coordinate already collected points at another surface; a cross-site result "
+                         "can only be reported as 'between site k and k+1, +/-N steps' and must not be "
+                         "disguised as metre coordinates, which is a separate output form."),
+            "alternatives": [tr("allow_coarse_move=False:先把当前站点的压电范围铺完",
+                                "allow_coarse_move=False: finish the piezo range of the current site first"),
                              form["next_step"]],
             "cross_site_form": form,
         }
@@ -1763,7 +2014,7 @@ class SearchDomainBoundary(CompositeSkillGraph):
             for i, (x, y) in enumerate(positions):
                 self._points.append(self._point_record(
                     i + 1, x, y, prep, search_id, status=POINT_PLANNED,
-                    note="dry_run:没有发出扫描"))
+                    note=tr("dry_run:没有发出扫描", "dry_run: no scan was sent")))
             set_partial("dry_run", True)
             return
 
@@ -1791,9 +2042,12 @@ class SearchDomainBoundary(CompositeSkillGraph):
             if status == POINT_SCAN_FAILED:
                 consecutive_failures += 1
                 if consecutive_failures >= MAX_CONSECUTIVE_SCAN_FAILURES:
-                    stopped = (f"连续 {consecutive_failures} 帧没扫成,提前收尾 —— "
-                               f"后面的点多半也扫不成,而每一帧都在花机时。"
-                               f"先查针尖/反馈,再重跑。")
+                    stopped = tr(f"连续 {consecutive_failures} 帧没扫成,提前收尾 —— "
+                                 f"后面的点多半也扫不成,而每一帧都在花机时。"
+                                 f"先查针尖/反馈,再重跑。",
+                                 f"{consecutive_failures} consecutive frames failed to scan; finishing "
+                                 f"early. The remaining points will probably fail too, and every frame "
+                                 f"costs instrument time. Check the tip/feedback, then re-run.")
             else:
                 consecutive_failures = 0
             self._points.append(self._point_record(
@@ -1827,7 +2081,7 @@ class SearchDomainBoundary(CompositeSkillGraph):
             optional=True, checkpoint_after=True, tags=tuple(tags))
         scan_res = executor.sub_results.get(f"scan_{tag}")
         if scan_res is None or not getattr(scan_res, "success", False):
-            err = getattr(scan_res, "error", None) or "ScanAt 没有返回结果"
+            err = getattr(scan_res, "error", None) or tr("ScanAt 没有返回结果", "ScanAt returned no result")
             return POINT_SCAN_FAILED, "", None, str(err)[:300]
 
         yield CompositeStep(
@@ -1839,15 +2093,20 @@ class SearchDomainBoundary(CompositeSkillGraph):
         frame_res = executor.sub_results.get(f"frame_{tag}")
         path = str((getattr(frame_res, "data", None) or {}).get("path") or "")
         if not path:
-            return POINT_NO_FRAME, "", None, (
+            return POINT_NO_FRAME, "", None, tr(
                 "扫描报成功,但找不到刚落盘的 .sxm —— 判据只吃已保存的帧,"
-                "这个点没有证据。")
+                "这个点没有证据。",
+                "The scan reported success but the just-saved .sxm cannot be found; the criterion only "
+                "takes saved frames, so this point has no evidence.")
         if self._frame_is_reused(path, seen_frames):
             # 「借最新文件伪造历史」:上一个点的文件被当成这一个点的证据,
             # 指纹会一模一样,而那个「一样」是假的。
-            return POINT_STALE_FRAME, path, None, (
+            return POINT_STALE_FRAME, path, None, tr(
                 "找到的 .sxm 是前一个采样点已经用过的那一份 —— 这一帧没有落盘。"
-                "拿它当本点的证据会造出一个假的「指纹相同」。")
+                "拿它当本点的证据会造出一个假的「指纹相同」。",
+                "The .sxm found is the one already used by the previous sample point; this frame was "
+                "not saved. Using it as evidence for this point would fabricate a false 'identical "
+                "fingerprint'.")
         seen_frames.add(path)
 
         yield CompositeStep(
@@ -1856,7 +2115,7 @@ class SearchDomainBoundary(CompositeSkillGraph):
             optional=True, checkpoint_after=False, tags=("verdict", "read"))
         assess_res = executor.sub_results.get(f"assess_{tag}")
         if assess_res is None or not getattr(assess_res, "success", False):
-            err = getattr(assess_res, "error", None) or "判据没有返回结果"
+            err = getattr(assess_res, "error", None) or tr("判据没有返回结果", "The criterion returned no result")
             return POINT_ASSESS_FAILED, path, None, str(err)[:300]
         return (POINT_ASSESSED, path,
                 dict(getattr(assess_res, "data", None) or {}), "")
@@ -1928,12 +2187,18 @@ class SearchDomainBoundary(CompositeSkillGraph):
             if machine.state != STATE_INVALIDATED:
                 lo_lab, hi_lab = labels.get(ROLE_LO, ""), labels.get(ROLE_HI, "")
                 if not lo_lab or not hi_lab or lo_lab == hi_lab:
-                    machine.abandon(END_NOT_A_PAIR, message=(
+                    machine.abandon(END_NOT_A_PAIR, message=tr(
                         f"两端判出来的是 lo={lo_lab or '判不了'}、"
                         f"hi={hi_lab or '判不了'} —— 二分要求两端各判出一个畴名,"
                         f"而且两个名字不一样。同一个相之间没有畴界可找;判不了的话"
                         f"先看那一帧的 verdict_reason(尺度门要缩视野/加像素,"
-                        f"帧角读不到要补角度来源)。"))
+                        f"帧角读不到要补角度来源)。",
+                        f"The two ends were judged as lo={lo_lab or 'undetermined'}, "
+                        f"hi={hi_lab or 'undetermined'}; bisection needs each end judged as a domain "
+                        f"name, and the two names must differ. There is no domain wall between the "
+                        f"same phase; if a frame cannot be judged, check its verdict_reason first "
+                        f"(scale gate needs a smaller field of view / more pixels, an unreadable "
+                        f"frame angle needs an angle source)."))
                 else:
                     machine.lo_label, machine.hi_label = lo_lab, hi_lab
                     machine.state = STATE_BRACKETED
@@ -1976,9 +2241,12 @@ class SearchDomainBoundary(CompositeSkillGraph):
                 consecutive_failures += 1
                 machine.skip(probe, reason=note or status)
                 if consecutive_failures >= MAX_CONSECUTIVE_SCAN_FAILURES:
-                    machine.abandon(END_NOT_SAMPLED, message=(
+                    machine.abandon(END_NOT_SAMPLED, message=tr(
                         f"连续 {consecutive_failures} 个落点没采成 —— 后面多半也采不成,"
-                        f"而每一帧都在花机时。先查针尖/反馈,再重跑。"))
+                        f"而每一帧都在花机时。先查针尖/反馈,再重跑。",
+                        f"{consecutive_failures} consecutive landing points were not sampled; the "
+                        f"rest will probably fail too, and every frame costs instrument time. "
+                        f"Check the tip/feedback, then re-run."))
                     break
                 continue
             consecutive_failures = 0
@@ -2006,7 +2274,7 @@ class SearchDomainBoundary(CompositeSkillGraph):
                             "position_problem": problem or ""})
             self._record_probe(prep, search_id, machine.bracket_id, probe.role,
                                probe.x_m, probe.y_m, status=POINT_PLANNED,
-                               note="dry_run:没有发出扫描")
+                               note=tr("dry_run:没有发出扫描", "dry_run: no scan was sent"))
         gap = machine.gap_m
         tol = float(machine.tolerance_m)
         bound = (0 if gap <= tol else
@@ -2088,8 +2356,8 @@ class SearchDomainBoundary(CompositeSkillGraph):
             "status": status,
             "error": note or None,
             "sxm_path": frame or None,
-            "label": (f"畴普查 #{index}" if role == ROLE_SEED
-                      else f"畴二分 #{index} ({role})"),
+            "label": (tr(f"畴普查 #{index}", f"Domain survey #{index}") if role == ROLE_SEED
+                      else tr(f"畴二分 #{index} ({role})", f"Domain bisection #{index} ({role})")),
             "meta": meta,
             # ↓ 报告用的展开(marker 只吃 meta;这几个键让结果本身读得懂)
             "verdict": verdict,
@@ -2156,8 +2424,9 @@ class SearchDomainBoundary(CompositeSkillGraph):
             return None
         from mast.core.coord_epoch import verify
 
-        what = ("这个 bracket 的两个端点坐标"
-                if prep.get("mode") == MODE_BISECT else "这一轮普查的网格坐标")
+        what = (tr("这个 bracket 的两个端点坐标", "The coordinates of the two endpoints of this bracket")
+                if prep.get("mode") == MODE_BISECT
+                else tr("这一轮普查的网格坐标", "The grid coordinates of this survey"))
         v = verify(stamped, what=what)
         return v.message if v.stale else None
 
@@ -2200,8 +2469,10 @@ class SearchDomainBoundary(CompositeSkillGraph):
             # 只会让人去找一个这个模式根本不需要的东西。
             data["clustering"] = {
                 "available": False, "reason": "not_run",
-                "next_step": ("这一轮被拒绝了,先看 refusal。" if refusal else
-                              "二分模式不做聚类 —— 它的产物是 bisect 里那个区间。"),
+                "next_step": (tr("这一轮被拒绝了,先看 refusal。",
+                                 "This run was refused; look at refusal first.") if refusal else
+                              tr("二分模式不做聚类 —— 它的产物是 bisect 里那个区间。",
+                                 "Bisect mode does no clustering; its product is the interval in bisect.")),
                 "clusters": [], "n_comparable": 0}
         else:
             data["clustering"] = cluster_two(
@@ -2233,16 +2504,22 @@ class SearchDomainBoundary(CompositeSkillGraph):
         data["scan_angles_deg"] = angles
         warns = list(data.get("warnings") or ())
         if len(angles) > 1:
-            warns.append(
+            warns.append(tr(
                 f"这一轮的帧角不止一个({angles})—— 样品系归一会把它们抹平,"
                 f"但如果 xy 压电是各向异性的,同一个畴在不同帧角下会报成两个畴。"
-                f"先在**同一帧角**下比对。")
+                f"先在**同一帧角**下比对。",
+                f"This run has more than one frame angle ({angles}); normalising to the sample frame "
+                f"flattens them, but if the xy piezo is anisotropic the same domain can be reported as "
+                f"two domains at different frame angles. Compare at the **same frame angle** first."))
         n_unknown_angle = sum(1 for p in assessed
                               if p.get("verdict_reason") == "unknown_frame_angle")
         if n_unknown_angle:
-            warns.append(
+            warns.append(tr(
                 f"{n_unknown_angle} 个点的帧角读不到 —— 这些点判不了,"
-                f"**没有按 0° 处理**(那会让同一个畴在两种帧角下报成两个畴)。")
+                f"**没有按 0° 处理**(那会让同一个畴在两种帧角下报成两个畴)。",
+                f"The frame angle of {n_unknown_angle} points cannot be read; these points cannot be "
+                f"judged and were **not treated as 0 deg** (that would make the same domain be "
+                f"reported as two domains at two frame angles)."))
         data["warnings"] = warns
         return data
 
@@ -2268,7 +2545,7 @@ class SearchDomainBoundary(CompositeSkillGraph):
         二分这一边多一条**不对称**,值得写清楚:
 
         * ``ABANDONED``(判不了用光预算 / 端点不成一对 / 出现第三个相)⇒ **成功**。
-          验收 R8 的通过判据逐字就是「收敛到 locate_tolerance_m,或诚实
+          二分的通过判据是「收敛到 locate_tolerance_m,或诚实
           ``ABANDONED``」—— 它是一个信息量足够的答案,上层照着它换一对点就行。
         * ``INVALIDATED_BY_EPOCH`` ⇒ **失败**。这一条不是「答案是没找到」,而是
           **这一轮的坐标全部作废**:粗动之后 p_lo/p_hi 指向另一片表面,已采的
@@ -2280,14 +2557,21 @@ class SearchDomainBoundary(CompositeSkillGraph):
             return False, f"[{refusal['code']}] {refusal['detail']}"
         bisect = data.get("bisect") or {}
         if bisect.get("state") == STATE_INVALIDATED:
-            return False, (
+            return False, tr(
                 f"[{REFUSE_EPOCH_STALE}] 二分中途发生了粗动,bracket "
                 f"{bisect.get('bracket_id')!r} 立刻作废({STATE_INVALIDATED})—— "
                 f"p_lo / p_hi 的米坐标现在指向另一片表面,它们之间已经不存在那条"
                 f"畴界。**不是暂停**:这两个坐标回头也不能再用。"
                 f"{bisect.get('note') or ''} 请按当前代次重新找一对端点。"
                 f"**不做跨代次换算**:粗动步进是开环的,换算出来的坐标看上去和真"
-                f"坐标一样,而它是编的。")
+                f"坐标一样,而它是编的。",
+                f"[{REFUSE_EPOCH_STALE}] A coarse motion happened during bisection; bracket "
+                f"{bisect.get('bracket_id')!r} is invalidated on the spot ({STATE_INVALIDATED}): the "
+                f"metre coordinates of p_lo / p_hi now point at another surface, and the domain wall "
+                f"between them no longer exists. **This is not a pause**: these two coordinates can "
+                f"never be used again. {bisect.get('note') or ''} Find a new pair of endpoints in the "
+                f"current epoch. **No cross-epoch conversion is done**: coarse steps are open loop, "
+                f"and a converted coordinate looks like a real one but is made up.")
         return super()._decide_outcome(all_good, progress, data)
 
     # ── 执行 ──────────────────────────────────────────────────────────────
@@ -2319,56 +2603,77 @@ class SearchDomainBoundary(CompositeSkillGraph):
         n = data.get("points_planned") or 0
         ok = data.get("points_assessed") or 0
         if data.get("dry_run"):
-            lines.append(f"排练(dry_run):排了 {n} 个网格点,**一帧都没有发出去**,"
-                         f"地图上也不留任何足迹。")
+            lines.append(tr(f"排练(dry_run):排了 {n} 个网格点,**一帧都没有发出去**,"
+                            f"地图上也不留任何足迹。",
+                            f"Dry run: {n} grid points planned, **no frame was sent** and nothing is "
+                            f"left on the map."))
         else:
-            lines.append(f"畴普查:{n} 个网格点,{ok} 个拿到了判据结果"
-                         f"(针尖去过 {data.get('points_visited') or 0} 个)。")
+            lines.append(tr(f"畴普查:{n} 个网格点,{ok} 个拿到了判据结果"
+                            f"(针尖去过 {data.get('points_visited') or 0} 个)。",
+                            f"Domain survey: {n} grid points, {ok} got a criterion result "
+                            f"(the tip visited {data.get('points_visited') or 0})."))
         pitch = data.get("grid_pitch_m")
         frame = data.get("frame_size_m")
         if pitch and frame:
-            lines.append(
+            lines.append(tr(
                 f"网格间距 {float(pitch) * 1e9:.0f} nm,帧 {float(frame) * 1e9:.1f} nm / "
                 f"{data.get('pixels')} px = {float(data.get('nm_per_px') or 0):.4f} nm/px"
-                f"（{data.get('scale')} 档）")
+                f"（{data.get('scale')} 档）",
+                f"Grid pitch {float(pitch) * 1e9:.0f} nm, frame {float(frame) * 1e9:.1f} nm / "
+                f"{data.get('pixels')} px = {float(data.get('nm_per_px') or 0):.4f} nm/px "
+                f"(tier {data.get('scale')})"))
         if data.get("center_zone_reason"):
             lines.append(str(data["center_zone_reason"]))
 
         counts = data.get("verdict_counts") or {}
         if counts:
-            lines.append("判定：" + "、".join(f"{k} ×{v}" for k, v in sorted(counts.items())))
+            lines.append(tr("判定：", "Verdicts: ") + tr("、", ", ").join(
+                f"{k} ×{v}" for k, v in sorted(counts.items())))
         reasons = data.get("undetermined_reasons") or {}
         if reasons:
-            lines.append("判不了的细分：" + "、".join(
+            lines.append(tr("判不了的细分：", "Breakdown of undetermined: ") + tr("、", ", ").join(
                 f"{k} ×{v}" for k, v in sorted(reasons.items())))
         if not data.get("reference_calibrated"):
-            lines.append(
+            lines.append(tr(
                 "没有标定过的畴参照系 —— 每个点都是 undetermined(no_reference)。"
                 "**这是正确的第一轮产物,不是失败**:指纹已经拿到了,"
-                "下一步是人看两簇的代表帧、确认它们是不是两个畴,再固化成参照系。")
+                "下一步是人看两簇的代表帧、确认它们是不是两个畴,再固化成参照系。",
+                "No calibrated domain reference: every point is undetermined(no_reference). "
+                "**This is the correct first-round product, not a failure**: the fingerprints are "
+                "in hand, and the next step is for a person to look at the representative frames of "
+                "the two clusters, confirm whether they are two domains, then fix them into a reference."))
 
         cl = data.get("clustering") or {}
         if cl.get("available"):
             bits = []
             for c in cl.get("clusters") or ():
                 intra = c.get("intra_max")
-                bits.append(f"{c['name']}: {c['size']} 帧"
-                            + (f",簇内最大距离 {intra:.4f}" if intra is not None
-                               else ",簇内距离无样本"))
-            lines.append("聚类(k=2,**簇不是畴的名字**)：" + "；".join(bits))
+                bits.append(tr(f"{c['name']}: {c['size']} 帧", f"{c['name']}: {c['size']} frames")
+                            + ((tr(f",簇内最大距离 {intra:.4f}",
+                                   f", within-cluster max distance {intra:.4f}"))
+                               if intra is not None
+                               else tr(",簇内距离无样本", ", no samples for within-cluster distance")))
+            lines.append(tr("聚类(k=2,**簇不是畴的名字**)：",
+                            "Clustering (k=2, **a cluster is not a domain name**): ")
+                         + tr("；", "; ").join(bits))
             if cl.get("inter_min") is not None:
-                lines.append(f"簇间最小距离 {cl['inter_min']:.4f}")
+                lines.append(tr(f"簇间最小距离 {cl['inter_min']:.4f}",
+                                f"Minimum between-cluster distance {cl['inter_min']:.4f}"))
             if cl.get("separation_ratio") is not None:
-                lines.append(f"分离度 = 簇间/簇内 = {cl['separation_ratio']:.2f}")
+                lines.append(tr(f"分离度 = 簇间/簇内 = {cl['separation_ratio']:.2f}",
+                                f"Separation = between/within = {cl['separation_ratio']:.2f}"))
             elif cl.get("ratio_reason"):
-                lines.append(f"分离度算不出来：{cl['ratio_reason']}")
+                lines.append(tr(f"分离度算不出来：{cl['ratio_reason']}",
+                                f"Separation cannot be computed: {cl['ratio_reason']}"))
             if cl.get("next_step"):
-                lines.append(f"下一步：{cl['next_step']}")
+                lines.append(tr(f"下一步：{cl['next_step']}", f"Next step: {cl['next_step']}"))
         elif cl.get("reason"):
-            lines.append(f"聚类没做（{cl['reason']}）：{cl.get('next_step', '')}")
+            lines.append(tr(f"聚类没做（{cl['reason']}）：{cl.get('next_step', '')}",
+                            f"Clustering not done ({cl['reason']}): {cl.get('next_step', '')}"))
 
         if data.get("stopped_early"):
-            lines.append(f"提前收尾：{data['stopped_early']}")
+            lines.append(tr(f"提前收尾：{data['stopped_early']}",
+                            f"Finished early: {data['stopped_early']}"))
         for w in (data.get("warnings") or ()):
             lines.append(f"⚠️ {w}")
         return "\n".join(lines)
@@ -2383,54 +2688,86 @@ class SearchDomainBoundary(CompositeSkillGraph):
         if data.get("dry_run"):
             bound = data.get("iterations_upper_bound")
             lines.append(
-                f"排练(dry_run):bracket {b.get('bracket_id')} 的状态机跑完了,"
-                f"**一帧都没有发出去**,地图上也不留任何足迹。"
-                + (f" 按当前区间 {float(b.get('gap_m') or 0) * 1e9:.0f} nm 与容差 "
-                   f"{tol * 1e9:.1f} nm,最多再要 {bound} 次二分。"
+                tr(f"排练(dry_run):bracket {b.get('bracket_id')} 的状态机跑完了,"
+                   f"**一帧都没有发出去**,地图上也不留任何足迹。",
+                   f"Dry run: the state machine of bracket {b.get('bracket_id')} ran through, "
+                   f"**no frame was sent** and nothing is left on the map.")
+                + (tr(f" 按当前区间 {float(b.get('gap_m') or 0) * 1e9:.0f} nm 与容差 "
+                      f"{tol * 1e9:.1f} nm,最多再要 {bound} 次二分。",
+                      f" With the current interval {float(b.get('gap_m') or 0) * 1e9:.0f} nm and "
+                      f"tolerance {tol * 1e9:.1f} nm, at most {bound} more bisections are needed.")
                    if bound is not None else ""))
             for p in (data.get("planned_probes") or ()):
                 lines.append(
-                    f"第一个落点({p['role']}):({p['x_m'] * 1e9:.1f}, "
-                    f"{p['y_m'] * 1e9:.1f}) nm —— {p['why']}"
-                    + (f" ⚠️ 但它{p['position_problem']}"
+                    tr(f"第一个落点({p['role']}):({p['x_m'] * 1e9:.1f}, "
+                       f"{p['y_m'] * 1e9:.1f}) nm —— {p['why']}",
+                       f"First landing point ({p['role']}): ({p['x_m'] * 1e9:.1f}, "
+                       f"{p['y_m'] * 1e9:.1f}) nm: {p['why']}")
+                    + (tr(f" ⚠️ 但它{p['position_problem']}",
+                          f" ⚠️ But it: {p['position_problem']}")
                        if p.get("position_problem") else ""))
-            lines.append(
+            lines.append(tr(
                 "排练只算得出**第一个**落点:后面每一步都取决于前一帧的判定,"
-                "那是硬件才有的信息。报一条完整路径出来会让人以为整条路已经验过了。")
+                "那是硬件才有的信息。报一条完整路径出来会让人以为整条路已经验过了。",
+                "A dry run can only compute the **first** landing point: every later step depends on "
+                "the verdict of the previous frame, which only hardware can provide. Reporting a "
+                "complete path would make people think the whole route had been verified."))
         else:
             state = b.get("state")
-            lines.append(
+            lines.append(tr(
                 f"二分 bracket {b.get('bracket_id')}（{b.get('lo_label')} ↔ "
                 f"{b.get('hi_label')}）：{state}／{b.get('end_reason') or '—'}，"
                 f"{b.get('iterations')} 次收窄、{b.get('offsets_used')} 个偏移点，"
-                f"针尖去过 {data.get('points_visited') or 0} 个位置。")
+                f"针尖去过 {data.get('points_visited') or 0} 个位置。",
+                f"Bisection bracket {b.get('bracket_id')} ({b.get('lo_label')} <-> "
+                f"{b.get('hi_label')}): {state} / {b.get('end_reason') or '-'}, "
+                f"{b.get('iterations')} narrowings, {b.get('offsets_used')} offset points, "
+                f"the tip visited {data.get('points_visited') or 0} positions."))
             if state == STATE_CONVERGED and b.get("boundary_m"):
                 bx, by = b["boundary_m"]
                 unc = float(b.get("boundary_uncertainty_m") or 0.0)
                 lines.append(
-                    f"畴界在 ({bx * 1e9:.1f}, {by * 1e9:.1f}) nm，±{unc * 1e9:.1f} nm"
-                    + ("（这一帧里两个畴的峰**都在** —— 畴界就落在这一帧内，"
-                       "比继续二分更直接）" if b.get("end_reason") == END_MIXED
-                       else f"（区间已收到 {float(b.get('gap_m') or 0) * 1e9:.1f} nm"
-                            f"，容差 {tol * 1e9:.1f} nm）"))
+                    tr(f"畴界在 ({bx * 1e9:.1f}, {by * 1e9:.1f}) nm，±{unc * 1e9:.1f} nm",
+                       f"Domain wall at ({bx * 1e9:.1f}, {by * 1e9:.1f}) nm, +/-{unc * 1e9:.1f} nm")
+                    + (tr("（这一帧里两个畴的峰**都在** —— 畴界就落在这一帧内，"
+                          "比继续二分更直接）",
+                          " (the peaks of both domains are **both** in this frame, so the wall lies "
+                          "within this frame, which is more direct than bisecting further)")
+                       if b.get("end_reason") == END_MIXED
+                       else tr(f"（区间已收到 {float(b.get('gap_m') or 0) * 1e9:.1f} nm"
+                               f"，容差 {tol * 1e9:.1f} nm）",
+                               f" (interval narrowed to {float(b.get('gap_m') or 0) * 1e9:.1f} nm, "
+                               f"tolerance {tol * 1e9:.1f} nm)")))
             elif state == STATE_ABANDONED:
-                lines.append(
+                lines.append(tr(
                     f"**没有定位到畴界** —— 诚实地停在 ABANDONED，"
                     f"区间还剩 {float(b.get('gap_m') or 0) * 1e9:.0f} nm。"
-                    f"不给一个「大概在这儿」的坐标：那会是编的。")
+                    f"不给一个「大概在这儿」的坐标：那会是编的。",
+                    f"**The domain wall was not located**; honestly stopping at ABANDONED, with "
+                    f"{float(b.get('gap_m') or 0) * 1e9:.0f} nm of interval left. No 'roughly here' "
+                    f"coordinate is given: it would be made up."))
             elif state == STATE_INVALIDATED:
-                lines.append(
+                lines.append(tr(
                     "**这个 bracket 已作废**：二分中途发生了粗动，两端的米坐标现在"
-                    "指向另一片表面。不是暂停 —— 这两个坐标回头也不能再用。")
+                    "指向另一片表面。不是暂停 —— 这两个坐标回头也不能再用。",
+                    "**This bracket is invalidated**: a coarse motion happened during bisection and the "
+                    "metre coordinates of both ends now point at another surface. This is not a pause: "
+                    "these two coordinates can never be used again."))
             if b.get("note"):
                 lines.append(str(b["note"]))
         if frame and tol:
             lines.append(
-                f"终止容差 {tol * 1e9:.1f} nm，帧宽 {frame * 1e9:.1f} nm。"
-                + ("**容差被帧宽顶上去了** —— " if data.get("locate_tolerance_clamped")
-                   else "")
-                + "下限是帧宽不是压电分辨率：两个中心相距不到一个帧宽的帧看的是同一片"
-                  "表面，指纹必然相同。要更细只能换更小的帧，而那是换一套判据。")
+                tr(f"终止容差 {tol * 1e9:.1f} nm，帧宽 {frame * 1e9:.1f} nm。",
+                   f"Stopping tolerance {tol * 1e9:.1f} nm, frame width {frame * 1e9:.1f} nm. ")
+                + (tr("**容差被帧宽顶上去了** —— ",
+                      "**The tolerance was pushed up by the frame width**: ")
+                   if data.get("locate_tolerance_clamped") else "")
+                + tr("下限是帧宽不是压电分辨率：两个中心相距不到一个帧宽的帧看的是同一片"
+                     "表面，指纹必然相同。要更细只能换更小的帧，而那是换一套判据。",
+                     "The floor is the frame width, not the piezo resolution: two frames whose centres "
+                     "are less than one frame width apart see the same surface, so their fingerprints "
+                     "are necessarily identical. Finer localisation needs a smaller frame, which is a "
+                     "different criterion."))
         if data.get("bracket_note"):
             lines.append(str(data["bracket_note"]))
         for w in (data.get("warnings") or ()):

@@ -1,13 +1,13 @@
 import clsx from "clsx";
+import { tr } from "@/lib/i18n";
 import { KIND_TONE } from "@/components/skills/compositeGraph";
 import type { Spec, SpecNode, Addr, NodeKind } from "./builderSpec";
 
 // Structured, ordered tree canvas for the builder. Sequential order == execution
-// order; if/loop/llm/human/agent are containers with branch slots. Replaces the
-// old react-flow free canvas with an explicit nested-list editor (clearer for
-// per-node edit, and never relies on drag for correctness). Each node row has:
-// select · move up/down · delete · "add node here". Container slots render their
-// children recursively and an "add into <slot>" button.
+// order; if/loop/llm/human/agent are containers with branch slots. An explicit
+// nested-list editor (clear per-node editing; correctness never relies on drag).
+// Each node row has: select · move up/down · delete · "add node here". Container
+// slots render their children recursively and an "add into <slot>" button.
 
 const KIND_LABEL: Record<string, string> = {
   step: "step",
@@ -44,9 +44,9 @@ function nodeTitle(n: SpecNode): string {
     case "try":
       return "try / finally";
     case "break":
-      return "break · 跳出循环";
+      return tr("break · 跳出循环", "break · exit loop");
     case "continue":
-      return "continue · 下一轮";
+      return tr("continue · 下一轮", "continue · next iteration");
     case "succeed":
       return `succeed ${String(n.reason ?? "")}`.trim();
     case "fail":
@@ -58,15 +58,14 @@ function nodeTitle(n: SpecNode): string {
 
 const ROUTE_KINDS = ["llm", "human", "agent"];
 
-// Human-readable slot labels — mirror the old builder-ui.jsx slot captions
-// ("then 为真" / "else 为假" / "body 循环体" / "on_error 失败时") so block nesting
-// reads like a code editor rather than bare keys.
+// Human-readable slot captions so block nesting reads like a code editor
+// rather than bare keys.
 const SLOT_LABEL: Record<string, string> = {
-  then: "then · 为真",
-  else: "else · 为假",
-  body: "body · 主体",
-  finally: "finally · 总会执行",
-  on_error: "on_error · 失败时",
+  then: tr("then · 为真", "then · true"),
+  else: tr("else · 为假", "else · false"),
+  body: tr("body · 主体", "body"),
+  finally: tr("finally · 总会执行", "finally · always runs"),
+  on_error: tr("on_error · 失败时", "on_error · on failure"),
 };
 function slotLabel(slot: string): string {
   if (SLOT_LABEL[slot]) return SLOT_LABEL[slot];
@@ -149,14 +148,14 @@ export function BuilderCanvas({
           >
             {slotLabel(slot)}
           </span>
-          {!items.length && <span className="text-[10px] text-mast-muted/70">（空）</span>}
+          {!items.length && <span className="text-[10px] text-mast-muted/70">{tr("（空）", "(empty)")}</span>}
         </div>
         {items.map((n) => renderNode(n, depth + 1))}
         <button
           onClick={() => onAddInto(addr)}
           className="my-1 rounded border border-dashed border-mast-border px-2 py-0.5 text-xs text-mast-muted hover:border-mast-accent hover:text-mast-accent"
         >
-          ＋ 在此添加节点
+          {tr("＋ 在此添加节点", "＋ Add node here")}
         </button>
       </div>
     );
@@ -199,10 +198,10 @@ export function BuilderCanvas({
           {hasErr && <span title={rep.errors.join("; ")} className="text-mast-danger">⛔</span>}
           {!hasErr && hasWarn && <span title={rep.warnings.join("; ")} className="text-mast-warn">⚠</span>}
           <span className="flex shrink-0 items-center gap-0.5">
-            <IconBtn title="上移" onClick={() => onMove(id, -1)}>▲</IconBtn>
-            <IconBtn title="下移" onClick={() => onMove(id, +1)}>▼</IconBtn>
-            <IconBtn title="在此之后添加" onClick={() => onAddAfter(id)}>＋</IconBtn>
-            <IconBtn title="删除" onClick={() => onRemove(id)} danger>✕</IconBtn>
+            <IconBtn title={tr("上移", "Move up")} onClick={() => onMove(id, -1)}>▲</IconBtn>
+            <IconBtn title={tr("下移", "Move down")} onClick={() => onMove(id, +1)}>▼</IconBtn>
+            <IconBtn title={tr("在此之后添加", "Add after")} onClick={() => onAddAfter(id)}>＋</IconBtn>
+            <IconBtn title={tr("删除", "Delete")} onClick={() => onRemove(id)} danger>✕</IconBtn>
           </span>
         </div>
 
@@ -255,8 +254,8 @@ export function BuilderCanvas({
     >
       {!spec.nodes.length ? (
         <div className="flex h-full min-h-[200px] flex-col items-center justify-center gap-1 text-center text-mast-muted">
-          <div className="text-sm">从左侧双击 / 拖入技能开始组合</div>
-          <div className="text-xs">或用下方“＋ 添加节点”加入 if / loop / set / llm 等节点</div>
+          <div className="text-sm">{tr("从左侧双击 / 拖入技能开始组合", "Double-click or drag a skill from the left to start composing")}</div>
+          <div className="text-xs">{tr("或用下方“＋ 添加节点”加入 if / loop / set / llm 等节点", "Or use “＋ Add node” below to add if / loop / set / llm nodes")}</div>
         </div>
       ) : (
         spec.nodes.map((n) => renderNode(n))
@@ -268,7 +267,7 @@ export function BuilderCanvas({
         }}
         className="mt-2 w-full rounded border border-dashed border-mast-border px-2 py-1 text-xs text-mast-muted hover:border-mast-accent hover:text-mast-accent"
       >
-        ＋ 添加节点到末尾
+        {tr("＋ 添加节点到末尾", "＋ Add node at end")}
       </button>
     </div>
   );

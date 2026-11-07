@@ -4,6 +4,7 @@ import type uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import type { components } from "@/api/schema";
 import { useUiStore } from "@/store";
+import { tr } from "@/lib/i18n";
 import { Badge, EmptyNote } from "@/components/ui";
 import { fmtCurrent, fmtLength } from "@/lib/units";
 import {
@@ -22,7 +23,7 @@ type AuxSnapshot = components["schemas"]["AuxSnapshot"];
 type AuxChannelState = components["schemas"]["AuxChannelState"];
 type AuxSeriesResponse = components["schemas"]["AuxSeriesResponse"];
 
-// 辅助通道 — Z 位置 / qPlus 振幅 / 频率偏移.
+// Auxiliary channels — Z position / qPlus amplitude / frequency shift.
 //
 // ── why these are not on the current chart ─────────────────────────────────
 // Metres, metres and hertz do not share an axis with amperes, and they do not
@@ -30,7 +31,7 @@ type AuxSeriesResponse = components["schemas"]["AuxSeriesResponse"];
 // and where two curves sit relative to one another on separate axes is a choice
 // the person drawing made — it invites the reader to see a correlation nobody
 // measured. Small multiples on ONE time axis show the same data and make no
-// such claim. That is also the answer to "同时看多路但不要变成一团".
+// such claim.
 //
 // ── why the numbers arrive at 1 Hz and not 2 kHz ───────────────────────────
 // The daemon samples these over `Signals_ValsGet` once per segment and never
@@ -40,8 +41,8 @@ type AuxSeriesResponse = components["schemas"]["AuxSeriesResponse"];
 // drift is a minutes-scale phenomenon. See docs/v2/design/monitoring_aux_channels.md.
 //
 // ── what must never happen ─────────────────────────────────────────────────
-// A channel this rig does not have must read "本机没有", not "正常". A channel
-// recorded but not judged must read "未判级", not "正常". Green here would be a
+// A channel this rig does not have must read "not present", not "normal". A channel
+// recorded but not judged must read "not graded", not "normal". Green here would be a
 // claim that a judgement happened.
 
 /** Width used only for the first frame, before the ResizeObserver has measured
@@ -70,23 +71,32 @@ function fmtDrift(v: number | null | undefined): string | null {
 }
 
 /**
- * 调制开没开，紧挨着那个读数。
+ * Whether the lock-in modulation is on, shown right next to the reading.
  *
- * 三态各说各的，**不塌成两态**：`undefined` 是「这一拍没读到 ``LockIn_ModOnOffGet``」，
- * 把它显示成「关闭」会让人把一条真 dI/dV 当噪声底扔掉，而这一路本来就是做谱学的。
- * 后端同样以 NULL 而非 0 记录它（``store`` schema v6）。
+ * Three states, not collapsed to two: `undefined` means ``LockIn_ModOnOffGet``
+ * could not be read this tick. Showing that as "off" would make a genuine dI/dV
+ * look like a noise floor. The backend likewise stores it as NULL rather than 0
+ * (``store`` schema v6).
  */
 function LockinState({ mod }: { mod: number | undefined }) {
   if (mod === 1) {
-    return <div className="mt-0.5 text-xs text-mast-muted">调制开 · 这是 dI/dV</div>;
+    return (
+      <div className="mt-0.5 text-xs text-mast-muted">
+        {tr("调制开 · 这是 dI/dV", "Modulation on · this is dI/dV")}
+      </div>
+    );
   }
   if (mod === 0) {
     return (
-      <div className="mt-0.5 text-xs text-mast-warn">调制关 · 此读数不是 dI/dV</div>
+      <div className="mt-0.5 text-xs text-mast-warn">
+        {tr("调制关 · 此读数不是 dI/dV", "Modulation off · this reading is not dI/dV")}
+      </div>
     );
   }
   return (
-    <div className="mt-0.5 text-xs text-mast-muted">调制状态未读到（不等于关闭）</div>
+    <div className="mt-0.5 text-xs text-mast-muted">
+      {tr("调制状态未读到（不等于关闭）", "Modulation state not read (not the same as off)")}
+    </div>
   );
 }
 
@@ -104,18 +114,21 @@ function ChannelTile({ ch, hint }: { ch: AuxChannelState | undefined; hint: stri
         {fmtAux(ch?.value, ch?.unit ?? "")}
       </div>
       {drift && (
-        <div className="mt-0.5 font-mono text-xs text-mast-muted">漂移 {drift}</div>
+        <div className="mt-0.5 font-mono text-xs text-mast-muted">{tr("漂移", "Drift")} {drift}</div>
       )}
-      {/* 「基线」是**未接触本底**，不是「健康的被驱动振幅」——这台机器的 qPlus
-          传感器根本没被驱动，那 8 pm 是未驱动解调器的噪声底。它唯一的用处是
-          回答「不为零长什么样」，所以标签必须这么写。 */}
+      {/* The "baseline" is the non-contact noise floor, not a healthy driven amplitude:
+          the qPlus sensor is not driven on the instrument, so it is the undriven demodulator's
+          noise floor. Its only use is showing what "not zero" looks like, hence the label. */}
       {typeof frac === "number" && (
         <div className="mt-0.5 font-mono text-xs text-mast-muted">
-          未接触本底的 {(frac * 100).toFixed(1)}%
+          {tr(
+            `未接触本底的 ${(frac * 100).toFixed(1)}%`,
+            `${(frac * 100).toFixed(1)}% of the non-contact floor`,
+          )}
         </div>
       )}
-      {/* dI/dV 的读数在调制关着的时候仍然是一个漂亮的 pA 数字 —— 量纲、量级都
-          对，只是它不是 dI/dV。所以状态要紧挨着那个数字，不能只藏在下面的说明里。 */}
+      {/* With modulation off the dI/dV channel still shows a plausible pA value that is not dI/dV,
+          so the state sits right next to the number instead of only in the note below. */}
       {ch?.kind === "lockin" && <LockinState mod={ch?.metrics?.lockin_mod_on} />}
       <div className="mt-1 text-[11px] leading-snug text-mast-faint">
         {ch?.note || hint}
@@ -124,10 +137,10 @@ function ChannelTile({ ch, hint }: { ch: AuxChannelState | undefined; hint: stri
   );
 }
 
-/** 一条画出来的曲线：值 + 线型。第二条用来把「不是测量值」的那些段区分开。 */
+/** One plotted curve: values plus line style. A second trace separates the segments that are not measurements. */
 interface Trace {
   label: string;
-  /** `null` = 这一点不属于这条曲线（或那一刻根本没有读数）。 */
+  /** `null` = this point does not belong to the curve (or there was no reading at that moment). */
   v: (number | null)[];
   dashed?: boolean;
   muted?: boolean;
@@ -143,17 +156,17 @@ function MiniChart({
   footer,
 }: {
   label: string;
-  /** 这条通道声明的固定纵轴前缀。来自 `AUX_CHANNELS`，不在这里按单位反查 ——
-   *  按单位反查会让 Z 与 qPlus 振幅(都是米，量级差四个数量级)被迫共用一个前缀。 */
+  /** Fixed Y-axis prefix declared by the channel in `AUX_CHANNELS`. Not derived from the unit,
+   *  which would force Z and qPlus amplitude (both metres, four decades apart) to share a prefix. */
   plot: AuxPlotScale;
   t: number[];
-  /** 一条或多条曲线，共用 `t`。`null` **绝不能变成 0** 画出来。 */
+  /** One or more curves sharing `t`. A `null` must never be drawn as 0. */
   traces: Trace[];
-  /** 真实读数的条数（不含为了断线补进去的 null）。 */
+  /** Number of real readings (excluding nulls inserted to break the line). */
   n: number;
-  /** 窗口内的采集中断处数。 */
+  /** Number of acquisition gaps in the window. */
   gaps: number;
-  /** 图下额外一行（如 lock-in 的调制状态构成）。 */
+  /** Extra line below the chart (e.g. the lock-in modulation-state breakdown). */
   footer?: React.ReactNode;
 }) {
   const theme = useUiStore((s) => s.theme);
@@ -173,12 +186,12 @@ function MiniChart({
     () =>
       [
         t,
-        ...traces.map((tr) => tr.v.map((y) => (y == null ? null : y * scale))),
+        ...traces.map((x) => x.v.map((y) => (y == null ? null : y * scale))),
       ] as uPlot.AlignedData,
     [t, traces, scale],
   );
 
-  const shape = traces.map((tr) => `${tr.label}|${tr.dashed}|${tr.muted}`).join(",");
+  const shape = traces.map((x) => `${x.label}|${x.dashed}|${x.muted}`).join(",");
   const options = useMemo<uPlot.Options>(() => {
     const axisStroke = token("--mast-muted") || "#94a3b8";
     const gridStroke = token("--mast-border") || "#1e293b";
@@ -198,14 +211,15 @@ function MiniChart({
         },
       ],
       series: [
-        { label: "时间" },
-        ...traces.map((tr) => ({
-          label: tr.label,
-          // 「不是测量值」的那些段既换颜色又换线型。只换颜色的话，深浅两个主题下
-          // 都得赌那两个 token 的对比度够；虚线在两个主题、以及打印出来时都成立。
-          stroke: tr.muted ? axisStroke : stroke,
-          width: tr.muted ? 1 : 1.2,
-          ...(tr.dashed ? { dash: [4, 3] } : {}),
+        { label: tr("时间", "Time") },
+        ...traces.map((x) => ({
+          label: x.label,
+          // Non-measurement segments change both colour and line style: colour alone would
+          // depend on token contrast in both themes, while a dashed line holds in either
+          // theme and in print.
+          stroke: x.muted ? axisStroke : stroke,
+          width: x.muted ? 1 : 1.2,
+          ...(x.dashed ? { dash: [4, 3] } : {}),
         })),
       ],
       legend: { show: false },
@@ -213,12 +227,12 @@ function MiniChart({
     };
   }, [theme, axisLabel, shape, width, height]);
 
-  // 判据是**真实读数条数**，不是 t.length：为了断线补进去的 null 也占一个时间戳，
-  // 拿数组长度问「有没有数据」会让一条全是空洞的曲线显示成「有数据」。
+  // Test the number of real readings, not t.length: nulls inserted to break the line also
+  // occupy a timestamp, so the array length would report an all-gap curve as having data.
   if (!n) {
     return (
       <div className="rounded-lg border border-mast-border bg-mast-bg p-3 text-xs text-mast-muted">
-        {label}：窗口内还没有采到数据。
+        {label}{tr("：窗口内还没有采到数据。", ": no data collected in this window yet.")}
       </div>
     );
   }
@@ -230,11 +244,12 @@ function MiniChart({
       <UplotReact options={options} data={data} />
       {footer}
       {gaps > 0 && (
-        // 说出来，否则一条断掉的曲线看起来像画崩了。这一行同时是「断点是被判出来的，
-        // 不是渲染故障」这句话本身。
+        // State it explicitly, otherwise a broken curve looks like a rendering fault.
         <div className="px-1 pt-1 text-[11px] text-mast-faint">
-          曲线断开 {gaps} 处 = 那几段时间没有采到数据（守护停过 / 服务重启 / 窗口早于
-          开始记录的时刻），不是读数为零。
+          {tr(
+            `曲线断开 ${gaps} 处 = 那几段时间没有采到数据（守护停过 / 服务重启 / 窗口早于开始记录的时刻），不是读数为零。`,
+            `The curve breaks at ${gaps} place(s) = no data was collected then (daemon stopped / service restarted / window starts before recording began); the reading is not zero.`,
+          )}
         </div>
       )}
     </div>
@@ -242,13 +257,14 @@ function MiniChart({
 }
 
 /**
- * dI/dV 图下的一行：虚线段是什么，以及窗口里三种状态各占多少点。
+ * One line under the dI/dV chart: what the dashed segments are, and how many
+ * points fall in each of the three states in the window.
  *
- * 图上只有两种线型（**确认在调制** vs 其余），因为在图上「关闭」和「没读到」要
- * 说的是同一句话：别把它当 dI/dV 读。但两者的**下一步动作不同** —— 关闭是有人
- * 拧过的旋钮，没读到是一条要去查的链路 —— 所以数字上分开报。
- *
- * 「没读到」绝不写成「关闭」：那句话会让人把一条真 dI/dV 当噪声底扔掉。
+ * The chart has only two line styles (modulation confirmed on vs the rest), since
+ * "off" and "not read" both mean "do not read this as dI/dV". The follow-up
+ * differs (off is a knob someone turned; not read is a link to investigate), so
+ * the counts are reported separately. "Not read" is never written as "off",
+ * which would make a genuine dI/dV look like a noise floor.
  */
 function LockinLegend({ nOn, nOff, nUnknown }: {
   nOn: number; nOff: number; nUnknown: number;
@@ -256,18 +272,25 @@ function LockinLegend({ nOn, nOff, nUnknown }: {
   if (!nOn && !nOff && !nUnknown) return null;
   return (
     <div className="px-1 pt-1 text-[11px] leading-snug text-mast-faint">
-      <span className="text-mast-muted">灰色虚线段＝未确认在调制，不是 dI/dV</span>
-      （解调器的噪声与串扰底）。本窗口：调制开 {nOn} 点
-      {nOff > 0 && <> · 调制关 {nOff} 点</>}
-      {nUnknown > 0 && <> · 调制状态未读到 {nUnknown} 点（不等于关闭）</>}。
+      <span className="text-mast-muted">
+        {tr("灰色虚线段＝未确认在调制，不是 dI/dV", "Gray dashed segments = modulation not confirmed, not dI/dV")}
+      </span>
+      {tr("（解调器的噪声与串扰底）。本窗口：调制开 ", " (demodulator noise and crosstalk floor). This window: modulation on ")}
+      {nOn}
+      {tr(" 点", " pts")}
+      {nOff > 0 && <> · {tr(`调制关 ${nOff} 点`, `modulation off ${nOff} pts`)}</>}
+      {nUnknown > 0 && (
+        <> · {tr(`调制状态未读到 ${nUnknown} 点（不等于关闭）`, `modulation state not read ${nUnknown} pts (not the same as off)`)}</>
+      )}
+      {tr("。", ".")}
     </div>
   );
 }
 
-/** 短期↔长期 switcher for the charts below. Deliberately NOT labelled 统计窗口:
- *  it changes how far back the small multiples are drawn and nothing else. The
- *  verdict tiles keep using the daemon's own window (`aux.window_s`), which is a
- *  threshold-calibration parameter and lives in 设置, not here. */
+/** Short-term / long-term switcher for the charts below. Deliberately not labelled
+ *  "statistics window": it changes how far back the small multiples are drawn and
+ *  nothing else. The verdict tiles keep using the daemon's own window
+ *  (`aux.window_s`), a threshold-calibration parameter that lives in Settings. */
 function WindowPicker({
   windowS,
   onWindowChange,
@@ -310,16 +333,27 @@ export function AuxChannels({
   windowS: number;
   onWindowChange: (s: number) => void;
 }) {
-  if (degraded) return <EmptyNote label="监控模块未装载，无辅助通道。" />;
+  if (degraded) {
+    return <EmptyNote label={tr("监控模块未装载，无辅助通道。", "Monitoring module not loaded; no auxiliary channels.")} />;
+  }
   if (!aux) {
     // Not the same as "this rig has no Z channel" — say which one it is.
-    return <EmptyNote label="采集守护未运行，辅助通道没有在采样。历史数据照常可浏览。" />;
+    return (
+      <EmptyNote
+        label={tr(
+          "采集守护未运行，辅助通道没有在采样。历史数据照常可浏览。",
+          "The acquisition daemon is not running, so auxiliary channels are not being sampled. History can still be browsed.",
+        )}
+      />
+    );
   }
 
   const byKind = new Map<string, AuxChannelState>();
   for (const c of aux.channels ?? []) byKind.set(c.kind, c);
   const available = AUX_CHANNELS.filter((c) => byKind.get(c.kind)?.available);
-  // 采样是机会式的；设置只是节流上限，按观测节奏评估采样速度。
+  // Judge "fast enough" against the observed cadence, not the configured value:
+  // sampling is opportunistic and the setting is only a throttle ceiling, so the
+  // two differ (e.g. configured 1.0 s, observed 1.33 s).
   const observed = aux.observed_interval_s ?? null;
   const sampling = auxAmpSamplingNote(aux.amp_tau_s, observed ?? aux.interval_s);
 
@@ -332,25 +366,40 @@ export function AuxChannels({
       </div>
 
       <p className="text-xs leading-relaxed text-mast-muted">
-        {/* 同时报设置间隔与观测间隔；样本不足时明确说明。 */}
-        设定每 {aux.interval_s.toFixed(2)} s 采一次
+        {/* Report both the configured and the observed interval: showing only the configured
+            value would keep displaying a tidy number while sampling is actually slower.
+            When the observed cadence cannot be measured (too few points), say so. */}
+        {tr(`设定每 ${aux.interval_s.toFixed(2)} s 采一次`, `Configured to sample every ${aux.interval_s.toFixed(2)} s`)}
         {observed != null
-          ? `，实测 ${observed.toFixed(2)} s`
-          : "（实测节奏样本还不够，暂时给不出）"}
-        ，<strong>不占用示波器</strong>——它搭在电流泵等缓冲的空隙里，
-        与采集主环、急停看门狗都不共用锁。判级窗口 {Math.round(aux.window_s)} s，
-        已采 {aux.sampled} 次
-        {aux.skipped_busy > 0 && `，因通道被占跳过 ${aux.skipped_busy} 次`}。
-        {sampling && <> {sampling}。</>}
+          ? tr(`，实测 ${observed.toFixed(2)} s`, `, observed ${observed.toFixed(2)} s`)
+          : tr("（实测节奏样本还不够，暂时给不出）", " (not enough samples yet to measure the observed cadence)")}
+        {tr("，", ", ")}
+        <strong>{tr("不占用示波器", "does not occupy the oscilloscope")}</strong>
+        {tr(
+          "——它搭在电流泵等缓冲的空隙里，与采集主环、急停看门狗都不共用锁。判级窗口 ",
+          ": it rides in the gaps while the current pump waits for buffers and shares no lock with the main acquisition loop or the emergency-stop watchdog. Grading window ",
+        )}
+        {Math.round(aux.window_s)} s{tr("，已采 ", ", sampled ")}
+        {aux.sampled}
+        {tr(" 次", " times")}
+        {aux.skipped_busy > 0 &&
+          tr(`，因通道被占跳过 ${aux.skipped_busy} 次`, `, skipped ${aux.skipped_busy} time(s) because the channel was busy`)}
+        {tr("。", ".")}
+        {sampling && <> {sampling}{tr("。", ".")}</>}
       </p>
 
       {!aux.alerts_enabled && (
         <p className="rounded-mast-card border border-mast-warn-border bg-mast-warn-bg p-2 text-xs leading-relaxed text-mast-warn">
-          辅助通道的<strong>告警当前是关的</strong>——出厂状态，不是故障。
-          Z 与振幅的阈值从未在本机标定过，先跑
+          {tr("辅助通道的", "Auxiliary-channel alerts are ")}
+          <strong>{tr("告警当前是关的", "currently off")}</strong>
+          {tr(
+            "——出厂状态，不是故障。Z 与振幅的阈值从未在本机标定过，先跑",
+            ": this is the factory state, not a fault. The Z and amplitude thresholds have never been calibrated on this machine; first run",
+          )}
           <code className="mx-1">python -m mast.monitoring.commission</code>
-          看【辅助通道】那一段，再到「设置 → 电流监控」把
-          <code className="mx-1">cm_aux_alerts_enabled</code>打开。记录一直在进行。
+          {tr("看【辅助通道】那一段，再到「设置 → 电流监控」把", "and read the [Auxiliary channels] section, then in Settings → Current monitor turn on")}
+          <code className="mx-1">cm_aux_alerts_enabled</code>
+          {tr("打开。记录一直在进行。", ". Recording continues regardless.")}
         </p>
       )}
 
@@ -361,8 +410,14 @@ export function AuxChannels({
         <EmptyNote
           label={
             (aux.channels ?? []).some((c) => c.verdict === "unknown")
-              ? `还没读到信号表（${aux.detail || "探测中"}）——尚未判定这台机器有没有这些通道。`
-              : "这台机器的信号表里没有 Z / qPlus 振幅通道——不是故障，是本机没有这些信号。"
+              ? tr(
+                  `还没读到信号表（${aux.detail || "探测中"}）——尚未判定这台机器有没有这些通道。`,
+                  `Signal table not read yet (${aux.detail || "probing"}); it is not yet known whether this machine has these channels.`,
+                )
+              : tr(
+                  "这台机器的信号表里没有 Z / qPlus 振幅通道——不是故障，是本机没有这些信号。",
+                  "This machine's signal table has no Z / qPlus amplitude channels. This is not a fault; the machine simply lacks these signals.",
+                )
           }
         />
       ) : (
@@ -370,13 +425,16 @@ export function AuxChannels({
           <div className="flex flex-wrap items-center gap-2">
             <WindowPicker windowS={windowS} onWindowChange={onWindowChange} />
             <span className="text-xs text-mast-faint">
-              图的时间跨度。判级仍按守护自己的 {Math.round(aux.window_s)} s 窗口。
+              {tr(
+                `图的时间跨度。判级仍按守护自己的 ${Math.round(aux.window_s)} s 窗口。`,
+                `Chart time span. Grading still uses the daemon's own ${Math.round(aux.window_s)} s window.`,
+              )}
             </span>
           </div>
           {available.map((c) => {
             const label = byKind.get(c.kind)?.label_zh || c.kind;
-            // lock-in 是唯一一路「同一条曲线有时是测量值、有时不是」的通道，
-            // 所以只有它拆两条线。别的通道拆了只会多一条永远为空的序列。
+            // The lock-in is the only channel whose curve is sometimes a measurement and
+            // sometimes not, so only it is split in two; splitting others would add an empty series.
             if (c.kind === "lockin") {
               const s = auxLockinSplit(series);
               return (
@@ -388,8 +446,8 @@ export function AuxChannels({
                   n={s.n}
                   gaps={s.gaps}
                   traces={[
-                    { label: "调制开（dI/dV）", v: s.on },
-                    { label: "未确认在调制", v: s.off, dashed: true, muted: true },
+                    { label: tr("调制开（dI/dV）", "Modulation on (dI/dV)"), v: s.on },
+                    { label: tr("未确认在调制", "Modulation not confirmed"), v: s.off, dashed: true, muted: true },
                   ]}
                   footer={<LockinLegend {...s} />}
                 />
@@ -409,9 +467,12 @@ export function AuxChannels({
             );
           })}
           <div className="text-xs text-mast-muted">
-            共用同一条时间轴。<strong>刻意不叠在一起</strong>：米、米、赫兹不通约，
-            叠加要用双 Y 轴，而两条曲线在各自轴上的相对高低是画图人定的，
-            会诱导出没人测过的相关性。
+            {tr("共用同一条时间轴。", "They share one time axis. ")}
+            <strong>{tr("刻意不叠在一起", "Deliberately not overlaid")}</strong>
+            {tr(
+              "：米、米、赫兹不通约，叠加要用双 Y 轴，而两条曲线在各自轴上的相对高低是画图人定的，会诱导出没人测过的相关性。",
+              ": metres, metres and hertz are incommensurable; overlaying needs dual Y axes, and the relative heights of curves on separate axes are the plotter's choice, which suggests correlations nobody measured.",
+            )}
           </div>
         </div>
       )}

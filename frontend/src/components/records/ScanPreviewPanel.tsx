@@ -3,6 +3,7 @@ import type { components } from "@/api/schema";
 import { Card, DegradedNote, EmptyNote, ErrorNote, Spinner } from "@/components/ui";
 import { Modal } from "@/components/controls";
 import { copyLocations, locationKindLabel } from "@/lib/scanCopies";
+import { tr } from "@/lib/i18n";
 import { SpectrumChart } from "./SpectrumChart";
 import {
   ALL_FLATTEN_MODES,
@@ -11,21 +12,19 @@ import {
   type FlattenMode,
 } from "./scanPreviewQuery";
 
-// 单个文件的预览面板（右栏）。
+// Preview panel for a single file (right-hand column).
 //
-// Two things this gained on 2026-08-21:
-//
-//  * **去衬底 controls.** A raw topograph is mostly sample tilt — over a 100 nm
-//    frame a fraction of a degree is nanometres of z, while the corrugation the
-//    operator is looking for is picometres. The panel now says which background
-//    was subtracted, and `auto` explains its choice in the instrument's own
-//    words (it forwards `scan_prep.plan_for`'s reasons).
-//  * **Spectra are curves.** A .dat opens the interactive chart instead of a
+//  * Background subtraction controls. A raw topograph is mostly sample tilt: over
+//    a 100 nm frame a fraction of a degree is nanometres of z, while the
+//    corrugation of interest is picometres. The panel says which background was
+//    subtracted, and `auto` explains its choice in the instrument's own words (it
+//    forwards `scan_prep.plan_for`'s reasons).
+//  * Spectra are curves. A .dat opens the interactive chart instead of a
 //    thumbnail of its first two columns.
 //
-// The lightbox opens ONLY on click, never from an effect — is a
-// full-screen overlay appearing over readings the operator was reading, and
-// `test/recentFrameZoom.test.ts` holds that line for the vision tiles.
+// The lightbox opens only on click, never from an effect, so a full-screen
+// overlay can never appear over readings the operator is looking at
+// (`test/recentFrameZoom.test.ts` holds the same line for the vision tiles).
 
 type ScanFileEntry = components["schemas"]["ScanFileEntry"];
 
@@ -41,8 +40,8 @@ function fmtBias(v?: number | null): string {
   return Math.abs(v) < 1 ? `${(v * 1000).toFixed(0)} mV` : `${v.toFixed(3)} V`;
 }
 
-/** 点开放大。Asks for the big render rather than scaling the small one up —
- *  stretching a 256 px thumbnail is a 放大 button that produces bigger squares. */
+/** Click-to-enlarge. Asks for the big render rather than scaling the small one up;
+ *  stretching a 256 px thumbnail only produces bigger squares. */
 function PreviewLightbox({
   path,
   flatten,
@@ -55,7 +54,7 @@ function PreviewLightbox({
   const big = useScanPreview(path, { size: 1024, flatten });
   const name = path.split(/[\\/]/).pop();
   return (
-    <Modal open onClose={onClose} wide title={name || "预览"}>
+    <Modal open onClose={onClose} wide title={name || tr("预览", "Preview")}>
       {big.isPending && <Spinner />}
       {big.isError && <ErrorNote error={big.error} />}
       {big.data?.image ? (
@@ -67,7 +66,10 @@ function PreviewLightbox({
       ) : (
         !big.isPending && (
           <div className="py-10 text-center text-sm text-mast-muted">
-            这张图取不回来了{big.data?.detail ? `：${big.data.detail}` : ""}。
+            {tr(
+              `这张图取不回来了${big.data?.detail ? `：${big.data.detail}` : ""}。`,
+              `Could not load this image${big.data?.detail ? `: ${big.data.detail}` : ""}.`,
+            )}
           </div>
         )
       )}
@@ -101,7 +103,7 @@ export function ScanPreviewPanel({
         <SpectrumChart path={path} />
       ) : (
         <>
-          {/* 去衬底 switch. `auto` is here and NOT in the grid: it measures the
+          {/* Background-subtraction switch. `auto` is here and NOT in the grid: it measures the
               frame (~3 s the first time per file) and thirty cards would queue
               thirty measurements. */}
           <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
@@ -110,7 +112,11 @@ export function ScanPreviewPanel({
                 <button
                   key={m}
                   onClick={() => onFlattenChange(m)}
-                  title={m === "auto" ? "测量这一帧再决定怎么处理（首次约 3 秒）" : undefined}
+                  title={
+                    m === "auto"
+                      ? tr("测量这一帧再决定怎么处理（首次约 3 秒）", "Measure this frame, then decide how to process it (about 3 s the first time)")
+                      : undefined
+                  }
                   className={
                     "px-2.5 py-1 " +
                     (flatten === m
@@ -122,25 +128,28 @@ export function ScanPreviewPanel({
                 </button>
               ))}
             </div>
-            {/* What was ACTUALLY applied. `auto` resolves to a concrete method,
-                and a method that fails falls back to raw — either way the label
+            {/* What was actually applied. `auto` resolves to a concrete method,
+                and a method that fails falls back to raw; either way the label
                 must not keep claiming the frame was flattened. */}
             {prev.data?.flatten && prev.data.flatten !== flatten && (
               <span className="text-mast-muted">
-                实际：{flattenLabel(prev.data.flatten)}
+                {tr("实际：", "Applied: ")}{flattenLabel(prev.data.flatten)}
               </span>
             )}
-            {prev.isFetching && <Spinner label="处理中…" />}
+            {prev.isFetching && <Spinner label={tr("处理中…", "Processing…")} />}
           </div>
 
           {prev.isError && <ErrorNote error={prev.error} />}
-          {prev.data?.degraded && <DegradedNote what="扫描预览" />}
+          {prev.data?.degraded && <DegradedNote what={tr("扫描预览", "scan preview")} />}
           {prev.data && !prev.data.rendered && !prev.data.degraded && (
             <EmptyNote
               label={
                 prev.data.found
-                  ? `无法渲染${prev.data.detail ? `：${prev.data.detail}` : ""}`
-                  : "文件不存在"
+                  ? tr(
+                      `无法渲染${prev.data.detail ? `：${prev.data.detail}` : ""}`,
+                      `Cannot render${prev.data.detail ? `: ${prev.data.detail}` : ""}`,
+                    )
+                  : tr("文件不存在", "File does not exist")
               }
             />
           )}
@@ -149,7 +158,7 @@ export function ScanPreviewPanel({
             <button
               type="button"
               onClick={() => setZoom(true)}
-              title="点击放大"
+              title={tr("点击放大", "Click to enlarge")}
               className="block w-full rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-mast-accent"
             >
               <img
@@ -161,17 +170,17 @@ export function ScanPreviewPanel({
           )}
 
           {/* Frame scale + bias, straight off the file header. Without these the
-              picture has no size: two frames of the same surface at 20 nm and
-              200 nm look identical once the tilt is out. */}
+              picture has no size: frames at 20 nm and 200 nm look identical once
+              the tilt is removed. */}
           {prev.data?.rendered && (
             <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-mast-muted">
-              {prev.data.channel && <span>通道 {prev.data.channel}</span>}
+              {prev.data.channel && <span>{tr("通道", "Channel")} {prev.data.channel}</span>}
               {prev.data.width_nm != null && (
                 <span>
                   {fmtNm(prev.data.width_nm)} × {fmtNm(prev.data.height_nm)}
                 </span>
               )}
-              {prev.data.bias_v != null && <span>偏压 {fmtBias(prev.data.bias_v)}</span>}
+              {prev.data.bias_v != null && <span>{tr("偏压", "Bias")} {fmtBias(prev.data.bias_v)}</span>}
             </div>
           )}
 
@@ -190,11 +199,11 @@ export function ScanPreviewPanel({
         </>
       )}
 
-      {/* Copies of THIS measurement. Shown in the panel too, not only on the
-          card, because this is where an operator lands after clicking. */}
+      {/* Copies of this measurement. Shown in the panel as well as on the card,
+          because this is where the click lands. */}
       {(entry?.copies ?? 1) > 1 && (
         <div className="mt-2 space-y-1 rounded border border-mast-border bg-mast-bg/60 p-1.5 text-[11px]">
-          <div className="text-mast-muted">自动拷贝：同一份数据存在 {entry!.copies} 处</div>
+          <div className="text-mast-muted">{tr(`自动拷贝：同一份数据存在 ${entry!.copies} 处`, `Auto-copy: the same data exists in ${entry!.copies} places`)}</div>
           {copyLocations(entry!).map((loc) => (
             <div key={loc.path} className="break-all font-mono text-mast-faint" title={loc.path}>
               <span className="mr-1 font-sans text-mast-muted">[{locationKindLabel(loc.kind)}]</span>

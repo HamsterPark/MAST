@@ -1,29 +1,35 @@
 /**
- * 技能市场写入的判据 + manifest 解析 —— 一份判据，一个地方。
+ * Criterion for skill-market writes + manifest parsing — one criterion, one place.
  *
- * ── 为什么不能只看 `ok` ──
- * 改订阅只改了一个 holder。agent 的工具表是在**建图时冻结**的，所以一次成功的
- * 写入之后，模型手上那张表可能还是旧的：任务在跑 ⇒ 重建排队；重建被调度了但失败；
- * 压根没有活的运行时（存下来了，下次启动才生效）。三条路径都返回 `ok:true`。
+ * ── Why `ok` alone is not enough ──
+ * Changing a subscription only changes one holder. The agent's tool table is
+ * **frozen when the graph is built**, so after a successful write the table the
+ * model holds may still be the old one: a task is running ⇒ the rebuild is
+ * queued; the rebuild was scheduled but failed; or there is no live runtime at
+ * all (saved, takes effect at the next start). All three paths return `ok:true`.
  *
- * 这与 `settingsWrite.ts` 是同一条纪律的延伸，但多了一层：那边只需回答「存进去
- * 了吗」，这边还要回答「**现在生效了吗**」。所以判据有三态：
+ * This extends the discipline of `settingsWrite.ts` by one layer: that file only
+ * answers "was it saved", this one also answers "**is it in effect now**". The
+ * criterion therefore has three states:
  *
- *   null            → 存了，而且 agent 手上那张表已经跟上
- *   { kind: "pending" } → 存了，还没生效（要显示成黄色，不是绿色）
- *   { kind: "failed" }  → 没存进去
+ *   null                → saved, and the agent's table has caught up
+ *   { kind: "pending" } → saved, not yet in effect (show as yellow, not green)
+ *   { kind: "failed" }  → not saved
  *
- * `test/skillMarketWiring.test.ts` 有一条闸门守着「谁 POST 了市场端点就必须用它」。
+ * `test/skillMarketWiring.test.ts` has a gate that requires every caller of the
+ * market endpoints to use it.
  */
+
+import { tr } from "./i18n.ts";
 
 export type MarketWriteResult = {
   ok?: boolean;
   degraded?: boolean;
   reason?: string | null;
   rebuild_note?: string | null;
-  /** agent 侧还没跟上（true = 现在还没生效）；null = 判断不了。 */
+  /** The agent side has not caught up (true = not in effect yet); null = cannot tell. */
   agent_path_pending?: boolean | null;
-  /** agent 手上那张表 == 注册表现在的样子；**null ≠ false**。 */
+  /** The agent's table equals the registry as it is now; **null ≠ false**. */
   fingerprint_matches?: boolean | null;
   skipped_mandatory?: string[] | null;
   unknown?: string[] | null;
@@ -35,68 +41,74 @@ export type MarketWriteProblem = {
 };
 
 /**
- * 写入的结果到底是什么。真的存了**并且**生效了返回 null。
+ * What the outcome of a write really is. Returns null when it was saved **and**
+ * is in effect.
  *
- * 顺序是有意的：先「没收到回应」，再 degraded（内核没接上），再 `ok !== true`
- * （被拒），最后才是三态的生效判断。少一层都会让某一类失败静静变成绿色。
+ * The order is deliberate: first "no response", then degraded (kernel not
+ * attached), then `ok !== true` (rejected), and only then the three-state
+ * in-effect check. Dropping any layer would let one class of failure silently
+ * turn green.
  */
 export function marketWriteProblem(
   res: MarketWriteResult | null | undefined,
 ): MarketWriteProblem | null {
-  if (!res) return { kind: "failed", message: "保存失败：没有收到内核的回应。" };
+  if (!res) return { kind: "failed", message: tr("保存失败：没有收到内核的回应。", "Save failed: no response from the kernel.") };
   if (res.degraded) {
-    return { kind: "failed", message: res.reason || "写入未生效（内核未接入）。" };
+    return { kind: "failed", message: res.reason || tr("写入未生效（内核未接入）。", "The write did not take effect (kernel not attached).") };
   }
   if (res.ok !== true) {
-    return { kind: "failed", message: res.reason || "保存被拒绝（内核未说明原因）。" };
+    return { kind: "failed", message: res.reason || tr("保存被拒绝（内核未说明原因）。", "Save rejected (the kernel gave no reason).") };
   }
-  // 后端那句人话逐字带出来 —— 它说的是「排队了/重建了/下次启动生效」，
-  // 前端自己改写会把三种情况压成一种。
+  // Pass the backend's human-readable sentence through verbatim — it says
+  // "queued / rebuilt / takes effect at next start", and rewording it on the
+  // frontend would collapse three cases into one.
   const note = (res.rebuild_note || "").trim();
   if (res.agent_path_pending === true) {
-    return { kind: "pending", message: note || "已保存，但 agent 工具表尚未跟上。" };
+    return { kind: "pending", message: note || tr("已保存，但 agent 工具表尚未跟上。", "Saved, but the agent tool table has not caught up yet.") };
   }
   if (res.agent_path_pending === null || res.agent_path_pending === undefined) {
-    return { kind: "unsure", message: note || "已保存；是否已生效判断不了。" };
+    return { kind: "unsure", message: note || tr("已保存；是否已生效判断不了。", "Saved; whether it is in effect cannot be determined.") };
   }
   if (res.fingerprint_matches === false) {
     return {
       kind: "pending",
-      message: note || "已保存，但 agent 手上那张工具表还是旧的。",
+      message: note || tr("已保存，但 agent 手上那张工具表还是旧的。", "Saved, but the agent is still holding the old tool table."),
     };
   }
-  // fingerprint_matches === null 时不报 pending：进程刚起、还没建过工具表，
-  // 那是「判断不了」，而 agent_path_pending 已经说了 false（重建走完了）。
+  // Do not report pending when fingerprint_matches === null: the process has just
+  // started and no tool table was built yet. That is "cannot tell", and
+  // agent_path_pending has already said false (the rebuild finished).
   return null;
 }
 
-/** 生效状态的三态标签 —— null / false / true 各说各话，不折叠。 */
+/** Three-state label for the in-effect status — null / false / true each speak for themselves and are not folded together. */
 export function liveBadge(
   matches: boolean | null | undefined,
 ): { tone: "ok" | "warn" | "unknown"; text: string } {
-  if (matches === true) return { tone: "ok", text: "已生效" };
-  if (matches === false) return { tone: "warn", text: "尚未跟上" };
-  return { tone: "unknown", text: "无法确认" };
+  if (matches === true) return { tone: "ok", text: tr("已生效", "In effect") };
+  if (matches === false) return { tone: "warn", text: tr("尚未跟上", "Not caught up") };
+  return { tone: "unknown", text: tr("无法确认", "Cannot confirm") };
 }
 
-/** 必装项在界面上是锁着的开关 —— 判据与后端同源（用它返回的 mandatory 字段）。 */
+/** Mandatory entries are locked switches in the UI — same criterion as the backend (uses the `mandatory` field it returns). */
 export function canUnsubscribe(row: { mandatory?: boolean }): boolean {
   return !row.mandatory;
 }
 
 /**
- * 构建器 palette 要不要把这一条藏起来。
+ * Whether the builder palette should hide this entry.
  *
- * **`=== false` 而不是 `!subscribed`**：字段缺席（旧响应、目录降级、订阅子系统读
- * 不出来）时**不过滤**。写成 `!e.subscribed` 的话，一个少了这个字段的响应会让整个
- * palette 空掉，而界面上只会显示「没有匹配的技能」—— 一个完全合法的错答案。
- * 这是本仓 [[unknown_is_not_an_answer]] 的形状：「不知道」被折叠成了「否」。
+ * **`=== false` rather than `!subscribed`**: when the field is absent (old
+ * response, degraded catalogue, subscription subsystem unreadable) **do not
+ * filter**. Written as `!e.subscribed`, a response missing the field would empty
+ * the whole palette and the UI would only show "no matching skills" — a
+ * perfectly plausible wrong answer. This is the "unknown folded into no" pattern.
  */
 export function paletteHides(entry: { subscribed?: boolean }, subOnly: boolean): boolean {
   return subOnly && entry.subscribed === false;
 }
 
-/** 被订阅过滤挡掉的条数。**要显示出来** —— 静默截断会被读成「本机没有那个技能」。 */
+/** Number of entries blocked by the subscription filter. **Show it** — a silent truncation would be read as "this machine does not have that skill". */
 export function paletteHiddenCount(
   entries: { subscribed?: boolean }[],
   subOnly: boolean,
@@ -105,24 +117,29 @@ export function paletteHiddenCount(
 }
 
 /**
- * 「随应用发布」以外的来源 —— 也就是**在这台机器上出现的**技能。
+ * Origins other than "shipped with the app" — i.e. skills that **appeared on
+ * this machine**.
  *
- * 判据用 `classify_origin` 的闭集词汇（后端唯一真源）。`builtin` / `composite` /
- * `paper` / `agent_tool` 都是随应用一起来的，升级会带；这三个是本机后天长出来的：
- * 用户/agent 组合的工作流、自建 .py、覆盖层新增。
+ * The criterion uses the closed vocabulary of `classify_origin` (the backend is
+ * the single source of truth). `builtin` / `composite` / `paper` / `agent_tool`
+ * all ship with the app and arrive with upgrades; these three grow locally:
+ * workflows composed by the user/agent, self-written .py files, overlay additions.
  */
 export const LOCAL_ORIGINS = ["user_composite", "custom", "overlay"] as const;
 
 /**
- * 本机长出来、却**不在订阅面上**的技能。
+ * Skills that grew locally but are **not on the subscription surface**.
  *
- * 这个列表补的是一个真实的空档：定制过订阅之后，agent 用技能工坊新造的组合技能
- * 只进市场、不进工具面 —— 而**没有任何东西会告诉用户它出现了**。工坊那边的
- * 说法是「下一轮它会自己出现在工具表里」，在定制过的机器上那句话不成立。
+ * This list fills a real gap: once subscriptions have been customised, a
+ * composite skill newly created by the agent in the skill workshop enters the
+ * market but not the tool surface — and **nothing tells the user it appeared**.
+ * The workshop's wording is "next round it will show up in the tool table on its
+ * own", which does not hold on a customised machine.
  *
- * 刻意做成**派生视图而不是一道闸**：闸会把工具面重新变成安全边界（2026-08-20
- * 已经拆过一次），而这里真正缺的是**可见性**。所以它没有自己的状态、不会过期、
- * 也不需要 agent 那边配合埋点。
+ * Deliberately a **derived view rather than a gate**: a gate would turn the tool
+ * surface back into a safety boundary (that was already dismantled once), and
+ * what is missing here is **visibility**. So it has no state of its own, cannot
+ * go stale, and needs no instrumentation on the agent side.
  */
 export function locallyAuthoredUnsubscribed<
   T extends { name: string; source?: string; subscribed?: boolean },
@@ -131,7 +148,7 @@ export function locallyAuthoredUnsubscribed<
   return rows.filter((r) => r.subscribed === false && local.has(r.source ?? ""));
 }
 
-/** 角标只数待确认的，已裁决的不算。 */
+/** The badge counts only pending items; decided ones do not count. */
 export function pendingBadgeCount(
   recs: { status?: string }[] | null | undefined,
 ): number {
@@ -153,10 +170,11 @@ export type SubscriptionManifest = {
 export const MANIFEST_KIND = "mast-skill-subscription";
 
 /**
- * 解析一份别人发来的订阅列表文件。
+ * Parse a subscription-list file someone sent.
  *
- * 失败返回一句中文原因而不是抛 —— 调用方是一个文件选择器，它拿到的东西可能是
- * 任何东西（一张图、一份 conduct 导出、一个截断的下载）。
+ * On failure it returns a reason string rather than throwing — the caller is a
+ * file picker, and what it receives could be anything (an image, a conduct
+ * export, a truncated download).
  */
 export function parseSubscriptionManifest(
   text: string,
@@ -165,19 +183,22 @@ export function parseSubscriptionManifest(
   try {
     raw = JSON.parse(text);
   } catch (e) {
-    return { error: `这不是一个 JSON 文件：${(e as Error).message}` };
+    return { error: tr(`这不是一个 JSON 文件：${(e as Error).message}`, `This is not a JSON file: ${(e as Error).message}`) };
   }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return { error: "文件内容不是一个对象。" };
+    return { error: tr("文件内容不是一个对象。", "The file content is not an object.") };
   }
   const obj = raw as Record<string, unknown>;
   if (obj.kind !== MANIFEST_KIND) {
     return {
-      error: `这不是一份订阅列表（kind = ${JSON.stringify(obj.kind ?? null)}，应为 "${MANIFEST_KIND}"）。`,
+      error: tr(
+        `这不是一份订阅列表（kind = ${JSON.stringify(obj.kind ?? null)}，应为 "${MANIFEST_KIND}"）。`,
+        `This is not a subscription list (kind = ${JSON.stringify(obj.kind ?? null)}, expected "${MANIFEST_KIND}").`,
+      ),
     };
   }
   if (!Array.isArray(obj.entries)) {
-    return { error: "manifest 里没有 entries 列表。" };
+    return { error: tr("manifest 里没有 entries 列表。", "The manifest has no entries list.") };
   }
   const entries: ManifestEntry[] = [];
   for (const it of obj.entries) {
@@ -199,10 +220,13 @@ export function parseSubscriptionManifest(
 }
 
 /**
- * 导入前的本地预览：这份清单里有多少本机有、多少没有。
+ * Local preview before import: how many entries in this list this machine has
+ * and how many it lacks.
  *
- * 这只是给用户看的**预览**。真正的判据在后端（`POST /import` 的 dry_run），
- * 因为内嵌的 composite 落地之后「有没有」的答案会变 —— 前端算的那份必然偏保守。
+ * This is only a **preview** for the user. The real criterion is on the backend
+ * (the dry_run of `POST /import`), because the answer to "do we have it" changes
+ * once embedded composites are installed — the frontend's count is necessarily
+ * conservative.
  */
 export function diffManifestAgainstCatalog(
   manifest: SubscriptionManifest,

@@ -1,9 +1,8 @@
 """跨天记住「目前最好的那一张」—— 以及「连着几轮没更好了」。
 
-多天追猎一张图的典型流程：反复修整,直到觉得「差不多了」就存一张;此后若又
-修出更好的就再存一张,直到连续多轮都没有更好的为止。
+多天流程：反复修针，每出一张更好的图就记下来，差不多了就放弃继续修。
 
-「差不多就放弃」翻成机器话不是一个阈值（你说不出「集中度 > X 就够了」），
+「差不多就放弃」翻成机器话不是一个阈值（说不出「集中度 > X 就够了」），
 而是 **loop-until-dry**：连着 N 轮都没能出比现有更好的，那就是差不多了。
 
 ## 为什么这是一个技能，而不是分析步、也不是 conduct 状态
@@ -29,6 +28,7 @@ import logging
 import time
 from typing import Any
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -41,7 +41,7 @@ from mast.skills.base import BaseSkill
 logger = logging.getLogger(__name__)
 
 #: 连着这么多张都没超过现有最好的 ⇒ 「差不多了」。
-#: 这是认可的默认值。**不是标定出来的**，是一条约定 ——
+#: 采用的默认值。**不是标定出来的**，是一条约定 ——
 #: 它的好处正在于不用假装知道「多好才算够」。
 DEFAULT_DRY_LIMIT = 3
 
@@ -114,7 +114,7 @@ def peek(tag: str, *, dry_limit: int | None = None,
         try:
             rec = json.loads(p.read_text(encoding="utf-8"))
         except Exception as exc:  # noqa: BLE001
-            raise BestFrameStoreUnreadable(f"记录 {p} 读不懂：{exc}") from exc
+            raise BestFrameStoreUnreadable(tr(f"记录 {p} 读不懂：{exc}", f"Record {p} is unreadable: {exc}")) from exc
     else:
         rec = {}
     best = rec.get("best") or None
@@ -164,59 +164,65 @@ class TrackBestFrame(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "记录一张候选帧和它的成色，然后回报它有没有**超过**当前最好的那张、"
+                tr("记录一张候选帧和它的成色，然后回报它有没有**超过**当前最好的那张、"
                 "以及连着多少轮没能超过。靠实验文件夹里的一个 JSON 落盘，所以为了"
                 "一张能发表的图连着追好几天时，它扛得住重启 —— 一个只活在内存里的"
                 "「目前最好」，跨几天等于没有。「够好了，可以收手」在这里表达成 "
                 "loop-until-dry（连着 N 轮没有进步），不是一条质量阈值："
-                "没有人说得出那条阈值，但每个人都说得出 N。"
+                "没有人说得出那条阈值，但每个人都说得出 N。",
+                "Record a candidate frame and its quality, then report whether it **beat** the current best one, and how many rounds in a row failed to beat it. It is persisted to a JSON in the experiment folder, so when chasing a publishable image for several days it survives restarts - a 'best so far' that lives only in memory is worthless across days. 'Good enough, can stop' is expressed here as loop-until-dry (N rounds in a row without progress), not a quality threshold: nobody can name that threshold, but everyone can name N.")
             ),
             parameters=[
                 ParameterSpec(
                     name="tag", type="str",
-                    description=("这一轮追猎的标识（用 conduct_id 或实验 id）。"
-                                 "不同的追猎各记各的，别互相污染。"),
+                    description=(tr("这一轮追猎的标识（用 conduct_id 或实验 id）。"
+                                 "不同的追猎各记各的，别互相污染。",
+                                 "Identifier of this hunt (use conduct_id or the experiment id). Different hunts are recorded separately, so they do not contaminate each other.")),
                     required=True),
                 ParameterSpec(
                     name="frame_path", type="str",
-                    description="这一张图的路径。空 = 这一轮没出图（只推进 dry 计数）。",
+                    description=tr("这一张图的路径。空 = 这一轮没出图（只推进 dry 计数）。", "Path of this image. Empty = this round produced no image (only advances the dry count)."),
                     required=False, default=""),
                 ParameterSpec(
                     name="quality", type="float",
-                    description=("这一张的成色（角向集中度）。**留空 = 判不了** —— "
+                    description=(tr("这一张的成色（角向集中度）。**留空 = 判不了** —— "
                                  "那既不算更好也不算更差，不推进 dry 计数。"
                                  "把「判不了」记成「不够好」会让流程在一个"
-                                 "读不到数的故障上收手。"),
+                                 "读不到数的故障上收手。",
+                                 "Quality of this frame (angular concentration). **Empty = cannot judge** - that counts as neither better nor worse and does not advance the dry count. Recording 'cannot judge' as 'not good enough' would make the process stop on a fault that reads no number.")),
                     required=False),
                 ParameterSpec(
                     name="dry_limit", type="int",
-                    description=f"连着几张没更好就算「差不多了」。出厂 {DEFAULT_DRY_LIMIT}。",
+                    description=tr(f"连着几张没更好就算「差不多了」。出厂 {DEFAULT_DRY_LIMIT}。", f"How many frames in a row without improvement count as 'about done'. Factory {DEFAULT_DRY_LIMIT}."),
                     required=False, default=DEFAULT_DRY_LIMIT,
                     min_value=1, max_value=100),
                 ParameterSpec(
                     name="better_ratio", type="float",
-                    description=(f"要高出这个倍数才算更好。出厂 {DEFAULT_BETTER_RATIO}。"
+                    description=(tr(f"要高出这个倍数才算更好。出厂 {DEFAULT_BETTER_RATIO}。"
                                  "卡在 1.0 会把判据自己的抖动记成进步，"
-                                 "于是 dry 计数永远清零、永远不收手。"),
+                                 "于是 dry 计数永远清零、永远不收手。",
+                                 f"It must exceed this factor to count as better. Factory {DEFAULT_BETTER_RATIO}. Sitting at 1.0 would record the criterion's own jitter as progress, so the dry count would reset forever and never stop.")),
                     required=False, default=DEFAULT_BETTER_RATIO,
                     min_value=1.0, max_value=10.0),
                 ParameterSpec(
                     name="gate_floor_base", type="float",
-                    description=("「值不值得再花一小时」的门槛基线。留空 = 取"
+                    description=(tr("「值不值得再花一小时」的门槛基线。留空 = 取"
                                  "ScanPublicationFrame 的出厂线（单一真源，"
-                                 "不在这里再写一个数）。"),
+                                 "不在这里再写一个数）。",
+                                 "Baseline of the bar for 'worth another hour'. Empty = take the factory line of ScanPublicationFrame (single source of truth; no second number is written here).")),
                     required=False, min_value=0.0, max_value=100000.0),
                 ParameterSpec(
                     name="gate_floor_frac", type="float",
-                    description=(f"门槛 = max(基线, 现有最好 × 这个系数)。出厂 "
+                    description=(tr(f"门槛 = max(基线, 现有最好 × 这个系数)。出厂 "
                                  f"{DEFAULT_GATE_FRAC}。**越到后面越挑剔** —— "
                                  "已经有一张 900 的图之后，再花一小时去扫一个 400 的"
-                                 "针尖是亏的。"),
+                                 "针尖是亏的。",
+                                 f"Bar = max(baseline, current best x this coefficient). Factory {DEFAULT_GATE_FRAC}. **It gets pickier later on** - once there is a 900 image, spending another hour scanning a 400 tip is a loss.")),
                     required=False, default=DEFAULT_GATE_FRAC,
                     min_value=0.0, max_value=10.0),
                 ParameterSpec(
                     name="peek", type="bool",
-                    description="只读现状，不记这一张（供闸门复查用）。",
+                    description=tr("只读现状，不记这一张（供闸门复查用）。", "Read the current state only, do not record this frame (for gate re-checks)."),
                     required=False, default=False),
             ],
             estimated_duration_s=0.2,
@@ -240,8 +246,9 @@ class TrackBestFrame(BaseSkill):
         tag = str(params.get("tag") or "").strip()
         if not tag:
             return SkillResult(skill_name="TrackBestFrame", success=False,
-                               error="没给 tag —— 不同的追猎必须各记各的，"
-                                     "共用一个记录会把两次实验混在一起。")
+                               error=tr("没给 tag —— 不同的追猎必须各记各的，"
+                                     "共用一个记录会把两次实验混在一起。",
+                                     "No tag given - different hunts must be recorded separately; sharing one record would mix two experiments."))
         dry_limit = int(params.get("dry_limit") or DEFAULT_DRY_LIMIT)
         ratio = float(params.get("better_ratio") or DEFAULT_BETTER_RATIO)
         peek = bool(params.get("peek", False))
@@ -254,8 +261,9 @@ class TrackBestFrame(BaseSkill):
         except Exception as exc:  # noqa: BLE001
             return SkillResult(
                 skill_name="TrackBestFrame", success=False,
-                error=(f"记录 {p} 读不懂：{exc} —— **不覆盖它**。"
-                       f"一份读不懂的历史比没有历史更该让人来看一眼。"))
+                error=(tr(f"记录 {p} 读不懂：{exc} —— **不覆盖它**。"
+                       f"一份读不懂的历史比没有历史更该让人来看一眼。",
+                       f"Record {p} is unreadable: {exc} - **not overwriting it**. An unreadable history deserves a human look more than no history does.")))
         entries: list[dict] = list(rec.get("entries") or [])
         best = rec.get("best") or None
 
@@ -283,9 +291,10 @@ class TrackBestFrame(BaseSkill):
                         "good_enough_to_stop": _settled(dry, dry_limit),
                         "gate_floor": self._gate_floor(
                             params, (best or {}).get("quality")),
-                        "note": ("这一轮判不了成色 —— **不推进 dry 计数**。"
+                        "note": (tr("这一轮判不了成色 —— **不推进 dry 计数**。"
                                  "把「判不了」记成「不够好」会让流程在一个读不到数的"
-                                 "故障上收手。")})
+                                 "故障上收手。",
+                                 "This round could not judge the quality - **the dry count is not advanced**. Recording 'cannot judge' as 'not good enough' would make the process stop on a fault that reads no number."))})
             return SkillResult(skill_name="TrackBestFrame", success=True, data=out,
                                summary=self._say(out))
 
@@ -326,15 +335,15 @@ class TrackBestFrame(BaseSkill):
         bq = out.get("best_quality")
         if out.get("is_best"):
             prev = out.get("previous_best_quality")
-            return ("这一张更好（%.1f%s），成为目前最好的；已看过 %d 张，dry 归零。"
+            return (tr("这一张更好（%.1f%s），成为目前最好的；已看过 %d 张，dry 归零。", "This frame is better (%.1f%s) and becomes the current best; %d seen, dry reset to zero.")
                     % (float(out.get("quality") or 0),
-                       ("，此前 %.1f" % prev) if prev else "，是第一张", n))
-        return ("这一张没超过现有最好的（%.1f vs %s）；连着 %d 张没更好%s。"
+                       (tr("，此前 %.1f", ", previously %.1f") % prev) if prev else tr("，是第一张", ", this is the first"), n))
+        return (tr("这一张没超过现有最好的（%.1f vs %s）；连着 %d 张没更好%s。", "This frame did not beat the current best (%.1f vs %s); %d in a row not better%s.")
                 % (float(out.get("quality") or 0),
                    ("%.1f" % bq) if bq else "—",
                    out.get("dry_rounds") or 0,
-                   ("，**到线了：差不多可以收手**" if out.get("good_enough_to_stop")
-                    else "，还没到 %d" % (out.get("dry_limit") or 0))))
+                   (tr("，**到线了：差不多可以收手**", ", **at the line: about time to stop**") if out.get("good_enough_to_stop")
+                    else tr("，还没到 %d", ", not yet at %d") % (out.get("dry_limit") or 0))))
 
 
 def make_tools(context_provider):

@@ -24,6 +24,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.skills.base import BaseSkill
 
 logger = logging.getLogger(__name__)
@@ -40,38 +41,56 @@ class VerifyAdatomAt(BaseSkill):
             version="1.0.0",
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
-            description=(
+            description=tr(
                 "读一帧已保存的 .sxm,判断给定目标位置上有没有一个吸附原子,并给出最近团簇"
                 "到目标的残差。只读文件,不碰硬件。verdict 取 'at_target' / 'ambiguous' / "
                 "'displaced' / 'not_found' / 'undecidable'。目标不在这一帧的范围内时是"
                 "'undecidable' —— 那是**这一帧答不了**,不是「原子不在」。容差留空则取衬底"
-                "最近邻距离的一半,也就是「同一个晶格位」。"
+                "最近邻距离的一半,也就是「同一个晶格位」。",
+                "Read a saved .sxm frame, decide whether there is an adatom at the given target "
+                "position, and report the residual from the nearest cluster to the target. Reads the "
+                "file only and does not touch the hardware. verdict is one of 'at_target' / "
+                "'ambiguous' / 'displaced' / 'not_found' / 'undecidable'. When the target is outside "
+                "this frame the verdict is 'undecidable' -- **this frame cannot answer**, which is "
+                "not the same as \"the atom is not there\". If the tolerance is left empty, half the "
+                "substrate nearest-neighbor distance is used, i.e. \"the same lattice site\".",
             ),
             parameters=[
                 ParameterSpec(name="scan_path", type="str",
-                              description="复扫帧的 .sxm 路径。", required=True),
+                              description=tr("复扫帧的 .sxm 路径。", "Path of the re-scanned frame's .sxm file."),
+                              required=True),
                 ParameterSpec(name="target_x_m", type="float", unit="m",
-                              description="目标位置 x,例如 '12.5n'(SI 前缀必须写)。",
+                              description=tr("目标位置 x,例如 '12.5n'(SI 前缀必须写)。",
+                                             "Target position x, e.g. '12.5n' (the SI prefix is required)."),
                               required=True, min_value=-1.5e-6, max_value=1.5e-6),
                 ParameterSpec(name="target_y_m", type="float", unit="m",
-                              description="目标位置 y,例如 '-3n'。",
+                              description=tr("目标位置 y,例如 '-3n'。", "Target position y, e.g. '-3n'."),
                               required=True, min_value=-1.5e-6, max_value=1.5e-6),
                 # 刻意没有 default:缺席要能回落到衬底晶格。
                 ParameterSpec(name="tolerance_m", type="float", unit="m",
-                              description=("算「到位」的半径,例如 '150p'。留空则取衬底最近邻"
-                                           "距离的一半。"),
+                              description=tr("算「到位」的半径,例如 '150p'。留空则取衬底最近邻"
+                                             "距离的一半。",
+                                             "Radius within which the atom counts as in place, e.g. "
+                                             "'150p'. If empty, half the substrate nearest-neighbor "
+                                             "distance is used."),
                               required=False, min_value=1e-11, max_value=5e-9),
                 ParameterSpec(name="channel", type="str",
-                              description="形貌通道。", required=False, default="Z"),
+                              description=tr("形貌通道。", "Topography channel."),
+                              required=False, default="Z"),
                 ParameterSpec(name="polarity", type="str",
-                              description="原子是亮的还是暗的。", required=False,
+                              description=tr("原子是亮的还是暗的。", "Whether the atom is bright or dark."),
+                              required=False,
                               default="bright", allowed_values=["auto", "bright", "dark"]),
                 ParameterSpec(name="min_peak_height_m", type="float", unit="m",
-                              description=("比这更矮的团簇不算原子,例如 '30p'。"
-                                           "留空则不按高度筛。"),
+                              description=tr("比这更矮的团簇不算原子,例如 '30p'。"
+                                             "留空则不按高度筛。",
+                                             "Clusters lower than this do not count as atoms, e.g. "
+                                             "'30p'. If empty, no filtering by height."),
                               required=False, min_value=1e-12, max_value=5e-9),
                 ParameterSpec(name="expected_count", type="int",
-                              description="这一帧里预期有几个原子(对不上只给 warning)。",
+                              description=tr("这一帧里预期有几个原子(对不上只给 warning)。",
+                                             "Number of atoms expected in this frame (a mismatch only "
+                                             "gives a warning)."),
                               required=False, min_value=0, max_value=1000),
             ],
             estimated_duration_s=5.0,
@@ -84,25 +103,29 @@ class VerifyAdatomAt(BaseSkill):
 
         path = str(params.get("scan_path") or "")
         if not path or not Path(path).exists():
-            return SkillResult(skill_name=_NAME, success=False, error=f"文件不存在: {path}")
+            return SkillResult(skill_name=_NAME, success=False,
+                               error=tr(f"文件不存在: {path}", f"File does not exist: {path}"))
         tol, tol_src = self._tolerance(params)
         if tol is None:
             return SkillResult(
                 skill_name=_NAME, success=True,
                 data={"verdict": "undecidable", "reasons": ["no_tolerance"],
                       "scan_path": path},
-                summary="没有容差可用:传 tolerance_m,或者先声明衬底")
+                summary=tr("没有容差可用:传 tolerance_m,或者先声明衬底",
+                           "No tolerance available: pass tolerance_m, or declare the substrate first"))
         try:
             from mast.skills.builtins.cluster_extract import ExtractClusters
         except ImportError as exc:
-            return SkillResult(skill_name=_NAME, success=False, error=f"缺依赖: {exc}")
+            return SkillResult(skill_name=_NAME, success=False,
+                               error=tr(f"缺依赖: {exc}", f"Missing dependency: {exc}"))
 
         res = ExtractClusters().execute(context, {
             "scan_path": path, "channel": params.get("channel") or "Z",
             "polarity": params.get("polarity") or "bright", "level": "plane"})
         if not res.success:
             return SkillResult(skill_name=_NAME, success=False,
-                               error=f"团簇提取失败: {res.error}")
+                               error=tr(f"团簇提取失败: {res.error}",
+                                        f"Cluster extraction failed: {res.error}"))
         data_in = res.data if isinstance(res.data, dict) else {}
         clusters = list(data_in.get("clusters") or [])
         tx = float(params["target_x_m"])
@@ -114,7 +137,8 @@ class VerifyAdatomAt(BaseSkill):
                 data={"verdict": "undecidable", "reasons": ["target_outside_frame"],
                       "frame_contains_target": False, "n_clusters": len(clusters),
                       "tolerance_m": tol, "tolerance_source": tol_src, "scan_path": path},
-                summary="目标不在这一帧里,这一帧答不了")
+                summary=tr("目标不在这一帧里,这一帧答不了",
+                           "The target is not in this frame, so this frame cannot answer"))
 
         min_h = params.get("min_peak_height_m")
         cands = []
@@ -139,20 +163,26 @@ class VerifyAdatomAt(BaseSkill):
         if not cands:
             return SkillResult(skill_name=_NAME, success=True,
                                data={"verdict": "not_found", **base},
-                               summary="这一帧的目标附近没有团簇")
+                               summary=tr("这一帧的目标附近没有团簇",
+                                          "No cluster near the target in this frame"))
         d0, best = cands[0]
         n_close = sum(1 for d, _ in cands if d <= 2 * tol)
         base.update({"residual_m": d0, "residual_nm": d0 * 1e9,
                      "found_x_m": best.get("x_m"), "found_y_m": best.get("y_m"),
                      "nearest_cluster": best, "n_candidates_within_2tol": n_close})
         if d0 <= tol and n_close <= 1:
-            verdict, summary = "at_target", f"原子在目标上,残差 {d0 * 1e12:.0f} pm"
+            verdict, summary = "at_target", tr(f"原子在目标上,残差 {d0 * 1e12:.0f} pm",
+                                               f"The atom is on target, residual {d0 * 1e12:.0f} pm")
         elif d0 <= 2 * tol or n_close > 1:
-            verdict, summary = "ambiguous", f"目标附近有 {n_close} 个候选,说不清是哪一个"
+            verdict, summary = "ambiguous", tr(f"目标附近有 {n_close} 个候选,说不清是哪一个",
+                                                f"{n_close} candidates near the target; cannot tell "
+                                                f"which one it is")
         elif d0 <= 10 * tol:
-            verdict, summary = "displaced", f"找到了,但偏了 {d0 * 1e9:.2f} nm"
+            verdict, summary = "displaced", tr(f"找到了,但偏了 {d0 * 1e9:.2f} nm",
+                                                f"Found it, but it is off by {d0 * 1e9:.2f} nm")
         else:
-            verdict, summary = "not_found", f"最近的团簇在 {d0 * 1e9:.1f} nm 外"
+            verdict, summary = "not_found", tr(f"最近的团簇在 {d0 * 1e9:.1f} nm 外",
+                                                f"The nearest cluster is {d0 * 1e9:.1f} nm away")
         return SkillResult(skill_name=_NAME, success=True, data={"verdict": verdict, **base},
                            summary=summary)
 

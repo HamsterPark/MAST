@@ -49,6 +49,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ def _gate_block() -> dict:
         from mast.agents._shared.buffer_hitl import gate_states
         states = gate_states()
     except Exception as exc:  # noqa: BLE001
-        return {"available": False, "why": f"读不到审批闸门状态: {exc}", "gates": []}
+        return {"available": False, "why": tr(f"读不到审批闸门状态: {exc}", f"Cannot read the approval gate state: {exc}"), "gates": []}
     blocking = [g for g in states if g.get("closed") or g.get("unresolved")]
     return {
         "available": True,
@@ -146,7 +147,7 @@ class ReadHardwareEvents(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读取硬件事件缓冲区:①当前有没有审批闸门拦着你、拦的是哪条事件;"
+                tr("读取硬件事件缓冲区:①当前有没有审批闸门拦着你、拦的是哪条事件;"
                 "②最近 N 条事件(种类/严重度/来源/一句话摘要/**触发时的实测指标**/"
                 "建议动作)。**纯读,不动任何硬件,也不解除任何拦截。**\n"
                 "\n"
@@ -156,13 +157,23 @@ class ReadHardwareEvents(BaseSkill):
                 "也用于日常自主判断:监控在报什么、要不要主动修针。"
                 "注意 `read_latest_tip_status` 读的是视觉 TipStatus,"
                 "**电流监控发的事件不写 TipStatus** —— 那条路上它会返回 seqno=-1，"
-                "看起来像「一切正常」。本工具才是事件本身。"
+                "看起来像「一切正常」。本工具才是事件本身。", "Read the hardware event buffer: (1) whether an approval gate is currently blocking you and which event it is blocking on; "
+"(2) the most recent N events (kind / severity / source / one-line summary / **measured metrics at trigger time** / "
+"recommended action). **Pure read: touches no hardware and lifts no block.**\n"
+"\n"
+"⚠️ **When buffer_hitl blocks a write-type tool, call this tool first to see the evidence and then decide** -- "
+"the block message only gives the event kind; the metrics are here. Do not repeatedly retry the refused tool.\n"
+"\n"
+"Also used for routine autonomous judgement: what the monitor is reporting, and whether to condition the tip proactively. "
+"Note that `read_latest_tip_status` reads the vision TipStatus, "
+"and **events from the current monitor do not write TipStatus** -- on that path it returns seqno=-1, "
+"which looks like \"all normal\". This tool is the events themselves.")
             ),
             parameters=[
                 ParameterSpec(
                     name="limit",
                     type="int",
-                    description="最多返回多少条最近事件(默认 10)",
+                    description=tr("最多返回多少条最近事件(默认 10)", "Maximum number of recent events to return (default 10)"),
                     required=False,
                     default=10,
                     min_value=1,
@@ -172,8 +183,9 @@ class ReadHardwareEvents(BaseSkill):
                     name="min_severity",
                     type="str",
                     description=(
-                        "只返回不低于此严重度的事件:info / warn / critical。"
-                        "留空返回全部。"
+                        tr("只返回不低于此严重度的事件:info / warn / critical。"
+                        "留空返回全部。", "Only return events at or above this severity: info / warn / critical. "
+"Empty returns all.")
                     ),
                     required=False,
                     default="",
@@ -198,8 +210,9 @@ class ReadHardwareEvents(BaseSkill):
             buf = get_active_buffer()
             if buf is None:
                 ev_block["why"] = (
-                    "事件缓冲区未启动(standalone / 未接视觉服务)。"
-                    "**这不代表没有事件,是这条路读不到。**")
+                    tr("事件缓冲区未启动(standalone / 未接视觉服务)。"
+                    "**这不代表没有事件,是这条路读不到。**", "The event buffer is not running (standalone / vision service not connected). "
+"**This does not mean there are no events; this path cannot read them.**"))
             else:
                 raw = buf.get_event_history(since_seqno=-1, limit=max(1, limit))
                 events = [_event_dict(e) for e in raw]
@@ -218,23 +231,26 @@ class ReadHardwareEvents(BaseSkill):
                         e["cause_detail"] = detail
                 ev_block.update({"available": True, "events": events})
         except Exception as exc:  # noqa: BLE001 — 诊断工具不许自己炸
-            ev_block["why"] = f"读事件历史失败: {exc}"
+            ev_block["why"] = tr(f"读事件历史失败: {exc}", f"Failed to read event history: {exc}")
         data["recent"] = ev_block
 
         # ⚠️ 「一条都没有」与「读不到」是两句话。前者是结论,后者不是。
         n = len(events)
         if not ev_block["available"]:
-            summary = f"事件缓冲区读不到({ev_block['why']});" \
-                      f"审批闸门:{'有拦截' if data['blocking'].get('any_blocking') else '无'}"
+            summary = tr(f"事件缓冲区读不到({ev_block['why']});" \
+                      f"审批闸门:{'有拦截' if data['blocking'].get('any_blocking') else '无'}", f"The event buffer cannot be read ({ev_block['why']}); " \
+f"approval gate: {'blocking' if data['blocking'].get('any_blocking') else 'none'}")
         elif n == 0:
-            summary = "缓冲区里没有事件(已确认读到,不是读不到)。"
+            summary = tr("缓冲区里没有事件(已确认读到,不是读不到)。", "No events in the buffer (confirmed read, not unreadable).")
         else:
             worst = max(events, key=lambda e: {"info": 0, "warn": 1,
                                                "critical": 2}.get(
                 str(e.get("severity") or "").lower(), -1))
-            summary = (f"{n} 条事件,最高 {worst.get('severity')} "
+            summary = (tr(f"{n} 条事件,最高 {worst.get('severity')} "
                        f"{worst.get('kind')}(来源 {worst.get('source') or '?'})"
-                       f":{worst.get('summary_zh') or ''}")
+                       f":{worst.get('summary_zh') or ''}", f"{n} event(s), worst {worst.get('severity')} "
+f"{worst.get('kind')} (source {worst.get('source') or '?'})"
+f": {worst.get('summary_zh') or ''}"))
         data["n_events"] = n
         data["read_at"] = time.time()
 

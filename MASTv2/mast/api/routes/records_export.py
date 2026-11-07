@@ -69,8 +69,8 @@ def _parse_ext_filter(ext: str | None) -> set[str] | None:
     A filter naming only extensions we do not recognise returns an EMPTY set,
     which the caller honours as "match nothing". Falling back to "match
     everything" would answer a question the client did not ask and hand back a
-    screen of .dat files to someone who asked for .sxm — the failure #53/#60 are
-    about, one layer up."""
+    screen of .dat files to someone who asked for .sxm — the failure the empty-list rule
+    guards against, one layer up."""
     if ext is None or not ext.strip():
         # A blank value is not a request for a type, so it cannot mean "match
         # nothing"; it means the caller left the filter off.
@@ -291,7 +291,7 @@ def latest_scans(
     ``ext`` filters BEFORE the ``n``-slice. That ordering is the whole point: a
     caller that takes the newest ``n`` of everything and filters afterwards gets
     however many survive, which on a rig writing spectroscopy is zero .sxm while
-    the disk is full of them (, and its 数据面板 twin #60). The same
+    the disk is full of them (and its data-panel twin). The same
     trap is documented on ``_collect_scans``.
 
     The discovery glob is ext-independent work, so the response also carries

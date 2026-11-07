@@ -1,12 +1,9 @@
 """StallGuardMiddleware — end a repeated-identical-failure spin, and say what it was.
 
-This is the diagnosis someone had to make themselves, reverse-engineered from
-what the system actually said:
-
-    "运行出错：任务步数达到上限——可能某个智能体在预条件或安全门上反复失败而空转。
-     已停止本次运行。"
-
-They were right. And this middleware was ALREADY RUNNING when it happened. Three
+A run could end with 「运行出错：任务步数达到上限——可能某个智能体在预条件或安全门上
+反复失败而空转。已停止本次运行。」 — an agent spinning on a failing precondition or
+safety gate until the recursion cap killed the run. This middleware was ALREADY
+RUNNING when that happened. Three
 reasons it did nothing (all fixed here):
 
   1. **It was wired into instrument_control only.** The other five agents had no
@@ -102,7 +99,7 @@ _LEDGER_MAX = 64
 # A forced-stop message carries this phrase. Like _MARKER for a nudge, it is also
 # the signal that the guard has ALREADY intervened on this spin — so a later turn
 # can tell "the agent was warned" from "a fresh spin", and not re-stop an agent
-# that has since complied. 
+# that has since complied.
 _STOP_SENTINEL = "空转保护"
 
 # ── failure category ─────────────────────────────────────────────────────────
@@ -111,7 +108,7 @@ _STOP_SENTINEL = "空转保护"
 # operator has nothing to fix. That is a different animal from a precondition or
 # hardware failure (timeout, module-not-running, crash), where a human at the
 # machine may be exactly what is needed. Telling the operator to "到机台检查" a
-# typo is noise; is 25 minutes of an agent apologising for one
+# typo is noise; one observed case was 25 minutes of an agent apologising for one
 # because the guard kept escalating the SAME already-abandoned typo to the human.
 _INPUT_ERROR_KEYS = (
     "safety_gate",
@@ -293,7 +290,7 @@ def _last_intervention_idx(msgs) -> int:
     The spin count is scoped to failures produced AFTER this point, so an agent
     that was warned and then STOPPED repeating the failing call is treated as
     having complied — the guard goes quiet instead of re-firing on the stale
-    failures that still sit in the sliding window ."""
+    failures that still sit in the sliding window."""
     for i in range(len(msgs) - 1, -1, -1):
         c = str(getattr(msgs[i], "content", "") or "")
         if _MARKER in c or _STOP_SENTINEL in c:
@@ -336,7 +333,7 @@ def _prior_warnings_line(in_turn: int, carried: int) -> str:
 
     The old text said 「且两次提示后仍在重试」 unconditionally. When the ladder was
     climbed in EARLIER runs — which is the common case, because the ledger is
-    process-lifetime and never decays — that sentence is simply false: this turn
+    process-lifetime and never decays — that sentence is wrong: this turn
     was killed without a single warning in it. Saying so, and saying where the
     release is, is the difference between a diagnosis and a dead end."""
     if in_turn >= _MAX_NUDGES:
@@ -486,7 +483,7 @@ class StallGuardMiddleware(AgentMiddleware):
             # warned about and has stopped repeating is skipped, so the guard does
             # not keep re-nudging / re-stopping on the stale failures lingering in
             # the window. It also means a genuine SECOND spin (a different tool) is
-            # still caught rather than masked by the abandoned one. 
+            # still caught rather than masked by the abandoned one.
             last_iv = _last_intervention_idx(recent)
             worst, n = "", 0
             for sig, cnt in sigs.most_common():

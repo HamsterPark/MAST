@@ -27,6 +27,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 
 class MonitorCurrentFFT(BaseSkill):
@@ -39,16 +40,18 @@ class MonitorCurrentFFT(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "通过 TCP 轮询对隧道电流做软件 FFT。以 `poll_hz` Hz 采集 `duration_s` 时长的样本，"
+                tr("通过 TCP 轮询对隧道电流做软件 FFT。以 `poll_hz` Hz 采集 `duration_s` 时长的样本，"
                 "然后返回幅度（或功率）谱。时延 = duration_s + 22 µs FFT。Nyquist = poll_hz / 2。当 "
-                "Nanonis Spectrum Analyzer 模块不可用、或你需要自定义窗函数时用它。"
+                "Nanonis Spectrum Analyzer 模块不可用、或你需要自定义窗函数时用它。", "Software FFT of the tunnelling current via TCP polling. Samples for `duration_s` at `poll_hz` Hz, "
+"then returns the amplitude (or power) spectrum. Latency = duration_s + 22 µs FFT. Nyquist = poll_hz / 2. Use it when the "
+"Nanonis Spectrum Analyzer module is unavailable, or you need a custom window function.")
             ),
             parameters=[
                 ParameterSpec(
                     name="duration_s",
                     type="float",
                     description=(
-                        "窗长，单位是 SECONDS（秒）。频率分辨率 df = 1 / duration_s 。典型 0.5–2 s。"
+                        tr("窗长，单位是 SECONDS（秒）。频率分辨率 df = 1 / duration_s 。典型 0.5–2 s。", "Window length, in SECONDS. Frequency resolution df = 1 / duration_s. Typically 0.5-2 s.")
                     ),
                     unit="s", required=False, default=1.0,
                     min_value=0.05, max_value=30.0,
@@ -57,8 +60,9 @@ class MonitorCurrentFFT(BaseSkill):
                     name="poll_hz",
                     type="float",
                     description=(
-                        "目标轮询速率，单位 Hz。真实 Nanonis V5e + Python TCP 大约在 1500–2000 Hz "
-                        "封顶；实际速率会写进结果的 `actual_fs_hz` 字段。"
+                        tr("目标轮询速率，单位 Hz。真实 Nanonis V5e + Python TCP 大约在 1500–2000 Hz "
+                        "封顶；实际速率会写进结果的 `actual_fs_hz` 字段。", "Target polling rate, in Hz. A real Nanonis V5e + Python TCP tops out at about 1500-2000 Hz; "
+"the actual rate is written to the `actual_fs_hz` field of the result.")
                     ),
                     unit="Hz", required=False, default=1000.0,
                     min_value=10.0, max_value=4000.0,
@@ -67,20 +71,20 @@ class MonitorCurrentFFT(BaseSkill):
                     name="window",
                     type="str",
                     description=(
-                        "FFT 之前施加的窗函数。'hann'（默认）、'hamming'、'rect'（不加窗）。"
+                        tr("FFT 之前施加的窗函数。'hann'（默认）、'hamming'、'rect'（不加窗）。", "Window function applied before the FFT. 'hann' (default), 'hamming', 'rect' (no window).")
                     ),
                     required=False, default="hann",
                 ),
                 ParameterSpec(
                     name="detrend",
                     type="bool",
-                    description="加窗前先减去缓冲区的均值。",
+                    description=tr("加窗前先减去缓冲区的均值。", "Subtract the buffer mean before windowing."),
                     required=False, default=True,
                 ),
                 ParameterSpec(
                     name="output",
                     type="str",
-                    description="'magnitude'（|FFT|）或 'power'（|FFT|² PSD）。",
+                    description=tr("'magnitude'（|FFT|）或 'power'（|FFT|² PSD）。", "'magnitude' (|FFT|) or 'power' (|FFT|² PSD)."),
                     required=False, default="magnitude",
                 ),
             ],

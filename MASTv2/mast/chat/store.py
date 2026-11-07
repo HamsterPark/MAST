@@ -215,7 +215,7 @@ class ConversationStore:
         inline PRAGMA-then-ALTER shape ``ExperimentStorage._migrate`` uses (that
         is how ``actions.sample_id`` was added).
 
-        ``sample_id``: a chat now hangs off the
+        ``sample_id`` (added 2026-07-27): a chat now hangs off the
         SAMPLE it was started on, so the operator sees the real hierarchy
         实验 → 若干样品 → 每个样品若干群聊. NULL on every pre-existing row and on
         any chat started with no sample active — those stay listable and render
@@ -287,12 +287,12 @@ class ConversationStore:
              include_archived: bool = False, limit: int = 200) -> list[dict]:
         """List conversations, newest first.
 
-        ``experiment_id`` / ``sample_id`` are OPT-IN drill-down filters .
+        ``experiment_id`` / ``sample_id`` are OPT-IN drill-down filters.
         They default to None = no filter, so the plain list still spans every
         experiment and sample — a chat is grouped by where it started, never
         confined to it. Pass the literal string ``"none"`` to select the
         UNASSIGNED bucket (rows whose column is NULL), which is what old
-        pre-#17 conversations land in."""
+        conversations (created before the tag existed) land in."""
         q = "SELECT * FROM conversations"
         clauses, params = [], []
         if kind is not None:
@@ -528,9 +528,8 @@ def _publish_transcript_append(conversation_id: str, seq: int, kind: str,
                                agent_id: str, role: str, t: float) -> None:
     """Tell the EventBus a transcript row landed, so other viewers can catch up.
 
-    「多个电脑上打开远程窗口时，对话不同步显示」. The transcript
-    was read once on mount and then only on an explicit 「刷新进展」 click, so a
-    second machine watching the same group chat simply never saw new messages.
+    The transcript was read once on mount and then only on an explicit
+    「刷新进展」 click, so a second machine watching the same group chat simply never saw new messages.
 
     Deliberately carries **no text** — only the cursor (conversation + seq) and
     enough shape to decide whether this viewer cares. A client that does gets the
@@ -561,7 +560,6 @@ def publish_private_turn_finished(conversation_id: str, agent_id: str) -> None:
     :meth:`ConversationStore.append_message` 上，而私聊的正文根本不走这张表 ——
     它落在 LangGraph 的 checkpointer 里（``/agents/{id}/messages`` 读的就是那里）。
     于是群聊转录有推送、私聊一条都没有，前端那一页只在**自己**发完消息之后才刷新。
-    「智能体代理对话不会自动刷新」。
 
     ``scope`` 刻意不是 ``"transcript"``：``RunTaskPanel`` 用
     ``d.scope !== "transcript"`` 做第一道过滤，借用那个值会让它把私聊回合

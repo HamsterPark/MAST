@@ -1,8 +1,23 @@
-"""AnalyzeFrameTilt：只读已保存的 .sxm，计算倾斜、台阶主导与表面起伏。
+"""AnalyzeFrameTilt —— 从一张已保存的 .sxm 量倾斜、台阶主导与表面起伏(只读)。
 
-为 AutoTilt 提供 surface_rms_m，并输出可用于目标仪器阈值验证的统计量。
-通用默认阈值不等于目标仪器标定。慢扫方向混入采集期间漂移，不能直接把帧的
-视在倾斜当成真实静态倾斜；需要两方向信息时使用独立的 TiltProbeCircle 测量。"""
+设计文档:``docs/v2/design/scan_intelligence_scripted_rfc.md`` §5.1-5.2
+
+``mast.vision.tilt`` 里的帧法判据(``estimate_tilt`` / ``assess_steps``)一直没有
+agent 可调的入口 —— 于是两件事做不了:
+
+1. **AutoTilt 的 ``surface_rms_m`` 没人能算**。那个参数是「斜坡有没有把形貌淹没」
+   这条触发判据的分母,也就是「扫出的图明显是倾斜的」。缺了它,AutoTilt
+   只剩下「吃掉多少 Z 量程」这一条安全判据,而后者在大多数机器上要很大的倾斜才
+   触发。
+2. **真机上的阈值重标定没有数据来源**。台阶主导比的 1.4 是在合成数据上定的;要知道
+   它在真表面上成不成立,得先能在真帧上把这个比值算出来。
+
+本技能只读文件、不碰硬件。
+
+**它给出的倾斜只有快扫方向可信** —— 一帧 512 线 × 2 s/线要扫半个多小时,慢扫轴上
+图像顶部与底部相隔那么久,期间的热漂移会原样表现为视在倾斜,与真实倾斜无法区分。
+要两个方向都可信,用 ``TiltProbeCircle``(恒流内接圆,几秒跑完)。
+"""
 
 from __future__ import annotations
 
@@ -17,6 +32,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -31,25 +47,31 @@ class AnalyzeFrameTilt(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "量出样品倾斜、台阶是不是主导了高度分布、以及表面自身的粗糙度 —— "
+                tr("量出样品倾斜、台阶是不是主导了高度分布、以及表面自身的粗糙度 —— "
                 "全都只从一份已保存的 .sxm 文件里读。只读,不碰硬件。"
                 "用它来拿到 AutoTilt 需要的 surface_rms_m(也就是「斜坡有没有把形貌"
                 "淹没」那条判据),以及在决定要不要调平之前先看看图是不是肉眼可见地"
                 "倾斜。**注意**:它报出来的倾斜**只有沿快扫轴那一个方向可信**:"
                 "慢扫轴横跨整帧的采集时长,那个方向上的热漂移与真实倾斜无法区分。"
-                "要两个方向都可信的倾斜测量,用 TiltProbeCircle。"
+                "要两个方向都可信的倾斜测量,用 TiltProbeCircle。", "Measure the sample tilt, whether steps dominate the height distribution, and the surface's own roughness -- "
+"all read only from a saved .sxm file. Read-only, never touches hardware. "
+"Use it to get the surface_rms_m that AutoTilt needs (the criterion for \"has the slope "
+"swamped the topography\"), and to check whether the image is visibly tilted before deciding to level. "
+"**Note**: the tilt it reports is **trustworthy only along the fast-scan axis**: "
+"the slow axis spans the acquisition time of the whole frame, and in that direction thermal drift cannot be told from real tilt. "
+"For a tilt measurement trustworthy in both directions, use TiltProbeCircle.")
             ),
             parameters=[
                 ParameterSpec(
                     name="scan_path",
                     type="str",
-                    description="要分析的 .sxm 文件路径。",
+                    description=tr("要分析的 .sxm 文件路径。", "Path of the .sxm file to analyse."),
                     required=True,
                 ),
                 ParameterSpec(
                     name="channel",
                     type="str",
-                    description="形貌通道('Z' 是标准选择)。",
+                    description=tr("形貌通道('Z' 是标准选择)。", "Topography channel ('Z' is the standard choice)."),
                     required=False,
                     default="Z",
                 ),
@@ -57,9 +79,11 @@ class AnalyzeFrameTilt(BaseSkill):
                     name="check_steps",
                     type="bool",
                     description=(
-                        "跑「台阶主导」这道否决闸。台阶主导的时候,倾斜拟合量到的"
+                        tr("跑「台阶主导」这道否决闸。台阶主导的时候,倾斜拟合量到的"
                         "是台阶包络而不是表面,所以倾斜会被报成**无效**,而不是给出"
-                        "一个数。只有在想看原始拟合结果时才关掉它。"
+                        "一个数。只有在想看原始拟合结果时才关掉它。", "Run the \"step-dominated\" veto gate. When steps dominate, the tilt fit measures "
+"the step envelope rather than the surface, so the tilt is reported as **invalid** instead of giving "
+"a number. Turn it off only when you want to see the raw fit result.")
                     ),
                     required=False,
                     default=True,
@@ -78,7 +102,7 @@ class AnalyzeFrameTilt(BaseSkill):
         if not Path(scan_path).exists():
             return SkillResult(
                 skill_name="AnalyzeFrameTilt", success=False,
-                error=f"文件不存在: {scan_path}")
+                error=tr(f"文件不存在: {scan_path}", f"File does not exist: {scan_path}"))
 
         try:
             import numpy as np
@@ -94,26 +118,26 @@ class AnalyzeFrameTilt(BaseSkill):
             )
         except ImportError as exc:
             return SkillResult(skill_name="AnalyzeFrameTilt", success=False,
-                               error=f"缺依赖: {exc}")
+                               error=tr(f"缺依赖: {exc}", f"Missing dependency: {exc}"))
 
         try:
             scan = read_sxm(scan_path)
         except Exception as exc:  # noqa: BLE001
             return SkillResult(skill_name="AnalyzeFrameTilt", success=False,
-                               error=f".sxm 读取失败: {exc}")
+                               error=tr(f".sxm 读取失败: {exc}", f"Failed to read .sxm: {exc}"))
 
         channels = scan.get("channels", {}) or {}
         ch = channels.get(channel_name) or next(iter(channels.values()), None)
         if ch is None:
             return SkillResult(
                 skill_name="AnalyzeFrameTilt", success=False,
-                error=f"文件里没有可用通道(要的是 {channel_name!r})")
+                error=tr(f"文件里没有可用通道(要的是 {channel_name!r})", f"No usable channel in the file (wanted {channel_name!r})"))
         img = ch.get("forward")
         if img is None:
             img = ch.get("backward")
         if img is None:
             return SkillResult(skill_name="AnalyzeFrameTilt", success=False,
-                               error="通道里没有正扫/反扫数据")
+                               error=tr("通道里没有正扫/反扫数据", "No forward/backward scan data in the channel"))
 
         arr = np.asarray(img, dtype=np.float64)
 
@@ -125,8 +149,9 @@ class AnalyzeFrameTilt(BaseSkill):
         if not meta:
             return SkillResult(
                 skill_name="AnalyzeFrameTilt", success=False,
-                error=("从 .sxm 头里解析不出扫描几何(offset/range)—— 没有物理尺寸"
-                       "就换算不出角度,拒绝给出无意义的数字"),
+                error=(tr("从 .sxm 头里解析不出扫描几何(offset/range)—— 没有物理尺寸"
+                       "就换算不出角度,拒绝给出无意义的数字", "Cannot parse the scan geometry (offset/range) from the .sxm header -- without a physical size "
+"the angle cannot be computed, and a meaningless number is refused")),
                 data={"scan_path": scan_path})
 
         width_m, height_m = float(meta["w"]), float(meta["h"])
@@ -185,15 +210,20 @@ class AnalyzeFrameTilt(BaseSkill):
 
         if est.valid:
             summary = (
-                f"倾斜 {est.slope_mag_deg:.4f}°(快扫轴 {est.tilt_fast_deg:+.4f}°,"
+                tr(f"倾斜 {est.slope_mag_deg:.4f}°(快扫轴 {est.tilt_fast_deg:+.4f}°,"
                 f"慢扫轴 {est.tilt_slow_deg:+.4f}° ← 混漂移不可信);"
                 f"帧内吃掉 Z {est.z_span_m * 1e9:.2f} nm;"
-                f"表面起伏 {surface_rms * 1e12:.1f} pm")
+                f"表面起伏 {surface_rms * 1e12:.1f} pm", f"Tilt {est.slope_mag_deg:.4f}° (fast axis {est.tilt_fast_deg:+.4f}°, "
+f"slow axis {est.tilt_slow_deg:+.4f}° <- mixed with drift, not trustworthy); "
+f"Z consumed within the frame {est.z_span_m * 1e9:.2f} nm; "
+f"surface corrugation {surface_rms * 1e12:.1f} pm"))
         else:
             summary = (
-                f"倾斜无法测定({est.invalid_reason});"
+                tr(f"倾斜无法测定({est.invalid_reason});"
                 f"表面起伏 {surface_rms * 1e12:.1f} pm,"
-                f"台阶主导比 {ratio_max:.2f}")
+                f"台阶主导比 {ratio_max:.2f}", f"Tilt cannot be determined ({est.invalid_reason}); "
+f"surface corrugation {surface_rms * 1e12:.1f} pm, "
+f"step-dominance ratio {ratio_max:.2f}"))
 
         return SkillResult(skill_name="AnalyzeFrameTilt", success=True,
                            data=data, summary=summary)

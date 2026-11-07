@@ -1,17 +1,20 @@
-// 右栏的日常切换器 —— 「回去做那个」= 一次点击。
+// Everyday experiment/sample switcher for the right panel: returning to an
+// earlier experiment or sample is a single click.
 //
-// 取代旧的 ExperimentControls（自由文本输入 + New/End 按钮）。两处关键改动：
+//  * There is no "End" action. Neither experiments nor samples are ever closed or
+//    archived; an experiment may be resumed years later. The one real use case
+//    left is "the sample was physically removed and no new one is mounted yet",
+//    which is clear-sample (deselect) and writes no field on the sample row.
+//  * There is no free-text input + New button. That was the create-always source of
+//    duplicate experiments; creation goes through a confirm dialog that checks for
+//    existing names.
 //
-//  * **删掉 End 按钮**。实验和样品都没有「结束」这个动作 ——「没必要做归档。
-//    有的实验可能过了十年重启。」剩下的唯一真实用例是「样品被物理取下、还没
-//    装新的」，那是 clear-sample（取消选中），它不写样品行任何字段。
-//  * **删掉自由文本 + New**。那正是 create-always 的源头：库里 5 条同名实验
-//    相隔 2 分钟就是这么来的。新建改走带重名检测的确认弹窗。
-//
-// 不新增顶级 tab：一个必须随处可达的东西不该是第 15 个 tab。
+// No new top-level tab: something that must be reachable everywhere should not be
+// yet another tab.
 
 import { useState } from "react";
 import { Button } from "../controls";
+import { tr } from "@/lib/i18n";
 import { useClearSample, useCurrentScope, useSwitchExperiment, useSwitchSample } from "@/api/scope";
 import { NewExperimentDialog, NewSampleDialog } from "./NewScopeDialogs";
 import { ExperimentPicker, SamplePicker } from "./ScopePickers";
@@ -41,11 +44,11 @@ export function ScopeControls() {
     setExpPicker(false);
     try {
       const r = await switchExp.mutateAsync({ experimentId: id });
-      // 失败必须说出来。一个点了没反应的切换按钮读起来就是「坏了」。
-      if (!r.ok) flash(r.block_reason || "切换未生效");
-      else if (r.changed) flash(`已切换到「${name}」`);
+      // Failures must be reported; a switch button that does nothing reads as broken.
+      if (!r.ok) flash(r.block_reason || tr("切换未生效", "Switch had no effect"));
+      else if (r.changed) flash(tr(`已切换到「${name}」`, `Switched to "${name}"`));
     } catch {
-      flash("切换未送达——网络或后端不可达，请重试");
+      flash(tr("切换未送达——网络或后端不可达，请重试", "Switch was not delivered: network or backend unreachable. Please retry."));
     }
   }
 
@@ -54,10 +57,10 @@ export function ScopeControls() {
     if (!exp) return;
     try {
       const r = await switchSmp.mutateAsync({ experimentId: exp.id, sampleId: id });
-      if (!r.ok) flash(r.block_reason || "切换未生效");
-      else if (r.changed) flash(`已切换到样品「${name}」`);
+      if (!r.ok) flash(r.block_reason || tr("切换未生效", "Switch had no effect"));
+      else if (r.changed) flash(tr(`已切换到样品「${name}」`, `Switched to sample "${name}"`));
     } catch {
-      flash("切换未送达——请重试");
+      flash(tr("切换未送达——请重试", "Switch was not delivered. Please retry."));
     }
   }
 
@@ -67,9 +70,9 @@ export function ScopeControls() {
         className="flex w-full items-center justify-between gap-2 rounded-mast-ctl border border-mast-border-strong bg-mast-panel px-2.5 py-1.5 text-left text-xs hover:bg-mast-panel-2"
         onClick={() => setExpPicker(true)}
       >
-        <span className="text-mast-muted">实验</span>
+        <span className="text-mast-muted">{tr("实验", "Experiment")}</span>
         <span className="min-w-0 flex-1 truncate text-right text-mast-text">
-          {exp?.name || "未选择"}
+          {exp?.name || tr("未选择", "None selected")}
         </span>
         <span className="text-mast-faint">▾</span>
       </button>
@@ -79,32 +82,35 @@ export function ScopeControls() {
         onClick={() => setSmpPicker(true)}
         disabled={!exp}
       >
-        <span className="text-mast-muted">└ 样品</span>
+        <span className="text-mast-muted">{tr("└ 样品", "└ Sample")}</span>
         <span
           className={
             "min-w-0 flex-1 truncate text-right " +
             (smp ? "text-mast-text" : "text-mast-danger")
           }
         >
-          {smp?.name || "未选择"}
+          {smp?.name || tr("未选择", "None selected")}
         </span>
         <span className="text-mast-faint">▾</span>
       </button>
 
       {smp && (
         <Button variant="ghost" onClick={() => clearSmp.mutate()}>
-          取消选中样品（物理出样时用）
+          {tr("取消选中样品（物理出样时用）", "Deselect sample (use when the sample is physically removed)")}
         </Button>
       )}
 
       <div className="text-[10.5px] leading-snug text-mast-faint">
-        实验和样品都可以来回切换，切换不会结束任何东西。新开的对话/群聊会记在当前样品下
-        —— 在 实验记录 → 群聊记录 按 实验 → 样品 → 群聊 查看。
+        {tr(
+          "实验和样品都可以来回切换，切换不会结束任何东西。新开的对话/群聊会记在当前样品下 —— 在 实验记录 → 群聊记录 按 实验 → 样品 → 群聊 查看。",
+          "Experiments and samples can be switched back and forth; switching ends nothing. New conversations and group chats are recorded under the current sample.",
+        )}
       </div>
       {msg && <div className="text-[11px] text-mast-muted">{msg}</div>}
 
-      {/* 针尖是仪器级的 —— 与实验/样品并列而不是它们的下级。放在这里是因为
-          用户的动线一致（都是「现在在做什么」），但它跨实验存活。 */}
+      {/* The tip is instrument-level: a sibling of experiment/sample, not a child.
+          It sits here because it belongs to the same "what am I working on now"
+          flow, but it persists across experiments. */}
       <div className="border-t border-mast-border pt-2">
         <TipControls />
       </div>
@@ -147,7 +153,7 @@ export function ScopeControls() {
   );
 }
 
-/** 无样品时的常驻横幅。只告知，不困住 —— 对话和查询完全不受影响。 */
+/** Persistent banner shown when no sample is selected. Informational only; conversations and queries are unaffected. */
 export function NoSampleBanner() {
   const scope = useCurrentScope();
   const [dismissed, setDismissed] = useState(false);
@@ -166,7 +172,7 @@ export function NoSampleBanner() {
       <button
         className="text-mast-faint hover:text-mast-text"
         onClick={() => setDismissed(true)}
-        aria-label="关闭提示"
+        aria-label={tr("关闭提示", "Dismiss hint")}
       >
         ✕
       </button>

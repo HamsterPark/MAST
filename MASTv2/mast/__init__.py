@@ -32,5 +32,5 @@ try:
     from mast._buildinfo import VERSION as __version__
     from mast._buildinfo import RELEASED_AT as __release_date__
 except ImportError:
-    __version__ = "6.5.0"
+    __version__ = "7.1.6"
     __release_date__ = ""

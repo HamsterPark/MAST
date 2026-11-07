@@ -21,7 +21,7 @@ if str(_ROOT) not in sys.path:
 from mast.vision.force_inversion import (forward_df, invert_force_curve,  # noqa: E402
                                          sader_jarvis)
 
-F0, K = 25296.2, 1800.0
+F0, K = 25000.0, 1800.0
 #: a Morse well of the depth and range a metal adatom has, in SI
 D_E_J, A_PER_M, Z_E_M = 150e-3 * 1.602176634e-19, 14e9, 0.30e-9
 HAMAKER_J, Z0_M, TIP_R_M = 2.0e-19, 0.3e-9, 2.0e-9

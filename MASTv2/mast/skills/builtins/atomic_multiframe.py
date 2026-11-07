@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -46,26 +47,26 @@ def _load_one(path: str, channel: str):
     from pathlib import Path
 
     if not Path(path).exists():
-        return None, None, None, None, None, f"文件不存在: {path}"
+        return None, None, None, None, None, tr(f"文件不存在: {path}", f"File does not exist: {path}")
     try:
         import numpy as np
 
         from mast.io.nanonis_files import read_sxm, sxm_oriented_frames
     except ImportError as exc:  # noqa: BLE001
-        return None, None, None, None, None, f"缺依赖: {exc}"
+        return None, None, None, None, None, tr(f"缺依赖: {exc}", f"Missing dependency: {exc}")
     try:
         scan = read_sxm(path)
     except Exception as exc:  # noqa: BLE001
-        return None, None, None, None, None, f".sxm 读取失败: {exc}"
+        return None, None, None, None, None, tr(f".sxm 读取失败: {exc}", f".sxm read failed: {exc}")
 
     fr = sxm_oriented_frames(scan, channel)
     img = fr.get("forward")
     if img is None:
-        return None, None, None, None, None, f"没有通道 {channel!r} 的正扫数据"
+        return None, None, None, None, None, tr(f"没有通道 {channel!r} 的正扫数据", f"No forward-scan data for channel {channel!r}")
     img = np.asarray(img, dtype=np.float64)
     nmpp = fr.get("nm_per_px")
     if not nmpp:
-        return None, None, None, None, None, "文件头里没有像素标度"
+        return None, None, None, None, None, tr("文件头里没有像素标度", "The file header has no pixel scale")
 
     header = scan.get("header") or {}
     ang = header.get("scan_angle")
@@ -74,7 +75,7 @@ def _load_one(path: str, channel: str):
     except Exception:  # noqa: BLE001
         angle = None
     if angle is None:
-        return None, None, None, None, None, "文件头里没有 scan_angle"
+        return None, None, None, None, None, tr("文件头里没有 scan_angle", "The file header has no scan_angle")
 
     # scan_time 存的是「每行每方向」的时间，一行往返是它的两倍 —— 慢轴推进
     # 一行所花的正是往返时间，漂移换算要用后者。
@@ -101,14 +102,15 @@ class AssessAtomicConsistency(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "跨帧判断原子晶格是否真实：真晶格重现同一组格矢，针尖抖动不重现。"
-                "单帧的角向集中度排除不掉「这一帧恰好抖出了周期」。"
+                tr("跨帧判断原子晶格是否真实：真晶格重现同一组格矢，针尖抖动不重现。"
+                "单帧的角向集中度排除不掉「这一帧恰好抖出了周期」。",
+                "Cross-frame check of whether the atomic lattice is real: a true lattice reproduces the same set of lattice vectors, tip jitter does not. The angular concentration of a single frame cannot rule out 'this frame happened to jitter into a period'.")
             ),
             parameters=[
                 ParameterSpec(name="scan_paths", type="str", required=True,
-                              description="多个 .sxm 路径，逗号分隔（至少两个）"),
+                              description=tr("多个 .sxm 路径，逗号分隔（至少两个）", "Multiple .sxm paths, comma-separated (at least two)")),
                 ParameterSpec(name="channel", type="str", required=False,
-                              default="Z", description="形貌通道"),
+                              default="Z", description=tr("形貌通道", "Topography channel")),
             ],
             estimated_duration_s=6.0,
             tags=["atomic", "lattice", "multiframe", "analysis"],
@@ -122,8 +124,9 @@ class AssessAtomicConsistency(BaseSkill):
         if len(paths) < 2:
             return SkillResult(
                 skill_name=self.metadata().name, success=False,
-                error="至少要两帧。单帧请用 AssessAtomicResolution —— "
-                      "它给的是「这一帧像不像晶格」，不是「这个晶格是不是真的」。")
+                error=tr("至少要两帧。单帧请用 AssessAtomicResolution —— "
+                      "它给的是「这一帧像不像晶格」，不是「这个晶格是不是真的」。",
+                      "At least two frames are needed. For a single frame use AssessAtomicResolution - it answers 'does this frame look like a lattice', not 'is this lattice real'."))
 
         imgs, angles, bad, nmpp = [], [], [], None
         for p in paths:
@@ -135,7 +138,7 @@ class AssessAtomicConsistency(BaseSkill):
                 nmpp = mpp
             elif abs(mpp - nmpp) / max(nmpp, 1e-12) > 0.02:
                 bad.append({"path": p,
-                            "error": "像素标度与第一帧差 %.1f%%，不是同一种取图"
+                            "error": tr("像素标度与第一帧差 %.1f%%，不是同一种取图", "Pixel scale differs from the first frame by %.1f%%; not the same kind of acquisition")
                                      % (abs(mpp - nmpp) / nmpp * 100)})
                 continue
             imgs.append(img)
@@ -144,7 +147,7 @@ class AssessAtomicConsistency(BaseSkill):
         if len(imgs) < 2:
             return SkillResult(
                 skill_name=self.metadata().name, success=False,
-                error="能用的帧不足两张", data={"rejected": bad})
+                error=tr("能用的帧不足两张", "Fewer than two usable frames"), data={"rejected": bad})
 
         r = assess_atomic_consistency(imgs, nmpp, angles_deg=angles)
         return SkillResult(
@@ -175,18 +178,20 @@ class CalibratePiezoMultiAngle(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "多扫描角原子分辨帧 → 压电 x/y 尺度与非正交，且与热漂移分离。"
-                "单帧版给不出这个分离（剪切归属未定），这是它存在的唯一理由。"
+                tr("多扫描角原子分辨帧 → 压电 x/y 尺度与非正交，且与热漂移分离。"
+                "单帧版给不出这个分离（剪切归属未定），这是它存在的唯一理由。",
+                "Multiple scan-angle atomically resolved frames -> piezo x/y scale and non-orthogonality, separated from thermal drift. The single-frame version cannot give this separation (shear attribution undetermined); that is its only reason to exist.")
             ),
             parameters=[
                 ParameterSpec(name="scan_paths", type="str", required=True,
-                              description="多个 .sxm 路径，逗号分隔。扫描角从文件头读，"
-                                          "不用填；角度要张开 ≥15°"),
+                              description=tr("多个 .sxm 路径，逗号分隔。扫描角从文件头读，"
+                                          "不用填；角度要张开 ≥15°",
+                                          "Multiple .sxm paths, comma-separated. The scan angle is read from the file header, no need to fill it in; the angles must spread by >=15 deg")),
                 ParameterSpec(name="channel", type="str", required=False,
-                              default="Z", description="形貌通道"),
+                              default="Z", description=tr("形貌通道", "Topography channel")),
                 ParameterSpec(name="surface", type="str", required=False,
                               default="Au(111)",
-                              description="表面（决定理论晶格常数）"),
+                              description=tr("表面（决定理论晶格常数）", "Surface (determines the theoretical lattice constant)")),
             ],
             estimated_duration_s=10.0,
             tags=["piezo", "calibration", "lattice", "multiframe"],
@@ -205,8 +210,9 @@ class CalibratePiezoMultiAngle(BaseSkill):
         if len(paths) < 2:
             return SkillResult(
                 skill_name=name, success=False,
-                error="至少要两个扫描角。单帧请用 CalibratePiezoFromLattice，"
-                      "但它报出的剪切**归属未定**（压电还是漂移分不开）。")
+                error=tr("至少要两个扫描角。单帧请用 CalibratePiezoFromLattice，"
+                      "但它报出的剪切**归属未定**（压电还是漂移分不开）。",
+                      "At least two scan angles are needed. For a single frame use CalibratePiezoFromLattice, but the shear it reports is **of undetermined origin** (piezo and drift cannot be told apart)."))
 
         obs, bad, line_t, width_nm = [], [], 0.0, 0.0
         for p in paths:
@@ -216,7 +222,7 @@ class CalibratePiezoMultiAngle(BaseSkill):
                 continue
             o = collect_observation(img, mpp, ang, label=p, line_time_s=lt or 0.0)
             if o is None:
-                bad.append({"path": p, "error": "这一帧上量不到晶格"})
+                bad.append({"path": p, "error": tr("这一帧上量不到晶格", "No lattice could be measured on this frame")})
                 continue
             obs.append(o)
             if lt:
@@ -227,7 +233,7 @@ class CalibratePiezoMultiAngle(BaseSkill):
         if len(obs) < 2:
             return SkillResult(
                 skill_name=name, success=False,
-                error="能用的帧不足两张（量到晶格的才算）",
+                error=tr("能用的帧不足两张（量到晶格的才算）", "Fewer than two usable frames (only frames where a lattice was measured count)"),
                 data={"rejected": bad, "n_ok": len(obs)})
 
         r = calibrate_multi_angle(obs, surface,
@@ -254,9 +260,10 @@ class CalibratePiezoMultiAngle(BaseSkill):
                 "drift_direction_deg": r.drift_direction_deg,
                 "detail": r.detail,
                 "suggestion": (
-                    "把 X / Y 压电灵敏度分别乘以 x_scale / y_scale。"
+                    tr("把 X / Y 压电灵敏度分别乘以 x_scale / y_scale。"
                     "**这个 skill 不写仪器** —— 改灵敏度要人来决定，"
-                    "而且改之前请确认这批帧确实是同一块区域、同一根针尖。"),
+                    "而且改之前请确认这批帧确实是同一块区域、同一根针尖。",
+                    "Multiply the X / Y piezo sensitivity by x_scale / y_scale respectively. **This skill does not write to the instrument** - changing the sensitivity is a human decision, and before changing it make sure these frames really cover the same area with the same tip.")),
             })
         # ok=False 也返回 success=True：解不出来是一个**结论**（角度不够张开、
         # 帧上没有晶格），不是这次调用失败。把它当失败会让上层重试，而重试

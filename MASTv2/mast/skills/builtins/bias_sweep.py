@@ -19,6 +19,7 @@ Three small gaps, closed together because none of them is worth a file:
 
 from __future__ import annotations
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -50,53 +51,55 @@ class RunBiasSweep(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "运行 Nanonis 的 BIAS SWEEPER：把偏压在两个限值之间 ramp，并"
+                tr("运行 Nanonis 的 BIAS SWEEPER：把偏压在两个限值之间 ramp，并"
                 "记录采集通道。它**不是** bias spectroscopy"
                 "（BiasSpectr / RunSTS）—— sweeper 只管 ramp 和记录，没有 "
                 "spectroscopy 模块的那套 Z-control 时序。用它做定高的 I–V，"
                 "或者在 lock-in 盯着时做一次偏压 ramp。\n\n"
                 "针尖留在原地不动。挑限值时要像用 SetBias 那样谨慎 —— "
-                "一次停在 5 V 的 sweep，会把偏压就留在 5 V。"
+                "一次停在 5 V 的 sweep，会把偏压就留在 5 V。",
+                "Run the Nanonis BIAS SWEEPER: ramp the bias between two limits and record the acquisition channels. It is **not** bias spectroscopy (BiasSpectr / RunSTS) - the sweeper only handles the ramp and recording, and has none of the Z-control timing of the spectroscopy module. Use it for a constant-height I-V, or for a bias ramp while a lock-in is watching.\n\nThe tip stays where it is. Choose the limits as carefully as with SetBias - a sweep that ends at 5 V leaves the bias at 5 V.")
             ),
             parameters=[
                 ParameterSpec(
                     name="lower_limit_v", type="float",
-                    description="sweep 的偏压下限（V）",
+                    description=tr("sweep 的偏压下限（V）", "Lower bias limit of the sweep (V)"),
                     unit="V", required=True, min_value=-10.0, max_value=10.0,
                 ),
                 ParameterSpec(
                     name="upper_limit_v", type="float",
-                    description="sweep 的偏压上限（V）",
+                    description=tr("sweep 的偏压上限（V）", "Upper bias limit of the sweep (V)"),
                     unit="V", required=True, min_value=-10.0, max_value=10.0,
                 ),
                 ParameterSpec(
                     name="steps", type="int",
-                    description="sweep 的点数",
+                    description=tr("sweep 的点数", "Number of points in the sweep"),
                     required=False, default=256, min_value=2, max_value=65535,
                 ),
                 ParameterSpec(
                     name="period_ms", type="int",
-                    description="每个点的耗时（ms）",
+                    description=tr("每个点的耗时（ms）", "Time per point (ms)"),
                     unit="ms", required=False, default=10,
                     min_value=1, max_value=65535,
                 ),
                 ParameterSpec(
                     name="z_controller_off", type="bool",
                     description=(
-                        "sweep 期间断开 Z feedback 环路。做定高 I–V 时通常选 "
+                        tr("sweep 期间断开 Z feedback 环路。做定高 I–V 时通常选 "
                         "True；选 False 则偏压变动时 feedback 会一直追着 "
-                        "setpoint 走。"
+                        "setpoint 走。",
+                        "Open the Z feedback loop during the sweep. Usually True for a constant-height I-V; with False the feedback keeps chasing the setpoint as the bias changes.")
                     ),
                     required=False, default=True,
                 ),
                 ParameterSpec(
                     name="sweep_direction", type="int",
-                    description="1 = 下限→上限，0 = 上限→下限",
+                    description=tr("1 = 下限→上限，0 = 上限→下限", "1 = lower limit -> upper limit, 0 = upper limit -> lower limit"),
                     required=False, default=1, min_value=0, max_value=1,
                 ),
                 ParameterSpec(
                     name="autosave", type="bool",
-                    description="把这次 sweep 存成文件，落在 Nanonis 那台机器上",
+                    description=tr("把这次 sweep 存成文件，落在 Nanonis 那台机器上", "Save this sweep to a file, on the Nanonis machine"),
                     required=False, default=True,
                 ),
             ],
@@ -159,15 +162,16 @@ class GetSignalCalibration(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读取某路信号的标定（gain + offset）—— 也就是原始值的一个单位"
+                tr("读取某路信号的标定（gain + offset）—— 也就是原始值的一个单位"
                 "对应多少物理量。MAST 一直能列出信号、也能读到它们的值，却说不出"
                 "这些数字**到底是什么意思**。在解读一条不是你配置的原始通道之前，"
-                "先用它。"
+                "先用它。",
+                "Read the calibration of a signal (gain + offset), that is, what physical quantity one unit of the raw value corresponds to. MAST could always list signals and read their values, but could not say **what those numbers actually mean**. Use this before interpreting a raw channel you did not configure yourself.")
             ),
             parameters=[
                 ParameterSpec(
                     name="signal_index", type="int",
-                    description="信号索引（0..127）—— 见 ListSignalNames",
+                    description=tr("信号索引（0..127）—— 见 ListSignalNames", "Signal index (0..127) - see ListSignalNames"),
                     required=True, min_value=0, max_value=127,
                 ),
             ],
@@ -201,19 +205,20 @@ class SetAdditionalRealtimeSignals(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "选择 Nanonis 额外计算并输出的那**两路**实时信号"
+                tr("选择 Nanonis 额外计算并输出的那**两路**实时信号"
                 "（在固定的那几路之外）。它只是配置 —— 改变的是测什么，"
-                "绝不改变仪器做什么。"
+                "绝不改变仪器做什么。",
+                "Select the **two** extra real-time signals that Nanonis computes and outputs (beyond the fixed ones). It is configuration only - it changes what is measured, never what the instrument does.")
             ),
             parameters=[
                 ParameterSpec(
                     name="signal_1", type="int",
-                    description="第一路额外 RT 信号的索引",
+                    description=tr("第一路额外 RT 信号的索引", "Index of the first extra RT signal"),
                     required=True, min_value=0, max_value=127,
                 ),
                 ParameterSpec(
                     name="signal_2", type="int",
-                    description="第二路额外 RT 信号的索引",
+                    description=tr("第二路额外 RT 信号的索引", "Index of the second extra RT signal"),
                     required=True, min_value=0, max_value=127,
                 ),
             ],
@@ -243,14 +248,15 @@ class SetAcquisitionPeriod(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "设置 Nanonis 的采集周期（控制器的采样间隔）。MAST 以前只能"
+                tr("设置 Nanonis 的采集周期（控制器的采样间隔）。MAST 以前只能"
                 "**读**它（GetAcqPeriod），设不了。调小它采样更快、也更吃带宽；"
-                "它影响控制器做的**每一次**测量，所以要有意识地改。"
+                "它影响控制器做的**每一次**测量，所以要有意识地改。",
+                "Set the Nanonis acquisition period (the controller's sampling interval). MAST could previously only **read** it (GetAcqPeriod), not set it. A smaller value samples faster and uses more bandwidth; it affects **every** measurement the controller makes, so change it deliberately.")
             ),
             parameters=[
                 ParameterSpec(
                     name="period_s", type="float",
-                    description="采集周期，单位秒",
+                    description=tr("采集周期，单位秒", "Acquisition period, in seconds"),
                     unit="s", required=True, min_value=1e-6, max_value=1.0,
                 ),
             ],

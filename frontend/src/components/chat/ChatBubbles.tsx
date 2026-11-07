@@ -5,30 +5,29 @@ import { useStickToBottom } from "@/hooks/useStickToBottom";
 import { InjectedContext } from "@/components/chat/InjectedContext";
 import { fmtClock } from "@/lib/narration";
 import { userTurnTimes } from "@/lib/injectedContext";
+import { tr } from "@/lib/i18n";
 
 /** Rendered chat history. Backend `content` is PRE-RENDERED, SANITIZED HTML
  *  (markdown → HTML, thinking wrapped in <details>; see mast.chat.render +
  *  chat.py _esc_llm). We therefore render it with dangerouslySetInnerHTML inside
  *  a styled wrapper — never re-escape, never re-parse. */
 
-/** `t` = 这条消息发生的 epoch 秒，由后端 `MessageClockMiddleware` 盖上。
+/** `t` is the epoch second at which the message was produced, stamped by the
+ *  backend `MessageClockMiddleware`.
  *
- *  **可选，而且它的缺席有意义**：没有 `t` 表示「不知道它是什么时候说的」
- *  （重启前就在 checkpoint 里的历史），不表示「零时刻」。所以这里不给默认值，
- *  渲染时 `fmtClock` 对无效值返回空串——**绝不显示 1970**。
- *  Assistant messages carry a timestamp too, for the same reason.
+ *  Optional on purpose: a missing `t` means "unknown" (history that was already in
+ *  the checkpoint before a restart), not "time zero". No default is supplied and
+ *  `fmtClock` returns an empty string for invalid values, so 1970 is never shown.
  *
- *  `null` 必须写进类型里：后端 `ChatMessage.t` 是 `float | None`，FastAPI 会把
- *  它序列化成 **`"t": null`**（不是省略这个键）。只写 `number | undefined` 时
- *  `tsc` 当场报 TS2322——那是类型在说实话，不是碍事：运行时 `fmtClock` 早就
- *  认得 null，而类型不认，两者一旦分家，下一个人会照类型写出一个错的判据。 */
+ *  `null` must be part of the type: the backend `ChatMessage.t` is `float | None`
+ *  and FastAPI serialises it as `"t": null` rather than omitting the key. */
 export type ChatMsg = { role: string; content: string; t?: number | null };
 
 const ROLE_LABEL: Record<string, string> = {
-  user: "你",
-  assistant: "助手",
-  system: "系统",
-  tool: "工具",
+  user: tr("你", "You"),
+  assistant: tr("助手", "Assistant"),
+  system: tr("系统", "System"),
+  tool: tr("工具", "Tool"),
 };
 
 // Tailwind arbitrary-variant restyle of the pre-rendered HTML body. We cannot
@@ -64,7 +63,7 @@ function AgentChip({ agentId }: { agentId: string }) {
       <span className={clsx("inline-flex items-center", agentClasses(agentId).text)}>
         <AgentIcon id={agentId} size={12} />
       </span>
-      <span className="text-[11.5px] font-medium text-mast-text">{a.cn} 助手</span>
+      <span className="text-[11.5px] font-medium text-mast-text">{tr(`${a.cn} 助手`, `${a.cn} assistant`)}</span>
     </span>
   );
 }
@@ -76,13 +75,13 @@ function Bubble({
 }: {
   msg: ChatMsg;
   agentId: string;
-  /** 整份转录里每一轮的起点（升序）。见 `lib/injectedContext.ts::userTurnTimes`。 */
+  /** Start time of every turn in the whole transcript (ascending). See `lib/injectedContext.ts::userTurnTimes`. */
   turnTimes: number[];
 }) {
   const isUser = msg.role === "user";
-  // 取不到就整个不渲染。带时间的用处不是计时，是**让顺序可核**：旁白和消息
-  // 现在共用一根时间轴，一条排在前面却时间更晚的条目会当场露出来——在此之前
-  // 那种错只能靠一句「感觉有点乱」被发现。
+  // Not rendered when unavailable. The timestamp makes the ordering checkable:
+  // narration and messages share one timeline, so an entry placed earlier but
+  // timestamped later is immediately visible.
   const clock = fmtClock(msg.t);
 
   // USER → accent-aligned (right), accent-soft fill — unchanged identity.
@@ -101,9 +100,10 @@ function Bubble({
               dangerouslySetInnerHTML={{ __html: msg.content }}
             />
           </div>
-          {/* 「我这句话发出去之后，系统往模型那儿塞了什么」。折叠着不发任何请求。
-              挂在**用户**气泡下而不是助手气泡下：注入发生在这句话之后、
-              回答之前，而用户当场要问的就是「它是带着什么去想的」。 */}
+          {/* What the system injected into the model after this message was sent.
+              Collapsed by default and issues no request while collapsed. Attached to
+              the user bubble because the injection happens after the message and
+              before the answer. */}
           <InjectedContext t={msg.t} turnTimes={turnTimes} agentId={agentId} />
         </div>
       </div>
@@ -169,29 +169,27 @@ export function ChatBubbles({
    */
   autoScroll?: boolean;
   /**
-   * **整份**转录（`messages` 可能只是其中一段）。只用来算「每一轮从哪儿开始」，
-   * 给注入上下文那个折叠块定右边界。
+   * The WHOLE transcript (`messages` may be only one segment of it). Used only to
+   * compute where each turn starts, which bounds the injected-context block.
    *
-   * 必须是整份：`NarrationLane` 按旁白卡片把消息切成好几段分别丢进来，一段里的
-   * 最后一条用户消息在整份转录里后面往往还有。只看这一段 → 那一条的时间窗开到
-   * 无穷大 → 它会把后面所有轮的请求都算成自己这一轮的。
+   * It must be the whole transcript: `NarrationLane` splits messages into several
+   * segments at narration cards, and the last user message of a segment usually has
+   * later turns in the full transcript. Looking at one segment alone would leave that
+   * message's time window open-ended and attribute all later requests to it.
    *
-   * 不传就退回 `messages`（未分段的调用方，行为不变）。
+   * Falls back to `messages` when omitted (unsegmented callers).
    */
   allMessages?: ChatMsg[];
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   const turnTimes = userTurnTimes(allMessages ?? messages);
 
-  // ⚠️ 这里原来是无条件 `endRef.scrollIntoView({behavior:"smooth"})`。
-  //
-  // 已知问题:对话的滚动条和整个标签的滚动条都会自动锁定,
-  // 想向下翻查看历史都不行,会自动被拉回,两个滚动条都是这样。两个毛病:
-  //
-  //   ① 不问用户在看哪儿 —— 往上翻历史,下一条消息就把他弹回底部;
-  //   ② `scrollIntoView` 会滚**每一个可滚动祖先** —— 所以是「两个」滚动条。
-  //
-  // 换成只在用户本来就贴着底部时,滚**最近的那一个**容器。
+  // An unconditional `scrollIntoView({behavior:"smooth"})` had two problems:
+  //   1. it ignores where the user is looking, so scrolling up through history gets
+  //      undone by the next message;
+  //   2. it scrolls EVERY scrollable ancestor, so both the chat and the page scroll.
+  // Instead, scroll only the nearest container, and only when the user is already
+  // at the bottom.
   useStickToBottom(endRef, [messages, pending], autoScroll);
 
   const cls = agentClasses(agentId);
@@ -214,7 +212,7 @@ export function ChatBubbles({
               <span className={clsx("inline-flex", cls.text)}>
                 <AgentIcon id={agentId} size={13} />
               </span>
-              {agentDef(agentId).cn}思考中…
+              {tr(`${agentDef(agentId).cn}思考中…`, `${agentDef(agentId).cn} is thinking…`)}
             </span>
           </div>
         </div>

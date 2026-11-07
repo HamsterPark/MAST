@@ -188,6 +188,26 @@ class DreamingService:
             self._thread.join(timeout=2.0)
             self._thread = None
 
+    def run_cycle(self) -> bool:
+        """One scheduled cycle: dream iff the injected predicate allows it.
+
+        Returns whether :meth:`dream_once` ran. The predicate is asked FIRST, so a
+        vetoed cycle does no work at all — no experiment-DB read, no consolidator
+        (model) call, no memory write. A predicate that raises is a veto. The
+        runtime wires the predicate to ``legacy_features_enabled`` (DEFAULT OFF)
+        AND "orchestrator idle"; :meth:`dream_once` itself stays ungated for the
+        on-demand path.
+        """
+        try:
+            allowed = bool(self._should_dream())
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("dream predicate failed, skipping cycle: %s", exc)
+            return False
+        if not allowed:
+            return False
+        self.dream_once()
+        return True
+
     def _loop(self) -> None:
         # initial settle before the first dream
         slept = 0.0
@@ -197,8 +217,7 @@ class DreamingService:
             if slept >= self._interval:
                 slept = 0.0
                 try:
-                    if self._should_dream():
-                        self.dream_once()
+                    self.run_cycle()
                 except Exception as exc:  # pragma: no cover
                     logger.debug("dream loop error: %s", exc)
 

@@ -26,6 +26,7 @@ the kept core.
 
 from __future__ import annotations
 
+from mast.i18n import tr
 import json
 import logging
 from typing import Any, Optional
@@ -163,7 +164,7 @@ def _run_brainstorm(ctx: Any, body: BrainstormFullRequest) -> tuple[dict, bool, 
     # malformed backend response → surface as degraded, not a silent empty 200.
     if not isinstance(result, dict) or "transcript" not in result or "summary" not in result:
         logger.warning("brainstorm result malformed: %r", type(result).__name__)
-        return {"transcript": [], "summary": ""}, True, "brainstorm 返回结构异常（缺 transcript/summary）"
+        return {"transcript": [], "summary": ""}, True, tr("brainstorm 返回结构异常（缺 transcript/summary）", "brainstorm returned a malformed structure (transcript/summary missing)")
     return result, False, ""
 
 
@@ -179,6 +180,8 @@ def cognition_brainstorm_full(
     ``run_brainstorm`` computes the whole discussion in one call (it has no
     per-round generator), so this synchronous endpoint returns everything at once.
     Degrade-safe: no store/DB → ``degraded=True`` with an empty transcript."""
+    from mast.legacy_gate import require_internal_llm
+    require_internal_llm("brainstorm")   # → 403 while legacy features are off
     result, degraded, message = _run_brainstorm(request.app.state.ctx, body)
     if degraded:
         return BrainstormFullResponse(degraded=True, message=message)
@@ -217,6 +220,8 @@ def cognition_brainstorm_stream(
     Frames: {kind:"turn", ...} per transcript line → {kind:"summary", content} →
     {kind:"done", streaming:false, ...}. Degrades to a single error frame when no
     store/DB is wired — never 500 mid-stream."""
+    from mast.legacy_gate import require_internal_llm
+    require_internal_llm("brainstorm")   # → 403 (before the stream opens)
     ctx = request.app.state.ctx
 
     def gen():
@@ -244,7 +249,7 @@ def cognition_brainstorm_stream(
 
     # Worst-case silence in the codebase: `_run_brainstorm` runs to completion
     # BEFORE the first frame, so a multi-round brainstorm is minutes of dead air
-    # on the socket — exactly what an idle reaper on a Tailscale link cuts .
+    # on the socket — exactly what an idle reaper on a Tailscale link cuts.
     return StreamingResponse(
         with_heartbeat(gen(), label="brainstorm"),
         media_type="text/event-stream",
@@ -265,7 +270,11 @@ def cognition_dream_full(
 
     Degrade-safe: no store/DB → ``degraded=True`` empty. The offline rule-based
     consolidator runs with no LLM key, so a wired store yields a real (possibly
-    empty, when there are no experiments) result without ever 500-ing."""
+    empty, when there are no experiments) result without ever 500-ing.
+
+    Refused (403) while legacy features are off (legacy memory feature)."""
+    from mast.legacy_gate import require_internal_llm
+    require_internal_llm("dreaming")
     ctx = request.app.state.ctx
     store = _resolve_store(ctx)
     db_path = _db_path_from(ctx, store)

@@ -37,6 +37,7 @@ from mast.core.types import (
 )
 from mast.io.nanonis_files import channel_ids_from_buffer, scalar_int
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +53,10 @@ REQUIRED_SKILLS: tuple[str, ...] = (
 
 #: 这些仪器级常数如果还是出厂默认,说明没人按本机填过。
 _PROFILE_KEYS: tuple[tuple[str, Any, str], ...] = (
-    ("z_range_m", 1.5e-6, "Z 压电总量程 —— 调平触发判据的分母"),
-    ("v_tip_max_m_s", 2e-6, "针尖横向速度上限 —— resolver 的组合约束"),
-    ("tilt_limit_deg", 5.0, "压电倾斜绝对上限"),
-    ("z_noise_floor_m", None, "Z 噪声底(留空 = 每次从数据估)"),
+    ("z_range_m", 1.5e-6, tr("Z 压电总量程 —— 调平触发判据的分母", "Total Z piezo range - the denominator of the levelling trigger criterion")),
+    ("v_tip_max_m_s", 2e-6, tr("针尖横向速度上限 —— resolver 的组合约束", "Upper limit of tip lateral speed - a combined constraint of the resolver")),
+    ("tilt_limit_deg", 5.0, tr("压电倾斜绝对上限", "Absolute upper limit of piezo tilt")),
+    ("z_noise_floor_m", None, tr("Z 噪声底(留空 = 每次从数据估)", "Z noise floor (empty = estimate from the data each time)")),
 )
 
 
@@ -77,18 +78,18 @@ class ScanIntelSelfCheck(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "对脚本化扫描层做一次只读自检：它的哪些技能在**这一次构建**里真的注册上了、逐尺度策略表用的是用户那份还是出厂那份、"
+                tr("对脚本化扫描层做一次只读自检：它的哪些技能在**这一次构建**里真的注册上了、逐尺度策略表用的是用户那份还是出厂那份、"
                 "机器常数与压电倾斜标定填没填、以及仪器当前报出来的分辨率／倾斜／扫描帧是什么。部署到一台新机器之后先跑它 —— 它一次调用就回答了本来要做十几项手工检查才问得清的事。"
-                "它什么都不移动，也什么都不改。"
+                "它什么都不移动，也什么都不改。", "Run a read-only self-check of the scripted scan layer: which of its skills are actually registered in **this build**, whether the per-scale policy table in use is the user's or the factory one, whether the machine constants and the piezo tilt calibration are filled in, and what resolution / tilt / scan frame the instrument currently reports. Run it first after deploying to a new machine - one call answers what would otherwise take a dozen manual checks. It moves nothing and changes nothing.")
             ),
             parameters=[
                 ParameterSpec(
                     name="probe_buffer_semantics",
                     type="bool",
                     description=(
-                        "顺带判定 Scan_BufferSet(channels, 0, 0) 到底是**保留**还是**重置**分辨率 —— 整个这一层都依赖着这个假设，"
+                        tr("顺带判定 Scan_BufferSet(channels, 0, 0) 到底是**保留**还是**重置**分辨率 —— 整个这一层都依赖着这个假设，"
                         "而它从来没有被验证过。它发出的那次调用，与 ConfigureScan 每一次调用都会发的那一次逐字节相同，"
-                        "所以不增加任何新风险；它只是把结果读回来。事后会把原来的分辨率恢复。默认**关闭**。"
+                        "所以不增加任何新风险；它只是把结果读回来。事后会把原来的分辨率恢复。默认**关闭**。", "Also determine whether Scan_BufferSet(channels, 0, 0) **keeps** or **resets** the resolution - this whole layer depends on that assumption, and it has never been verified. The call it makes is byte-for-byte identical to the one ConfigureScan makes on every call, so it adds no new risk; it just reads the result back. Afterwards the original resolution is restored. Default **off**.")
                     ),
                     required=False,
                     default=False,
@@ -117,8 +118,8 @@ class ScanIntelSelfCheck(BaseSkill):
                 "missing": missing,
                 "ok": not missing,
                 "note": ("" if not missing else
-                         "这些技能在本版里不存在 —— 多半是打包时包 __init__ 没有 "
-                         "import 到它们所在的模块(冻结环境不做 walk_packages)"),
+                         tr("这些技能在本版里不存在 —— 多半是打包时包 __init__ 没有 "
+                         "import 到它们所在的模块(冻结环境不做 walk_packages)", "These skills do not exist in this version - most likely the module containing them was not imported by the package __init__ when packaging (the frozen environment does not walk_packages)")),
             }
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": str(exc)}
@@ -150,8 +151,8 @@ class ScanIntelSelfCheck(BaseSkill):
                            "source": t.get("source")} for t in tiers],
                 "preview": preview,
                 "note": ("" if scan_policy.is_customised() else
-                         "当前用的是**出厂参考值**(取自渐进缩放协议的四级建议)。"
-                         "这些数字随仪器和样品变 —— 请按本机实际情况校准。"),
+                         tr("当前用的是**出厂参考值**(取自渐进缩放协议的四级建议)。"
+                         "这些数字随仪器和样品变 —— 请按本机实际情况校准。", "The **factory reference values** are in use (taken from the four-level suggestion of the progressive-scaling protocol). These numbers vary with instrument and sample - calibrate them for this machine.")),
             }
         except Exception as exc:  # noqa: BLE001
             return {"error": str(exc)}
@@ -171,9 +172,9 @@ class ScanIntelSelfCheck(BaseSkill):
             out["tilt_calibrated"] = calib is not None
             if calib is None:
                 out["tilt_note"] = (
-                    "**没有倾斜响应标定 → AutoTilt 一律跳过。** Piezo_TiltSet 的"
+                    tr("**没有倾斜响应标定 → AutoTilt 一律跳过。** Piezo_TiltSet 的"
                     "轴对应与符号取决于本机接线,猜错方向会把倾斜往反方向加倍。"
-                    "在一块平坦区上跑一次 TiltCalibrate。")
+                    "在一块平坦区上跑一次 TiltCalibrate。", "**No tilt response calibration -> AutoTilt is always skipped.** The axis mapping and sign of Piezo_TiltSet depend on this machine's wiring, and guessing the wrong direction would double the tilt the wrong way. Run TiltCalibrate once on a flat area."))
             return out
         except Exception as exc:  # noqa: BLE001
             return {"error": str(exc)}
@@ -188,7 +189,7 @@ class ScanIntelSelfCheck(BaseSkill):
             out["scan_buffer"] = {"pixels": int(v[2]), "lines": int(v[3]),
                                   "n_channels": int(v[0])}
         else:
-            out["scan_buffer"] = {"error": rec.error or "回包无法解析"}
+            out["scan_buffer"] = {"error": rec.error or tr("回包无法解析", "reply could not be parsed")}
 
         rec = context.safe_call("Scan_FrameGet")
         calls.append(rec)
@@ -199,7 +200,7 @@ class ScanIntelSelfCheck(BaseSkill):
                 "width_m": float(v[2]), "height_m": float(v[3]),
                 "angle_deg": float(v[4])}
         else:
-            out["scan_frame"] = {"error": rec.error or "回包无法解析"}
+            out["scan_frame"] = {"error": rec.error or tr("回包无法解析", "reply could not be parsed")}
 
         rec = context.safe_call("Piezo_TiltGet")
         calls.append(rec)
@@ -208,7 +209,7 @@ class ScanIntelSelfCheck(BaseSkill):
             out["piezo_tilt"] = {"tilt_x_deg": float(v[0]),
                                  "tilt_y_deg": float(v[1])}
         else:
-            out["piezo_tilt"] = {"error": rec.error or "回包无法解析"}
+            out["piezo_tilt"] = {"error": rec.error or tr("回包无法解析", "reply could not be parsed")}
 
         return out
 
@@ -223,31 +224,31 @@ class ScanIntelSelfCheck(BaseSkill):
         before = _vals(rec) if not rec.error else None
         if not before or len(before) < 4:
             return {"ok": False,
-                    "error": "读不到当前缓冲配置,无法探测(未发出任何写入)"}
+                    "error": tr("读不到当前缓冲配置,无法探测(未发出任何写入)", "Cannot read the current buffer configuration, cannot probe (no write was issued)")}
 
         # 还原扫描缓冲设置前必须得到整数通道列表；统一解析单元素元组，禁止把原始元组写回仪器。
         channels = channel_ids_from_buffer(before)
         if not channels:
             return {"ok": False,
-                    "error": "读不到当前采集通道,无法原样写回(未发出任何写入)"}
+                    "error": tr("读不到当前采集通道,无法原样写回(未发出任何写入)", "Cannot read the current acquisition channels, cannot write them back unchanged (no write was issued)")}
         px0, ln0 = scalar_int(before[2]), scalar_int(before[3])
         if px0 is None or ln0 is None:
             return {"ok": False,
-                    "error": "读不到当前分辨率,探测会无法复原(未发出任何写入)"}
+                    "error": tr("读不到当前分辨率,探测会无法复原(未发出任何写入)", "Cannot read the current resolution, the probe could not be undone (no write was issued)")}
 
         rec = context.safe_call("Scan_BufferSet", channels, 0, 0)
         calls.append(rec)
         if rec.error:
-            return {"ok": False, "error": f"Scan_BufferSet(0,0) 被拒: {rec.error}"}
+            return {"ok": False, "error": tr(f"Scan_BufferSet(0,0) 被拒: {rec.error}", f"Scan_BufferSet(0,0) was rejected: {rec.error}")}
 
         rec = context.safe_call("Scan_BufferGet")
         calls.append(rec)
         after = _vals(rec) if not rec.error else None
         if not after or len(after) < 4:
-            return {"ok": False, "error": "回读失败 —— 分辨率状态未知,请手工确认"}
+            return {"ok": False, "error": tr("回读失败 —— 分辨率状态未知,请手工确认", "Readback failed - resolution state unknown, please confirm manually")}
         px1, ln1 = scalar_int(after[2]), scalar_int(after[3])
         if px1 is None or ln1 is None:
-            return {"ok": False, "error": "回读失败 —— 分辨率状态未知,请手工确认"}
+            return {"ok": False, "error": tr("回读失败 —— 分辨率状态未知,请手工确认", "Readback failed - resolution state unknown, please confirm manually")}
 
         kept = (px1 == px0 and ln1 == ln0)
         restored = True
@@ -263,12 +264,12 @@ class ScanIntelSelfCheck(BaseSkill):
             "after_zero_zero": [px1, ln1],
             "semantics": "keep" if kept else "reset",
             "restored": restored,
-            "note": ("0/0 = 保持现值 —— 与设计假设一致,ConfigureScan 的既有行为安全。"
+            "note": (tr("0/0 = 保持现值 —— 与设计假设一致,ConfigureScan 的既有行为安全。", "0/0 = keep the current value - consistent with the design assumption, the existing behaviour of ConfigureScan is safe.")
                      if kept else
-                     "**0/0 会重置分辨率** —— 与设计假设相反。ScanAt 把 SetScanBuffer "
+                     tr("**0/0 会重置分辨率** —— 与设计假设相反。ScanAt 把 SetScanBuffer "
                      "排在 ConfigureScan 之后,所以 ScanAt 路径仍然正确;但**直接调用 "
                      "ConfigureScan 会清掉分辨率设置**,这一点必须写进文档并复查所有"
-                     "直接调用点。"),
+                     "直接调用点。", "**0/0 resets the resolution** - the opposite of the design assumption. ScanAt places SetScanBuffer after ConfigureScan, so the ScanAt path is still correct; but **calling ConfigureScan directly clears the resolution setting**, which must be documented and all direct call sites rechecked.")),
         }
 
     # ── 执行 ─────────────────────────────────────────────────────────────────
@@ -296,26 +297,26 @@ class ScanIntelSelfCheck(BaseSkill):
         todo: list[str] = []
         reg = data["registry"]
         if not reg.get("ok"):
-            todo.append(f"技能缺失:{reg.get('missing')} —— 打包注册有问题,先修这个")
+            todo.append(tr(f"技能缺失:{reg.get('missing')} —— 打包注册有问题,先修这个", f"Skills missing: {reg.get('missing')} - the packaging registration has a problem, fix this first"))
         prof = data["instrument_profile"]
         if not prof.get("tilt_calibrated"):
-            todo.append("在平坦区跑一次 TiltCalibrate(否则 AutoTilt 一律跳过)")
+            todo.append(tr("在平坦区跑一次 TiltCalibrate(否则 AutoTilt 一律跳过)", "Run TiltCalibrate once on a flat area (otherwise AutoTilt is always skipped)"))
         if prof.get("still_factory"):
-            todo.append(f"这些仪器常数还是出厂猜测,按本机填:{prof['still_factory']}")
+            todo.append(tr(f"这些仪器常数还是出厂猜测,按本机填:{prof['still_factory']}", f"These instrument constants are still factory guesses, fill them in for this machine: {prof['still_factory']}"))
         if not data["scan_policy"].get("customised"):
-            todo.append("档位表还是出厂参考值,按本机习惯校准扫描速度与分辨率")
+            todo.append(tr("档位表还是出厂参考值,按本机习惯校准扫描速度与分辨率", "The policy table is still the factory reference values, calibrate scan speed and resolution to this machine's habits"))
         if "buffer_semantics" not in data:
-            todo.append("用 probe_buffer_semantics=true 再跑一次,确认 "
-                        "Scan_BufferSet(0,0) 的语义")
+            todo.append(tr("用 probe_buffer_semantics=true 再跑一次,确认 "
+                        "Scan_BufferSet(0,0) 的语义", "Run again with probe_buffer_semantics=true to confirm the semantics of Scan_BufferSet(0,0)"))
 
         data["todo"] = todo
         data["ready"] = not todo
 
-        summary = (f"技能 {reg.get('total_registered', '?')} 个"
+        summary = (tr(f"技能 {reg.get('total_registered', '?')} 个"
                    f"({'齐' if reg.get('ok') else '缺 ' + str(len(reg.get('missing') or []))})"
                    f";档位表{'已定制' if data['scan_policy'].get('customised') else '=出厂'}"
                    f";倾斜标定{'有' if prof.get('tilt_calibrated') else '**无**'}"
-                   f";待办 {len(todo)} 项")
+                   f";待办 {len(todo)} 项", f"{reg.get('total_registered', '?')} skills ({'all present' if reg.get('ok') else 'missing ' + str(len(reg.get('missing') or []))}); policy table {'customised' if data['scan_policy'].get('customised') else '= factory'}; tilt calibration {'present' if prof.get('tilt_calibrated') else '**absent**'}; {len(todo)} to-do items"))
 
         return SkillResult(skill_name="ScanIntelSelfCheck", success=True,
                            data=data, summary=summary, nanonis_calls=calls)

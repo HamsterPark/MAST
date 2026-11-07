@@ -14,7 +14,7 @@ us:
 
 The wrapper short-circuits ``ctx.run("_phase_*", params)`` and dispatches to
 internal compute methods so the executor's standard machinery (per-step
-emit / checkpoint / on_step_result) is exercised verbatim.
+emit / checkpoint / on_step_result) is exercised unchanged.
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.agents._shared.skill_adapter import wrap_skill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -94,13 +95,13 @@ class AssessImageQuality(CompositeSkillGraph):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "评估扫描图像质量:FFT 打分、RMS 粗糙度、噪声估计。"
+                tr("评估扫描图像质量:FFT 打分、RMS 粗糙度、噪声估计。", "Assess scan image quality: FFT score, RMS roughness and noise estimate.")
             ),
             parameters=[
                 ParameterSpec(
                     name="scan_path",
                     type="str",
-                    description=".sxm 文件路径(缺省:最近一张扫描图)",
+                    description=tr(".sxm 文件路径(缺省:最近一张扫描图)", "Path of the .sxm file (default: the latest scan image)"),
                     required=False,
                     default="",
                 ),

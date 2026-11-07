@@ -71,6 +71,9 @@ KIT_MODULES: tuple[str, ...] = (
     "mast.data.processors",
     "mast.data.quality",
     "mast.data.visualization",
+    # User-facing text in the modules above goes through tr() (mast/i18n.py, stdlib-only);
+    # in the child it answers in the process language (MAST_LANG, default English).
+    "mast.i18n",
 )
 
 # 这些中间包我们**自己生成**空 __init__（真的那几个会 eager-import 无关的东西：

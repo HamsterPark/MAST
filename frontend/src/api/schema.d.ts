@@ -385,8 +385,9 @@ export interface paths {
         put?: never;
         /**
          * Admin Shutdown
-         * @description Graceful service shutdown: close the Nanonis pool + stop daemons, then
-         *     ask uvicorn to exit. Loopback-only + a one-time token (MAST2_SHUTDOWN_TOKEN)
+         * @description Graceful service shutdown: send ``safe`` to every connected satellite and
+         *     wait for the answers (before uvicorn closes the websockets), close the Nanonis
+         *     pool + stop daemons, then ask uvicorn to exit. Loopback-only + a one-time token (MAST2_SHUTDOWN_TOKEN)
          *     so it can't be triggered remotely. The launcher calls this BEFORE its
          *     taskkill fallback so a windowless frozen service stops gracefully instead of
          *     being TerminateProcess'd mid-TCP (which corrupts the port; review
@@ -459,7 +460,7 @@ export interface paths {
          * @description Durable group-conversation history (newest first) so a prior multi-agent
          *     run can be resumed. READ-ONLY relay onto ``ConversationStore.list(kind=
          *     'group')``, enriched with experiment/sample NAMES so the client can render the
-         *     实验 → 样品 → 群聊 tree ; degrades to empty when no store is wired.
+         *     实验 → 样品 → 群聊 tree; degrades to empty when no store is wired.
          */
         get: operations["run_task_conversations_api_agents_group_conversations_get"];
         put?: never;
@@ -1101,7 +1102,7 @@ export interface paths {
          *     nothing has been produced yet — which is a true statement, not a broken one.
          *
          *     Also returns ``groups`` — the per-CLASS status of all nine artifacts
-         *     (2026-07-28, ). The class rows are the answer to "has this been
+         *     (2026-07-28). The class rows are the answer to "has this been
          *     produced yet?", and they must come from the backend: the UI used to derive
          *     them by subtracting produced ids from class ids, two id spaces that never
          *     intersect, so every class read as 待产出 forever — on a machine where six of
@@ -1127,7 +1128,7 @@ export interface paths {
          * Get Artifact Permissions
          * @description The artifact DATA-FLOW graph: who writes each artifact, who reads it.
          *
-         *     DERIVED, not declared (2026-07-11, ). The edges come from
+         *     DERIVED, not declared (2026-07-11). The edges come from
          *     ``agents._shared.artifacts.derive_flow()``, which asks each agent which tools
          *     it actually holds and maps those tools to the artifacts they touch. Give an
          *     agent a tool and its edge appears here; take the tool away and the edge goes.
@@ -1374,6 +1375,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/camera/{camera_id}/frame.jpg": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Camera Frame
+         * @description 对光相机的最新一帧。响应头 ``X-Frame-Seq`` / ``X-Frame-T`` 给帧号与时间（unix 秒）。
+         */
+        get: operations["camera_frame_api_camera__camera_id__frame_jpg_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/camera/{camera_id}/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Camera Stats
+         * @description 状态 + 最新一帧的光斑统计。
+         */
+        get: operations["camera_stats_api_camera__camera_id__stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/chat/narration": {
         parameters: {
             query?: never;
@@ -1497,7 +1538,7 @@ export interface paths {
          *     A dedicated endpoint rather than "ask the agent to run the skill", for two
          *     reasons that both matter over a slow remote link during commissioning:
          *     it does not depend on the chat/agent loop being healthy, and it is one
-         *     request whose whole output can be saved verbatim.
+         *     request whose whole output can be saved as-is.
          *
          *     STRICTLY READ-ONLY — every call it makes is a getter MAST already issues in
          *     ordinary operation. Safe with the tip engaged, mid-scan, at any pressure.
@@ -1656,6 +1697,9 @@ export interface paths {
          *     store IS wired the offline rule-based consolidator runs synchronously (no LLM
          *     key needed) and the written paths are returned in the ack; SSE progress is
          *     layered on later at integration.
+         *
+         *     Refused (403) while legacy features are off: dreaming is part of the legacy
+         *     memory feature, on demand included.
          */
         post: operations["cognition_dream_api_cognition_dream_post"];
         delete?: never;
@@ -1679,6 +1723,8 @@ export interface paths {
          *     Degrade-safe: no store/DB → ``degraded=True`` empty. The offline rule-based
          *     consolidator runs with no LLM key, so a wired store yields a real (possibly
          *     empty, when there are no experiments) result without ever 500-ing.
+         *
+         *     Refused (403) while legacy features are off (legacy memory feature).
          */
         get: operations["cognition_dream_full_api_cognition_dream_full_get"];
         put?: never;
@@ -1918,9 +1964,9 @@ export interface paths {
          * Compile From Plan
          * @description 把一份 **APPROVED** 的 plan 干跑一遍编译器。**什么都不建、什么都不写。**
          *
-         *     存在的理由:用户要在建 conduct **之前**看得见「这份方案缺哪几个数」。
-         *     没有它,唯一的反馈路径是 ``POST /api/conducts`` 失败 —— 那时人已经按下了
-         *     「新建」,而屏幕上说的是一串参数错误,看起来像是自己填错了表。
+         *     存在的理由:要在建 conduct **之前**看得见「这份方案缺哪几个数」。
+         *     没有它,唯一的反馈路径是 ``POST /api/conducts`` 失败 —— 那时「新建」已经按下,
+         *     而返回的是一串参数错误,看起来像是表填错了。
          *
          *     ``ok=False`` 照样是 200:这是一个**答上来了的答案**(见
          *     :class:`ConductCompileResponse`)。plan 库没接上才是 503 —— 那是读不到。
@@ -2330,7 +2376,7 @@ export interface paths {
          * Put Document
          * @description 用户编辑 —— **存为新版本**（``created_by="operator"``）。
          *
-         *     这是让用户成为参与者而不是旁观者的地方（）。旧的对象编辑器把
+         *     这是让用户成为参与者而不是旁观者的地方。旧的对象编辑器把
          *     修改 POST 进一个内存 dict，声称「orchestrator 下一个 super-step 会读」——
          *     从来没有任何 agent 读过它。写进文件就真的闭环了：``load_draft("current")``
          *     读的就是这一版。
@@ -2480,7 +2526,7 @@ export interface paths {
          * @description 把废弃的文档搬回来。
          *
          *     给了 ``experiment_id`` 就直接归到那个实验；没给就回 ``_unfiled`` 待认领 ——
-         *     **不猜**它原来属于谁（猜错的归属比没有归属更糟）。
+         *     **不猜**它原来属于谁（猜错的归属比没有归属更有害）。
          */
         post: operations["restore_document_api_documents__doc_id__restore_post"];
         delete?: never;
@@ -3238,7 +3284,7 @@ export interface paths {
          *     1. ``raw`` —— 逐条原始读数，带样品归属。保留期内的实验走这里。
          *     2. ``buckets`` —— 原始行已被清扫，回退到统计桶。曲线更粗但覆盖全时段。
          *
-         *     不标注的话，用户看到一条比预期粗的曲线只会以为是采样出了问题。
+         *     不标注的话，一条比预期粗的曲线容易被误认为是采样出了问题。
          */
         get: operations["experiment_environment_api_experiments__experiment_id__environment_get"];
         put?: never;
@@ -3352,7 +3398,7 @@ export interface paths {
          * @description Global operator-feedback list (newest first) across ALL experiments —
          *     INCLUDING rows with no experiment_id. The per-experiment drill-down
          *     (get_experiment_detail) filters by experiment_id and so never surfaced the
-         *     floating-widget feedback (which is unscoped — 2026-07-06: 31 saved rows were
+         *     floating-widget feedback (which is unscoped, so saved rows were
          *     invisible in the UI). This is the single place the UI can list everything.
          *     Degrades to empty with no storage wired.
          */
@@ -4376,7 +4422,7 @@ export interface paths {
         /**
          * Manual Entry Endpoint
          * @description Register a paper from TYPED metadata (no PDF) and add a pointer to the
-         *     chosen library (#125 '直接管理条目').
+         *     chosen library.
          *
          *     Wraps ``ingest.ingest_manual``: mint/resolve a work_id, store a rich abstract
          *     row (retrievable with no embed key), best-effort embed for semantic search,
@@ -4418,7 +4464,7 @@ export interface paths {
         /**
          * Upload Pdf Endpoint
          * @description Receive a browser-uploaded PDF, save it to a temp path, ingest it into the
-         *     big library, and add a POINTER to the chosen library (#125 附加 PDF).
+         *     big library, and add a POINTER to the chosen library.
          *
          *     This is the browser-facing counterpart of ``POST /literature/ingest`` (which
          *     takes a server-visible path the SPA cannot produce). The upload is streamed to
@@ -4427,6 +4473,88 @@ export interface paths {
          *     degraded body, never a 500.
          */
         post: operations["upload_pdf_endpoint_api_literature_upload_pdf_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/live/streams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Live Streams
+         * @description 所有实时流的目录，含每个流的最新 seq。
+         */
+        get: operations["list_live_streams_api_live_streams_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/live/streams/{stream_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Live Stream
+         * @description 一个流的描述、横轴与帧 —— WS 不通时的轮询兜底，也用于回看。
+         */
+        get: operations["get_live_stream_api_live_streams__stream_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/manual/devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Manual Devices
+         * @description 所有电动装置与对光相机的描述：轴、按钮（各对应一个技能）、读数来源、能不能用及原因。
+         */
+        get: operations["manual_devices_api_manual_devices_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/manual/readouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Manual Readouts
+         * @description 本机台子、Nanonis 光学组与卫星设备的读数。只读：不执行技能、不取令牌、不入账；没打开的
+         *     台子不去打开，卫星设备只回枢纽缓存。相机与认不出的 id 各回一条 error；读不到时每台各回一条
+         *     error，端点照样 200。
+         */
+        get: operations["manual_readouts_api_manual_readouts_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4553,8 +4681,10 @@ export interface paths {
          * Monitoring Alert Ack
          * @description 人把这条告警点掉:「我知道了,别再提醒我」。
          *
-         *     ``store.ack_alert()`` 曾经存在却**全树零调用方** —— 没有路由、没有前端,
-         *     写进去的 ``acked`` 永远是 ``false``,那不是「没人点」,是**点不了**:
+         *     ## 为什么需要这条路由
+         *
+         *     ``store.ack_alert()`` 从写下那天起就存在,而且**全树零调用方** —— 没有路由、
+         *     没有前端。``acked`` 全是 ``false``,那不是「没人点」,是**点不了**。
          *     一个零可达调用方的原语,从测试外面看和一个能用的逃生门一模一样。
          *
          *     ## 它**不**做什么
@@ -4993,6 +5123,340 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/optical-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Optical State
+         * @description Slot definitions (``slots``) and what is registered now (``values``).
+         */
+        get: operations["get_optical_state_api_operator_optical_state_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/optical-state/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Optical History
+         * @description The newest ``limit`` writes (set and clear), oldest first.
+         */
+        get: operations["get_optical_history_api_operator_optical_state_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/optical-state/{slot_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Slot
+         * @description Register what is physically installed / set. The value must fit the slot (a choice
+         *     option id, a number in range, text of at most 500 characters - longer is refused, never
+         *     cut - true / false). 404 unknown slot, 422 does not fit, 503 could not save (then nothing
+         *     changed). ``source`` self-reported, ``client`` seen by the server (as for answer).
+         */
+        put: operations["set_slot_api_operator_optical_state__slot_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/optical-state/{slot_id}/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Clear Slot
+         * @description Forget a slot's value (the history keeps it, with the writer's ``client``). 404 unknown
+         *     slot, 503 could not save.
+         */
+        post: operations["clear_slot_api_operator_optical_state__slot_id__clear_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/prompts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Prompts
+         * @description Operator prompts, each with its ``answer`` (``null`` while open). Open ones first, oldest
+         *     first; with ``status=all`` the closed ones follow, newest first. ``seq`` changes on every post /
+         *     answer / close — poll every ~2 s and refetch when it differs.
+         */
+        get: operations["list_prompts_api_operator_prompts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/prompts/{prompt_id}/answer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Answer Prompt
+         * @description Answer an open prompt. confirm: ``choice`` ``yes`` | ``no``; choice (and attest with
+         *     options): ``choice`` = an option id; number: ``value`` within the prompt's range; text and
+         *     plain attest: ``value`` (a text longer than the limit is refused, never cut). An attest
+         *     answer also sets the prompt's optical-state slots, in the same step. 404 unknown prompt, 409
+         *     no longer open, 422 invalid answer, 503 could not save. ``source`` is the client's own claim
+         *     (self-reported); the response's ``client`` is what the server saw - audit by that.
+         */
+        post: operations["answer_prompt_api_operator_prompts__prompt_id__answer_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/prompts/{prompt_id}/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dismiss Prompt
+         * @description Close an open prompt without answering it; whoever waits for it gets ``dismissed``.
+         *     Nothing is attested. 404 unknown prompt, 409 no longer open. ``source`` self-reported,
+         *     ``client`` seen by the server (as for answer).
+         */
+        post: operations["dismiss_prompt_api_operator_prompts__prompt_id__dismiss_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/optical-layouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Layouts
+         * @description Every layout, most recently saved first. A file that cannot be read is listed with an
+         *     ``error``.
+         */
+        get: operations["list_layouts_api_optical_layouts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/optical-layouts/{layout_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Layout
+         * @description The layout (as stored: ``layout``), its ray trace (``trace``, the contract's section 4) and
+         *     ``links_state`` (the state behind each device / slot link: read from the registry's
+         *     configuration and the devices already open, never by opening one). 404 unknown, 500 the file
+         *     cannot be read (it is left untouched).
+         */
+        get: operations["get_layout_api_optical_layouts__layout_id__get"];
+        /**
+         * Put Layout
+         * @description Save a layout as the next revision. ``layout.id`` must be the id in the path. 409 when
+         *     ``base_revision`` is not the stored revision (someone saved in between: load the latest, or
+         *     save a copy under another id; the body says which revision is stored and who saved it); a new
+         *     layout is saved with ``base_revision`` 0. 422 the layout is not valid, 500 the stored file
+         *     cannot be read (nothing is overwritten), 503 the disk refused (nothing changed).
+         *     ``revision``, ``updated_at`` and ``updated_by`` are written by the server.
+         */
+        put: operations["put_layout_api_optical_layouts__layout_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/optical-layouts/{layout_id}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Comments
+         * @description The comments, oldest first. ``author`` says whether the operator or an agent wrote one.
+         */
+        get: operations["get_comments_api_optical_layouts__layout_id__comments_get"];
+        put?: never;
+        /**
+         * Post Comment
+         * @description Add a comment as the operator ``by`` (``author: "operator"``). ``component_id`` must be a
+         *     component of the layout (422). 429 when the layout's comments are full of unresolved ones.
+         */
+        post: operations["post_comment_api_optical_layouts__layout_id__comments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/optical-layouts/{layout_id}/comments/{comment_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve Comment
+         * @description Resolve a comment (idempotent: an already resolved one is returned as it is). Only here:
+         *     an external agent cannot resolve.
+         */
+        post: operations["resolve_comment_api_optical_layouts__layout_id__comments__comment_id__resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/optical-layouts/{layout_id}/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive Layout
+         * @description Archive a layout (moved to ``archive/`` with its history and comments, not deleted).
+         *     409 when ``base_revision`` is stale (same body as a stale save).
+         */
+        post: operations["archive_layout_api_optical_layouts__layout_id__delete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/optical-layouts/{layout_id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get History
+         * @description The saved revisions, newest first (the newest 200 are kept).
+         */
+        get: operations["get_history_api_optical_layouts__layout_id__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/optical-layouts/{layout_id}/render.png": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Render
+         * @description A PNG of the layout: components as simple shapes, beams coloured by wavelength, marks where a
+         *     beam hits far off center, on a back side or just misses. Needs no display.
+         */
+        get: operations["get_render_api_optical_layouts__layout_id__render_png_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/optical-layouts/{layout_id}/revisions/{revision}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Revision
+         * @description One saved revision, with its trace. To go back to it, save its ``layout`` as a new revision.
+         */
+        get: operations["get_revision_api_optical_layouts__layout_id__revisions__revision__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/optics/delay": {
         parameters: {
             query?: never;
@@ -5002,7 +5466,9 @@ export interface paths {
         };
         /**
          * Get Delay
-         * @description Read the current pump-probe optical delay (ps) + reachable range.
+         * @description Read the current pump-probe optical delay (ps) + reachable range — the
+         *     delay only if the delay stage is already open; the range is config (see
+         *     :func:`get_position` for why a GET never opens hardware).
          */
         get: operations["get_delay_api_optics_delay_get"];
         put?: never;
@@ -5070,8 +5536,8 @@ export interface paths {
          * Dry Run
          * @description Test-drive the delay line through a full pump-probe sweep — steps every
          *     point and settles, but fires no laser trigger, reads no signal and saves no
-         *     file. Verifies the whole range is reachable before a real measurement.
-         *     (Only the delay-line registry is touched — no Nanonis, no ExecutionContext.)
+         *     file. Verifies the whole range is reachable before a real measurement. It
+         *     MOVES the stage, so it takes the same write path as a move.
          */
         post: operations["dry_run_api_optics_dry_run_post"];
         delete?: never;
@@ -5131,7 +5597,12 @@ export interface paths {
         };
         /**
          * Get Position
-         * @description Read one optical stage axis position.
+         * @description Read one optical stage axis position — only if MAST already has the device
+         *     open (``connected: false`` otherwise). A GET never opens hardware: pages fetch
+         *     it on load, on window focus and on every refresh, and opening the port would
+         *     take the device from its vendor software, or take back a device the operator
+         *     just handed back with 断开 (DisconnectOpticalDevice). OpticalStageGetPos
+         *     must not be used here: its registry lookup connects.
          */
         get: operations["get_position_api_optics_position_get"];
         put?: never;
@@ -5176,6 +5647,23 @@ export interface paths {
          * @description Bring-up self-test: nudge an axis and report moved / direction / scale.
          */
         post: operations["wiggle_api_optics_wiggle_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/port-guard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Port Guard */
+        get: operations["port_guard_api_port_guard_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5379,15 +5867,15 @@ export interface paths {
          *
          *     ## 为什么必须有这个端点
          *
-         *     ``POST /safety/emergency-stop`` **挂**闩;在 2026-08-13 之前,全系统**没有
+         *     ``POST /safety/emergency-stop`` **挂**闩;若没有这个端点,全系统**没有
          *     任何东西解**它 —— ``MASTApp.clear_emergency_latch()`` 存在但没有路由、没有
          *     按钮,是死代码。而闩会被三个来源自动挂上(急停按钮、任意 E_STOP 事件、
          *     环境告警),其中两个不需要人参与。
          *
-         *     这类情况真会发生:``main`` 端口抖了 21 秒,环境监控把「这一次读不到」判成
+         *     曾出现过:``main`` 端口短暂抖动,环境监控把「这一次读不到」判成
          *     硬故障 ⇒ 退针 + 挂闩;通知用的 E_STOP 又因为 reason 不在白名单里被静默
-         *     丢掉,此后每一次仪器调用都只回一句
-         *     「用户已中止本次运行」,别的什么都看不到。连接 21 秒后就自愈了,针和仪器全程完好,机器却
+         *     丢掉。界面上看不到任何反应,而此后每一次仪器调用都回一句
+         *     「用户已中止本次运行」。连接很快就自愈了,针和仪器全程完好,机器却
          *     锁死到进程重启为止。**能停不能解的开关不是安全措施,是死锁。**
          *
          *     ## 它不做什么
@@ -5601,6 +6089,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/satellites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Satellites */
+        get: operations["list_satellites_api_satellites_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/satellites/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Satellite Files */
+        get: operations["list_satellite_files_api_satellites_files_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/satellites/{sat_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Satellite */
+        get: operations["get_satellite_api_satellites__sat_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/satellites/{sat_id}/devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Satellite Devices */
+        get: operations["get_satellite_devices_api_satellites__sat_id__devices_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/satellites/{sat_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Satellite Events */
+        get: operations["get_satellite_events_api_satellites__sat_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scan-map": {
         parameters: {
             query?: never;
@@ -5748,7 +6321,7 @@ export interface paths {
          *     ``ext`` filters BEFORE the ``n``-slice. That ordering is the whole point: a
          *     caller that takes the newest ``n`` of everything and filters afterwards gets
          *     however many survive, which on a rig writing spectroscopy is zero .sxm while
-         *     the disk is full of them (, and its 数据面板 twin #60). The same
+         *     the disk is full of them (and its data-panel twin). The same
          *     trap is documented on ``_collect_scans``.
          *
          *     The discovery glob is ext-independent work, so the response also carries
@@ -7057,8 +7630,7 @@ export interface paths {
          * Get Vision Recent Frame
          * @description The picture of 近期标注帧 tile ``seqno``, big enough to look at, or 404.
          *
-         *     -1 (DB #93):「近期标注帧不能点开放大？」— they could not. The
-         *     grid rendered a bare ``<img>`` with no handler anywhere, on both the 视觉 page
+         *     The grid rendered a bare ``<img>`` with no handler anywhere, on both the 视觉 page
          *     and the 对话 page. The current-monitor tiles were the exception: those already
          *     linked through to the full waveform, which is why only the picture tiles were
          *     dead ends.
@@ -7098,6 +7670,7 @@ export interface paths {
          *     (qwen3-tts-flash). The WAV bytes are relayed base64-encoded so the SPA can
          *     build a ``data:audio/wav;base64,…`` URL directly. Degrades to
          *     ``ok=false, degraded=true`` with no key / on failure — never a 500.
+         *     Refused (403) while legacy features are off.
          */
         post: operations["voice_synthesize_api_voice_synthesize_post"];
         delete?: never;
@@ -7121,7 +7694,7 @@ export interface paths {
          *
          *     Accepts either a base64 audio blob (+ mime) or an https audio URL. Degrades
          *     to ``ok=false, degraded=true`` when no voice key is configured or the ASR
-         *     call fails — never a 500.
+         *     call fails — never a 500. Refused (403) while legacy features are off.
          */
         post: operations["voice_transcribe_api_voice_transcribe_post"];
         delete?: never;
@@ -8237,6 +8810,132 @@ export interface components {
             total: number;
         };
         /**
+         * Annotations
+         * @description What the people who built the table know about a component (§3).
+         */
+        Annotations: {
+            /**
+             * Actuator
+             * @description motor / controller model (when motorized)
+             * @default
+             */
+            actuator: string;
+            /**
+             * Connection
+             * @description where it is connected: controller, port, channel, satellite, COM port ...
+             * @default
+             */
+            connection: string;
+            /**
+             * Datasheet Url
+             * @default
+             */
+            datasheet_url: string;
+            /** Extra */
+            extra?: components["schemas"]["ExtraPair"][];
+            /**
+             * Function
+             * @default
+             */
+            function: string;
+            /**
+             * Manufacturer
+             * @default
+             */
+            manufacturer: string;
+            /**
+             * Model
+             * @default
+             */
+            model: string;
+            /**
+             * Motorized
+             * @default false
+             */
+            motorized: boolean;
+            /**
+             * Notes
+             * @default
+             */
+            notes: string;
+        };
+        /**
+         * AnswerBody
+         * @description Answer a prompt: ``choice`` for confirm (``yes`` / ``no``), choice and attest-with-options
+         *     prompts (an option id); ``value`` for number, text and plain attest prompts.
+         */
+        AnswerBody: {
+            /**
+             * By
+             * @description the operator's name
+             */
+            by: string;
+            /** Choice */
+            choice?: string | null;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /**
+             * Source
+             * @description where the client says the request came from. Self-reported: an audit goes by `client`, which the server fills in from the request itself
+             * @default web
+             * @enum {string}
+             */
+            source: "web" | "launcher";
+            /** Value */
+            value?: unknown;
+        };
+        /**
+         * AnswerOut
+         * @description An operator's answer — or the way a prompt ended without one (``status`` is then
+         *     ``cancelled`` / ``timeout`` / ``dismissed``, ``source`` is ``system`` or the dismisser's).
+         */
+        AnswerOut: {
+            /**
+             * Answered At
+             * @default
+             */
+            answered_at: string;
+            /**
+             * Answered By
+             * @default
+             */
+            answered_by: string;
+            /** Choice */
+            choice?: string | null;
+            /** @description what the server saw of the request that gave this answer; null for an answer that came from MAST itself (a timeout, a cancellation) */
+            client?: components["schemas"]["ClientOut"] | null;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /** Prompt Id */
+            prompt_id: string;
+            /**
+             * Source
+             * @description self-reported by the client (web / launcher), or set by MAST itself (system / test)
+             * @default
+             */
+            source: string;
+            /** Status */
+            status: string;
+            /** Value */
+            value?: unknown;
+        };
+        /** ArchiveResponse */
+        ArchiveResponse: {
+            /**
+             * Archived
+             * @default true
+             */
+            archived: boolean;
+            /** Id */
+            id: string;
+        };
+        /**
          * ArtifactDiffResponse
          * @description Unified diff of the previous version against the current one.
          */
@@ -8363,17 +9062,17 @@ export interface components {
         };
         /**
          * ArtifactGroup
-         * @description One artifact CLASS and whether anything is in it (/ #29).
+         * @description One artifact CLASS and whether anything is in it.
          *
          *     Two things this exists to stop:
          *
-         *       * **#16 — "编辑/填充这些东西还是不会自动生产".** All nine classes showed
+         *       * **Classes stuck at "pending".** All nine classes showed
          *         待产出 forever. Half of that was a UI id mismatch; the other half was
          *         that four classes (文献库 / 实验记录 / 长期记忆 / 视觉缓冲) live in SQLite
          *         and a JSON registry, and NOTHING enumerated them — so they could not
          *         report themselves as produced no matter how full they got. ``count``
          *         comes from each class's own store.
-         *       * **#29 — a flat list buried everything under .sxm rows.** ``high_volume``
+         *       * **A flat list buried everything under .sxm rows.** ``high_volume``
          *         marks the class that arrives in bulk so the UI can start it collapsed.
          *
          *     ``known=False`` means the store could not be read. It is NOT ``count=0``:
@@ -9809,6 +10508,97 @@ export interface components {
             /** Warnings */
             warnings?: string[];
         };
+        /** CameraRoi */
+        CameraRoi: {
+            /**
+             * Binning
+             * @default 1
+             */
+            binning: number;
+            /** H */
+            h: number;
+            /** W */
+            w: number;
+            /** X */
+            x: number;
+            /** Y */
+            y: number;
+        };
+        /**
+         * CameraStats
+         * @description 坐标单位是传感器像素，原点是 ROI 左上角像素的中心；画标记按 ``x / frame_w``。
+         */
+        CameraStats: {
+            /** Camera Id */
+            camera_id: string;
+            /**
+             * Centroid Px
+             * @description [x, y]，ROI 内的传感器像素；没有光斑为 null
+             */
+            centroid_px?: number[] | null;
+            /**
+             * Centroid Sensor Px
+             * @description [x, y]，传感器绝对坐标
+             */
+            centroid_sensor_px?: number[] | null;
+            /** Connected */
+            connected: boolean;
+            /** Error */
+            error?: string | null;
+            /** Exposure Us */
+            exposure_us?: number | null;
+            /** Fps */
+            fps?: number | null;
+            /**
+             * Frame H
+             * @description 画面在传感器上跨的高（像素）
+             */
+            frame_h?: number | null;
+            /** Frame Seq */
+            frame_seq?: number | null;
+            /**
+             * Frame W
+             * @description 画面在传感器上跨的宽（像素）
+             */
+            frame_w?: number | null;
+            /**
+             * Fwhm Px
+             * @description [x 向, y 向]，二阶矩 2.355σ，传感器像素
+             */
+            fwhm_px?: number[] | null;
+            /** Gain Db */
+            gain_db?: number | null;
+            /** Live */
+            live: boolean;
+            /**
+             * Max
+             * @description 原始像素的最大值（ADU）
+             */
+            max?: number | null;
+            roi?: components["schemas"]["CameraRoi"] | null;
+            /**
+             * Saturated Frac
+             * @description 原始像素里达到满量程的比例
+             */
+            saturated_frac?: number | null;
+            /**
+             * Settled
+             * @description false = 刚改过设置，这一帧可能还是旧设置拍的
+             */
+            settled?: boolean | null;
+            /**
+             * State
+             * @description disconnected | connected | live | error
+             */
+            state: string;
+            /**
+             * T
+             * @description 这一帧到达的时间（unix 秒）
+             */
+            t?: number | null;
+        } & {
+            [key: string]: unknown;
+        };
         /**
          * CampaignStats
          * @description Per-campaign roll-up counts (records_api ``stats`` block).
@@ -10047,6 +10837,36 @@ export interface components {
              */
             reason: string;
         };
+        /** ClearSlotBody */
+        ClearSlotBody: {
+            /**
+             * By
+             * @description the operator's name
+             */
+            by: string;
+            /**
+             * Source
+             * @description where the client says the request came from. Self-reported: an audit goes by `client`, which the server fills in from the request itself
+             * @default web
+             * @enum {string}
+             */
+            source: "web" | "launcher";
+        };
+        /** ClearSlotResponse */
+        ClearSlotResponse: {
+            /**
+             * Cleared
+             * @default true
+             */
+            cleared: boolean;
+            /**
+             * Seq
+             * @default 0
+             */
+            seq: number;
+            /** Slot */
+            slot: string;
+        };
         /** ClearStallRequest */
         ClearStallRequest: {
             /**
@@ -10084,6 +10904,68 @@ export interface components {
             released: number;
             /** Signatures */
             signatures?: string[];
+        };
+        /**
+         * ClientOut
+         * @description What the server saw of the request behind a write: the record an audit goes by.
+         *     Credentials are never recorded, only which kind of credential came with the request.
+         */
+        ClientOut: {
+            /**
+             * Auth
+             * @description basic | session_cookie | none: the credential the request carried (not the credential itself)
+             * @default none
+             */
+            auth: string;
+            /**
+             * Auth Enforced
+             * @description whether the service requires LAN credentials at all; only when true was `auth` verified
+             * @default false
+             */
+            auth_enforced: boolean;
+            /**
+             * Browser
+             * @description the request carried an Origin or a Sec-Fetch-* header, i.e. a web page sent it
+             * @default false
+             */
+            browser: boolean;
+            /**
+             * Claimed Forwarding
+             * @description the forwarding headers the client sent (X-Forwarded-For, Forwarded, ...), verbatim and cut to 200 characters: what it claims, recorded next to the peer and never used instead of it; null when there were none
+             */
+            claimed_forwarding?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Host
+             * @description the Host header, cut to 120 characters
+             */
+            host?: string | null;
+            /**
+             * Origin
+             * @description the Origin header, cut to 120 characters
+             */
+            origin?: string | null;
+            /**
+             * Peer
+             * @description the address of the TCP connection, never read from a header; null when the server had none it could trust
+             */
+            peer?: string | null;
+            /**
+             * Referer
+             * @description whether a Referer header was present (its value is not recorded)
+             * @default false
+             */
+            referer: boolean;
+            /** Sec Fetch Mode */
+            sec_fetch_mode?: string | null;
+            /** Sec Fetch Site */
+            sec_fetch_site?: string | null;
+            /**
+             * User Agent
+             * @description the User-Agent header, cut to 200 characters (the client's own claim)
+             */
+            user_agent?: string | null;
         };
         /**
          * CloneRequest
@@ -10285,6 +11167,61 @@ export interface components {
             /** Written */
             written?: string[];
         };
+        /** CommentBody */
+        CommentBody: {
+            /**
+             * By
+             * @description the operator's name
+             */
+            by: string;
+            /**
+             * Component Id
+             * @description the component the comment is about (must be in the layout)
+             */
+            component_id?: string | null;
+            /** Text */
+            text: string;
+        };
+        /** CommentOut */
+        CommentOut: {
+            /**
+             * Author
+             * @enum {string}
+             */
+            author: "operator" | "agent";
+            /** By */
+            by: string;
+            /** Component Id */
+            component_id?: string | null;
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: string;
+            /**
+             * Resolved
+             * @default false
+             */
+            resolved: boolean;
+            /** Resolved At */
+            resolved_at?: string | null;
+            /** Resolved By */
+            resolved_by?: string | null;
+            /** Text */
+            text: string;
+        };
+        /** CommentsResponse */
+        CommentsResponse: {
+            /**
+             * Comments
+             * @description oldest first
+             */
+            comments?: components["schemas"]["CommentOut"][];
+            /**
+             * Open Count
+             * @default 0
+             */
+            open_count: number;
+        };
         /**
          * CompleteRequest
          * @description 盖「这台机器配过了」的戳。带上当前硬件指纹，换机器时能自动发现。
@@ -10300,6 +11237,50 @@ export interface components {
              * @default
              */
             rig_label: string;
+        };
+        /** Component */
+        Component: {
+            /**
+             * Angle Deg
+             * @description direction of the local +x axis, degrees counter-clockwise from +x, normalised to [0, 360)
+             * @default 0
+             */
+            angle_deg: number;
+            annotations?: components["schemas"]["Annotations"];
+            /**
+             * Aperture Mm
+             * @description length of the working surface; 0.1-500, default by type
+             */
+            aperture_mm?: number | null;
+            /** Id */
+            id: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+            links?: components["schemas"]["Links"];
+            /**
+             * Locked
+             * @default false
+             */
+            locked: boolean;
+            /** Props */
+            props?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "laser" | "fiber_out" | "lamp" | "led" | "mirror" | "beam_splitter" | "dichroic" | "grating" | "lens" | "objective" | "waveplate" | "polarizer" | "filter" | "window" | "nd" | "aotf" | "prism" | "periscope" | "iris" | "shutter" | "sample" | "detector" | "camera" | "spectrometer" | "power_meter" | "beam_dump" | "blocker" | "fiber_in" | "custom";
+            /**
+             * X Mm
+             * @description position, mm, 0.01 resolution
+             */
+            x_mm: number;
+            /** Y Mm */
+            y_mm: number;
         };
         /**
          * CompositeCreateRequest
@@ -11109,6 +12090,29 @@ export interface components {
             updated_at: string;
         };
         /**
+         * ConflictResponse
+         * @description The body of a 409: a stale ``base_revision``.
+         */
+        ConflictResponse: {
+            /**
+             * Current Revision
+             * @description the revision that is stored now (0 = the layout does not exist)
+             */
+            current_revision: number;
+            /** Detail */
+            detail: string;
+            /**
+             * Updated At
+             * @default
+             */
+            updated_at: string;
+            /**
+             * Updated By
+             * @default
+             */
+            updated_by: string;
+        };
+        /**
          * Conversation
          * @description One conversation row (mirrors ``ConversationStore`` row dict).
          *
@@ -11732,6 +12736,29 @@ export interface components {
             range_label: string;
             /** Setpoint */
             setpoint?: number | null;
+        };
+        /**
+         * DismissBody
+         * @description Close a prompt without answering it (nothing is attested).
+         */
+        DismissBody: {
+            /**
+             * By
+             * @description the operator's name
+             */
+            by: string;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+            /**
+             * Source
+             * @description where the client says the request came from. Self-reported: an audit goes by `client`, which the server fills in from the request itself
+             * @default web
+             * @enum {string}
+             */
+            source: "web" | "launcher";
         };
         /**
          * DocumentClaimRequest
@@ -13462,6 +14489,16 @@ export interface components {
             degraded: boolean;
             /** Experiments */
             experiments?: components["schemas"]["ExperimentSummary"][];
+        };
+        /** ExtraPair */
+        ExtraPair: {
+            /** Key */
+            key: string;
+            /**
+             * Value
+             * @default
+             */
+            value: string;
         };
         /**
          * FFTRequest
@@ -15377,7 +16414,7 @@ export interface components {
          *     run is currently streaming into (if any).
          *
          *     Rows carry experiment/sample ids + names so the client can render the
-         *     实验 → 样品 → 群聊 hierarchy the operator actually works in .
+         *     实验 → 样品 → 群聊 hierarchy the operator actually works in.
          */
         GroupConversationsResponse: {
             /** Active Conversation Id */
@@ -15636,6 +16673,23 @@ export interface components {
              */
             skill_registry_wired: boolean;
             /**
+             * Station Profile
+             * @default stm
+             * @enum {string}
+             */
+            station_profile: "stm" | "optical";
+            /**
+             * Station Profile Source
+             * @default default
+             * @enum {string}
+             */
+            station_profile_source: "env" | "settings" | "default";
+            /**
+             * Station Restart Pending
+             * @default false
+             */
+            station_restart_pending: boolean;
+            /**
              * Status
              * @default ok
              * @constant
@@ -15673,6 +16727,14 @@ export interface components {
              */
             threshold_s: number;
         };
+        /** HistoryResponse */
+        HistoryResponse: {
+            /**
+             * Revisions
+             * @description newest first
+             */
+            revisions?: components["schemas"]["RevisionRowOut"][];
+        };
         /** HoldResponse */
         HoldResponse: {
             /**
@@ -15704,6 +16766,61 @@ export interface components {
             axis: string;
             /** Device Id */
             device_id: string;
+        };
+        /** HubStatus */
+        HubStatus: {
+            /** Config Error */
+            config_error?: string | null;
+            /**
+             * Config Path
+             * @default
+             */
+            config_path: string;
+            /**
+             * Configured
+             * @default 0
+             */
+            configured: number;
+            /**
+             * Connected
+             * @default 0
+             */
+            connected: number;
+            /**
+             * Data Root
+             * @default
+             */
+            data_root: string;
+            /**
+             * Dispatch Dropped
+             * @default 0
+             */
+            dispatch_dropped: number;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Hub Boot Id
+             * @default
+             */
+            hub_boot_id: string;
+            /** Live */
+            live?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Started
+             * @default false
+             */
+            started: boolean;
+            /** Stm Ring */
+            stm_ring?: {
+                [key: string]: unknown;
+            };
+        } & {
+            [key: string]: unknown;
         };
         /**
          * IgnitionView
@@ -17183,6 +18300,148 @@ export interface components {
             total_matched: number;
         };
         /**
+         * Layout
+         * @description One optical layout. ``schema`` is the document version (1).
+         */
+        Layout: {
+            /** Components */
+            components?: components["schemas"]["Component"][];
+            /** Id */
+            id: string;
+            /**
+             * Notes
+             * @default
+             */
+            notes: string;
+            /**
+             * Revision
+             * @description written by the server
+             * @default 0
+             */
+            revision: number;
+            /**
+             * Schema
+             * @default 1
+             * @constant
+             */
+            schema: 1;
+            table?: components["schemas"]["Table"];
+            /** Texts */
+            texts?: components["schemas"]["TextLabel"][];
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /**
+             * Updated At
+             * @description written by the server
+             * @default
+             */
+            updated_at: string;
+            /**
+             * Updated By
+             * @description written by the server
+             * @default
+             */
+            updated_by: string;
+        };
+        /** LayoutArchiveBody */
+        LayoutArchiveBody: {
+            /**
+             * Base Revision
+             * @description the revision the client last saw
+             */
+            base_revision: number;
+            /**
+             * By
+             * @description the operator's name
+             */
+            by: string;
+        };
+        /** LayoutListResponse */
+        LayoutListResponse: {
+            /** Layouts */
+            layouts?: components["schemas"]["LayoutRowOut"][];
+        };
+        /** LayoutRowOut */
+        LayoutRowOut: {
+            /**
+             * Components
+             * @description number of components
+             * @default 0
+             */
+            components: number;
+            /**
+             * Error
+             * @description set when the file cannot be read; the other fields are then empty
+             */
+            error?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Open Comments
+             * @default 0
+             */
+            open_comments: number;
+            /**
+             * Revision
+             * @default 0
+             */
+            revision: number;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /**
+             * Updated At
+             * @default
+             */
+            updated_at: string;
+            /**
+             * Updated By
+             * @default
+             */
+            updated_by: string;
+        };
+        /**
+         * LayoutViewResponse
+         * @description A layout as it is stored, with its ray trace and what its links say now.
+         */
+        LayoutViewResponse: {
+            layout: components["schemas"]["Layout"];
+            /**
+             * Links State
+             * @description component id -> {device?, slot?}: the current state behind each link; only components with a link appear
+             */
+            links_state?: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
+            /** Trace */
+            trace: components["schemas"]["TraceTree"][];
+        };
+        /**
+         * LayoutWriteBody
+         * @description Save a layout. ``base_revision`` is the revision the client started from (0 for a layout
+         *     that does not exist yet); anything else than the stored one is a 409.
+         */
+        LayoutWriteBody: {
+            /**
+             * Base Revision
+             * @description the revision the edit started from; 0 = a new layout
+             */
+            base_revision: number;
+            /**
+             * By
+             * @description the operator's name
+             */
+            by: string;
+            layout: components["schemas"]["Layout"];
+        };
+        /**
          * LibrariesResponse
          * @description The library list for the 库管理 panel. ``degraded`` is True when the
          *     library backend is absent/unreachable (standalone dev) — empty, not broken.
@@ -17385,6 +18644,58 @@ export interface components {
             scope: string;
         };
         /**
+         * Links
+         * @description References into MAST. Only references: they are not required to exist when saved (the
+         *     device may be disabled); the current state is attached when the layout is read.
+         */
+        Links: {
+            /** Device Id */
+            device_id?: string | null;
+            /** Slot */
+            slot?: string | null;
+        };
+        /** LiveAxis */
+        LiveAxis: {
+            /** N */
+            n: number;
+            /** Unit */
+            unit: string;
+            /** Ver */
+            ver: number;
+            /** X */
+            x: number[];
+        };
+        /** LiveFrameItem */
+        LiveFrameItem: {
+            /** Frame */
+            frame: components["schemas"]["LiveSpectrumFrame"] | components["schemas"]["LiveScalarFrame"] | components["schemas"]["LiveXYFrame"] | components["schemas"]["LiveMap2DFrame"] | components["schemas"]["LiveStatusFrame"];
+            /** Seq */
+            seq: number;
+        };
+        /**
+         * LiveGap
+         * @description 客户端缺的那一段 seq（已经不在保留区里了）。
+         */
+        LiveGap: {
+            /** From */
+            from: number;
+            /** To */
+            to: number;
+        };
+        /** LiveMap2DFrame */
+        LiveMap2DFrame: {
+            /** Ix */
+            ix: number;
+            /** Iy */
+            iy: number;
+            /** T */
+            t: number;
+            /** Values */
+            values: {
+                [key: string]: number | null;
+            };
+        };
+        /**
          * LiveReadings
          * @description Live instrument readings from ``InstrumentState.snapshot()``.
          *
@@ -17449,6 +18760,158 @@ export interface components {
             /** Z History */
             z_history?: number[];
         };
+        /** LiveScalarFrame */
+        LiveScalarFrame: {
+            /** T */
+            t: number;
+            /** Values */
+            values: {
+                [key: string]: number | null;
+            };
+        };
+        /** LiveSpectrumFrame */
+        LiveSpectrumFrame: {
+            /**
+             * Axis Ver
+             * @default 0
+             */
+            axis_ver: number;
+            /** Meta */
+            meta?: {
+                [key: string]: unknown;
+            } | null;
+            /** T */
+            t: number;
+            /** Y */
+            y: (number | null)[];
+        };
+        /** LiveStatusFrame */
+        LiveStatusFrame: {
+            /**
+             * Level
+             * @default info
+             * @enum {string}
+             */
+            level: "debug" | "info" | "warn" | "error";
+            /** T */
+            t: number;
+            /** Text */
+            text: string;
+        };
+        /**
+         * LiveStreamDetail
+         * @description ``GET /api/live/streams/{stream_id}`` —— 轮询兜底与回看。
+         */
+        LiveStreamDetail: {
+            /**
+             * Axes
+             * @description 返回的帧引用到的其它（较旧的）横轴版本
+             */
+            axes?: components["schemas"]["LiveAxis"][];
+            /** @description 当前横轴（spectrum） */
+            axis?: components["schemas"]["LiveAxis"] | null;
+            /** @description since 之后有一段已经不在保留区里（只在 since > 0 时报告） */
+            dropped?: components["schemas"]["LiveGap"] | null;
+            /** Frames */
+            frames: components["schemas"]["LiveFrameItem"][];
+            /** Hub */
+            hub: string;
+            meta: components["schemas"]["LiveStreamMeta"];
+            /**
+             * More
+             * @description 被 limit 截断了；用最后一帧的 seq 当 since 接着取
+             * @default false
+             */
+            more: boolean;
+        };
+        /** LiveStreamList */
+        LiveStreamList: {
+            /**
+             * Hub
+             * @description 本进程的 LiveHub id；变了说明 MAST 重启过，客户端手里的 since 作废
+             */
+            hub: string;
+            /** Items */
+            items: components["schemas"]["LiveStreamMeta"][];
+        };
+        /**
+         * LiveStreamMeta
+         * @description 一个流的描述。``uid`` 变了 = 流被重置（换了 kind 或地图尺寸），客户端该清掉旧画面。
+         */
+        LiveStreamMeta: {
+            /**
+             * Axis Ver
+             * @description spectrum 当前横轴版本；0 = 还没设轴
+             * @default 0
+             */
+            axis_ver: number;
+            /**
+             * Bytes
+             * @description 保留区占用（近似字节）
+             * @default 0
+             */
+            bytes: number;
+            /** Created T */
+            created_t: number;
+            /**
+             * Ended
+             * @default false
+             */
+            ended: boolean;
+            /** Ended T */
+            ended_t?: number | null;
+            /**
+             * First Seq
+             * @description 保留区里最旧那帧的 seq
+             */
+            first_seq?: number | null;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "spectrum" | "scalar" | "xy" | "map2d" | "status";
+            /**
+             * Last Seq
+             * @description 最近一帧的 seq；还没有帧时是 0（或流被淘汰重建前的值）
+             * @default 0
+             */
+            last_seq: number;
+            /** Last T */
+            last_t?: number | null;
+            /**
+             * Meta
+             * @description 声明时给的描述。map2d 必有 nx, ny, x0, y0, dx, dy, x_unit, y_unit；spectrum 可带 laser_line_nm（前端切 cm⁻¹ 用）
+             */
+            meta?: {
+                [key: string]: unknown;
+            };
+            /**
+             * N Frames
+             * @default 0
+             */
+            n_frames: number;
+            /**
+             * Retain
+             * @description 保留的帧数上限（map2d 是像素数）
+             */
+            retain: number;
+            /** Source */
+            source: string;
+            /** Title */
+            title: string;
+            /** Uid */
+            uid: string;
+            /** X Label */
+            x_label?: string | null;
+            /** X Unit */
+            x_unit?: string | null;
+            /** Y Label */
+            y_label?: string | null;
+            /** Y Unit */
+            y_unit?: string | null;
+        };
         /**
          * LiveTraceResponse
          * @description Min/max envelope band for the live chart. Absolute unix seconds on t.
@@ -17457,7 +18920,7 @@ export interface components {
          *     measuring at that instant. It is not a reading of zero, and it is not a
          *     missing field: it is the one thing the arrays cannot say by being shorter,
          *     because the two sides of a gap would then become adjacent and the chart would
-         *     draw a straight line across the outage.
+         *     draw a straight line across the outage .
          *     Where the gaps are is decided in ``store.trace_gap_marks``.
          */
         LiveTraceResponse: {
@@ -17491,6 +18954,17 @@ export interface components {
              * @default 60
              */
             window_s: number;
+        };
+        /** LiveXYFrame */
+        LiveXYFrame: {
+            /** T */
+            t: number;
+            /** Values */
+            values: {
+                [key: string]: number | null;
+            };
+            /** X */
+            x: number;
         };
         /** MaintenanceBody */
         MaintenanceBody: {
@@ -17579,9 +19053,168 @@ export interface components {
              */
             source: string;
         };
+        /** ManualAction */
+        ManualAction: {
+            /**
+             * Bypass Lock
+             * @description 免仪器令牌（stop 类，instrument_lock.BYPASS_NAMES）
+             * @default false
+             */
+            bypass_lock: boolean;
+            /**
+             * Direction
+             * @default none
+             * @enum {string}
+             */
+            direction: "none" | "signed";
+            /**
+             * Direction Param
+             * @description direction=signed 时取正负号的那个参数
+             */
+            direction_param?: string | null;
+            /**
+             * Fixed
+             * @description 固定传给技能的参数（设备 id、relative 之类）
+             */
+            fixed?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Hint
+             * @description 一句话：这个按钮实际做什么（厂家调用的真实效果）
+             */
+            hint?: string | null;
+            /**
+             * Hold Repeat Ms
+             * @description 非空才允许按住连续点动：上一次返回之后、且距上一次至少这么久才发下一次
+             */
+            hold_repeat_ms?: number | null;
+            /**
+             * Id
+             * @description jog / move_abs / move_rel / home / stop / set_velocity / identify / set_zero / abort / camera_connect / …
+             */
+            id: string;
+            /** Label */
+            label: string;
+            /**
+             * Params
+             * @description 让人填的参数，是技能参数的子集
+             */
+            params?: components["schemas"]["ManualParamSpec"][];
+            /**
+             * Per Axis
+             * @description 为真时前端对 axes 的每一项各画一个按钮，轴名填进技能的 axis 参数
+             * @default false
+             */
+            per_axis: boolean;
+            /**
+             * Safety
+             * @default confirm
+             * @enum {string}
+             */
+            safety: "auto" | "confirm" | "dangerous";
+            /**
+             * Skill
+             * @description 已注册的技能名；按钮执行 POST /api/skills/{skill}/execute
+             */
+            skill: string;
+            /**
+             * Stop On Release
+             * @description 按住点动松开后再补发一次这台设备的 stop
+             * @default false
+             */
+            stop_on_release: boolean;
+        };
+        /** ManualAxis */
+        ManualAxis: {
+            /** Extra */
+            extra?: {
+                [key: string]: unknown;
+            } | null;
+            /** Homed */
+            homed?: boolean | null;
+            /** Max */
+            max?: number | null;
+            /** Min */
+            min?: number | null;
+            /** Moving */
+            moving?: boolean | null;
+            /** Name */
+            name: string;
+            /** Position */
+            position?: number | null;
+            /**
+             * Unit
+             * @default
+             */
+            unit: string;
+        };
+        /** ManualDevice */
+        ManualDevice: {
+            /** Actions */
+            actions?: components["schemas"]["ManualAction"][];
+            /**
+             * Available
+             * @default true
+             */
+            available: boolean;
+            /** Axes */
+            axes?: components["schemas"]["ManualAxis"][];
+            /**
+             * Id
+             * @description 同流名：local/stage/<id>、local/nanonis_group/<g>、local/camera/<id>、<satellite_id>/<device_id>
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "linear_stage" | "rotation_stage" | "openloop_stepper" | "xyz_stage" | "nanonis_motor_group" | "camera" | "spectrometer" | "aotf";
+            /** Label */
+            label: string;
+            /**
+             * Machine
+             * @description local = MAST 所在这台；卫星设备填卫星 id
+             */
+            machine: string;
+            /** Model */
+            model?: string | null;
+            /**
+             * Occupied By
+             * @description 只填有证据的占用方；null 表示不知道，不等于空闲
+             */
+            occupied_by?: string | null;
+            readout?: components["schemas"]["ManualReadout"] | null;
+            /** Serial */
+            serial?: string | null;
+            /**
+             * Tip Requirement
+             * @description tip_withdrawn | z_feedback_on | none；null = 没有配置
+             */
+            tip_requirement?: string | null;
+            /** Unavailable Reason */
+            unavailable_reason?: string | null;
+            /** Vendor */
+            vendor?: string | null;
+        };
+        /** ManualDevicesResponse */
+        ManualDevicesResponse: {
+            /**
+             * Degraded
+             * @description 有一类设备读不到（见 degraded_sources / notes）
+             * @default false
+             */
+            degraded: boolean;
+            /** Degraded Sources */
+            degraded_sources?: ("local" | "camera" | "satellite")[];
+            /** Devices */
+            devices?: components["schemas"]["ManualDevice"][];
+            /** Notes */
+            notes?: string[];
+        };
         /**
          * ManualEntryRequest
-         * @description Register a paper from TYPED metadata — no PDF (#125 '直接管理条目').
+         * @description Register a paper from TYPED metadata — no PDF.
          *
          *     The operator hand-enters a paper that is not in OpenAlex and has no PDF at
          *     hand. The core mints a synthetic ``local:<hash>`` work_id (unless one is
@@ -17644,6 +19277,99 @@ export interface components {
              * @default
              */
             year: string;
+        };
+        /**
+         * ManualParamSpec
+         * @description 技能 ParameterSpec 的一份拷贝（端点按技能注册的定义逐字覆盖）。
+         */
+        ManualParamSpec: {
+            /** Allowed Values */
+            allowed_values?: unknown[] | null;
+            /** Default */
+            default?: unknown;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Max Value */
+            max_value?: number | null;
+            /** Min Value */
+            min_value?: number | null;
+            /** Name */
+            name: string;
+            /**
+             * Required
+             * @default false
+             */
+            required: boolean;
+            /**
+             * Type
+             * @default str
+             */
+            type: string;
+            /**
+             * Unit
+             * @default
+             */
+            unit: string;
+        };
+        /**
+         * ManualReadout
+         * @description ``{kind:"live", stream}`` 或 ``{kind:"poll", interval_s}``。
+         *
+         *     读数不走技能执行入口（每次执行都要入账）：卫星设备看 LiveHub 的流；本机台子按
+         *     ``interval_s`` 轮询 ``GET /api/manual/readouts?ids=…``；相机轮询 ``/api/camera/{id}/stats``；
+         *     Nanonis 光学组没有位置反馈，``readout`` 为 null。提供者多给的字段（旧的 skill / params）不往外发。
+         */
+        ManualReadout: {
+            /** Interval S */
+            interval_s?: number | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "live" | "poll";
+            /** Stream */
+            stream?: string | null;
+        };
+        /** ManualReadoutAxis */
+        ManualReadoutAxis: {
+            /** Extra */
+            extra?: {
+                [key: string]: unknown;
+            } | null;
+            /** Homed */
+            homed?: boolean | null;
+            /** Moving */
+            moving?: boolean | null;
+            /** Name */
+            name: string;
+            /** Position */
+            position?: number | null;
+        };
+        /** ManualReadoutValue */
+        ManualReadoutValue: {
+            /** Axes */
+            axes?: components["schemas"]["ManualReadoutAxis"][];
+            /** Error */
+            error?: string | null;
+            /**
+             * T
+             * @description 读数时刻（unix 秒）
+             */
+            t?: number | null;
+        };
+        /**
+         * ManualReadoutsResponse
+         * @description ``GET /api/manual/readouts?ids=a,b``：本机台子、Nanonis 光学组（``local/…``）与卫星设备
+         *     （枢纽缓存）的批量只读读数。相机与认不出的 id 各回一条 error。
+         */
+        ManualReadoutsResponse: {
+            /** Readouts */
+            readouts?: {
+                [key: string]: components["schemas"]["ManualReadoutValue"];
+            };
         };
         /**
          * MapMarker
@@ -18428,7 +20154,7 @@ export interface components {
         MonitoringConfigResponse: {
             /**
              * Alerts Enabled
-             * @default true
+             * @default false
              */
             alerts_enabled: boolean;
             /**
@@ -19035,6 +20761,40 @@ export interface components {
             /** Wait Echo */
             wait_echo?: string[];
         };
+        /** OpticalHistoryResponse */
+        OpticalHistoryResponse: {
+            /**
+             * Records
+             * @description oldest first; each {slot, value, set_by, set_at, source, valid_until, note, client}; `client` is what the server saw of the writing request (null for records written before this was recorded, and for MAST's own voiding lines)
+             */
+            records?: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** OpticalStateResponse */
+        OpticalStateResponse: {
+            /**
+             * Persistent
+             * @default false
+             */
+            persistent: boolean;
+            /**
+             * Seq
+             * @description changes on every slot write
+             */
+            seq: number;
+            /** Slots */
+            slots?: components["schemas"]["SlotOut"][];
+            /**
+             * Values
+             * @description slot id -> {value, set_by, set_at, source, valid_until, valid}; an unset slot is {value: null, valid: false}
+             */
+            values?: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
+        };
         /**
          * OpticsActionResponse
          * @description Uniform result envelope for an optics action (relays a SkillResult).
@@ -19077,7 +20837,8 @@ export interface components {
         };
         /**
          * OpticsDevice
-         * @description One configured optical-bench device (stage controller).
+         * @description One configured optical-bench device (stage controller, rotation mount,
+         *     open-loop stepper or spectrometer — local or on a satellite node).
          */
         OpticsDevice: {
             /** Axes */
@@ -19094,8 +20855,19 @@ export interface components {
             enabled: boolean;
             /** Id */
             id: string;
+            /**
+             * Kind
+             * @default motion
+             */
+            kind: string;
             /** Name */
             name: string;
+            /** Remote Device */
+            remote_device?: string | null;
+            /** Role */
+            role?: string | null;
+            /** Satellite */
+            satellite?: string | null;
             /** Type */
             type: string;
         };
@@ -19865,6 +21637,48 @@ export interface components {
             /** Thread Id */
             thread_id?: string | null;
         };
+        /** PendingSummary */
+        PendingSummary: {
+            /** Ack */
+            ack?: string | null;
+            /**
+             * Action
+             * @default
+             */
+            action: string;
+            /** Created Ms */
+            created_ms?: number | null;
+            /**
+             * Device
+             * @default
+             */
+            device: string;
+            /**
+             * Done
+             * @default false
+             */
+            done: boolean;
+            /** Error */
+            error?: string | null;
+            /** Id */
+            id: string;
+            /** Ok */
+            ok?: boolean | null;
+            /**
+             * Sat Id
+             * @default
+             */
+            sat_id: string;
+            /**
+             * State
+             * @default
+             */
+            state: string;
+            /** Timeout S */
+            timeout_s?: number | null;
+        } & {
+            [key: string]: unknown;
+        };
         /**
          * PhaseSummary
          * @description One conversation-phase summary (sharding output) — mirrors the cognition
@@ -19982,6 +21796,98 @@ export interface components {
             reason?: string | null;
             /** Token */
             token?: string | null;
+        };
+        /** PortFinding */
+        PortFinding: {
+            /** Allowed By */
+            allowed_by?: string | null;
+            /** Cmdline */
+            cmdline?: string | null;
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
+            /** Exe */
+            exe?: string | null;
+            /** Kind */
+            kind: string;
+            /** Pid */
+            pid?: number | null;
+            /**
+             * Process
+             * @default
+             */
+            process: string;
+            /** Remote */
+            remote?: string | null;
+            /** Resource */
+            resource: string;
+            /** Severity */
+            severity: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /** PortGuardResponse */
+        PortGuardResponse: {
+            /**
+             * Checked Ms
+             * @default 0
+             */
+            checked_ms: number;
+            /**
+             * Complete
+             * @default true
+             */
+            complete: boolean;
+            /** Conflicts */
+            conflicts?: components["schemas"]["PortFinding"][];
+            /**
+             * Degraded
+             * @default false
+             */
+            degraded: boolean;
+            /**
+             * Duration Ms
+             * @default 0
+             */
+            duration_ms: number;
+            /**
+             * Enforce
+             * @default true
+             */
+            enforce: boolean;
+            /** Errors */
+            errors?: string[];
+            /** Infos */
+            infos?: components["schemas"]["PortFinding"][];
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /** Nanonis */
+            nanonis?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Optics */
+            optics?: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Serial Handle Scan
+             * @default false
+             */
+            serial_handle_scan: boolean;
+            /** Warnings */
+            warnings?: components["schemas"]["PortFinding"][];
+        } & {
+            [key: string]: unknown;
         };
         /**
          * PreampCheck
@@ -20374,6 +22280,79 @@ export interface components {
              */
             overridden_count: number;
         };
+        /** PromptOptionOut */
+        PromptOptionOut: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+        };
+        /**
+         * PromptOut
+         * @description One operator prompt. ``answer`` is ``null`` while the prompt is open.
+         */
+        PromptOut: {
+            /** Agent Id */
+            agent_id?: string | null;
+            answer?: components["schemas"]["AnswerOut"] | null;
+            /**
+             * Attest Slots
+             * @description attest: the optical-state slots this answer sets
+             */
+            attest_slots?: string[];
+            /** Context */
+            context?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Created At
+             * @default
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Job Id */
+            job_id?: string | null;
+            /**
+             * Kind
+             * @description confirm | choice | number | text | attest
+             */
+            kind: string;
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /** Number Max */
+            number_max?: number | null;
+            /** Number Min */
+            number_min?: number | null;
+            /** Options */
+            options?: components["schemas"]["PromptOptionOut"][];
+            /**
+             * Severity
+             * @description info | action | safety
+             * @default action
+             */
+            severity: string;
+            /** Skill */
+            skill?: string | null;
+            /**
+             * Status
+             * @description open | answered | cancelled | timeout | dismissed
+             * @default open
+             */
+            status: string;
+            /** Timeout S */
+            timeout_s?: number | null;
+            /** Title */
+            title: string;
+            /**
+             * Unit
+             * @default
+             */
+            unit: string;
+        };
         /**
          * PromptOverrideRequest
          * @description Replacement text. Empty/whitespace clears the override (back to default).
@@ -20423,7 +22402,7 @@ export interface components {
          * @description One inventory row — metadata only, no full body (the list stays small).
          *
          *     ``availability`` is the honest bit:
-         *       * ``static``          — a constant; ``preview``/detail show it verbatim
+         *       * ``static``          — a constant; ``preview``/detail show it unchanged
          *       * ``live``            — rendered now from CURRENT persisted state (real)
          *       * ``needs_hardware``  — needs a Nanonis read; NOT rendered, reason given
          *       * ``needs_request``   — per-request only; NOT rendered, reason given
@@ -20492,6 +22471,32 @@ export interface components {
              * @default
              */
             unavailable_reason: string;
+        };
+        /** PromptsResponse */
+        PromptsResponse: {
+            /**
+             * Open Count
+             * @default 0
+             */
+            open_count: number;
+            /**
+             * Persist Error
+             * @description the last error saving prompts.json, if the latest save failed
+             */
+            persist_error?: string | null;
+            /**
+             * Persistent
+             * @description false: prompts live in memory only
+             * @default false
+             */
+            persistent: boolean;
+            /** Prompts */
+            prompts?: components["schemas"]["PromptOut"][];
+            /**
+             * Seq
+             * @description changes on every post / answer / close; compare it for (in)equality to skip a refetch. Monotonic across restarts when persistent.
+             */
+            seq: number;
         };
         /**
          * QaRequest
@@ -21106,10 +23111,15 @@ export interface components {
             lan_enabled: boolean;
             /**
              * Lan Ip
-             * @description this machine's local-network IPv4
+             * @description this machine's local-network IPv4 (first of lan_ips)
              * @default
              */
             lan_ip: string;
+            /**
+             * Lan Ips
+             * @description every IPv4 a local-network peer might dial (a VPN adapter's address cannot be told apart from a NIC's, so all are listed)
+             */
+            lan_ips?: string[];
             /**
              * Note
              * @description one-line human guidance for the panel
@@ -21127,11 +23137,15 @@ export interface components {
              */
             scheme: string;
             tailscale: components["schemas"]["TailscaleInfo"];
+            /** @description serving certificate (https only) */
+            tls?: components["schemas"]["TlsInfo"] | null;
             /**
              * Urls
              * @description addresses to open on another computer
              */
             urls?: components["schemas"]["RemoteUrl"][];
+            /** @description how this request arrived */
+            viewer?: components["schemas"]["ViewerInfo"] | null;
         };
         /**
          * RemoteUrl
@@ -21254,6 +23268,17 @@ export interface components {
         ResetResult: {
             /** Deleted */
             deleted: number;
+        };
+        /**
+         * ResolveBody
+         * @description Resolve a comment. Only a person does this (an external agent cannot).
+         */
+        ResolveBody: {
+            /**
+             * By
+             * @description the operator's name
+             */
+            by: string;
         };
         /**
          * ResolveFetchRequest
@@ -21432,6 +23457,49 @@ export interface components {
              * @default degraded
              */
             status: string;
+        };
+        /** RevisionResponse */
+        RevisionResponse: {
+            layout: components["schemas"]["Layout"];
+            /** Revision */
+            revision: number;
+            /** Trace */
+            trace: components["schemas"]["TraceTree"][];
+            /**
+             * Updated At
+             * @default
+             */
+            updated_at: string;
+            /**
+             * Updated By
+             * @default
+             */
+            updated_by: string;
+        };
+        /** RevisionRowOut */
+        RevisionRowOut: {
+            /**
+             * Components
+             * @default 0
+             */
+            components: number;
+            /** Revision */
+            revision: number;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /**
+             * Updated At
+             * @default
+             */
+            updated_at: string;
+            /**
+             * Updated By
+             * @default
+             */
+            updated_by: string;
         };
         /**
          * RunTaskRequest
@@ -21627,6 +23695,378 @@ export interface components {
             /** Samples */
             samples?: components["schemas"]["SampleItem"][];
         };
+        /** SatDetail */
+        SatDetail: {
+            /** Boot Id */
+            boot_id?: string | null;
+            /** Clock Delay Ms */
+            clock_delay_ms?: number | null;
+            /** Clock Offset Ms */
+            clock_offset_ms?: number | null;
+            /**
+             * Clock Samples
+             * @default 0
+             */
+            clock_samples: number;
+            /**
+             * Configured
+             * @default true
+             */
+            configured: boolean;
+            /** Connected Since */
+            connected_since?: number | null;
+            /** Counters */
+            counters?: {
+                [key: string]: number;
+            };
+            /** Devices */
+            devices?: components["schemas"]["SatDevice"][];
+            /** Disconnected Ms */
+            disconnected_ms?: number | null;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Ever Connected
+             * @default false
+             */
+            ever_connected: boolean;
+            /**
+             * Evt Landed
+             * @default 0
+             */
+            evt_landed: number;
+            /**
+             * Host
+             * @default
+             */
+            host: string;
+            /** Id */
+            id: string;
+            last_estop?: components["schemas"]["SatEstop"] | null;
+            /** Last Seen Ms */
+            last_seen_ms?: number | null;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /**
+             * Peer
+             * @default
+             */
+            peer: string;
+            /** Pending */
+            pending?: components["schemas"]["PendingSummary"][];
+            /**
+             * Pending Commands
+             * @default 0
+             */
+            pending_commands: number;
+            /** Proto */
+            proto?: number | null;
+            /** Rtt Ms */
+            rtt_ms?: number | null;
+            /**
+             * State
+             * @default lost
+             */
+            state: string;
+            /**
+             * Sw
+             * @default
+             */
+            sw: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /** SatDevice */
+        SatDevice: {
+            /** Axis */
+            axis?: {
+                [key: string]: unknown;
+            } | null;
+            /** Caps */
+            caps?: string[];
+            /**
+             * Driver
+             * @default
+             */
+            driver: string;
+            /** Hub Config */
+            hub_config?: {
+                [key: string]: unknown;
+            };
+            /** Id */
+            id: string;
+            /** Info */
+            info?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Kind
+             * @default
+             */
+            kind: string;
+            /** Latest */
+            latest?: {
+                [key: string]: unknown;
+            } | null;
+            /** Latest Ts Ms */
+            latest_ts_ms?: number | null;
+            /**
+             * Model
+             * @default
+             */
+            model: string;
+            /**
+             * Operator Hold
+             * @default false
+             */
+            operator_hold: boolean;
+            /** Role */
+            role?: string | null;
+            /**
+             * Serial
+             * @default
+             */
+            serial: string;
+            /**
+             * Sim
+             * @default false
+             */
+            sim: boolean;
+            /**
+             * Stale
+             * @default true
+             */
+            stale: boolean;
+            /**
+             * State
+             * @default
+             */
+            state: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /** SatDevicesResponse */
+        SatDevicesResponse: {
+            /** Devices */
+            devices?: components["schemas"]["SatDevice"][];
+            /** Sat Id */
+            sat_id: string;
+            /**
+             * State
+             * @default lost
+             */
+            state: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /** SatEstop */
+        SatEstop: {
+            /** Ack */
+            ack?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+            /** Sent Ms */
+            sent_ms?: number | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /** SatEvent */
+        SatEvent: {
+            /** Data */
+            data?: {
+                [key: string]: unknown;
+            };
+            /** Device */
+            device?: string | null;
+            /** Kind */
+            kind?: string | null;
+            /** Seq */
+            seq?: number | null;
+            /** Ts Hub Ms */
+            ts_hub_ms?: number | null;
+            /** Ts Ms */
+            ts_ms?: number | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /** SatEventsResponse */
+        SatEventsResponse: {
+            /** Events */
+            events?: components["schemas"]["SatEvent"][];
+            /** Sat Id */
+            sat_id: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /** SatFile */
+        SatFile: {
+            /** Acq End Hub Ms */
+            acq_end_hub_ms?: number | null;
+            /** Acq Start Hub Ms */
+            acq_start_hub_ms?: number | null;
+            /** Boot Id */
+            boot_id?: string | null;
+            /** Experiment Ingest */
+            experiment_ingest?: string | null;
+            /** File Id */
+            file_id: string;
+            /** Kind */
+            kind?: string | null;
+            /** Meta Rel */
+            meta_rel?: string | null;
+            /** Mtime Ms */
+            mtime_ms?: number | null;
+            /** Name */
+            name?: string | null;
+            /** Received Ms */
+            received_ms?: number | null;
+            /** Rel Path */
+            rel_path?: string | null;
+            /**
+             * Sat Id
+             * @default
+             */
+            sat_id: string;
+            /** Sha256 */
+            sha256?: string | null;
+            /**
+             * Size
+             * @default 0
+             */
+            size: number;
+            /** Spe Ok */
+            spe_ok?: boolean | null;
+            /**
+             * Stm Matched
+             * @default false
+             */
+            stm_matched: boolean;
+            /** Stored Rel */
+            stored_rel?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /** SatFilesResponse */
+        SatFilesResponse: {
+            /**
+             * Count
+             * @default 0
+             */
+            count: number;
+            /** Files */
+            files?: components["schemas"]["SatFile"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /** SatSummary */
+        SatSummary: {
+            /** Boot Id */
+            boot_id?: string | null;
+            /** Clock Delay Ms */
+            clock_delay_ms?: number | null;
+            /** Clock Offset Ms */
+            clock_offset_ms?: number | null;
+            /**
+             * Clock Samples
+             * @default 0
+             */
+            clock_samples: number;
+            /**
+             * Configured
+             * @default true
+             */
+            configured: boolean;
+            /** Connected Since */
+            connected_since?: number | null;
+            /** Counters */
+            counters?: {
+                [key: string]: number;
+            };
+            /** Devices */
+            devices?: components["schemas"]["SatDevice"][];
+            /** Disconnected Ms */
+            disconnected_ms?: number | null;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Ever Connected
+             * @default false
+             */
+            ever_connected: boolean;
+            /**
+             * Evt Landed
+             * @default 0
+             */
+            evt_landed: number;
+            /**
+             * Host
+             * @default
+             */
+            host: string;
+            /** Id */
+            id: string;
+            last_estop?: components["schemas"]["SatEstop"] | null;
+            /** Last Seen Ms */
+            last_seen_ms?: number | null;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /**
+             * Peer
+             * @default
+             */
+            peer: string;
+            /**
+             * Pending Commands
+             * @default 0
+             */
+            pending_commands: number;
+            /** Proto */
+            proto?: number | null;
+            /** Rtt Ms */
+            rtt_ms?: number | null;
+            /**
+             * State
+             * @default lost
+             */
+            state: string;
+            /**
+             * Sw
+             * @default
+             */
+            sw: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /** SatellitesResponse */
+        SatellitesResponse: {
+            /**
+             * Degraded
+             * @default false
+             */
+            degraded: boolean;
+            hub: components["schemas"]["HubStatus"];
+            /** Satellites */
+            satellites?: components["schemas"]["SatSummary"][];
+        } & {
+            [key: string]: unknown;
+        };
         /**
          * ScanAttributionResponse
          * @description Files belonging to one experiment, from the v2 ``file_locations`` table.
@@ -21662,7 +24102,7 @@ export interface components {
          *     ``copies``/``locations`` describe the automatic ingest into the experiment
          *     folder: one measurement exists as several byte-identical files, and this
          *     listing used to show one card per copy — identical name, size and timestamp
-         *     on each, so the operator could not tell them apart .
+         *     on each, so the operator could not tell them apart.
          *     Copies are folded into ONE entry that says how many there are and where they
          *     live. Nothing is dropped: ``locations`` names every member, so a wrong fold is
          *     visible on screen rather than silently hiding a file.
@@ -22727,6 +25167,34 @@ export interface components {
             sensors?: components["schemas"]["mast__api__schemas_admin__SensorEntry"][];
         };
         /**
+         * SetSlotBody
+         * @description Register what is physically in the beam path. Only an operator may do this.
+         */
+        SetSlotBody: {
+            /**
+             * By
+             * @description the operator's name
+             */
+            by: string;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /**
+             * Source
+             * @description where the client says the request came from. Self-reported: an audit goes by `client`, which the server fills in from the request itself
+             * @default web
+             * @enum {string}
+             */
+            source: "web" | "launcher";
+            /**
+             * Value
+             * @description a choice option id, a number, text, or true/false
+             */
+            value: unknown;
+        };
+        /**
          * SettingsResponse
          * @description Persisted UI settings (SettingsStore whitelist). All optional — an unset
          *     key means 'use the live config default'. Mirrors SettingsStore.KNOWN_KEYS.
@@ -22806,6 +25274,11 @@ export interface components {
             instrument_profile?: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Legacy Features Enabled
+             * @default false
+             */
+            legacy_features_enabled: boolean | null;
             /** Literature Fetch Auto Resume */
             literature_fetch_auto_resume?: boolean | null;
             /** Model Alias */
@@ -22830,10 +25303,14 @@ export interface components {
             orchestrator_run_budget_usd?: number | null;
             /** Qa Model */
             qa_model?: string | null;
+            /** Satellite Hub Enabled */
+            satellite_hub_enabled?: boolean | null;
             /** Scan Policy */
             scan_policy?: {
                 [key: string]: unknown;
             } | null;
+            /** Station Profile */
+            station_profile?: string | null;
             /** Theme */
             theme?: string | null;
             /** Thinking */
@@ -22953,6 +25430,8 @@ export interface components {
             instrument_profile?: {
                 [key: string]: unknown;
             } | null;
+            /** Legacy Features Enabled */
+            legacy_features_enabled?: boolean | null;
             /** Literature Fetch Auto Resume */
             literature_fetch_auto_resume?: boolean | null;
             /** Model Alias */
@@ -22977,10 +25456,14 @@ export interface components {
             orchestrator_run_budget_usd?: number | null;
             /** Qa Model */
             qa_model?: string | null;
+            /** Satellite Hub Enabled */
+            satellite_hub_enabled?: boolean | null;
             /** Scan Policy */
             scan_policy?: {
                 [key: string]: unknown;
             } | null;
+            /** Station Profile */
+            station_profile?: string | null;
             /** Theme */
             theme?: string | null;
             /** Thinking */
@@ -23302,6 +25785,12 @@ export interface components {
              * @default false
              */
             ok: boolean;
+            /**
+             * Refused By
+             * @description 门口就被拒、技能没有执行时的来源（direct_exec.DirectRun.refused_by 原样透出）：si_parse（参数的 SI 字符串还原失败）/ sample_gate（没选样品）/ busy（仪器令牌被别人持有）；needs_human_node = 组合技能跑到需要人决定的节点停住（前面的步可能已执行）。技能真执行了（成败看 success）为空串。注意：ExecutionContext.run 里面的拒绝（中止闩、运行模式、硬闸、参数校验）目前没有结构化来源，也是空串 —— 原因看 error。
+             * @default
+             */
+            refused_by: string;
             /**
              * Skill
              * @default
@@ -23638,6 +26127,70 @@ export interface components {
             type: string;
             /** Unit */
             unit?: string | null;
+        };
+        /**
+         * SlotOut
+         * @description A slot definition: what can be registered, not its current value.
+         */
+        SlotOut: {
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @description choice | number | text | flag
+             */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Max */
+            max?: number | null;
+            /** Min */
+            min?: number | null;
+            /**
+             * Options
+             * @description choice slots: [{id, label, meta}]; meta may hold valid_nm
+             */
+            options?: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Unit
+             * @default
+             */
+            unit: string;
+            /**
+             * Valid For S
+             * @description null = valid until changed
+             */
+            valid_for_s?: number | null;
+        };
+        /** SlotValueOut */
+        SlotValueOut: {
+            /** @description what the server saw of the request that wrote this value */
+            client?: components["schemas"]["ClientOut"] | null;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /** Set At */
+            set_at: string;
+            /** Set By */
+            set_by: string;
+            /**
+             * Source
+             * @description self-reported by the client (web / launcher / prompt:<id>); the audit goes by `client`
+             */
+            source: string;
+            /** Valid Until */
+            valid_until?: string | null;
+            /** Value */
+            value?: unknown;
         };
         /**
          * SpectraListResponse
@@ -24167,6 +26720,35 @@ export interface components {
             /** Items */
             items?: components["schemas"]["SystemCheckItem"][];
         };
+        /** Table */
+        Table: {
+            /**
+             * Grid
+             * @default metric
+             * @enum {string}
+             */
+            grid: "metric" | "imperial" | "none";
+            /**
+             * Height Mm
+             * @default 900
+             */
+            height_mm: number;
+            /**
+             * Hole Offset Mm
+             * @default 12.5
+             */
+            hole_offset_mm: number;
+            /**
+             * Hole Pitch Mm
+             * @default 25
+             */
+            hole_pitch_mm: number;
+            /**
+             * Width Mm
+             * @default 1200
+             */
+            width_mm: number;
+        };
         /**
          * TailscaleInfo
          * @description Live Tailscale node status (from ``tailscale status --json``).
@@ -24268,6 +26850,26 @@ export interface components {
              * @default
              */
             title: string;
+        };
+        /**
+         * TextLabel
+         * @description A free text label on the drawing (a door, a warning, a name of a region).
+         */
+        TextLabel: {
+            /** Id */
+            id: string;
+            /**
+             * Size
+             * @description relative size, 0.1-20
+             * @default 1
+             */
+            size: number;
+            /** Text */
+            text: string;
+            /** X Mm */
+            x_mm: number;
+            /** Y Mm */
+            y_mm: number;
         };
         /** ThresholdKnob */
         ThresholdKnob: {
@@ -24465,8 +27067,6 @@ export interface components {
          * TipInService
          * @description 一次实验期间在役的针尖 —— **展示层聚合，不是第二个真源**。
          *
-         *     「针尖记录等是不是也应该在实验记录中?」
-         *
          *     针尖是仪器域的东西（与实验 / 样品**并列**，不是它们的下级 —— 一根针会跨很多次
          *     实验，一次实验也可能换好几根），所以 ``tips`` 表原地不动。这里只是把「这段时间
          *     里装的是哪根针」这个本来就能从两张表答出来的问题答出来，并给出跳回针尖卡片的
@@ -24638,6 +27238,44 @@ export interface components {
                 [key: string]: string;
             }[];
         };
+        /**
+         * TlsInfo
+         * @description The certificate the https listener is serving (LAN mode).
+         */
+        TlsInfo: {
+            /**
+             * Dns Names
+             * @description SAN DNS names
+             */
+            dns_names?: string[];
+            /**
+             * Ip Addresses
+             * @description SAN IP addresses
+             */
+            ip_addresses?: string[];
+            /**
+             * Issued By Mast
+             * @description self-signed CN=MAST LAN (re-signed automatically, same key)
+             * @default true
+             */
+            issued_by_mast: boolean;
+            /**
+             * Not After
+             * @description expiry, ISO-8601 UTC
+             * @default
+             */
+            not_after: string;
+            /**
+             * Spki Sha256
+             * @description hex SHA-256 of the DER SubjectPublicKeyInfo — the satellite pin (hub.spki_sha256)
+             */
+            spki_sha256: string;
+            /**
+             * Uncovered
+             * @description current Tailscale/LAN addresses the certificate does not list yet (added at the next service start; the key and SPKI stay the same)
+             */
+            uncovered?: string[];
+        };
         /** ToolPackInfo */
         ToolPackInfo: {
             /**
@@ -24691,6 +27329,62 @@ export interface components {
             top?: {
                 [key: string]: unknown;
             }[];
+        };
+        /** TraceBranch */
+        TraceBranch: {
+            /** Branch */
+            branch: string;
+            /**
+             * End
+             * @enum {string}
+             */
+            end: "stop" | "blocked" | "back_hit" | "split" | "left_table" | "max_events" | "budget";
+            /** Events */
+            events: components["schemas"]["TraceEvent"][];
+            /** Fraction */
+            fraction: number;
+            /** Segments */
+            segments: components["schemas"]["TraceSegment"][];
+        };
+        /** TraceEvent */
+        TraceEvent: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "reflect" | "transmit" | "split" | "stop" | "blocked" | "back_hit";
+            /** Component */
+            component: string;
+            /** Incidence Deg */
+            incidence_deg: number;
+            /** Offset Mm */
+            offset_mm: number;
+            /** Path Mm */
+            path_mm: number;
+            /** X */
+            x: number;
+            /** Y */
+            y: number;
+        };
+        /** TraceSegment */
+        TraceSegment: {
+            /** X0 */
+            x0: number;
+            /** X1 */
+            x1: number;
+            /** Y0 */
+            y0: number;
+            /** Y1 */
+            y1: number;
+        };
+        /** TraceTree */
+        TraceTree: {
+            /** Branches */
+            branches: components["schemas"]["TraceBranch"][];
+            /** Source */
+            source: string;
+            /** Wavelength Nm */
+            wavelength_nm?: number | null;
         };
         /**
          * TrajectoryExportRequest
@@ -25248,6 +27942,30 @@ export interface components {
             words: number;
         };
         /**
+         * ViewerInfo
+         * @description How THIS request reached the service — for checking a remote path.
+         */
+        ViewerInfo: {
+            /**
+             * Client Ip
+             * @description peer address of this request
+             * @default
+             */
+            client_ip: string;
+            /**
+             * Host
+             * @description Host header the browser used
+             * @default
+             */
+            host: string;
+            /**
+             * Via
+             * @description local | tailscale | lan | other
+             * @default other
+             */
+            via: string;
+        };
+        /**
          * VisionBufferEvent
          * @description One Vision-Buffer row (mirrors gui/vision_buffer.py ``_event_to_dict``).
          *
@@ -25656,7 +28374,7 @@ export interface components {
         mast__api__schemas_admin__SensorEntry: {
             /**
              * Extra
-             * @description type-specific fields (address/channel/baudrate/alarm/...) passed through verbatim
+             * @description type-specific fields (address/channel/baudrate/alarm/...) passed through unchanged
              */
             extra?: {
                 [key: string]: unknown;
@@ -27789,6 +30507,91 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    camera_frame_api_camera__camera_id__frame_jpg_get: {
+        parameters: {
+            query?: {
+                /** @description 宽度上限（像素），超过就等比缩小；mode=color 时忽略 */
+                max_w?: number | null;
+                /** @description JPEG 质量 */
+                q?: number;
+                /** @description full：0…满量程线性映射（亮度如实）；auto：按分位拉伸（暗光斑也看得见） */
+                scale?: "full" | "auto";
+                /** @description gray：对焦灰度（可缩宽）；color：全分辨率彩色，不下采样 */
+                mode?: "gray" | "color";
+            };
+            header?: never;
+            path: {
+                camera_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 最新一帧 JPEG（gray 或 color） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": unknown;
+                };
+            };
+            /** @description 没有这台相机，或没在直播 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    camera_stats_api_camera__camera_id__stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                camera_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraStats"];
+                };
+            };
+            /** @description 没有这台相机 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -32232,6 +35035,121 @@ export interface operations {
             };
         };
     };
+    list_live_streams_api_live_streams_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiveStreamList"];
+                };
+            };
+        };
+    };
+    get_live_stream_api_live_streams__stream_id__get: {
+        parameters: {
+            query?: {
+                /** @description 缺省：spectrum 只给最新一帧，其余全给；-1：只要最新一帧；n：seq > n 的帧 */
+                since?: number | null;
+                /** @description 最多返回多少帧（按 seq 升序，超了 more=true） */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                stream_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiveStreamDetail"];
+                };
+            };
+            /** @description 没有这个流 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    manual_devices_api_manual_devices_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManualDevicesResponse"];
+                };
+            };
+        };
+    };
+    manual_readouts_api_manual_readouts_get: {
+        parameters: {
+            query?: {
+                /** @description 逗号分隔的设备 id：local/stage/…、local/nanonis_group/…、<satellite_id>/<device_id> */
+                ids?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManualReadoutsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     memory_namespaces_api_memory_namespaces_get: {
         parameters: {
             query?: never;
@@ -33071,6 +35989,575 @@ export interface operations {
             };
         };
     };
+    get_optical_state_api_operator_optical_state_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpticalStateResponse"];
+                };
+            };
+        };
+    };
+    get_optical_history_api_operator_optical_state_history_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpticalHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_slot_api_operator_optical_state__slot_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetSlotBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SlotValueOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_slot_api_operator_optical_state__slot_id__clear_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClearSlotBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClearSlotResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_prompts_api_operator_prompts_get: {
+        parameters: {
+            query?: {
+                /** @description open | all */
+                status?: "open" | "all";
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    answer_prompt_api_operator_prompts__prompt_id__answer_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                prompt_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnswerBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnswerOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dismiss_prompt_api_operator_prompts__prompt_id__dismiss_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                prompt_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DismissBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnswerOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_layouts_api_optical_layouts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LayoutListResponse"];
+                };
+            };
+        };
+    };
+    get_layout_api_optical_layouts__layout_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                layout_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LayoutViewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_layout_api_optical_layouts__layout_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                layout_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LayoutWriteBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LayoutViewResponse"];
+                };
+            };
+            /** @description base_revision is not the stored revision */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConflictResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_comments_api_optical_layouts__layout_id__comments_get: {
+        parameters: {
+            query?: {
+                /** @description all | open */
+                status?: "all" | "open";
+            };
+            header?: never;
+            path: {
+                layout_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_comment_api_optical_layouts__layout_id__comments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                layout_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommentBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_comment_api_optical_layouts__layout_id__comments__comment_id__resolve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                layout_id: string;
+                comment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_layout_api_optical_layouts__layout_id__delete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                layout_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LayoutArchiveBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveResponse"];
+                };
+            };
+            /** @description base_revision is not the stored revision */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConflictResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_history_api_optical_layouts__layout_id__history_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                layout_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_render_api_optical_layouts__layout_id__render_png_get: {
+        parameters: {
+            query?: {
+                /** @description pixels wide */
+                width?: number;
+                /** @description the whole table, or zoomed to the work */
+                fit?: "table" | "content";
+            };
+            header?: never;
+            path: {
+                layout_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description the table as a PNG */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_revision_api_optical_layouts__layout_id__revisions__revision__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                layout_id: string;
+                revision: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevisionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_delay_api_optics_delay_get: {
         parameters: {
             query?: never;
@@ -33328,6 +36815,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpticsActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    port_guard_api_port_guard_get: {
+        parameters: {
+            query?: {
+                refresh?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortGuardResponse"];
                 };
             };
             /** @description Validation Error */
@@ -33749,6 +37267,156 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReconnectRoleResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_satellites_api_satellites_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SatellitesResponse"];
+                };
+            };
+        };
+    };
+    list_satellite_files_api_satellites_files_get: {
+        parameters: {
+            query?: {
+                sat_id?: string | null;
+                limit?: number;
+                since_ms?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SatFilesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_satellite_api_satellites__sat_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sat_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SatDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_satellite_devices_api_satellites__sat_id__devices_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sat_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SatDevicesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_satellite_events_api_satellites__sat_id__events_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                kind?: string | null;
+                device?: string | null;
+            };
+            header?: never;
+            path: {
+                sat_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SatEventsResponse"];
                 };
             };
             /** @description Validation Error */

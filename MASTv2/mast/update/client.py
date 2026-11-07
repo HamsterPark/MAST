@@ -14,6 +14,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from mast.i18n import tr
+
 logger = logging.getLogger(__name__)
 
 PENDING_DIR_NAME = "pending_update"
@@ -137,12 +139,21 @@ def _require_https(server_url: str) -> str:
                     host, _INSECURE_UPDATE_ENV,
                 )
                 return ""
-            return (f"更新服务器为明文 http 私有地址（{host}）。明文升级包易被中间人篡改，"
-                    f"且当前无 manifest 签名。如确在可信内网，请显式设置环境变量 "
-                    f"{_INSECURE_UPDATE_ENV}=1 以允许；否则请改用 https://。")
-        return ("更新服务器 URL 必须使用 HTTPS（明文 http:// 公网地址易被中间人篡改"
-                "升级包）。请改用 https:// 地址。")
-    return f"无法识别的更新服务器 URL 协议（需 https://）：{server_url!r}"
+            return tr(f"更新服务器为明文 http 私有地址（{host}）。明文升级包易被中间人篡改，"
+                      f"且当前无 manifest 签名。如确在可信内网，请显式设置环境变量 "
+                      f"{_INSECURE_UPDATE_ENV}=1 以允许；否则请改用 https://。",
+                      f"The update server is a plaintext http private address ({host}). "
+                      "Plaintext update packages can be tampered with by a man in the middle, "
+                      "and there is currently no manifest signature. If this really is a "
+                      "trusted intranet, explicitly set the environment variable "
+                      f"{_INSECURE_UPDATE_ENV}=1 to allow it; otherwise use https://.")
+        return tr("更新服务器 URL 必须使用 HTTPS（明文 http:// 公网地址易被中间人篡改"
+                  "升级包）。请改用 https:// 地址。",
+                  "The update server URL must use HTTPS (update packages from a plaintext "
+                  "http:// public address can be tampered with by a man in the middle). "
+                  "Use an https:// address.")
+    return tr(f"无法识别的更新服务器 URL 协议（需 https://）：{server_url!r}",
+              f"Unrecognised update server URL scheme (https:// required): {server_url!r}")
 
 
 def _read_one_line(path: Path) -> str:
@@ -208,9 +219,11 @@ def write_server_url(data_root: Path, url: str) -> Path:
     p = data_root / "api key" / SERVER_URL_FILE
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(
-        "# MAST 推送服务器 URL，必须使用 HTTPS（明文 http 已被拒绝），"
-        "例如 https://updates.example.com:8766\n"
-        f"{url.strip()}\n",
+        tr("# MAST 推送服务器 URL，必须使用 HTTPS（明文 http 已被拒绝），"
+           "例如 https://updates.example.com:8766\n",
+           "# MAST push server URL; HTTPS is required (plaintext http is rejected), "
+           "e.g. https://updates.example.com:8766\n")
+        + f"{url.strip()}\n",
         encoding="utf-8",
     )
     return p
@@ -234,8 +247,9 @@ def write_token(data_root: Path, token: str) -> Path:
     p = data_root / "api key" / TOKEN_FILE
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(
-        "# MAST 推送客户端 token。需要与服务器 update_server_token.env 一致。\n"
-        f"{token.strip()}\n",
+        tr("# MAST 推送客户端 token。需要与服务器 update_server_token.env 一致。\n",
+           "# MAST push client token. It must match the server's update_server_token.env.\n")
+        + f"{token.strip()}\n",
         encoding="utf-8",
     )
     return p
@@ -343,10 +357,15 @@ def check_and_download(server_url: str, token: str, data_root: Path,
     _pubkey = get_release_public_key()
     if _pubkey:
         if not sig:
-            return "error", ("更新被拒：本客户端要求签名验证，但服务器未提供 manifest.sig"
-                             "（发布端未签名，或中间人剥离了签名）。")
+            return "error", tr("更新被拒：本客户端要求签名验证，但服务器未提供 manifest.sig"
+                               "（发布端未签名，或中间人剥离了签名）。",
+                               "Update rejected: this client requires signature verification, "
+                               "but the server provided no manifest.sig (the publisher did not "
+                               "sign, or a man in the middle stripped the signature).")
         if not verify_manifest(raw_manifest, sig, _pubkey):
-            return "error", "更新被拒：manifest 签名验证失败（内容被篡改或密钥不匹配）。"
+            return "error", tr("更新被拒：manifest 签名验证失败（内容被篡改或密钥不匹配）。",
+                               "Update rejected: manifest signature verification failed "
+                               "(content tampered with, or the key does not match).")
         logger.info("manifest signature verified (remote v%s)", remote.version)
     else:
         logger.warning("manifest signature NOT verified — no release public key "
@@ -442,13 +461,14 @@ def post_feedback(server_url: str, token: str, *, text: str,
     import httpx
 
     if not server_url or not token:
-        return "no-config", "未配置更新服务器 URL / token（先在启动器配置）。"
+        return "no-config", tr("未配置更新服务器 URL / token（先在启动器配置）。",
+                               "Update server URL / token not configured (configure them in the launcher first).")
     tls_err = _require_https(server_url)
     if tls_err:
         return "error", tls_err
     text = (text or "").strip()
     if not text:
-        return "error", "反馈内容为空"
+        return "error", tr("反馈内容为空", "Feedback is empty")
     try:
         with httpx.Client(timeout=httpx.Timeout(20.0, connect=10.0), verify=_verify_arg(None)) as c:
             r = c.post(
@@ -501,7 +521,7 @@ def write_delta_marker(pdir: "Path", filename: str, from_version: "str | None",
 # (literature index, vision ckpt) + the TS SPA (served per-request via
 # FileResponse, briefly opened then closed — os.replace swaps atomically) + docs
 # (read-only reference). A delta touching ONLY these hot-applies live, no restart
-# (feature B, 审查). Anything else → offline applier.
+# (feature B). Anything else → offline applier.
 # 2026-08-02：这里曾与 delta.DEFAULT_INCLUDE_PREFIXES 一起停留在退役的
 # mast_vision_m12.pt 上。两处都得改 —— 上面那句注释声称「Mirrors」，一旦漂开就是
 # 一条没人守的不变式：视觉权重的增量包会被判成「不是纯数据」，白白走一次离线

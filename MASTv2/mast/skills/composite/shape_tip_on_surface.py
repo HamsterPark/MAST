@@ -42,6 +42,7 @@ from mast.skills.composite.graph_executor import (
     GraphExecutor,
 )
 from mast.agents._shared.skill_adapter import wrap_skill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -50,13 +51,20 @@ logger = logging.getLogger(__name__)
 #: `.execute()` 那条路)。写成常量是因为「两个地方各写一句」正是让其中一句
 #: 悄悄过期的做法。
 _ROUND_THRESHOLD_RETIRED = (
-    "`round_threshold` 已作废(2026-08-11),请用 `min_axis_ratio`"
+    tr("`round_threshold` 已作废(2026-08-11),请用 `min_axis_ratio`"
     "(等效轴比,完美圆 = 1.0;0.75 =「不比长短轴差 25% 的椭圆更不规则」)。"
     "**两个数不可换算**:旧的比的是 0.6*circularity+0.4*aspect,而那个 "
     "circularity = 4πA/P² 在像素化边界上的**上确界只有 0.617**(轴对齐正方形却是 "
     "0.785)—— 阈值 0.65 卡在两者之间,**圆的一律不合格、方的一律合格**。"
     "不做静默别名是因为两个阈值**方向相同** —— 一个漏改的 0.65 不会崩,"
-    "只会悄悄把闸门放宽到「长短轴差 35%」。")
+    "只会悄悄把闸门放宽到「长短轴差 35%」。",
+        "`round_threshold` is retired (2026-08-11); use `min_axis_ratio` "
+        "(equivalent axis ratio, perfect circle = 1.0; 0.75 = \"no more irregular than an ellipse whose axes differ by 25%\"). "
+        "**The two numbers are not convertible**: the old one compared 0.6*circularity+0.4*aspect, and that "
+        "circularity = 4πA/P² has a **supremum of only 0.617** on pixelated boundaries (an axis-aligned square gets "
+        "0.785) -- a threshold of 0.65 sits between the two, so **circles always fail and squares always pass**. "
+        "No silent alias, because the two thresholds point the **same way** -- a missed 0.65 would not crash, "
+        "it would quietly loosen the gate to \"axes differ by 35%\"."))
 
 
 class ShapeTipOnSurface(CompositeSkillGraph):
@@ -70,18 +78,23 @@ class ShapeTipOnSurface(CompositeSkillGraph):
             capabilities=frozenset({"tip_shaping"}),
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "在样品上端到端地整形针尖：先在一张大图上找一块平区，"
+                tr("在样品上端到端地整形针尖：先在一张大图上找一块平区，"
                 "再用 TipShape 逐级往下扎、同时盯电流判接触，然后扫那个坑"
                 "并评估圆度。簇不对称就换一个新点位重试。最后恢复反馈 + "
-                "扫描框。"
+                "扫描框。",
+                    "End-to-end tip shaping on the sample: find a flat area on a wide scan, "
+                    "then plunge with TipShape step by step while watching the current to detect contact, then scan the crater "
+                    "and assess its roundness. If the cluster is asymmetric, retry at a new spot. Finally restore feedback + "
+                    "the scan frame.")
             ),
             parameters=[
                 ParameterSpec(
                     name="wide_scan_path",
                     type="str",
                     description=(
-                        "用来挑平区的那张已有 .sxm 大图的路径。"
-                        "留空则现扫一张新的大图。"
+                        tr("用来挑平区的那张已有 .sxm 大图的路径。"
+                        "留空则现扫一张新的大图。",
+                            "Path of an existing .sxm wide scan used to pick the flat area. Leave empty to scan a new wide image now.")
                     ),
                     required=False,
                     default="",
@@ -90,9 +103,12 @@ class ShapeTipOnSurface(CompositeSkillGraph):
                     name="wide_scan_width_m",
                     type="float",
                     description=(
-                        "没给 scan_path 时，那张搜索用大图的宽度，单位 METRES。"
+                        tr("没给 scan_path 时，那张搜索用大图的宽度，单位 METRES。"
                         "常见 50n–200n（50–200 nm）。"
-                        "例：100n（= 100 nm）✓；1（= 1 m！）✗。"
+                        "例：100n（= 100 nm）✓；1（= 1 m！）✗。",
+                            "Width of the wide search scan when scan_path is not given, in METRES. "
+                            "Typical 50n-200n (50-200 nm). "
+                            "E.g. 100n (= 100 nm) OK; 1 (= 1 m!) wrong.")
                     ),
                     unit="m",
                     required=False,
@@ -104,8 +120,9 @@ class ShapeTipOnSurface(CompositeSkillGraph):
                     name="cluster_window_m",
                     type="float",
                     description=(
-                        "扎完之后那个小扫描窗的边长，单位 METRES。"
-                        "常见 3n–10n（3–10 nm）。"
+                        tr("扎完之后那个小扫描窗的边长，单位 METRES。"
+                        "常见 3n–10n（3–10 nm）。",
+                            "Side length of the small scan window after plunging, in METRES. Typical 3n-10n (3-10 nm).")
                     ),
                     unit="m",
                     required=False,
@@ -117,8 +134,9 @@ class ShapeTipOnSurface(CompositeSkillGraph):
                     name="shallow_depth_m",
                     type="float",
                     description=(
-                        "最浅的扎针深度（相对当前位置的负 Z），单位 METRES。"
-                        "常见 -300p（= -0.3 nm）。"
+                        tr("最浅的扎针深度（相对当前位置的负 Z），单位 METRES。"
+                        "常见 -300p（= -0.3 nm）。",
+                            "Shallowest plunge depth (negative Z relative to the current position), in METRES. Typical -300p (= -0.3 nm).")
                     ),
                     unit="m",
                     required=False,
@@ -130,9 +148,12 @@ class ShapeTipOnSurface(CompositeSkillGraph):
                     name="deep_depth_m",
                     type="float",
                     description=(
-                        "最深的扎针深度（更负的 Z），单位 METRES。"
+                        tr("最深的扎针深度（更负的 Z），单位 METRES。"
                         "常见 -3n to -5n（= -3 to -5 nm）。簇的大小随深度增长。"
-                        "上限 ±1 µm。"
+                        "上限 ±1 µm。",
+                            "Deepest plunge depth (more negative Z), in METRES. "
+                            "Typical -3n to -5n (= -3 to -5 nm). Cluster size grows with depth. "
+                            "Limit ±1 µm.")
                     ),
                     unit="m",
                     required=False,
@@ -144,8 +165,9 @@ class ShapeTipOnSurface(CompositeSkillGraph):
                     name="n_depth_steps",
                     type="int",
                     description=(
-                        "在 shallow_depth_m 与 deep_depth_m 之间分几档深度"
-                        "（linspace）。"
+                        tr("在 shallow_depth_m 与 deep_depth_m 之间分几档深度"
+                        "（linspace）。",
+                            "Number of depth steps between shallow_depth_m and deep_depth_m (linspace).")
                     ),
                     required=False,
                     default=5,
@@ -156,8 +178,9 @@ class ShapeTipOnSurface(CompositeSkillGraph):
                     name="contact_threshold_a",
                     type="float",
                     description=(
-                        "MonitorCurrent 用来判定「已接触」的电流绝对值阈值（A）。"
-                        "常见 50n（50 nA）。"
+                        tr("MonitorCurrent 用来判定「已接触」的电流绝对值阈值（A）。"
+                        "常见 50n（50 nA）。",
+                            "Absolute current threshold (A) MonitorCurrent uses to decide \"contact made\". Typical 50n (50 nA).")
                     ),
                     unit="A",
                     required=False,
@@ -169,8 +192,9 @@ class ShapeTipOnSurface(CompositeSkillGraph):
                     name="monitor_after_s",
                     type="float",
                     description=(
-                        "每一步整形之后盯电流盯多久，单位 SECONDS。"
-                        "常见 0.2–0.5。"
+                        tr("每一步整形之后盯电流盯多久，单位 SECONDS。"
+                        "常见 0.2–0.5。",
+                            "How long to watch the current after each shaping step, in SECONDS. Typical 0.2-0.5.")
                     ),
                     unit="s",
                     required=False,
@@ -182,13 +206,20 @@ class ShapeTipOnSurface(CompositeSkillGraph):
                     name="min_axis_ratio",
                     type="float",
                     description=(
-                        "坑的**等效轴比**达到这个值或更高就算通过："
+                        tr("坑的**等效轴比**达到这个值或更高就算通过："
                         "0.75 = 「不比一个两轴相差 25% 的椭圆更不规则」。"
                         "低于它 → 换一个新点位重试。"
                         "它**取代**了 round_threshold=0.65（2026-08-11）：那一个比的是 "
                         "0.6*circularity+0.4*aspect，在那把尺子上一个**完美圆盘**"
                         "最高只到 0.770，而一个轴对齐的**正方形**却能拿 0.871。"
-                        "**这两个数不可互换。**"
+                        "**这两个数不可互换。**",
+                            "The crater passes when its **equivalent axis ratio** reaches this value or higher: "
+                            "0.75 = \"no more irregular than an ellipse whose two axes differ by 25%\". "
+                            "Below it -> retry at a new spot. "
+                            "It **replaces** round_threshold=0.65 (2026-08-11): that one compared "
+                            "0.6*circularity+0.4*aspect, on which a **perfect disc** "
+                            "tops out at 0.770 while an axis-aligned **square** can score 0.871. "
+                            "**The two numbers are not interchangeable.**")
                     ),
                     required=False,
                     default=0.75,
@@ -198,7 +229,7 @@ class ShapeTipOnSurface(CompositeSkillGraph):
                 ParameterSpec(
                     name="max_attempts",
                     type="int",
-                    description="跨不同点位的最大重试次数。",
+                    description=tr("跨不同点位的最大重试次数。", "Maximum number of retries across different spots."),
                     required=False,
                     default=3,
                     min_value=1,
@@ -208,13 +239,20 @@ class ShapeTipOnSurface(CompositeSkillGraph):
                     name="allow_on_qplus",
                     type="bool",
                     description=(
-                        "默认关 —— 把针尖往表面里扎几 nm **就是**整形针尖的"
+                        tr("默认关 —— 把针尖往表面里扎几 nm **就是**整形针尖的"
                         "常规做法，不需要谁批准。"
                         "只有守卫被重新打开时（MAST_QPLUS_POKE_GUARD=1）这个"
                         "开关才有意义。真正保护音叉的是**深度包络**"
                         "（超限是 REFUSED，绝不夹紧）和扎之前**自动把偏压降到 "
                         "20 mV** —— 一次跳过了那道降压的扎针会把音叉激振，"
-                        "**毁针尖的是那个，不是扎针本身。**"
+                        "**毁针尖的是那个，不是扎针本身。**",
+                            "Off by default -- poking the tip a few nm into the surface **is** the "
+                            "normal way to shape a tip and needs nobody's approval. "
+                            "This switch only matters when the guard is re-enabled (MAST_QPLUS_POKE_GUARD=1). "
+                            "What actually protects the tuning fork is the **depth envelope** "
+                            "(over-limit is REFUSED, never clamped) and **automatically lowering the bias to "
+                            "20 mV** before poking -- a poke that skipped that bias reduction would excite the fork, "
+                            "and **that is what ruins the tip, not the poke itself.**")
                     ),
                     required=False,
                     default=False,
@@ -738,7 +776,7 @@ class ShapeTipOnSurface(CompositeSkillGraph):
             out.append({
                 "x_m": x, "y_m": y,
                 "index": entry.get("attempt"),
-                "label": f"修针尖尝试#{entry.get('attempt')}",
+                "label": tr(f"修针尖尝试#{entry.get('attempt')}", f"Tip shaping attempt #{entry.get('attempt')}"),
                 # The tip touched the surface here either way — a rejected
                 # cluster is still a crater. ``success`` only says whether this
                 # attempt produced the round apex we wanted.

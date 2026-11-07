@@ -1,11 +1,12 @@
-// Pure CompositeSpec tree operations for the 技能构建器 (composite skill builder).
-// Ports the spec-manipulation core of the old builder-ui.jsx (git 8bef1a1) to
-// typed TS. The document format = the backend CompositeSpec JSON (single source
+// Pure CompositeSpec tree operations for the composite skill builder.
+// The document format = the backend CompositeSpec JSON (single source
 // of truth, skills/composite/spec.py). Sequential order == execution order;
 // if/loop/llm/human/agent are containers whose branch bodies live under
 // then/else (if), body (loop), routes.<name>/on_error (llm/human/agent).
 //
 // Every mutation returns a NEW spec (deep-cloned) — never mutates in place.
+
+import { tr } from "../../lib/i18n.ts";
 
 export type NodeKind =
   | "step"
@@ -199,17 +200,20 @@ export function newNode(spec: Spec, kind: NodeKind, skillName?: string): SpecNod
       type: "llm",
       id: genId(spec, "decide"),
       mode: "route",
-      responsibility: "（写一句话职责）",
+      responsibility: tr("（写一句话职责）", "(describe the responsibility in one sentence)"),
       inputs: {},
       routes: { proceed: [], escalate: [] },
-      route_descriptions: { proceed: "继续", escalate: "升级人工" },
+      route_descriptions: {
+        proceed: tr("继续", "Continue"),
+        escalate: tr("升级人工", "Escalate to operator"),
+      },
       escape: "escalate",
     };
   if (kind === "human")
     return {
       type: "human",
       id: genId(spec, "ask"),
-      message: "需要人工决策：{原因}",
+      message: tr("需要人工决策：{原因}", "Operator decision needed: {reason}"),
       inputs: {},
       routes: { continue: [], abort: [] },
     };
@@ -218,7 +222,10 @@ export function newNode(spec: Spec, kind: NodeKind, skillName?: string): SpecNod
       type: "agent",
       id: genId(spec, "delegate"),
       agent: "literature",
-      task: "（描述要委托的任务，可用 {名} 插值 inputs）",
+      task: tr(
+        "（描述要委托的任务，可用 {名} 插值 inputs）",
+        "(describe the task to delegate; use {name} to interpolate inputs)",
+      ),
       inputs: {},
       max_model_calls: 8,
       timeout_s: 600,

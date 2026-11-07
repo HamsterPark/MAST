@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import math
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -28,14 +29,19 @@ logger = logging.getLogger(__name__)
 
 #: 拒绝报文里给出的处方 —— 「该怎么填」而不是「你没填」。
 _BOX_HINT = (
-    "请用 ExtractClusters 分析自己的完整数据集，对全部候选及反例的长宽比、像素数与峰高检查分布，再明确给出阈值。必须保持预处理一致，并验证误判与漏判；这里不提供样品标定值。"
+    tr("请用 ExtractClusters 分析自己的完整数据集，对全部候选及反例的长宽比、像素数与峰高检查分布，再明确给出阈值。"
+    "必须保持预处理一致，并验证误判与漏判；这里不提供样品标定值。",
+    "Analyse your own full dataset with ExtractClusters, check the distribution of aspect ratio, pixel count and peak height over all candidates and counter-examples, then set the thresholds explicitly. Keep preprocessing consistent and verify false positives and misses; no sample-specific calibration values are provided here.")
 )
 _ANCHOR_HINT = (
-    "扎针锚点应由刚执行动作的调用方提供；留空回退到帧中心，只在扫描框确实对准锚点时才等价。容差必须按当前定位误差提供，例如 '3n' 仅演示带 SI 前缀的输入格式，不是标定建议。"
+    tr("扎针坐标由**刚扎完的那个调用方**提供(它知道自己扎在哪);留空则退回帧中心 —— "
     # ⚠️ 这里的例子必须写成**带 SI 前缀的字符串**('3n'),不能写 3e-9 ——
     # 这几个米量纲参数是**强制前缀**的,指数写法会被解析器直接拒绝。
     # 在描述里举一个自己会拒绝的例子,等于教模型去撞墙(它不会怀疑文档,只会照抄)。
     # 由 tests/v2/unit/skills/test_strict_param_descriptions.py 把守。
+    "只有当扫描框确实对准了扎针点时那才等价。容差必须按当前定位误差提供,"
+    "例如 '3n' 仅演示带 SI 前缀的输入格式,不是标定建议。",
+    "The poke coordinates are supplied by **the caller that just poked** (it knows where it poked); if empty, falls back to the frame centre - that is only equivalent when the scan frame was really aimed at the poke point. The tolerance must be set from the current positioning error; '3n' is only an example of the SI-prefixed input format, not a calibration recommendation.")
 )
 
 
@@ -49,64 +55,74 @@ class SelectPokedCluster(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "从一帧可能有很多团簇的图里，挑出**我们刚扎的那一个**。"
+                tr("从一帧可能有很多团簇的图里，挑出**我们刚扎的那一个**。"
                 "先跑 ExtractClusters，再过一道合取（圆 且 大 且 高），"
                 "然后取离扎针坐标最近的那个。容差之内一个都没有时**弃权**"
                 "（selected=null）—— 「我找到的最近的东西」不是一个答案。"
                 "每一个阈值都**必填、没有默认值**：拒绝替人猜数，"
-                "正是这一层的意义所在。"
+                "正是这一层的意义所在。",
+                "From a frame that may contain many clusters, pick **the one we just poked**. First run ExtractClusters, then pass a conjunction (round AND large AND tall), then take the one nearest the poke coordinates. If none is within the tolerance it **abstains** (selected=null) - 'the nearest thing I found' is not an answer. Every threshold is **required and has no default**: refusing to guess numbers for people is the whole point of this layer.")
             ),
             parameters=[
                 ParameterSpec(
                     name="scan_path", type="str", required=True,
-                    description="已保存的那张 .sxm 的路径。",
+                    description=tr("已保存的那张 .sxm 的路径。", "Path of the saved .sxm."),
                 ),
                 ParameterSpec(
                     name="min_aspect", type="float", required=True,
                     min_value=0.0, max_value=1.0,
-                    description=("筛掉线状伪影。**必填，没有默认值**。"
+                    description=(tr("筛掉线状伪影。**必填，没有默认值**。", "Filters out line-like artifacts. **Required, no default**.")
                                  + _BOX_HINT),
                 ),
                 ParameterSpec(
                     name="min_area_px", type="int", required=True,
                     min_value=1, max_value=1000000,
-                    description=("连通域最小面积。必填且无默认值；与其他特征一起验证，不能因某批数据上不承重就放宽。"
-                                  + _BOX_HINT),
+                    description=(tr("连通域的最小面积。**必填，没有默认值**。"
+                                 "注意：这一条在有的数据上几乎**不承担"
+                                 "分辨力**，但仍需与其他特征一起验证 —— "
+                                 "而这恰恰是「把它调松了也没人会注意到」"
+                                 "的原因。",
+                                 "Minimum area of a connected component. **Required, no default**. Note: on some datasets this one carries almost **no discriminating power**, but it must still be validated together with the other features - which is exactly why 'nobody would notice if it were loosened'.") + _BOX_HINT),
                 ),
                 ParameterSpec(
                     name="min_peak_height_m", type="float", required=True,
                     unit="m", min_value=0.0, max_value=1e-6,
-                    description=("最小峰高。必填且无默认值；需与形状、面积、定位及当前预处理口径联合验证。"
-                                  + _BOX_HINT),
+                    description=(tr("最小峰高。**必填，没有默认值**。"
+                                 "这一条才是真正分得开的那一维"
+                                 "（需与形状、面积联合验证）。",
+                                 "Minimum peak height. **Required, no default**. This is the dimension that really separates them (validate it jointly with shape and area).") + _BOX_HINT),
                 ),
                 ParameterSpec(
                     name="anchor_tolerance_m", type="float", required=True,
                     unit="m", min_value=0.0, max_value=1e-6,
-                    description=("离扎针点多近才算「我们扎的那一个」。"
-                                 "**必填，没有默认值**。" + _ANCHOR_HINT),
+                    description=(tr("离扎针点多近才算「我们扎的那一个」。"
+                                 "**必填，没有默认值**。",
+                                 "How close to the poke point counts as 'the one we poked'. **Required, no default**.") + _ANCHOR_HINT),
                 ),
                 ParameterSpec(
                     name="near_x_m", type="float", required=False, default=None,
-                    unit="m", description="扎针点的 X。不填 → 退回帧中心。" + _ANCHOR_HINT,
+                    unit="m", description=tr("扎针点的 X。不填 → 退回帧中心。", "X of the poke point. If not given -> falls back to the frame centre.") + _ANCHOR_HINT,
                 ),
                 ParameterSpec(
                     name="near_y_m", type="float", required=False, default=None,
-                    unit="m", description="扎针点的 Y。不填 → 退回帧中心。",
+                    unit="m", description=tr("扎针点的 Y。不填 → 退回帧中心。", "Y of the poke point. If not given -> falls back to the frame centre."),
                 ),
                 ParameterSpec(
                     name="channel", type="str", required=False, default="Z",
-                    description="通道名（默认 Z）。",
+                    description=tr("通道名（默认 Z）。", "Channel name (default Z)."),
                 ),
                 ParameterSpec(
                     name="polarity", type="str", required=False, default="auto",
                     allowed_values=["auto", "bright", "dark"],
-                    description="原样透传给 ExtractClusters。",
+                    description=tr("原样透传给 ExtractClusters。", "Passed through unchanged to ExtractClusters."),
                 ),
                 ParameterSpec(
                     name="level", type="str", required=False, default="none",
                     allowed_values=["none", "plane"],
-                    description=("原样透传，默认 RAW。阈值必须在与当前数据相同的"
-                                 "预处理口径下验证；更换预处理后需重新检查。"),
+                    description=(tr("原样透传。默认 RAW。阈值必须在与当前数据相同的"
+                                 "预处理口径下验证；更换预处理后需重新检查。",
+                                 
+                                 "Passed through unchanged. Default RAW. Thresholds must be validated under the same preprocessing as the data; re-check them after changing it.")),
                 ),
             ],
             estimated_duration_s=2.0,
@@ -124,9 +140,17 @@ class SelectPokedCluster(BaseSkill):
         if missing:
             return SkillResult(
                 skill_name=name, success=False,
-                error=(f"这些阈值必须显式给出,本技能**不替你猜**:{missing}。"
-                       f"{_BOX_HINT} 锚点容差:{_ANCHOR_HINT}"),
-                # 公开快照不提供样品标定或推荐工作点，调用方必须显式配置。
+                error=(tr(f"这些阈值必须显式给出,本技能**不替你猜**:{missing}。"
+                       f"{_BOX_HINT} 锚点容差:{_ANCHOR_HINT}",
+                       f"These thresholds must be given explicitly; this skill **does not guess them for you**: {missing}. {_BOX_HINT} Anchor tolerance: {_ANCHOR_HINT}")),
+                # ⚠️ 米量纲那两个必须给**带 SI 前缀的字符串**,不能给 1.5e-10 /
+                # 3e-9:它们是强制前缀参数,指数写法会被这个技能**自己**拒绝。
+                #
+                # 这和描述里举错例子是同一个缺陷,只是挪到了 data 里 —— 而这里更糟:
+                # **拒绝报文正是模型用来决定"下次该传什么"的东西**,
+                # 一份开不出来的处方比不开处方更坏。
+                # (那道闸门只看 description,看不到 data;由
+                #  test_cluster_select.py::test_the_prescription_is_actually_fillable 把守。)
                 data={"missing_parameters": missing,
                       "suggested_operating_point": {},
                       "calibration_required": True})
@@ -168,7 +192,7 @@ class SelectPokedCluster(BaseSkill):
         })
         if not ext.success:
             return SkillResult(skill_name=name, success=False,
-                               error=f"提取失败:{ext.error}", data=ext.data)
+                               error=tr(f"提取失败:{ext.error}", f"Extraction failed: {ext.error}"), data=ext.data)
         ex = ext.data
         frame = ex["frame"]
 
@@ -226,8 +250,9 @@ class SelectPokedCluster(BaseSkill):
         }
         if not coords_trustworthy:
             out["coords_warning"] = (
-                "这一帧的 scan_angle 不可知,像素→米的换算**没有验证过** —— "
-                "选出来的坐标不要直接拿去移动针尖。")
+                tr("这一帧的 scan_angle 不可知,像素→米的换算**没有验证过** —— "
+                "选出来的坐标不要直接拿去移动针尖。",
+                "The scan_angle of this frame is unknown, and the pixel-to-metre conversion has **not been verified** - do not use the selected coordinates to move the tip directly."))
 
         if not passing:
             # 弃权,并且**把最近的那个的距离也报出来** —— 它是下一版容差的数据。
@@ -236,10 +261,11 @@ class SelectPokedCluster(BaseSkill):
                               key=lambda c: c["distance_to_anchor_m"], default=None)
             out["selected"] = None
             out["selected_reason"] = (
-                f"提取到 {len(cands)} 个连通域,没有一个同时满足"
+                tr(f"提取到 {len(cands)} 个连通域,没有一个同时满足"
                 f"(长宽比≥{min_aspect}、≥{min_area}px、峰高≥{min_peak_m * 1e12:.0f}pm)。"
                 "**这是弃权,不是「没有团簇」** —— 可能是阈值不适合这一帧,"
-                "也可能这一针真的没扎出东西。看 candidates 里每个是卡在哪一条。")
+                "也可能这一针真的没扎出东西。看 candidates 里每个是卡在哪一条。",
+                f"Extracted {len(cands)} connected components, none satisfies all of (aspect ratio>={min_aspect}, >={min_area}px, peak height>={min_peak_m * 1e12:.0f}pm). **This is an abstention, not 'no cluster'** - the threshold may not suit this frame, or this poke may really have produced nothing. See which condition each entry in candidates is stuck on."))
             if nearest_any is not None:
                 out["nearest_rejected"] = {
                     "rank": nearest_any["rank"],
@@ -254,11 +280,12 @@ class SelectPokedCluster(BaseSkill):
             # 是三态里最常被跳过的那一步。
             out["selected"] = None
             out["selected_reason"] = (
-                f"最近的合格团簇距锚点 {best['distance_to_anchor_m'] * 1e9:.2f} nm,"
+                tr(f"最近的合格团簇距锚点 {best['distance_to_anchor_m'] * 1e9:.2f} nm,"
                 f"超过容差 {tol_m * 1e9:.2f} nm —— **判不了这是不是我们扎的那个**。"
                 "不把它当成新扎的交出去:那正是「拿最近的东西冒充答案」。"
                 "(如果这个距离反复出现在同一个量级上,那就是容差该改的信号 —— "
-                "这一版的 3 nm 就是这么来的。)")
+                "这一版的 3 nm 就是这么来的。)",
+                f"The nearest qualifying cluster is {best['distance_to_anchor_m'] * 1e9:.2f} nm from the anchor, beyond the tolerance {tol_m * 1e9:.2f} nm - **cannot tell whether this is the one we poked**. It is not handed over as the newly poked one: that would be 'passing off the nearest thing as the answer'. (If this distance keeps appearing at the same order of magnitude, it is a signal that the tolerance should change - this version's 3 nm came about that way.)"))
             out["nearest_passing"] = {
                 "rank": best["rank"],
                 "distance_to_anchor_m": best["distance_to_anchor_m"],
@@ -268,6 +295,7 @@ class SelectPokedCluster(BaseSkill):
 
         out["selected"] = best
         out["selected_reason"] = (
-            f"合格团簇 {len(passing)} 个,取距锚点最近的一个:"
-            f"{best['distance_to_anchor_m'] * 1e9:.2f} nm(容差 {tol_m * 1e9:.2f} nm)。")
+            tr(f"合格团簇 {len(passing)} 个,取距锚点最近的一个:"
+            f"{best['distance_to_anchor_m'] * 1e9:.2f} nm(容差 {tol_m * 1e9:.2f} nm)。",
+            f"{len(passing)} qualifying clusters, taking the one nearest the anchor: {best['distance_to_anchor_m'] * 1e9:.2f} nm (tolerance {tol_m * 1e9:.2f} nm)."))
         return SkillResult(skill_name=name, success=True, data=out)

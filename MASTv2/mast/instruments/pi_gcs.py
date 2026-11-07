@@ -16,13 +16,26 @@ and E-861 vendor SDKs shipped with the LabVIEW project):
 - ``ERR?``             last error code        → ``<int>``
 - ``STP``              smooth stop (sets error 10, which we swallow)
 - ``FRF <ax>`` / ``FRF? <ax>``  reference move + referenced query (E-861)
+- ``VEL <ax> <v>`` / ``VEL? <ax>``  closed-loop velocity, physical unit / s
+- ``SVO? <ax>``        servo state
+- ``TMN? <ax>`` / ``TMX? <ax>``  the controller's own travel range
+- ``LIM? <ax>`` / ``TRS? <ax>``  does the stage HAVE limit / reference switches
+  (presence, not their state) — E-861 only
+
+The manual-panel additions (status, velocity, servo) use only commands the
+vendor's per-controller LabVIEW driver sets ship a VI for (E-861 set 6.0.2:
+VEL/VEL?, SVO/SVO?, TMN?/TMX?, LIM?, TRS?, FRF/FRF?; the E-816 set has no
+FRF/LIM?/TRS?). A query the firmware does not answer leaves GCS error 2 in the
+queue; the next command's ERR? would be misattributed that error, so a failed status
+query is followed by one draining ERR?.
 
 Model differences handled here:
 
 - **E-816**: axes are letters (``A``-``D``), no homing concept (piezo with
   absolute sensor) — ``home()`` raises. Servo must be ON for MOV.
 - **E-861**: axis is usually ``"1"``; a closed-loop absolute MOV requires
-  the axis to be referenced once (FRF). ``home()`` = FRF.
+  the axis to be referenced once (FRF). ``home()`` = FRF: the stage MOVES to its
+  reference switch and the position is then set to the reference value.
 """
 
 from __future__ import annotations
@@ -42,6 +55,7 @@ from mast.instruments.base import (
     InstrumentUnavailable,
     MotionAxis,
     MotionController,
+    serial_open_hint,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,6 +87,14 @@ def parse_gcs_value(line: str, axis: str) -> str:
     raise InstrumentError(f"GCS reply {line!r} has no value for axis {axis!r}")
 
 
+#: what a velocity readback may differ from the request (the controller rounds)
+_VEL_REL_TOL = 0.01
+
+
+def _gcs_bool(value: str) -> bool:
+    return value.strip() in ("1", "True", "true")
+
+
 class PiGcsAxis(MotionAxis):
     """One GCS axis (letter for E-816, digit for E-861)."""
 
@@ -80,6 +102,8 @@ class PiGcsAxis(MotionAxis):
         super().__init__(config, controller)
         self._pi: PiGcsController = controller
         self._ax = str(config.channel)
+        self.SUPPORTS = frozenset({"velocity", "servo"} | (
+            {"home"} if controller.model_needs_reference else set()))
 
     # -- primitives (controller lock already held by the base class) --------
 
@@ -127,6 +151,67 @@ class PiGcsAxis(MotionAxis):
                 "no homing procedure exists"
             )
         self._pi._command(f"FRF {self._ax}")
+
+    def _ask(self, cmd: str) -> str | None:
+        """``<cmd> <axis>`` → the value, or None when the controller does not answer."""
+        try:
+            return parse_gcs_value(self._pi._query(f"{cmd} {self._ax}"), self._ax)
+        except InstrumentError:
+            return None
+
+    def _status_details_raw(self) -> dict:
+        out: dict = {}
+        failed = False
+        queries = [("servo", "SVO?", _gcs_bool), ("velocity", "VEL?", float),
+                   ("travel_min_controller", "TMN?", float),
+                   ("travel_max_controller", "TMX?", float)]
+        if self._pi.model_needs_reference:
+            queries += [("has_limit_switches", "LIM?", _gcs_bool),
+                        ("has_reference_switch", "TRS?", _gcs_bool)]
+        for key, cmd, conv in queries:
+            raw = self._ask(cmd)
+            try:
+                if raw is not None:
+                    out[key] = conv(raw)
+                    continue
+            except ValueError:
+                pass
+            failed = True
+        if "velocity" in out:
+            out["velocity_unit"] = f"{self.config.unit}/s"
+        if failed:
+            # an unanswered query leaves GCS error 2 queued: read it here, or the
+            # next set command's ERR? reports it as its own failure
+            try:
+                self._pi._query("ERR?")
+            except InstrumentError:
+                pass
+        return out
+
+    def _set_velocity_raw(self, velocity: float) -> float | None:
+        self._pi._command(f"VEL {self._ax} {velocity:.6f}")
+        raw = self._ask("VEL?")
+        if raw is None:
+            return None
+        try:
+            back = float(raw)
+        except ValueError:
+            return None
+        if abs(back - velocity) > _VEL_REL_TOL * velocity:
+            raise InstrumentError(
+                f"PI {self._pi.model}: VEL {self._ax} {velocity:g} reads back {back:g}")
+        return back
+
+    def _set_servo_raw(self, on: bool) -> bool | None:
+        self._pi._command(f"SVO {self._ax} {1 if on else 0}")
+        raw = self._ask("SVO?")
+        if raw is None:
+            return None
+        back = _gcs_bool(raw)
+        if back != on:
+            raise InstrumentError(
+                f"PI {self._pi.model}: SVO {self._ax} {int(on)} reads back {int(back)}")
+        return back
 
 
 class PiGcsController(MotionController):
@@ -182,7 +267,7 @@ class PiGcsController(MotionController):
                 t.open()
             except SerialUnavailable as exc:
                 raise InstrumentUnavailable(
-                    f"PI {self.model} on {self._port}: {exc}"
+                    f"PI {self.model} on {self._port}: {exc}{serial_open_hint(self._port)}"
                 ) from exc
             self._transport = t
         if self._servo_on_connect:

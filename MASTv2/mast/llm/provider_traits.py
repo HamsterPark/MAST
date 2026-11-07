@@ -71,13 +71,13 @@ SHARED: dict[str, Trait] = {
     "json_hint_contains_literal_json": Trait(
         why='文本回退的提示里必须**字面**出现 "json" 这个词。',
         symptom="qwen 不进 JSON 模式，返回散文，解析失败后整轮路由落空。",
-        source="llm_route.py docstring（点名 qwen）",
+        source="llm_route.py docstring（qwen）",
         enforced_by="agentruntime/routing.py::make_llm_router 的 json_hint",
     ),
     "conversation_ends_on_user_turn": Trait(
         why="送出去的消息列表必须以 user 轮结尾。",
         symptom="sonnet 拒绝以 assistant 轮结尾的请求。",
-        source="llm_route.py docstring（点名 sonnet）",
+        source="llm_route.py docstring（sonnet）",
         enforced_by="agentruntime/routing.py::make_llm_router",
     ),
     "no_parallel_tool_calls": Trait(
@@ -126,7 +126,7 @@ PER_PROVIDER: dict[str, dict[str, Trait]] = {
         "base_url_is_minimaxi": Trait(
             why="接口在 **api.minimaxi.com**（``/anthropic`` 兼容面），不是 .io。",
             symptom="连不上 / 401，而域名看起来完全合理。",
-            source="项目规约「模型 provider」段 + docs/api_providers/minimax.md",
+            source="docs/api_providers/minimax.md",
             enforced_by="",
         ),
         "multi_turn_thinking_verbatim": Trait(
@@ -146,8 +146,8 @@ PER_PROVIDER: dict[str, dict[str, Trait]] = {
         ),
         "v1_128k_has_no_thinking": Trait(
             why="``moonshot-v1-128k`` **没有** thinking；thinking 参数一个都不能发。",
-            symptom="400，或者更糟：静默地不对。",
-            source="config.model_thinking_mode docstring（点名这个型号）",
+            symptom="请求返回 400，或者请求成功但 thinking 设置被静默忽略、结果不对。",
+            source="config.model_thinking_mode docstring（该型号）",
             enforced_by="mast/config.py::model_thinking_mode → \"none\"",
         ),
     },

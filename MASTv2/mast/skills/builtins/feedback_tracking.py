@@ -20,6 +20,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -38,35 +39,42 @@ class AssessFeedbackTracking(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读一帧 .sxm 的 Z 与电流两个通道，量 Z 反馈在这个扫描速度下跟得有多紧："
+                tr("读一帧 .sxm 的 Z 与电流两个通道，量 Z 反馈在这个扫描速度下跟得有多紧："
                 "电流误差对地形斜率的斜率，除以设定点即 v/I_gain（可与文件头对账）。"
                 "给了势垒常数 κ 还能换算出晶格频率上的跟随保真度。"
-                "**不判针尖好坏，也不建议增益该设多少** —— 只给「现在这一档的代价」。"
+                "**不判针尖好坏，也不建议增益该设多少** —— 只给「现在这一档的代价」。", "Read the Z and Current channels of an .sxm frame and measure how tightly the Z feedback tracks at this scan speed: "
+"the slope of current error against topography slope, divided by the setpoint, is v/I_gain (can be reconciled with the file header). "
+"Given the barrier constant kappa, it can also convert this into tracking fidelity at the lattice frequency. "
+"**It does not judge tip quality or recommend a gain** -- it only gives \"the cost of the current setting\".")
             ),
             parameters=[
                 ParameterSpec(
                     name="scan_path", type="str",
-                    description="要分析的 .sxm 文件路径（必须含 Current 通道）。",
+                    description=tr("要分析的 .sxm 文件路径（必须含 Current 通道）。", "Path of the .sxm file to analyse (must contain a Current channel)."),
                     required=True),
                 ParameterSpec(
                     name="direction", type="str",
-                    description="用正扫还是反扫。forward / backward。",
+                    description=tr("用正扫还是反扫。forward / backward。", "Forward or backward scan. forward / backward."),
                     required=False, default="forward",
                     allowed_values=["forward", "backward"]),
                 ParameterSpec(
                     name="kappa_per_nm", type="float",
                     description=(
-                        "隧穿衰减常数，每纳米。**刻意没有默认值**：它只有 "
+                        tr("隧穿衰减常数，每纳米。**刻意没有默认值**：它只有 "
                         "MeasureBarrierHeight 量得出（κ = √φ·5.123，φ 单位 eV；"
                         "干净真空结约 10 /nm）。不给时跟随保真度留空，"
-                        "lag_ratio 照样给。"),
+                        "lag_ratio 照样给。", "Tunnelling decay constant, per nm. **Deliberately no default**: only "
+"MeasureBarrierHeight can measure it (kappa = sqrt(phi)*5.123, phi in eV; "
+"about 10 /nm for a clean vacuum junction). If not given, tracking fidelity is left empty "
+"and lag_ratio is still reported.")),
                     unit="1/nm", required=False,
                     min_value=0.5, max_value=30.0),
                 ParameterSpec(
                     name="lattice_period_nm", type="float",
                     description=(
-                        "算保真度用的空间周期，纳米。留空则从这一帧自己量出的原胞取"
-                        "较短的那个基矢。"),
+                        tr("算保真度用的空间周期，纳米。留空则从这一帧自己量出的原胞取"
+                        "较短的那个基矢。", "Spatial period used to compute fidelity, in nm. Empty = take the shorter basis vector "
+"of the unit cell measured from this frame.")),
                     unit="nm", required=False,
                     min_value=0.05, max_value=100.0),
             ],
@@ -97,9 +105,11 @@ class AssessFeedbackTracking(BaseSkill):
                 data={"verdict": "undetermined", "scan_path": path,
                       "direction": direction,
                       "reason": "missing_channel"},
-                summary=("这一帧没有 %s 方向的 Z 或 Current 通道 —— 跟随误差只能从"
+                summary=(tr("这一帧没有 %s 方向的 Z 或 Current 通道 —— 跟随误差只能从"
                          "电流通道读，Z 里没有这个信息。扫描时把 Current 加进采集"
-                         "通道即可（ConfigureScan 的 channels 参数）。" % direction))
+                         "通道即可（ConfigureScan 的 channels 参数）。", "This frame has no Z or Current channel in the %s direction -- the tracking error can only be read from "
+"the current channel; Z does not carry that information. Add Current to the acquisition channels when scanning "
+"(the channels parameter of ConfigureScan).") % direction))
 
         period_src = "caller"
         if period is None:
@@ -136,9 +146,11 @@ class AssessFeedbackTracking(BaseSkill):
         }
         if kappa is None:
             data["fidelity_note"] = (
-                "没给 kappa_per_nm，所以不给跟随保真度。κ 只有 MeasureBarrierHeight "
+                tr("没给 kappa_per_nm，所以不给跟随保真度。κ 只有 MeasureBarrierHeight "
                 "量得出；这不是缺省值能补的东西 —— 一个编出来的 κ 会让「这台机器没测过"
-                "势垒」看不见，而保真度对 κ 是线性敏感的。")
+                "势垒」看不见，而保真度对 κ 是线性敏感的。", "kappa_per_nm was not given, so no tracking fidelity is reported. kappa can only be measured by "
+"MeasureBarrierHeight; a default cannot stand in for it -- an invented kappa would hide that \"this machine has not measured "
+"the barrier\", and the fidelity is linearly sensitive to kappa."))
         # 「把增益翻倍会怎样」按同一个模型外推 —— 它是预测不是建议。
         if res.ok and res.lag_ratio and res.omega_tau:
             wt2 = res.omega_tau / 2.0
@@ -146,10 +158,13 @@ class AssessFeedbackTracking(BaseSkill):
                 "lag_ratio": round(res.lag_ratio / 2.0, 4),
                 "omega_tau": round(wt2, 4),
                 "fidelity": round(1.0 / (1.0 + wt2 * wt2) ** 0.5, 4),
-                "note": ("同一个一阶模型的外推：I_gain 翻倍 ⇒ lag_ratio 减半。"
+                "note": (tr("同一个一阶模型的外推：I_gain 翻倍 ⇒ lag_ratio 减半。"
                          "**这是预测，不是建议** —— 增益提高也会把电流噪声更多地"
                          "灌进 Z，那一半本技能量不了（要看扣掉滞后项之后的"
-                         "residual_rms_a 在改动前后变没变）。"),
+                         "residual_rms_a 在改动前后变没变）。", "Extrapolation of the same first-order model: doubling I_gain => lag_ratio halves. "
+"**This is a prediction, not a recommendation** -- raising the gain also feeds more current noise "
+"into Z, and this skill cannot measure that half (check whether residual_rms_a, after subtracting the lag term, "
+"changed before and after the change).")),
             }
         return SkillResult(skill_name=_NAME, success=True, data=data,
                            summary=_summary(data))
@@ -157,20 +172,20 @@ class AssessFeedbackTracking(BaseSkill):
 
 def _summary(data: dict) -> str:
     if data.get("verdict") != "measured":
-        return "量不了跟随误差：%s。" % (data.get("reason") or "原因未知")
-    s = "反馈滞后 lag_ratio %.3f" % (data.get("lag_ratio") or 0.0)
+        return tr("量不了跟随误差：%s。", "Cannot measure tracking error: %s.") % (data.get("reason") or tr("原因未知", "reason unknown"))
+    s = tr("反馈滞后 lag_ratio %.3f", "feedback lag lag_ratio %.3f") % (data.get("lag_ratio") or 0.0)
     exp = data.get("expected_lag_ratio")
     if exp:
-        s += "（文件头的 v/I_gain 算得 %.3f，%s）" % (
-            exp, "对上了" if (data.get("ratio_disagreement") or 1) < 0.3 else "**对不上**")
+        s += tr("（文件头的 v/I_gain 算得 %.3f，%s）", " (v/I_gain from the file header gives %.3f, %s)") % (
+            exp, tr("对上了", "consistent") if (data.get("ratio_disagreement") or 1) < 0.3 else tr("**对不上**", "**inconsistent**"))
     fid = data.get("fidelity")
     if fid is not None and data.get("lattice_period_nm"):
-        s += "；在 %.3f nm 的周期上 Z 只跟到真实起伏的 %.0f%%" % (
+        s += tr("；在 %.3f nm 的周期上 Z 只跟到真实起伏的 %.0f%%", "; at a period of %.3f nm Z only follows %.0f%% of the true corrugation") % (
             data["lattice_period_nm"], 100 * fid)
     r2 = data.get("fit_r2")
     if r2 is not None and r2 < 0.25:
-        s += "。拟合优度只有 %.2f —— 电流里主导的不是滞后项，这个数别拿去推增益" % r2
-    return s + "。"
+        s += tr("。拟合优度只有 %.2f —— 电流里主导的不是滞后项，这个数别拿去推增益", ". Goodness of fit is only %.2f -- the lag term does not dominate the current, so do not use this number to infer the gain") % r2
+    return s + tr("。", ".")
 
 
 def make_tool(context_provider):

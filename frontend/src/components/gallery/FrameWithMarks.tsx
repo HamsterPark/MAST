@@ -1,13 +1,16 @@
-// 帧缩略图 + SVG 标记层（旧版兼容格式 context.js 的 drawMarks）。
+// Frame thumbnail with an SVG marker layer.
 //
-// 几何全在 lib/gallery/context.ts 的 overlayShapes：它按缩略图的**自然像素尺寸**算，
-// SVG 用同一个 viewBox 盖在图上（preserveAspectRatio="none"，与 <img> 同宽同高比例），
-// 线宽用 non-scaling-stroke，图缩放后线不变粗。尺寸要等图片加载完才知道。
+// The geometry lives in overlayShapes (lib/gallery/context.ts), computed in the thumbnail's
+// *natural pixel size*. The SVG overlays the image with the same viewBox
+// (preserveAspectRatio="none", same width and aspect as the <img>) and uses
+// non-scaling-stroke so lines keep their width when the image is scaled. The size is only
+// known once the image has loaded.
 
 import { useCallback, useState } from "react";
 import clsx from "clsx";
 import type { GalleryItem } from "@/lib/gallery/types";
 import { overlayShapes, type OverlayPoint, type UV } from "@/lib/gallery/context";
+import { tr } from "@/lib/i18n";
 
 const IN = "#22d3ee";
 const OUT = "#fbbf24";
@@ -36,7 +39,7 @@ function SinglePoint({ p, width }: { p: OverlayPoint; width: number }) {
           strokeWidth={3}
           paintOrder="stroke"
         >
-          视野外
+          {tr("视野外", "Out of view")}
         </text>
       )}
     </g>
@@ -78,7 +81,7 @@ export function FrameWithMarks({
   anchored?: boolean;
 }) {
   const [nat, setNat] = useState<{ w: number; h: number } | null>(null);
-  // 缓存命中的图可能在监听挂上之前就加载完了：ref 回调里再看一眼 complete。
+  // A cached image may finish loading before the listener is attached: check `complete` again in the ref callback.
   const imgRef = useCallback((img: HTMLImageElement | null) => {
     if (img && img.complete && img.naturalWidth) setNat({ w: img.naturalWidth, h: img.naturalHeight });
   }, []);

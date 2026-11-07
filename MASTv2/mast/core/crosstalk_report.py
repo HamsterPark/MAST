@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import logging
+from mast.i18n import tr
 import time
 from typing import Any
 
@@ -176,8 +177,8 @@ def position_report(value_a: float, *, sd_a: float = 0.0,
     lib = cc.load_curves(cc.KIND_RETRACT_LOCKIN) if curves is None else list(curves)
     if not lib:
         out["crosstalk_note"] = (
-            f"X = {value_a:.4g} A;曲线库里没有退针参考曲线,**未翻译**。"
-            "(采一条:退针过程中每批记 X,存进标定目录。)")
+            tr(f"X = {value_a:.4g} A;曲线库里没有退针参考曲线,**未翻译**。"
+            "(采一条:退针过程中每批记 X,存进标定目录。)", f"X = {value_a:.4g} A; there is no withdraw reference curve in the curve library, **not translated**. (Record one: log X in each batch during a withdraw and store it in the calibration directory.)"))
         return out
 
     reasons: "list[str]" = []
@@ -191,11 +192,11 @@ def position_report(value_a: float, *, sd_a: float = 0.0,
         out["crosstalk_steps_band"] = None if band is None else _round_steps(band)
         out["crosstalk_curve"] = cc.describe(curve)
         band_txt = (f" ± {_round_steps(band)}" if band is not None
-                    else "(给不出误差带:曲线在此处太平或算不出斜率)")
+                    else tr("(给不出误差带:曲线在此处太平或算不出斜率)", "(no error band: the curve is too flat here or the slope cannot be computed)"))
         out["crosstalk_note"] = (
-            f"X = {value_a:.4g} A ≈ 参考曲线上的 **{_round_steps(steps)}"
+            tr(f"X = {value_a:.4g} A ≈ 参考曲线上的 **{_round_steps(steps)}"
             f"{band_txt} 步**(相对隧穿点的退针步数)。"
-            f"依据:{cc.describe(curve)} **仅供参考,不驱动任何动作。**")
+            f"依据:{cc.describe(curve)} **仅供参考,不驱动任何动作。**", f"X = {value_a:.4g} A ~ **{_round_steps(steps)}{band_txt} steps** on the reference curve (withdraw steps relative to the tunnelling point). Basis: {cc.describe(curve)} **For reference only; drives no action.**"))
         for caveat in (curve.get("caveats") or [])[:3]:
             out.setdefault("crosstalk_caveats", []).append(caveat)
         return out
@@ -203,7 +204,7 @@ def position_report(value_a: float, *, sd_a: float = 0.0,
     # 一条都没匹配上 —— 把**为什么**说全,连两边的值。否则「换了针没重采曲线」
     # 和「功能坏了」长得一模一样。
     out["crosstalk_note"] = (
-        f"X = {value_a:.4g} A;**未翻译成步数** —— " + ";".join(reasons[:3]))
+        tr(f"X = {value_a:.4g} A;**未翻译成步数** —— ", f"X = {value_a:.4g} A; **not translated into steps**: ") + ";".join(reasons[:3]))
     return out
 
 
@@ -217,32 +218,32 @@ def crosstalk_report(ctx, *, n: int = 5, interval_s: float = 0.15
     try:
         now = live_conditions(ctx)
         if now.get("mod_on") is not True:
-            state = {True: "开", False: "关", None: "读不到"}[now.get("mod_on")]
+            state = {True: tr("开", "on"), False: tr("关", "off"), None: tr("读不到", "unreadable")}[now.get("mod_on")]
             return {"crosstalk_modulation_off": True,
                     "crosstalk_skipped": (
-                        f"调制{state} —— 不读 X,也就不翻译。"
-                        "⚠️ 进针/退针流程**开跑前会自动关调制**(用完即关,`d097541`),"
+                        tr(f"调制{state} —— 不读 X,也就不翻译。"
+                        "⚠️ 进针/退针流程**开跑前会自动关调制**(用完即关),"
                         "所以默认情况下这条报告在这些流程里永远是这一句 —— "
                         "**这不是故障,是两个机制的取舍**:调制开着时电流通道上那层"
                         "纹波会污染进退针的形态判据,"
                         "而串扰导航恰恰需要它开着。要用导航就得为这些流程保留调制,"
-                        "那是一次要单独拍板的取舍(见 KNOWN_ISSUES §2.36)。")}
+                        "那是一次需要单独决定的取舍。", f"Modulation {state}: X is not read, so nothing is translated. WARNING: approach/withdraw flows **turn modulation off before they start** (and off again after use), so by default this report is always this one sentence in those flows. **This is not a fault; it is a trade-off between two mechanisms**: with modulation on, the ripple on the current channel pollutes the morphology criteria of approach/withdraw, while crosstalk navigation needs it on. Using navigation would mean keeping modulation on for these flows, which is a trade-off that needs a separate decision."))}
         got = sample_x(ctx, n=n, interval_s=interval_s)
         if got is None:
             return {"crosstalk_skipped": (
-                "读不到 lock-in X(索引未配置或读取失败)—— **不猜**索引:"
+                tr("读不到 lock-in X(索引未配置或读取失败)—— **不猜**索引:"
                 "猜错读到的是另一路信号,而算出来的距离看上去一样合理。"
-                "请在仪器档案里填 lockin_x_signal_index。")}
+                "请在仪器档案里填 lockin_x_signal_index。", "Cannot read lock-in X (index not configured or read failed). **Not guessing** the index: a wrong guess reads another signal, and the distance computed from it looks just as plausible. Fill in lockin_x_signal_index in the instrument profile."))}
         mean, sd, count = got
         if abs(mean) < MIN_SIGNAL_A:
             return {"crosstalk_skipped": (
-                f"X = {mean:.3g} A 在噪声底以下(下界 {MIN_SIGNAL_A:.1g})—— 不翻译。")}
+                tr(f"X = {mean:.3g} A 在噪声底以下(下界 {MIN_SIGNAL_A:.1g})—— 不翻译。", f"X = {mean:.3g} A is below the noise floor (lower bound {MIN_SIGNAL_A:.1g}); not translating."))}
         rep = position_report(mean, sd_a=sd, now=now)
         rep["crosstalk_samples"] = count
         return rep
     except Exception as exc:  # noqa: BLE001 — 报告失败不该带走流程
         logger.debug("串扰报告失败(跳过):%s", exc, exc_info=True)
-        return {"crosstalk_skipped": f"串扰报告出错(已跳过):{exc}"}
+        return {"crosstalk_skipped": tr(f"串扰报告出错(已跳过):{exc}", f"Crosstalk report failed (skipped): {exc}")}
 
 
 __all__ = ["MIN_SIGNAL_A", "STEP_GRANULARITY", "live_tip_type", "live_conditions",

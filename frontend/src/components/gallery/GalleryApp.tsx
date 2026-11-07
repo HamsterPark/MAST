@@ -1,18 +1,23 @@
 // ════════════════════════════════════════════════════════════════════════════
-// 数据图库（实验记录 → 数据图库，/records/gallery）。
+// Data gallery (Records -> Data gallery, /records/gallery).
 //
-// 数据来自 /api/gallery/*；「出图」一栏从用户标记与系列生成图表。
+// Design: docs/v2/design/data_gallery.md. Data comes from /api/gallery/*. The "Figures" tab
+// generates publication figures from marks and series.
 //
-// 视图在 URL query 里（lib/gallery/route.ts）：深链可收藏、前进后退可用。URL 没有 `v`
-// 时回到上次停的视图（localStorage["mast.gallery.view"]，读时校验）。
+// The view lives in the URL query (lib/gallery/route.ts), so deep links can be bookmarked and
+// back/forward work. When the URL has no `v`, the last view is restored from
+// localStorage["mast.gallery.view"] (validated on read).
 //
-// 这一层管的是跨视图的事：顶栏、标记加载与「回到页面时拉一次」、构建完成的那一刻让
-// 索引与标记重拉、出图任务结束的提示、视图切换时清空选中、底部操作条、提示条。
+// This layer handles cross-view concerns: the header, loading marks and refreshing them when
+// the page becomes visible again, re-fetching the index and marks the moment a build finishes,
+// the figure-job notification, clearing the selection on view change, the bottom action bar
+// and the toast.
 //
-// ⚠️ 视图主体（body）按「视图 + 索引」memo。这一层订阅了保存状态、构建状态——每打
-// 一次分、构建时每 1.5 s 轮询一次都会重渲。主体若跟着重建，列表视图拿到的就是一个
-// 新的 base 数组：卡片网格回到前 150 张、滚动位置丢失、而且会在打分过程中按新标记
-// 重排（原版刻意不这样做）。所以主体只在视图或索引真的变了时才重建。
+// NOTE: the view body is memoised on "view + index". This layer subscribes to save state and
+// build state, so it re-renders on every rating and on every 1.5 s build poll. If the body were
+// rebuilt each time, list views would receive a new `base` array: the card grid would drop back
+// to the first 150 cards, scroll position would be lost, and the list would re-sort by the new
+// marks mid-rating. So the body is rebuilt only when the view or the index really changes.
 // ════════════════════════════════════════════════════════════════════════════
 
 import { useEffect, useMemo, useRef } from "react";
@@ -35,6 +40,7 @@ import { SelectionBar } from "./SelectionBar";
 import { GalleryToast, toast } from "./toast";
 import { FiguresView } from "./figures/FiguresView";
 import { FigureJobChip } from "./figures/figureJob";
+import { tr } from "@/lib/i18n";
 
 const LAST_VIEW_KEY = "mast.gallery.view";
 
@@ -48,13 +54,13 @@ function readLastView(): string | null {
 }
 
 const NAV: { id: string; label: string; view: GalleryView }[] = [
-  { id: "dirs", label: "目录", view: { v: "dirs" } },
-  { id: "all-f", label: "全部帧", view: { v: "all", k: "f" } },
-  { id: "all-s", label: "全部谱", view: { v: "all", k: "s" } },
-  { id: "all-g", label: "网格谱", view: { v: "all", k: "g" } },
-  { id: "marked", label: "已标记", view: { v: "marked" } },
-  { id: "figures", label: "出图", view: { v: "figures" } },
-  { id: "setup", label: "数据根与构建", view: { v: "setup" } },
+  { id: "dirs", label: tr("目录", "Directories"), view: { v: "dirs" } },
+  { id: "all-f", label: tr("全部帧", "All frames"), view: { v: "all", k: "f" } },
+  { id: "all-s", label: tr("全部谱", "All spectra"), view: { v: "all", k: "s" } },
+  { id: "all-g", label: tr("网格谱", "Grid spectra"), view: { v: "all", k: "g" } },
+  { id: "marked", label: tr("已标记", "Marked"), view: { v: "marked" } },
+  { id: "figures", label: tr("出图", "Figures"), view: { v: "figures" } },
+  { id: "setup", label: tr("数据根与构建", "Data roots & build"), view: { v: "setup" } },
 ];
 
 export function GalleryApp() {
@@ -65,7 +71,7 @@ export function GalleryApp() {
   const vk = viewKey(view);
   const qc = useQueryClient();
 
-  // URL 没有视图：回到上次停的地方（替换历史，不多一步后退）。
+  // No view in the URL: restore the last view (replace history so back does not gain an extra step).
   useEffect(() => {
     if (!vs) setSp(readLastView() ?? viewSearch({ v: "dirs" }), { replace: true });
   }, [vs, setSp]);
@@ -74,14 +80,14 @@ export function GalleryApp() {
     try {
       localStorage.setItem(LAST_VIEW_KEY, vs);
     } catch {
-      /* 记不住也能用 */
+      /* works without remembering */
     }
   }, [vs]);
 
   const { q, model } = useGalleryModel();
   const status = useGalleryStatus();
 
-  // 标记：第一次进页面加载；回到页面时若服务端变过（别的标签页改了）就拉。
+  // Marks: load on first visit; refresh when the page becomes visible again, in case another tab changed the server copy.
   const init = useMarksStore((s) => s.init);
   useEffect(() => {
     void init();
@@ -101,7 +107,7 @@ export function GalleryApp() {
     };
   }, []);
 
-  // 构建从「在跑」变成「不在跑」的那一刻：索引与标记重拉。
+  // The moment a build goes from running to not running: re-fetch the index and marks.
   const wasRunning = useRef<boolean | null>(null);
   const running = status.data?.running;
   useEffect(() => {
@@ -112,10 +118,13 @@ export function GalleryApp() {
       const d = status.data;
       toast(
         d?.phase === "error"
-          ? `图库构建出错：${d.message || d.detail || ""}`
+          ? tr(`图库构建出错：${d.message || d.detail || ""}`, `Gallery build failed: ${d.message || d.detail || ""}`)
           : d?.phase === "cancelled"
-            ? "图库构建已取消"
-            : `图库已更新：新 ${d?.n_new ?? 0} · 变动 ${d?.n_changed ?? 0} · 失败 ${d?.n_failed ?? 0}`,
+            ? tr("图库构建已取消", "Gallery build cancelled")
+            : tr(
+                `图库已更新：新 ${d?.n_new ?? 0} · 变动 ${d?.n_changed ?? 0} · 失败 ${d?.n_failed ?? 0}`,
+                `Gallery updated: ${d?.n_new ?? 0} new · ${d?.n_changed ?? 0} changed · ${d?.n_failed ?? 0} failed`,
+              ),
         d?.phase === "error" ? "err" : "ok",
       );
     }
@@ -123,12 +132,12 @@ export function GalleryApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [running]);
 
-  // 视图变了就清空选中（原版 route() 的 selClear）。
+  // Clear the selection when the view changes.
   useEffect(() => {
     useSelectionStore.getState().clear();
   }, [vk]);
 
-  // 顶栏高度 → CSS 变量，筛选条吸顶在它下面。
+  // Header height -> CSS variable, so the filter bar sticks below it.
   const rootRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -148,16 +157,17 @@ export function GalleryApp() {
   const indexData = q.data;
   const body = useMemo(() => {
     if (view.v === "setup") return <SetupView />;
-    // 出图页不依赖本地索引是否建好：产物列表与任务状态走自己的端点。
+    // The figures page does not depend on the local index being built: its artifact list and job state use their own endpoints.
     if (view.v === "figures") return <FiguresView />;
-    if (q.isPending) return <Spinner label="读取图库索引…" />;
+    if (q.isPending) return <Spinner label={tr("读取图库索引…", "Reading gallery index…")} />;
     if (q.isError) return <ErrorNote error={q.error} />;
     if (indexData?.degraded) {
       return (
         <div className="rounded-mast-ctl border border-mast-warn-border bg-mast-warn-bg px-3 py-2.5 text-sm text-mast-warn">
-          图库后端不可用：{indexData.detail || "未知原因"}。
+          {tr("图库后端不可用：", "Gallery backend unavailable: ")}
+          {indexData.detail || tr("未知原因", "unknown reason")}.
           <Link to={{ search: `?${viewSearch({ v: "setup" })}` }} className="ml-1 underline">
-            去「数据根与构建」看看
+            {tr("去「数据根与构建」看看", "Check Data roots & build")}
           </Link>
         </div>
       );
@@ -165,13 +175,16 @@ export function GalleryApp() {
     if (!model || !model.built) {
       return (
         <div className="space-y-2">
-          <EmptyNote label="还没有构建过图库索引。" />
+          <EmptyNote label={tr("还没有构建过图库索引。", "The gallery index has not been built yet.")} />
           <div className="text-sm text-mast-muted">
-            先到
+            {tr("先到", "Go to")}
             <Link to={{ search: `?${viewSearch({ v: "setup" })}` }} className="mx-1 text-mast-accent hover:underline">
-              数据根与构建
+              {tr("数据根与构建", "Data roots & build")}
             </Link>
-            加一个数据根（放 .sxm / .dat / .3ds 的目录），再点「增量更新」。
+            {tr(
+              "加一个数据根（放 .sxm / .dat / .3ds 的目录），再点「增量更新」。",
+              "and add a data root (a directory holding .sxm / .dat / .3ds files), then click \"Incremental update\".",
+            )}
           </div>
         </div>
       );
@@ -221,9 +234,11 @@ export function GalleryApp() {
       >
         <div>
           <Link to={{ search: `?${viewSearch({ v: "dirs" })}` }} className="text-[1.05rem] font-bold text-mast-text hover:no-underline">
-            数据图库
+            {tr("数据图库", "Data gallery")}
           </Link>
-          <span className="ml-2 text-xs text-mast-faint">缩略图 {model?.generated || "—"}</span>
+          <span className="ml-2 text-xs text-mast-faint">
+            {tr("缩略图", "Thumbnails")} {model?.generated || "—"}
+          </span>
         </div>
         <nav className="flex flex-wrap gap-0.5">
           {NAV.map((n) => (
@@ -244,9 +259,9 @@ export function GalleryApp() {
           <Link
             to={{ search: `?${viewSearch({ v: "setup" })}` }}
             className="rounded-mast-badge bg-mast-info-bg px-1.5 text-xs text-mast-info hover:no-underline"
-            title="图库正在构建"
+            title={tr("图库正在构建", "Gallery build in progress")}
           >
-            构建中 {status.data.done}/{status.data.total}
+            {tr("构建中", "Building")} {status.data.done}/{status.data.total}
           </Link>
         )}
         <FigureJobChip />

@@ -10,11 +10,20 @@
 // 时间一律按**浏览器本地时区**显示——原版如此，仪器与操作员通常在同一时区。
 // ════════════════════════════════════════════════════════════════════════════
 
+import { tr } from "../i18n.ts";
 import type { GalleryItem, Kind } from "./types.ts";
 
-export const KLAB: Record<Kind, string> = { f: "帧", s: "谱", g: "网格谱" };
+export const KLAB: Record<Kind, string> = {
+  f: tr("帧", "Frame"),
+  s: tr("谱", "Spectrum"),
+  g: tr("网格谱", "Grid"),
+};
 export const RSYM: Record<string, string> = { "2": "★", "1": "✓", "-1": "✗" };
-export const RLAB: Record<string, string> = { "2": "★ 重点", "1": "✓ 可用", "-1": "✗ 排除" };
+export const RLAB: Record<string, string> = {
+  "2": tr("★ 重点", "★ Key"),
+  "1": tr("✓ 可用", "✓ Usable"),
+  "-1": tr("✗ 排除", "✗ Excluded"),
+};
 
 export const pad2 = (n: number): string => String(n).padStart(2, "0");
 
@@ -115,9 +124,12 @@ export function gridIncomplete(it: GalleryItem): boolean {
 /** 秒数 → `N 秒` / `N 分 M 秒` / `N 小时 M 分`（原版 context.js 的 dur）。 */
 export function dur(s: number): string {
   const x = Math.round(Math.abs(s));
-  if (x < 60) return `${x} 秒`;
-  if (x < 3600) return `${Math.floor(x / 60)} 分 ${x % 60} 秒`;
-  return `${Math.floor(x / 3600)} 小时 ${Math.floor((x % 3600) / 60)} 分`;
+  if (x < 60) return tr(`${x} 秒`, `${x} s`);
+  if (x < 3600) return tr(`${Math.floor(x / 60)} 分 ${x % 60} 秒`, `${Math.floor(x / 60)} min ${x % 60} s`);
+  return tr(
+    `${Math.floor(x / 3600)} 小时 ${Math.floor((x % 3600) / 60)} 分`,
+    `${Math.floor(x / 3600)} h ${Math.floor((x % 3600) / 60)} min`,
+  );
 }
 
 const fix2 = (v?: number | null): string => (Number(v) || 0).toFixed(2);
@@ -128,14 +140,22 @@ export function meta(it: GalleryItem): string {
   if (it.k === "f") {
     return `${fmtT(it.t)} · ${nm(it.w)} nm · ${fmtB(it.b)} · ${round0(it.sp)} pA · ${it.nx}px`;
   }
-  if (it.k === "s" && it.ex) return `${fmtT(it.t)} · ${it.ex} · ${it.n} 点（不是偏压谱）`;
+  if (it.k === "s" && it.ex) {
+    return `${fmtT(it.t)} · ${it.ex} · ` + tr(`${it.n} 点（不是偏压谱）`, `${it.n} pts (not a bias spectrum)`);
+  }
   if (it.k === "s") {
     return (
-      `${fmtT(it.t)} · 谱 ${it.n} 点 · ${fmtV(it.v0)}…${fmtV(it.v1)} V · ` +
+      `${fmtT(it.t)} · ` + tr(`谱 ${it.n} 点`, `Spectrum ${it.n} pts`) + ` · ${fmtV(it.v0)}…${fmtV(it.v1)} V · ` +
       `Zoff ${round0(it.zo)} pm · (${fix2(it.x)}, ${fix2(it.y)}) nm`
     );
   }
-  return `${fmtT(it.t)} · 网格 ${it.gx}×${it.gy} · ${nm(it.w)} nm · ${it.n} 点 ${fmtV(it.v0)}→${fmtV(it.v1)} V`;
+  return (
+    `${fmtT(it.t)} · ` +
+    tr(`网格 ${it.gx}×${it.gy}`, `Grid ${it.gx}×${it.gy}`) +
+    ` · ${nm(it.w)} nm · ` +
+    tr(`${it.n} 点`, `${it.n} pts`) +
+    ` ${fmtV(it.v0)}→${fmtV(it.v1)} V`
+  );
 }
 
 /** 卡片说明：`num` 加粗、`when` 跟在后面，`lines` 各占一行（原版 capHtml 的文字部分）。 */
@@ -149,14 +169,14 @@ export function caption(it: GalleryItem): { num: string; when: string; lines: st
     };
   }
   if (it.k === "s" && it.ex) {
-    return { num: n, when: fmtT(it.t), lines: [`${it.ex} · ${it.n} 点（不是偏压谱）`] };
+    return { num: n, when: fmtT(it.t), lines: [`${it.ex} · ` + tr(`${it.n} 点（不是偏压谱）`, `${it.n} pts (not a bias spectrum)`)] };
   }
   if (it.k === "s") {
     return {
       num: n,
       when: fmtT(it.t),
       lines: [
-        `${it.n} 点 · ${fmtV(it.v0)}…${fmtV(it.v1)} V · Zoff ${round0(it.zo)} pm` +
+        tr(`${it.n} 点`, `${it.n} pts`) + ` · ${fmtV(it.v0)}…${fmtV(it.v1)} V · Zoff ${round0(it.zo)} pm` +
           ((it.sw ?? 0) > 1 ? ` · ${it.sw} sw` : ""),
         `(${fix2(it.x)}, ${fix2(it.y)}) nm`,
       ],
@@ -166,7 +186,9 @@ export function caption(it: GalleryItem): { num: string; when: string; lines: st
     num: n,
     when: `${fmtT(it.t)} → ${fmtT(it.t1)}`,
     lines: [
-      `${it.gx}×${it.gy} · ${nm(it.w)} nm · ${it.n} 点 ${fmtV(it.v0)}→${fmtV(it.v1)} V · ` +
+      `${it.gx}×${it.gy} · ${nm(it.w)} nm · ` +
+        tr(`${it.n} 点`, `${it.n} pts`) +
+        ` ${fmtV(it.v0)}→${fmtV(it.v1)} V · ` +
         `Zoff ${round0(it.zo)} pm · ${fmtB(it.b)}/${round0(it.sp)} pA`,
     ],
   };
@@ -194,42 +216,59 @@ export function autoTags(
   numOf: (id: string) => string | null,
 ): AutoTag[] {
   const out: AutoTag[] = [];
-  if (lastBatch && it.ad === lastBatch) out.push({ kind: "new", text: "新" });
+  if (lastBatch && it.ad === lastBatch) out.push({ kind: "new", text: tr("新", "New") });
   if (it.at) {
     out.push({
       kind: "atom",
-      text: `原子 ×${Math.round(it.at)}`,
-      title: "原子相判据的角向集中度（离散布拉格点 vs 弥散环；通过阈值 20）",
+      text: tr(`原子 ×${Math.round(it.at)}`, `Atomic ×${Math.round(it.at)}`),
+      title: tr(
+        "原子相判据的角向集中度（离散布拉格点 vs 弥散环；通过阈值 20）",
+        "Angular concentration of the atomic-phase criterion (discrete Bragg spots vs diffuse ring; pass threshold 20)",
+      ),
     });
   }
   if (it.hf) {
     out.push({
       kind: "half",
-      text: `超结构 ${it.hl || ""} ×${it.hf}`.replace("  ", " "),
-      title: "分数序位置的相干幅值 / 空白对照最大值（> 1.5 判为存在）",
+      text: tr(`超结构 ${it.hl || ""} ×${it.hf}`, `Superstructure ${it.hl || ""} ×${it.hf}`).replace("  ", " "),
+      title: tr(
+        "分数序位置的相干幅值 / 空白对照最大值（> 1.5 判为存在）",
+        "Coherent amplitude at the fractional-order position / maximum of the blank control (> 1.5 counts as present)",
+      ),
     });
   }
-  if (partial(it)) out.push({ kind: "part", text: `未扫完 ${it.rows}/${it.rall}` });
+  if (partial(it)) out.push({ kind: "part", text: tr(`未扫完 ${it.rows}/${it.rall}`, `Incomplete ${it.rows}/${it.rall}`) });
   if (it.dup) {
     const n = numOf(it.dup);
     out.push({
       kind: "dup",
-      text: `重复保存 = ${n ?? "?"}`,
-      title: `Z 数据与 ${it.dup} 逐字节相同（REC 时刻相同、之后又存了一次）`,
+      text: tr(`重复保存 = ${n ?? "?"}`, `Duplicate of ${n ?? "?"}`),
+      title: tr(
+        `Z 数据与 ${it.dup} 逐字节相同（REC 时刻相同、之后又存了一次）`,
+        `Z data byte-identical to ${it.dup} (same REC time, saved again afterwards)`,
+      ),
     });
   }
   if ((it.seg ?? 0) >= 2) {
     out.push({
       kind: "seg",
-      text: `同一次采集 ×${it.seg}`,
-      title: "REC 时刻、视野、中心、转角都相同的不同文件（自动保存 / 手动保存 / 中途停）",
+      text: tr(`同一次采集 ×${it.seg}`, `Same acquisition ×${it.seg}`),
+      title: tr(
+        "REC 时刻、视野、中心、转角都相同的不同文件（自动保存 / 手动保存 / 中途停）",
+        "Different files with the same REC time, field of view, center and rotation (auto-save / manual save / stopped midway)",
+      ),
     });
   }
   if ((it.cp ?? 0) > 1) {
-    out.push({ kind: "copies", text: `副本 ×${it.cp}`, title: "字节级相同的副本（自动拷贝进实验文件夹）" });
+    out.push({
+      kind: "copies",
+      text: tr(`副本 ×${it.cp}`, `Copies ×${it.cp}`),
+      title: tr("字节级相同的副本（自动拷贝进实验文件夹）", "Byte-identical copies (auto-copied into the experiment folder)"),
+    });
   }
   if (gridIncomplete(it)) {
-    out.push({ kind: "gridpart", text: `未完成 ${it.have}/${(it.gx ?? 0) * (it.gy ?? 0)}` });
+    const total = (it.gx ?? 0) * (it.gy ?? 0);
+    out.push({ kind: "gridpart", text: tr(`未完成 ${it.have}/${total}`, `Incomplete ${it.have}/${total}`) });
   }
   if (it.k === "s" && it.lic) out.push({ kind: "li", text: "LI" });
   return out;

@@ -487,9 +487,8 @@ class ExperimentStorage:
         ``sample_name`` / ``sample_id`` come from the newest ``active`` sample,
         falling back to the newest sample of any status. The panel that shows
         the running experiment had only the experiment UUID to display and
-        rendered ``441ebe7c-2a7`` — the operator's response was 「这里的id不是
-        用户友好的。这里应该显示样品名。这个id是样品id还是对话id？」. An id
-        that cannot even be identified is not a readout.
+        rendered ``441ebe7c-2a7``, which is not a readable label. An id that
+        cannot even be identified is not a readout.
 
         One query, no N+1: the correlated subqueries run per experiment row
         inside SQLite, and the list is capped at *limit*.
@@ -879,8 +878,6 @@ class ExperimentStorage:
 
     def tips_in_service_during(self, experiment_id: str) -> list[dict]:
         """一次实验**期间在役**的针尖，装入时刻早的在前。
-
-        「针尖记录等是不是也应该在实验记录中?」
 
         这是**展示层聚合**，不是第二个真源：``tips`` 仍然是针尖的唯一真源，
         这个方法一个字都不写，只是把「这段时间里装的是哪根针」这个本来就能从

@@ -60,6 +60,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -79,13 +80,16 @@ def _resolve_prior(explicit, substrate_param):
         return float(explicit), facts, "explicit", ""
     if not facts.available:
         return None, facts, "unknown", (
-            f"没给周期先验，也推断不出衬底：{facts.reason}")
+            tr(f"没给周期先验，也推断不出衬底：{facts.reason}", f"No period prior given and the substrate cannot be inferred: {facts.reason}"))
     if facts.reconstruction_period_nm is None:
         return None, facts, "unknown", (
-            f"{facts.material} 在知识库里没有表面重构的条纹周期 —— "
+            tr(f"{facts.material} 在知识库里没有表面重构的条纹周期 —— "
             f"这个面本来就没有 herringbone 这类重构，不是数据缺失。"
             f"用别的验收判据（台阶锐度 AssessTipSharpness / 原子相 "
-            f"AssessAtomicPhase），或显式给一个 period_prior_nm。")
+            f"AssessAtomicPhase），或显式给一个 period_prior_nm。", f"{facts.material} has no surface-reconstruction stripe period in the knowledge base -- "
+f"this surface simply has no herringbone-type reconstruction; it is not missing data. "
+f"Use another acceptance criterion (step sharpness AssessTipSharpness / atomic phase "
+f"AssessAtomicPhase), or explicitly give a period_prior_nm."))
     return float(facts.reconstruction_period_nm), facts, "substrate", ""
 
 
@@ -99,7 +103,7 @@ class AssessHerringbone(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "判定一帧已保存的 .sxm 上有没有 Au(111) 的 22x-sqrt3 "
+                tr("判定一帧已保存的 .sxm 上有没有 Au(111) 的 22x-sqrt3 "
                 "**herringbone** 重构,并报出与之配套的针尖质量读数(条纹起伏,"
                 "单位 pm;FFT 锐度;正反扫不稳定度;双针尖读数)。只读。"
                 "这是在**大片平坦台面**上锻出来的针尖的验收判据 —— 在那种表面上,"
@@ -109,49 +113,70 @@ class AssessHerringbone(BaseSkill):
                 "平行于快扫方向 —— 那时它与扫描行伪迹分不开)—— 换一个视野、或者"
                 "把扫描框转个角度重扫;**不要**把它读成「针尖不行」。"
                 "阈值是**未标定的(UNCALIBRATED)**:除非你传了 corrugation_min_pm,"
-                "否则针尖质量读数只报数、不给判定。"
+                "否则针尖质量读数只报数、不给判定。", "Decide whether a saved .sxm frame shows the 22x-sqrt3 **herringbone** reconstruction of Au(111), "
+"and report the accompanying tip-quality readings (stripe corrugation, "
+"in pm; FFT sharpness; forward/backward instability; double-tip reading). Read-only. "
+"This is the acceptance criterion for a tip forged on a **large flat terrace** -- on that kind of surface "
+"the step-edge criterion (AssessTipSharpness) has no input at all. verdict is one of "
+"'herringbone' / 'absent' / 'undetermined'. 'undetermined' "
+"means **this frame cannot answer** (field of view too small or pixels too coarse, a dead-flat frame, or stripes "
+"parallel to the fast-scan direction -- then they cannot be told from scan-line artefacts) -- use another field of view, or "
+"rotate the scan frame and rescan; **do not** read it as \"the tip is bad\". "
+"The threshold is **UNCALIBRATED**: unless you pass corrugation_min_pm, "
+"the tip-quality reading is only a number, with no verdict.")
             ),
             parameters=[
                 ParameterSpec(name="scan_path", type="str",
-                              description=".sxm 帧的路径。",
+                              description=tr(".sxm 帧的路径。", "Path of the .sxm frame."),
                               required=True),
                 ParameterSpec(name="channel", type="str",
-                              description="形貌通道('Z' 是标准选择)。",
+                              description=tr("形貌通道('Z' 是标准选择)。", "Topography channel ('Z' is the standard choice)."),
                               required=False, default="Z"),
                 ParameterSpec(
                     name="substrate", type="str",
-                    description=("衬底名(例如 'Au(111)')。"
-                                 "留空则从当前样品记录里推断。"),
+                    description=(tr("衬底名(例如 'Au(111)')。"
+                                 "留空则从当前样品记录里推断。", "Substrate name (e.g. 'Au(111)'). "
+"Empty = inferred from the current sample record.")),
                     required=False, default=""),
                 ParameterSpec(
                     name="period_prior_nm", type="float", unit="nm",
-                    description=("预期的孤子对条纹周期。这是**搜索窗的中心**,"
+                    description=(tr("预期的孤子对条纹周期。这是**搜索窗的中心**,"
                                  "不是一条及格线。留空则取自衬底"
-                                 "(Au(111):6.3 nm)。"),
+                                 "(Au(111):6.3 nm)。", "Expected soliton-pair stripe period. This is the **centre of the search window**, "
+"not a pass line. Empty = taken from the substrate "
+"(Au(111): 6.3 nm).")),
                     required=False, min_value=0.5, max_value=200.0),
                 ParameterSpec(
                     name="snr_min", type="float",
-                    description=("带内谱峰信噪比的下限。沿用 seg_scale_adaptive "
-                                 "调好的 lat_snr。"),
+                    description=(tr("带内谱峰信噪比的下限。沿用 seg_scale_adaptive "
+                                 "调好的 lat_snr。", "Lower limit of the in-band spectral-peak signal-to-noise ratio. Follows the lat_snr tuned in "
+"seg_scale_adaptive.")),
                     required=False, default=4.0, min_value=1.0, max_value=1e6),
                 ParameterSpec(
                     name="concentration_min", type="float",
-                    description=("角向集中度的下限 —— 分的是「离散的条纹峰」还是"
+                    description=(tr("角向集中度的下限 —— 分的是「离散的条纹峰」还是"
                                  "「一圈弥散的环」。在合成物理数据上实测到的分离度:"
                                  "1:1 信噪比下的 herringbone 是 142+,而经过带通的"
-                                 "针尖振铃最高只到 13.6。"),
+                                 "针尖振铃最高只到 13.6。", "Lower limit of angular concentration -- it separates \"discrete stripe peaks\" from "
+"\"a diffuse ring\". Separation measured on synthetic physical data: "
+"herringbone at 1:1 SNR gives 142+, while band-passed "
+"tip ringing reaches at most 13.6.")),
                     required=False, default=20.0, min_value=1.0, max_value=1e9),
                 ParameterSpec(
                     name="corrugation_min_pm", type="float", unit="pm",
-                    description=("条纹起伏(peak-to-peak)达到或超过这个值,针尖"
+                    description=(tr("条纹起伏(peak-to-peak)达到或超过这个值,针尖"
                                  "才算好。**未标定(UNCALIBRATED)** —— 留空则"
                                  "只报数、不给判定;在拿到真实数据把它标出来之前,"
-                                 "这才是诚实的缺省。"),
+                                 "这才是诚实的缺省。", "The tip counts as good only if the stripe corrugation (peak-to-peak) reaches or exceeds this value. "
+"**UNCALIBRATED** -- empty = "
+"report the number only, no verdict; until real data are available to calibrate it, "
+"this is the honest default.")),
                     required=False, min_value=0.0, max_value=10000.0),
                 ParameterSpec(
                     name="allow_reduced_scale", type="bool",
-                    description=("在降级尺度带里也接受正判定(每个条纹周期 "
-                                 "3-6 px,或者整帧里只有 4-6 个周期)。"),
+                    description=(tr("在降级尺度带里也接受正判定(每个条纹周期 "
+                                 "3-6 px,或者整帧里只有 4-6 个周期)。", "Also accept a positive verdict in the degraded scale band (3-6 px per stripe period, "
+"or only 4-6 periods in the whole frame).")),
                     required=False, default=False),
             ],
             estimated_duration_s=4.0,
@@ -167,7 +192,7 @@ class AssessHerringbone(BaseSkill):
         channel_name = params.get("channel") or "Z"
         if not Path(path).exists():
             return SkillResult(skill_name=_NAME, success=False,
-                               error=f"文件不存在: {path}")
+                               error=tr(f"文件不存在: {path}", f"File does not exist: {path}"))
 
         prior, facts, prior_source, why = _resolve_prior(
             params.get("period_prior_nm"), params.get("substrate"))
@@ -189,13 +214,13 @@ class AssessHerringbone(BaseSkill):
             from mast.vision.tip_metrics import _fwd_bwd_instability
         except ImportError as exc:
             return SkillResult(skill_name=_NAME, success=False,
-                               error=f"缺依赖: {exc}")
+                               error=tr(f"缺依赖: {exc}", f"Missing dependency: {exc}"))
 
         try:
             scan = read_sxm(path)
         except Exception as exc:  # noqa: BLE001
             return SkillResult(skill_name=_NAME, success=False,
-                               error=f".sxm 读取失败: {exc}")
+                               error=tr(f".sxm 读取失败: {exc}", f"Failed to read .sxm: {exc}"))
 
         # 走 sxm_oriented_frames 而不是自己扒 channels:它把 backward 的镜像
         # (fliplr)与 :SCAN_DIR: up 的上下翻转都处理掉了。**正反扫对比缺了这一步
@@ -205,8 +230,9 @@ class AssessHerringbone(BaseSkill):
         if arr is None:
             return SkillResult(
                 skill_name=_NAME, success=False,
-                error=(f"文件里没有可用通道/正反扫数据"
-                       f"(要的是 {channel_name!r})"))
+                error=(tr(f"文件里没有可用通道/正反扫数据"
+                       f"(要的是 {channel_name!r})", f"No usable channel / forward-backward scan data in the file "
+f"(wanted {channel_name!r})")))
         arr = np.asarray(arr, dtype=np.float64)
         bwd = fr.get("backward")
         bwd_arr = (np.asarray(bwd, dtype=np.float64)
@@ -313,54 +339,68 @@ class AssessHerringbone(BaseSkill):
 def _summarize(res, instab, data) -> str:
     """给用户/模型读的一句话。**「判不了」与「没有」必须是两句不同的话。**"""
     if res.verdict == "undetermined":
-        why = ", ".join(res.reasons) or "判不了"
-        head = f"这一帧判不了 herringbone（{why}）—— 这不等于「没有 herringbone」，"
+        why = ", ".join(res.reasons) or tr("判不了", "cannot judge")
+        head = tr(f"这一帧判不了 herringbone（{why}）—— 这不等于「没有 herringbone」，", f"This frame cannot judge herringbone ({why}) -- this does not mean \"there is no herringbone\", ")
         if "scale_gate" in res.reasons:
-            head += (f"也不是针尖的问题：视野 {res.frame_nm:.0f} nm / "
+            head += (tr(f"也不是针尖的问题：视野 {res.frame_nm:.0f} nm / "
                      f"{res.nm_per_px:.4f} nm/px 下，每个周期只有 "
                      f"{res.px_per_period:.1f} px、帧里只有 "
                      f"{res.periods_in_frame:.1f} 个周期。"
-                     f"要 6 px/周期且 6 个周期以上才判得动。")
+                     f"要 6 px/周期且 6 个周期以上才判得动。", f"nor is it a tip problem: at a field of view of {res.frame_nm:.0f} nm / "
+f"{res.nm_per_px:.4f} nm/px, each period is only "
+f"{res.px_per_period:.1f} px and the frame holds only "
+f"{res.periods_in_frame:.1f} periods. "
+f"A verdict needs 6 px/period and more than 6 periods."))
         elif "stripes_along_fast_axis" in res.reasons:
             head += res.notes.get("slow_axis", "条纹平行于快扫方向。")
         elif "frame_unusable" in res.reasons:
             head += res.notes.get("frame_unusable", "")
         else:
-            head += "换一张再判；不要据此去修针尖。"
+            head += tr("换一张再判；不要据此去修针尖。", "Judge again on another frame; do not condition the tip on this basis.")
         return head
 
     if res.verdict == "absent":
         why = ", ".join(res.reasons)
-        s = f"没有找到 herringbone 条纹（{why}）"
+        s = tr(f"没有找到 herringbone 条纹（{why}）", f"No herringbone stripes found ({why})")
         if "row_alignment_artifact" in res.reasons:
-            s += "；" + res.notes.get("row_alignment_artifact", "")
-        return s + "。注意：这是「这张图上没有」，不直接等于「针尖不行」。"
+            s += tr("；", "; ") + res.notes.get("row_alignment_artifact", "")
+        return s + tr("。注意：这是「这张图上没有」，不直接等于「针尖不行」。", ". Note: this means \"not on this image\", not directly \"the tip is bad\".")
 
     corr = res.stripe_corrugation_pm
-    s = (f"检出 herringbone：周期 {res.period_nm:.2f} nm"
+    s = (tr(f"检出 herringbone：周期 {res.period_nm:.2f} nm"
          f"（先验 {res.period_prior_nm:.2f} nm），条纹走向 "
          f"{res.stripe_angle_deg:.0f}°，角向集中度 "
-         f"{res.angular_concentration:.0f}。")
+         f"{res.angular_concentration:.0f}。", f"Herringbone detected: period {res.period_nm:.2f} nm "
+f"(prior {res.period_prior_nm:.2f} nm), stripe direction "
+f"{res.stripe_angle_deg:.0f}°, angular concentration "
+f"{res.angular_concentration:.0f}."))
     if corr is not None:
-        s += f"条纹起伏（峰峰）{corr:.1f} pm"
+        s += tr(f"条纹起伏（峰峰）{corr:.1f} pm", f"Stripe corrugation (peak-to-peak) {corr:.1f} pm")
         tv = data.get("tip_verdict")
         if tv == "measured":
-            s += "（未给判定阈值 —— 阈值尚未标定，这里只报数）。"
+            s += tr("（未给判定阈值 —— 阈值尚未标定，这里只报数）。", " (no verdict threshold given -- the threshold is not yet calibrated, so only the number is reported).")
         else:
-            s += (f"，阈值 {data.get('corrugation_min_pm'):.1f} pm ⇒ "
-                  f"{'够好' if tv == 'good' else '偏弱'}。")
+            s += (tr(f"，阈值 {data.get('corrugation_min_pm'):.1f} pm ⇒ "
+                  f"{'够好' if tv == 'good' else '偏弱'}。", f", threshold {data.get('corrugation_min_pm'):.1f} pm => "
+f"{'good enough' if tv == 'good' else 'weak'}."))
     if instab is not None:
-        s += f" 正反扫不稳定度 {instab:.2f}。"
+        s += tr(f" 正反扫不稳定度 {instab:.2f}。", f" Forward/backward instability {instab:.2f}.")
     if res.double_tip_score is not None:
-        s += (f" 双针尖读数 {res.double_tip_score:.2f}"
+        s += (tr(f" 双针尖读数 {res.double_tip_score:.2f}"
               f"（阈值 {res.double_tip_threshold:.2f}）"
               f"，本帧非周期内容占比 {res.aperiodic_fraction:.2f} —— "
               f"这个占比越小，「没检出重影」越接近「没有证据」而不是"
-              f"「没有双针尖」。")
+              f"「没有双针尖」。", f" Double-tip reading {res.double_tip_score:.2f} "
+f"(threshold {res.double_tip_threshold:.2f}), "
+f"aperiodic fraction of this frame {res.aperiodic_fraction:.2f} -- "
+f"the smaller this fraction, the more \"no ghost detected\" means \"no evidence\" rather than "
+f"\"no double tip\"."))
     if "chevron_not_resolvable" in res.warnings:
-        s += (f" 注意：zigzag 本身没查 —— 要看清全周期 "
+        s += (tr(f" 注意：zigzag 本身没查 —— 要看清全周期 "
               f"{res.chevron_prior_nm:.0f} nm 的折线得有 "
-              f"≥{res.chevron_min_frame_nm:.0f} nm 的帧。")
+              f"≥{res.chevron_min_frame_nm:.0f} nm 的帧。", f" Note: the zigzag itself was not checked -- to see the full-period "
+f"{res.chevron_prior_nm:.0f} nm zigzag you need a frame of at least "
+f"{res.chevron_min_frame_nm:.0f} nm."))
     return s
 
 

@@ -58,12 +58,12 @@ class VisionEventType(str, Enum):
 VISION_ERROR_KINDS = ("cuda_oom", "model_error", "preprocess_fail", "context_loss")
 SETPOINT_SOURCES = ("user", "planner", "monitor")
 #: 每加一个发起方,都要在这里加它的名字 —— 否则 :func:`make_e_stop` 抛
-#: ValueError,而**每个调用点都用宽 except 包着**,于是急停会被静默丢掉。
-#: 这个形状已经炸过两次:
+#: ValueError,而**每个调用点都用宽 except 包着**,于是那次急停被静默丢掉。
+#: 这个形状的后果:
 #:   ``"operator"`` 被拒 ⇒ 用户按下的急停没有事件;
 #:   ``"environment"`` 被拒 ⇒ 环境告警**退了针、挂了急停闩**,
-#:               而唯一会告诉人的那条通道把自己拒了 —— 用户看到的是
-#:               「什么都没发生」,仪器却已经锁死。
+#:               而唯一会告诉人的那条通道把自己拒了 ——
+#:               界面上没有任何提示,仪器却已经锁死。
 #: 白名单与调用点的一致性由 test_e_stop_reasons_are_all_allowed 结构闸门看着。
 E_STOP_REASONS = ("user", "watchdog", "temperature", "vacuum", "force",
                   "environment")

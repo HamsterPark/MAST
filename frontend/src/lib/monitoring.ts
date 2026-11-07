@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════════════════
-// monitoring.ts — pure helpers behind 电流监控 (pages/MonitoringPage.tsx).
+// monitoring.ts: pure helpers behind the current-monitoring page (pages/MonitoringPage.tsx).
 //
 // NO RUNTIME DEPENDENCIES beyond sibling `lib/*.ts` modules, on purpose — same
 // rule lib/ws.ts follows. These run under `node --test` with Node's native
@@ -10,12 +10,13 @@
 //
 // NOT HERE, deliberately: current formatting. `fmtCurrent` already exists in
 // lib/units.ts with a documented engineering-notation rule (96.3 pA, not
-// 9.63e-11 A and not 1000.0 pA) that came out of . A second
+// 9.63e-11 A and not 1000.0 pA). A second
 // implementation would drift from it, and a current printed two different ways
 // on the same page is exactly the class of bug that unit confusion causes here.
 // Components import it from "@/lib/units".
 // ════════════════════════════════════════════════════════════════════════════
 import { medianStep, spliceGaps } from "./seriesGaps.ts";
+import { tr } from "./i18n.ts";
 
 /** Badge tones as `components/ui.tsx` defines them. */
 export type Tone = "AUTO" | "INFO" | "WARN" | "DANGEROUS" | "default";
@@ -28,14 +29,14 @@ export interface VerdictView {
 }
 
 const VERDICTS: Record<string, VerdictView> = {
-  ok: { label: "正常", tone: "AUTO" },
-  warn: { label: "警告", tone: "WARN" },
-  critical: { label: "严重", tone: "DANGEROUS" },
+  ok: { label: tr("正常", "OK"), tone: "AUTO" },
+  warn: { label: tr("警告", "Warning"), tone: "WARN" },
+  critical: { label: tr("严重", "Critical"), tone: "DANGEROUS" },
   // The daemon judged the segment but withheld the alert because a tip-shaping
-  // skill held the instrument — the noise was ours. Showing it as 正常 would
-  // hide that a judgement happened; showing it as 警告 would cry wolf.
-  suppressed: { label: "已抑制", tone: "INFO" },
-  unknown: { label: "未知", tone: "default" },
+  // skill held the instrument: the noise was ours. Showing it as OK would
+  // hide that a judgement happened; showing it as a warning would cry wolf.
+  suppressed: { label: tr("已抑制", "Suppressed"), tone: "INFO" },
+  unknown: { label: tr("未知", "Unknown"), tone: "default" },
 };
 
 export function verdictView(v: string | null | undefined): VerdictView {
@@ -53,44 +54,62 @@ export interface StateView {
 // tells them nothing, and "unavailable" in particular is not a fault to chase.
 const STATES: Record<string, StateView> = {
   disabled: {
-    label: "已关闭",
+    label: tr("已关闭", "Disabled"),
     tone: "default",
-    hint: "监控在设置里被关闭。到「设置 → 电流监控」打开后即可启动。",
+    hint: tr(
+      "监控在设置里被关闭。到「设置 → 电流监控」打开后即可启动。",
+      "Monitoring is disabled in settings. Enable it under Settings → Current monitoring to start.",
+    ),
   },
   no_pool: {
-    label: "无连接",
+    label: tr("无连接", "No connection"),
     tone: "WARN",
-    hint: "内核未连接 Nanonis，采集无法开始。历史数据照常可浏览。",
+    hint: tr(
+      "内核未连接 Nanonis，采集无法开始。历史数据照常可浏览。",
+      "The kernel is not connected to Nanonis, so acquisition cannot start. History can still be browsed.",
+    ),
   },
   comms_down: {
-    label: "通信中断",
+    label: tr("通信中断", "Communication lost"),
     tone: "DANGEROUS",
-    hint: "Nanonis TCP 链路已熔断，采集暂停中；链路恢复后自动重连。",
+    hint: tr(
+      "Nanonis TCP 链路已熔断，采集暂停中；链路恢复后自动重连。",
+      "The Nanonis TCP link has tripped its breaker and acquisition is paused; it reconnects automatically once the link recovers.",
+    ),
   },
   probing: {
-    label: "探测中",
+    label: tr("探测中", "Probing"),
     tone: "INFO",
-    hint: "正在协商采集通道与采样率，稍候即进入运行。",
+    hint: tr(
+      "正在协商采集通道与采样率，稍候即进入运行。",
+      "Negotiating the acquisition channel and sample rate; it will start running shortly.",
+    ),
   },
   running: {
-    label: "运行中",
+    label: tr("运行中", "Running"),
     tone: "AUTO",
-    hint: "正在采集，每段落库一次。",
+    hint: tr("正在采集，每段落库一次。", "Acquiring; each segment is stored once."),
   },
   unavailable: {
-    label: "不可用",
+    label: tr("不可用", "Unavailable"),
     tone: "WARN",
-    hint: "本机 Nanonis 没有可用的示波器接口，无法原生采集——这不是故障，是该机型的能力限制。",
+    hint: tr(
+      "本机 Nanonis 没有可用的示波器接口，无法原生采集——这不是故障，是该机型的能力限制。",
+      "This Nanonis has no usable oscilloscope interface, so native acquisition is impossible. This is not a fault but a capability limit of the model.",
+    ),
   },
   paused: {
-    label: "已暂停",
+    label: tr("已暂停", "Paused"),
     tone: "WARN",
-    hint: "采集被暂停（通常是其他任务占用了仪器），让出后自动恢复。",
+    hint: tr(
+      "采集被暂停（通常是其他任务占用了仪器），让出后自动恢复。",
+      "Acquisition is paused (usually another task holds the instrument) and resumes automatically when released.",
+    ),
   },
   unknown: {
-    label: "未知",
+    label: tr("未知", "Unknown"),
     tone: "default",
-    hint: "拿不到守护进程状态。",
+    hint: tr("拿不到守护进程状态。", "The daemon state cannot be read."),
   },
 };
 
@@ -141,7 +160,7 @@ function num(v: unknown): number | null {
  *     hand back a whole `MonitoringStatus` we would have to invent those, and
  *     `connected: false` invented next to a real segment reading would put a
  *     fabricated connection state on screen. The poll is ≤3 s away and fills it
- *     in properly. (Same reasoning as TopBar.tsx:163-188.)
+ *     in properly. (Same reasoning as in TopBar.tsx.)
  *
  *   · the payload is not one we know. An unrecognised push degrades to
  *     poll-only behaviour rather than blanking a live readout.
@@ -250,17 +269,16 @@ export function isStale(
  *  what is worth drawing on a *live* chart, not about what data survives. */
 export const MAX_TRACE_WINDOW_S = 21600;
 
-/** Window lengths offered by the live chart, in seconds. The long end answers
- *  Live current needed a longer visible window: a tip degrading over an afternoon is
- *  invisible in five minutes, and the envelope band keeps every spike visible
- *  no matter how far out the window goes. */
+/** Window lengths offered by the live chart, in seconds. The long end exists because a
+ *  tip degrading over an afternoon is invisible in five minutes, and the envelope band
+ *  keeps every spike visible no matter how far out the window goes. */
 export const TRACE_WINDOWS: ReadonlyArray<{ s: number; label: string }> = [
-  { s: 30, label: "30 秒" },
-  { s: 60, label: "1 分钟" },
-  { s: 300, label: "5 分钟" },
-  { s: 1800, label: "30 分钟" },
-  { s: 7200, label: "2 小时" },
-  { s: 21600, label: "6 小时" },
+  { s: 30, label: tr("30 秒", "30 s") },
+  { s: 60, label: tr("1 分钟", "1 min") },
+  { s: 300, label: tr("5 分钟", "5 min") },
+  { s: 1800, label: tr("30 分钟", "30 min") },
+  { s: 7200, label: tr("2 小时", "2 h") },
+  { s: 21600, label: tr("6 小时", "6 h") },
 ];
 
 /** Clamp to the range `/api/monitoring/live-trace` accepts, so the client never
@@ -289,11 +307,11 @@ export const MAX_AUX_WINDOW_S = 86400;
  * these charts.
  */
 export const AUX_WINDOWS: ReadonlyArray<{ s: number; label: string }> = [
-  { s: 300, label: "5 分钟" },
-  { s: 900, label: "15 分钟" },
-  { s: 3600, label: "1 小时" },
-  { s: 21600, label: "6 小时" },
-  { s: 86400, label: "24 小时" },
+  { s: 300, label: tr("5 分钟", "5 min") },
+  { s: 900, label: tr("15 分钟", "15 min") },
+  { s: 3600, label: tr("1 小时", "1 h") },
+  { s: 21600, label: tr("6 小时", "6 h") },
+  { s: 86400, label: tr("24 小时", "24 h") },
 ];
 
 export function clampAuxWindow(s: number): number {
@@ -341,8 +359,14 @@ export function fmtSeconds(s: number | null | undefined): string {
   let out: string;
   if (v < 1) out = `${(v * 1000).toFixed(0)} ms`;
   else if (v < 60) out = `${v.toFixed(v < 10 ? 1 : 0)} s`;
-  else if (v < 3600) out = `${Math.floor(v / 60)} 分 ${Math.round(v % 60)} 秒`;
-  else out = `${Math.floor(v / 3600)} 时 ${Math.round((v % 3600) / 60)} 分`;
+  else if (v < 3600) {
+    out = tr(`${Math.floor(v / 60)} 分 ${Math.round(v % 60)} 秒`, `${Math.floor(v / 60)} min ${Math.round(v % 60)} s`);
+  } else {
+    out = tr(
+      `${Math.floor(v / 3600)} 时 ${Math.round((v % 3600) / 60)} 分`,
+      `${Math.floor(v / 3600)} h ${Math.round((v % 3600) / 60)} min`,
+    );
+  }
   return neg ? `-${out}` : out;
 }
 
@@ -363,15 +387,15 @@ export interface MetricTile {
 /** The six the operator watches. The extractor produces ~35 columns
  *  (monitoring/features.py FEATURE_COLUMNS); the rest are for the corpus. */
 export const METRIC_TILES: readonly MetricTile[] = [
-  { key: "rms_detrended_a", label: "RMS 噪声", hint: "去趋势后的电流起伏，针尖状态最直接的读数", unit: "A" },
-  { key: "mean_a", label: "平均电流", hint: "段内均值——偏离设定点说明回路在追", unit: "A" },
-  { key: "inv_f_slope", label: "1/f 斜率", hint: "低频噪声谱的斜率，越接近 -1 越像典型 1/f", unit: "plain" },
-  { key: "jump_rate_hz", label: "跳变率", hint: "每秒台阶式跳变次数，针尖不稳的特征", unit: "hz" },
-  { key: "rtn_score", label: "RTN 判分", hint: "双能级随机电报噪声的强度，高即针尖有活动位点", unit: "ratio" },
-  { key: "kurtosis", label: "峰度", hint: "远离 3 表示分布有重尾——尖峰或跳变", unit: "plain" },
+  { key: "rms_detrended_a", label: tr("RMS 噪声", "RMS noise"), hint: tr("去趋势后的电流起伏，针尖状态最直接的读数", "Detrended current fluctuation, the most direct readout of tip state"), unit: "A" },
+  { key: "mean_a", label: tr("平均电流", "Mean current"), hint: tr("段内均值——偏离设定点说明回路在追", "Segment mean; a deviation from the setpoint means the loop is still catching up"), unit: "A" },
+  { key: "inv_f_slope", label: tr("1/f 斜率", "1/f slope"), hint: tr("低频噪声谱的斜率，越接近 -1 越像典型 1/f", "Slope of the low-frequency noise spectrum; the closer to -1, the more typical 1/f it is"), unit: "plain" },
+  { key: "jump_rate_hz", label: tr("跳变率", "Jump rate"), hint: tr("每秒台阶式跳变次数，针尖不稳的特征", "Step-like jumps per second, a sign of an unstable tip"), unit: "hz" },
+  { key: "rtn_score", label: tr("RTN 判分", "RTN score"), hint: tr("双能级随机电报噪声的强度，高即针尖有活动位点", "Strength of two-level random telegraph noise; high means the tip has active sites"), unit: "ratio" },
+  { key: "kurtosis", label: tr("峰度", "Kurtosis"), hint: tr("远离 3 表示分布有重尾——尖峰或跳变", "Far from 3 means a heavy-tailed distribution: spikes or jumps"), unit: "plain" },
 ];
 
-// ── auxiliary channels (Z 位置 / qPlus 振幅 / Δf) ───────────────────────────
+// ── auxiliary channels (Z position / qPlus amplitude / Δf) ──────────────────
 //
 // These are NOT drawn on the current chart, and not on each other. Metres,
 // metres and hertz are incommensurable, so an overlay needs two or three Y axes
@@ -390,14 +414,13 @@ export const METRIC_TILES: readonly MetricTile[] = [
  * It hangs off the CHANNEL rather than off the unit, and that is the whole
  * point of it living here. It used to be a `Record<unit, …>` lookup inside
  * AuxChannels.tsx, which forced Z and qPlus amplitude to share one prefix
- * because both are measured in metres — and they are four orders of magnitude
+ * because both are measured in metres, although they are four orders of magnitude
  * apart. One `m` entry cannot serve a ±100 nm piezo range and a 10 pm
- * oscillation amplitude; picking pm for both is what made the Z axis read
- * ±100000 . Being a field of the object the renderer is already
- * iterating also removes the lookup entirely — the old `PLOT_SCALE[unit] ??
- * {mul: 1, suffix: unit}` fallback meant a key that did not match silently
- * rendered raw metres with a bare "m" label, i.e. it failed into exactly the
- * symptom being reported.
+ * oscillation amplitude; picking pm for both made the Z axis read ±100000.
+ * Being a field of the object the renderer is already iterating also removes the
+ * lookup entirely: the old `PLOT_SCALE[unit] ?? {mul: 1, suffix: unit}` fallback
+ * meant a key that did not match silently rendered raw metres with a bare "m"
+ * label.
  */
 export interface AuxPlotScale {
   mul: number;
@@ -419,22 +442,32 @@ export interface AuxChannelView {
 /** Draw order, top to bottom. Z first: it is the one most often checked
  *  first and the one with an actionable failure mode (drift ruins a scan). */
 export const AUX_CHANNELS: readonly AuxChannelView[] = [
-  // nm，要求要的。压电 Z 的行程是 ±100 nm 量级，画成 pm 就是一排
-  // 六位数,而这条曲线要读的是漂移斜率和台阶,不是绝对位置的皮米位。
+  // nm: the piezo Z range is of order ±100 nm, so drawing it in pm gives a column of
+  // six-digit numbers, while the curve is read for drift slope and steps, not for
+  // absolute position at the picometre level.
   { kind: "z", series: "z_m", unit: "m", plot: { mul: 1e9, suffix: "nm" },
-    hint: "压电 Z 位置——看漂移与台阶" },
-  // 只在进针期间判「归零」。STM 模式下这一路平时是噪声（隧穿不阻尼它），
-  // 扎针与电脉冲反而会让它大起振。
+    hint: tr("压电 Z 位置——看漂移与台阶", "Piezo Z position: watch for drift and steps") },
+  // "Zeroed" is judged only during approach. In STM mode this channel is normally noise
+  // (tunnelling does not damp it), while tip crashes and electrical pulses can make it ring
+  // strongly; see docs/v2/design/monitoring_aux_channels.md.
   //
-  // 用 nm 显示振幅，避免根据未驱动时的噪声底选择单位。
-  // 实际幅度范围和激励状态应由使用者确认。
+  // nm here too, with a known cost: an undriven sensor (excitation_v=0) reads only the
+  // demodulator noise floor, of order picometres, which plots as 0.00x. nm is kept rather
+  // than picking a prefix that looks good for such data, because that floor is a
+  // configuration state and not the range of the channel. The channel exists to show a
+  // driven qPlus amplitude dropping to zero on approach, and a driven amplitude is 50 pm to
+  // 10 nm. Choosing the prefix from the noise floor would bake a fault state into the UI.
   { kind: "amplitude", series: "amp_m", unit: "m", plot: { mul: 1e9, suffix: "nm" },
-    hint: "qPlus 振幅——进针时归零即撞针" },
+    hint: tr("qPlus 振幅——进针时归零即撞针", "qPlus amplitude: dropping to zero during approach means a tip crash") },
   { kind: "df", series: "df_hz", unit: "Hz", plot: { mul: 1, suffix: "Hz" },
-    hint: "频率偏移——只记录，不判级" },
-  // 显示带符号的解调分量，穿零不等于信号缺失；保持与实时电流图相同的单位。
+    hint: tr("频率偏移——只记录，不判级", "Frequency shift: recorded only, not graded") },
+  // This channel carries the demodulator X component (signed), not |R|; the hint must say so,
+  // otherwise readers take a zero crossing for "signal lost". Grading stays off; see
+  // aux_channels.CHANNEL_SPECS for the reasoning. pA is unchanged: this channel is a
+  // current whose magnitude comes from the same source as the live current chart, and
+  // changing the prefix would make the two current charts on one machine disagree.
   { kind: "lockin", series: "lockin_a", unit: "A", plot: { mul: 1e12, suffix: "pA" },
-    hint: "dI/dV lock-in——带符号，会穿零；只记录" },
+    hint: tr("dI/dV lock-in——带符号，会穿零；只记录", "dI/dV lock-in: signed, crosses zero; recorded only") },
 ];
 
 /**
@@ -455,19 +488,19 @@ export const AUX_CHANNELS: readonly AuxChannelView[] = [
  *     investigating.
  */
 const AUX_VERDICTS: Record<string, VerdictView> = {
-  ok: { label: "正常", tone: "AUTO" },
-  warn: { label: "警告", tone: "WARN" },
-  suppressed: { label: "已抑制", tone: "INFO" },
-  unjudged: { label: "未判级", tone: "INFO" },
-  unavailable: { label: "本机没有", tone: "default" },
-  unknown: { label: "尚未探测", tone: "default" },
+  ok: { label: tr("正常", "OK"), tone: "AUTO" },
+  warn: { label: tr("警告", "Warning"), tone: "WARN" },
+  suppressed: { label: tr("已抑制", "Suppressed"), tone: "INFO" },
+  unjudged: { label: tr("未判级", "Not graded"), tone: "INFO" },
+  unavailable: { label: tr("本机没有", "Not on the instrument"), tone: "default" },
+  unknown: { label: tr("尚未探测", "Not probed yet"), tone: "default" },
 };
 
 /** For a verdict string this frontend does not know (backend/UI version skew).
  *  Deliberately NOT the `unknown` row: that one means a specific thing — "the
  *  signal table has not been read yet" — and putting it on every unrecognised
  *  value would state a fact nobody established. */
-const AUX_FALLBACK: VerdictView = { label: "未知", tone: "default" };
+const AUX_FALLBACK: VerdictView = { label: tr("未知", "Unknown"), tone: "default" };
 
 export function auxVerdictView(v: string | null | undefined): VerdictView {
   return AUX_VERDICTS[String(v ?? "")] ?? AUX_FALLBACK;
@@ -477,8 +510,8 @@ export function auxVerdictView(v: string | null | undefined): VerdictView {
  * Pull one channel's series out of an `/aux/series` payload, with every
  * interruption preserved as a hole.
  *
- * Two different holes, and both used to be paved over — the aux channel did not
- * mark a data gap as missing, it drew a straight line across it:
+ * Two different holes, and both used to be paved over (the chart joined across
+ * interruptions with a straight line):
  *
  *   · **This channel had no reading while others did.** The row exists, its
  *     column is `null`. That null is now KEPT at its own timestamp instead of
@@ -543,8 +576,9 @@ function auxColumns(
   const ex = extras.map((c) => {
     const raw = body?.series?.[c];
     if (!Array.isArray(raw)) return new Array<number | null>(n).fill(null);
-    // 短了就补 null（不是截断整体）：注释列比值列短，说的是「后面那几拍没有这个
-    // 注释」，不是「后面那几拍没有数据」。
+    // Pad with null when short (rather than truncating everything): an annotation column
+    // shorter than the value column means "the later samples have no such annotation",
+    // not "the later samples have no data".
     return raw.length >= n
       ? raw.slice(0, n)
       : [...raw, ...new Array<number | null>(n - raw.length).fill(null)];
@@ -556,7 +590,7 @@ function auxColumns(
 /**
  * The dI/dV curve, split by whether the lock-in was actually modulating.
  *
- * The dI/dV auxiliary channel needs to mark whether the lock-in was actually on. This is not a
+ * The chart must show whether the lock-in was on. This is not a
  * display preference. With modulation off the demodulator puts out crosstalk and
  * noise — same unit, same order of magnitude, same shape as a real dI/dV — and
  * the one thing that differs, whether it is a measurement at all, is invisible
@@ -597,8 +631,9 @@ export function auxLockinSplit(body: AuxSeriesBody): {
     const y = v[i] ?? null;
     const mine = modulating(i);
     const prev = i > 0 ? modulating(i - 1) : mine;
-    // 过渡点两条都放：否则两种线型之间会留一个采样点的洞，而那个洞和「采集中断」
-    // 画出来一模一样 —— 刚修好的那个谎会从另一头回来。
+    // A transition point goes into both series: otherwise the two line styles would leave
+    // a one-sample hole that looks exactly like an acquisition gap, reintroducing the
+    // false-gap problem from the other side.
     const bridge = prev !== mine;
     on.push(mine || (bridge && prev) ? y : null);
     off.push(!mine || (bridge && !prev) ? y : null);
@@ -619,9 +654,10 @@ export function auxLockinSplit(body: AuxSeriesBody): {
  * than τ buys demodulator noise and nothing else. Returns null when the
  * resonance has never been swept — that is "unknown", not "fine".
  *
- * `intervalS` 要传**实测**节奏（`aux.observed_interval_s`），不是设置值。
- * 采样是机会式的，设置只是节流上限，两个数一直不相等 —— 传设置值的话这句话
- * 回答的是「假如每次机会都采得到，够不够」，一个没人问的问题，而且长得像答案。
+ * `intervalS` must be the MEASURED cadence (`aux.observed_interval_s`), not the
+ * configured value. Sampling is opportunistic and the setting is only a throttle ceiling,
+ * so the two never match; passing the setting would answer "would it be enough if every
+ * opportunity yielded a sample", a question nobody asked that looks like an answer.
  */
 export function auxAmpSamplingNote(
   tauS: number | null | undefined,
@@ -632,8 +668,14 @@ export function auxAmpSamplingNote(
   const ratio = tauS / intervalS;
   const tau = tauS >= 1 ? `${tauS.toFixed(2)} s` : `${(tauS * 1000).toFixed(0)} ms`;
   return ratio >= 1
-    ? `振幅弛豫 τ = ${tau}，采样间隔 ${intervalS.toFixed(2)} s —— 过采样 ${ratio.toFixed(1)}×，够了`
-    : `振幅弛豫 τ = ${tau}，采样间隔 ${intervalS.toFixed(2)} s —— 比 τ 还慢，会漏掉快速归零`;
+    ? tr(
+        `振幅弛豫 τ = ${tau}，采样间隔 ${intervalS.toFixed(2)} s —— 过采样 ${ratio.toFixed(1)}×，够了`,
+        `Amplitude relaxation τ = ${tau}, sampling interval ${intervalS.toFixed(2)} s: oversampled ${ratio.toFixed(1)}×, sufficient`,
+      )
+    : tr(
+        `振幅弛豫 τ = ${tau}，采样间隔 ${intervalS.toFixed(2)} s —— 比 τ 还慢，会漏掉快速归零`,
+        `Amplitude relaxation τ = ${tau}, sampling interval ${intervalS.toFixed(2)} s: slower than τ, so a fast drop to zero can be missed`,
+      );
 }
 
 // ── settings knobs ──────────────────────────────────────────────────────────

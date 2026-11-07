@@ -31,6 +31,7 @@ from mast.core.noble_tip_workflow import (
     forge_line_time_s,
 )
 from mast.skills.composite.graph_executor import CompositeStep, GraphExecutor
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +147,7 @@ def _tilt_readout(executor: GraphExecutor, step_id: str) -> dict:
 #:
 #: ## 为什么不是「自动找干净地方」
 #:
-#: 查下来**不自动** —— 6 处 ``_relocate``
+#: 核查结论:扫图之前不会自动先问地图可用区域 —— 6 处 ``_relocate``
 #: 和 5 处扫图靠人肉配对。但也**不能改成自动找**:一半的扫图是故意指定坐标的
 #: (回退图要同一片、簇图要看刚扎的那一点、验收图要回到台阶上),自动找会把它们
 #: 全毁掉。
@@ -162,10 +163,10 @@ def _tilt_readout(executor: GraphExecutor, step_id: str) -> dict:
 _MAX_DRY_REFILLS: int = 3
 
 SCAN_ORIGINS: dict[str, str] = {
-    "clean_spot": "刚由 FindCleanSpot 在地图的可用区里找来的(默认路径)",
-    "same_frame": "**故意**沿用上一步的同一中心 —— 换个视野重扫同一片",
-    "analysis": "**故意**用图像分析给出的坐标(台阶位置 / 平区中心)",
-    "just_poked": "**故意**回到刚动过手的那一点(看簇、看坑)",
+    "clean_spot": tr("刚由 FindCleanSpot 在地图的可用区里找来的(默认路径)", "just found by FindCleanSpot in the usable area of the map (default path)"),
+    "same_frame": tr("**故意**沿用上一步的同一中心 —— 换个视野重扫同一片", "**deliberately** reusing the previous step's center - rescanning the same area with another field of view"),
+    "analysis": tr("**故意**用图像分析给出的坐标(台阶位置 / 平区中心)", "**deliberately** using coordinates from image analysis (step position / flat-area center)"),
+    "just_poked": tr("**故意**回到刚动过手的那一点(看簇、看坑)", "**deliberately** returning to the point just poked (to look at the cluster / pit)"),
 }
 
 
@@ -182,10 +183,14 @@ def scan_at_params(wf: NobleTipWorkflow, x: float, y: float, *,
     # 和一个没想过的 origin 长得一模一样,而后者正是这道闸门要拦的东西。
     if origin not in SCAN_ORIGINS:
         raise ValueError(
-            f"scan_at_params: origin={origin!r} 不在受控词表里。"
-            f"合法值:{sorted(SCAN_ORIGINS)}。"
-            "要加新值就同时在 SCAN_ORIGINS 里写清楚它是什么情况 —— "
-            "这道闸门问的是「这个坐标哪来的」,不接受自由文本。")
+            tr(f"scan_at_params: origin={origin!r} 不在受控词表里。"
+               f"合法值:{sorted(SCAN_ORIGINS)}。"
+               "要加新值就同时在 SCAN_ORIGINS 里写清楚它是什么情况 —— "
+               "这道闸门问的是「这个坐标哪来的」,不接受自由文本。",
+               f"scan_at_params: origin={origin!r} is not in the controlled vocabulary. "
+               f"Valid values: {sorted(SCAN_ORIGINS)}. "
+               "To add a new value, also describe the situation in SCAN_ORIGINS - "
+               "this gate asks 'where did this coordinate come from' and does not accept free text."))
     logger.debug("scan_at_params: %.1f nm @ (%.3g, %.3g) origin=%s (%s)",
                  size_nm, x, y, origin, SCAN_ORIGINS[origin])
 
@@ -285,7 +290,40 @@ def _spot_list(*groups: "Iterable[tuple[float, float]] | None") -> str:
 
 def _mark_dirty(executor: GraphExecutor, x: float, y: float,
                 *, kind: str = "pulse", label: str = "") -> None:
-    """将处理位置同时写入本次共享清单和持久地图，避免其他阶段或后续调用重访。"""
+    """把一个刚被弄脏的落点**记两处**:本跑的共享表 + 地图。
+
+    ═══════════════════════════════════════════════════════════════════════
+    为什么是两处
+    ═══════════════════════════════════════════════════════════════════════
+
+    只写 ``partial_data`` 不够,因为 ``FindCleanSpot`` 问的是
+    ``map_scope.load_markers()`` —— 两个互不相干的容器。后果是选点器
+    **永远看不见这一跑自己打出来的坑**。
+
+    典型失败形状(``map_known=True``,地图读得到,
+    里面就是没有脉冲标记):
+
+        第一轮落点: A → B → C → D → E
+        第二轮落点: E → D → C → B → A → ...
+
+    **第二轮把第一轮的坑原路倒着打了一遍。** 唯一拦着它的是
+    ``pd[f"{prefix}:used"]`` 这张排除表,而那张表的键带轮次前缀,**每轮重置为空**。
+    本该如此:脉冲打过几次之后当地已标记为污染,理应换地方
+    —— 标记了,但没人读。
+
+    ⚠️ **两处都要留,不是冗余。** ``nearest_clean_from`` 的自述写着:
+    「``exclude`` carries the points used earlier in this run, which the caller
+     holds because a marker written moments ago may not have reached the store
+     yet — a stale read must never let two pulses land on one spot.」
+    落库有延迟,而这中间的窗口正好是「连打两发」那段时间。
+
+    ``kind`` 决定避让半径(``DAMAGE_KINDS``:pulse → ``pulse_r_m`` 500 nm,
+    tip_shape → ``tip_shape_r_m`` 30 nm)。**传错 kind 不会报错,只会让避让圈
+    小一个量级** —— 所以调用点上它是显式的,没有「猜」的余地。
+
+    落库失败**绝不许弄坏正在跑的实验**:记不进地图,至少 ``partial_data``
+    那半还在,行为退回到只写 ``partial_data`` 的旧样子 —— 更差,但不是灾难。
+    """
     pd = executor.progress.partial_data
     cur = [tuple(p) for p in (pd.get(_DIRTY_KEY) or [])]
     spot = (float(x), float(y))
@@ -314,7 +352,8 @@ def _log_damage_marker(executor: GraphExecutor, x: float, y: float,
     #     混进技能清单,会让那道自检去找一个根本不存在的依赖。
     row_id = record_damage_marker(
         x, y, kind=kind,
-        label=label or ("脉冲坑" if kind == "pulse" else "修针坑"),
+        label=label or (tr("脉冲坑", "Pulse crater") if kind == "pulse"
+                        else tr("修针坑", "Tip-conditioning crater")),
         skill_name=str(getattr(executor, "_composite_name", "") or ""))
     if row_id is None:
         _bump_marker_failure(executor, f"{kind}")
@@ -357,7 +396,27 @@ def _say(kind: str, /, **data) -> None:
 
 
 def _decide(entry: dict, kind: str, **facts) -> None:
-    """扎针决策的报文与旁白在同一处生成，展示下一步动作及其原因。"""
+    """记一次扎针决策 —— **报文和旁白在同一处产出**。
+
+    每一针之后流程都会决定下一步(加深 / 换地方 / 变浅 / 收工计数),而这些决策
+    曾**只存在于 ``entry["note"]`` 里** —— 进报文、进 sidecar,
+    屏幕上却是一针接一针,中间没有任何理由。「在原地反复打脉冲」
+    正是这个形状:动作换了,旁白一个字都没有。
+
+    ## 为什么不把 ``note`` 直接念出去
+
+    ``note`` 是一句写好的、带数字的话。把它塞进 ``narrate()`` 等于绕过旁白模块
+    的全部约束(它的签名里**没有** ``text=``,理由见 ``narration_templates`` 的
+    模块自述)。所以这里交出的是**决策码 + 原始数值**,句子由模板拼。
+
+    两者读的是同一批局部变量,所以数字不可能对不上;而 ``entry["decision"]``
+    让这个决策**可检索**了 —— 从前想统计「有多少针是因为搬多了才变浅的」,
+    只能去正则匹配中文。
+
+    ⚠️ ``facts`` **不写回 ``entry``**。报文里的深度已经是 ``depth_nm`` /
+    ``next_depth_nm``(纳米),再塞一份 pm 的进去就是同一个值的第二种表示 ——
+    下一个人改其中一处,两处会安静地不一致。
+    """
     entry["decision"] = kind
     _say("poke_decision", kind=kind, **facts)
 
@@ -436,7 +495,25 @@ def _remember_searched(executor: GraphExecutor, x: float, y: float) -> None:
 
 def _move_to(executor: GraphExecutor, *, step_prefix: str,
              x: float, y: float) -> Iterator[CompositeStep]:
-    """将针尖移动到指定坐标，保持真实位置与后续处理中心一致。"""
+    """把针尖挪到 ``(x, y)``。
+
+    ═══════════════════════════════════════════════════════════════════════
+    为什么要有这一步:没有它**扎针根本不移动**
+    ═══════════════════════════════════════════════════════════════════════
+
+    ``poke_phase`` 从台面表里取一个落点 ``(x, y)``、记脏、发旁白,然后直接扎 ——
+    **一步移动都没有**。于是针扎在 200 nm 帧的中心(``_relocate`` 停下的地方),
+    而簇图扫在台面落点上:**扎的地方和看的地方不是同一处**。
+
+    缺这一步时的步骤序列:
+
+        S1D:p4:poke_bias → amp_base → poke → amp_after → poke_bias_restore
+                                      ↑ 没有 move
+
+    要求:扎针必须落在调平后的台面上,否则找台面这一步就没有意义。
+
+    与 ``_relocate`` 一样先把反馈开回来:``MoveToXY`` 的前置是 ``z_controller_on``。
+    """
     yield CompositeStep(
         step_id=f"{step_prefix}:pre_move_feedback", skill_name="ZControllerOnOff",
         params={"enable": True},
@@ -511,9 +588,12 @@ def _relocate(executor: GraphExecutor, *, step_prefix: str, purpose: str,
         )
         # 尝试开启反馈失败时必须报告原因，再由后续移动步骤检查准确的前置条件。
         if not _ok(executor, f"{step_prefix}:pre_move_feedback"):
-            note = (f"{step_prefix}: 移动前尝试打开 Z 反馈(ZControllerOnOff enable=True)"
-                    "**这一步本身失败了** —— 接下来 MoveToXY 若报 z_controller_on 前置"
-                    "不满足,原因在这里,不是「谁把它关了」。")
+            note = tr(f"{step_prefix}: 移动前尝试打开 Z 反馈(ZControllerOnOff enable=True)"
+                      "**这一步本身失败了** —— 接下来 MoveToXY 若报 z_controller_on 前置"
+                      "不满足,原因在这里,不是「谁把它关了」。",
+                      f"{step_prefix}: tried to turn Z feedback on before moving (ZControllerOnOff enable=True) "
+                      "and **that step itself failed** - if MoveToXY next reports the z_controller_on "
+                      "precondition unmet, the cause is here, not 'someone turned it off'.")
             logger.warning(note)
             executor.set_partial(f"{step_prefix}:feedback_restore_failed", note)
         yield CompositeStep(
@@ -536,12 +616,12 @@ def pulse_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
                 set_junction: bool = True) -> Iterator[dict]:
     """打脉冲直到 Z 向上跳出几十 nm,或者预算用完。
 
-    极性策略（定案）:先用一种极性;同一极性连打 ``pulses_per_polarity`` 发都
+    极性策略:先用一种极性;同一极性连打 ``pulses_per_polarity`` 发都
     没效果就翻过来再试。极性与连败计数存进 ``partial_data``,所以中途被打断再续
     跑不会从头数。
 
     ``voltage_sequence`` 给定时(扫描验证失败后的 7/5/3 V 递减),按序换电压而不是
-    换极性 —— 那是用户在大修与精修之间的过渡手法。
+    换极性 —— 这是大修与精修之间的过渡手法。
     """
     pd = executor.progress.partial_data
     log: list[dict[str, Any]] = list(pd.get(f"{prefix}:log", []))
@@ -571,7 +651,7 @@ def pulse_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
             optional=False, checkpoint_after=False, tags=("junction",))
         if not (_ok(executor, f"{prefix}:junction_bias")
                 and _ok(executor, f"{prefix}:junction_setpoint")):
-            out["reason"] = "无法建立修针所需的结条件(低偏压/大电流)"
+            out["reason"] = tr("无法建立修针所需的结条件(低偏压/大电流)", "Cannot establish the junction conditions needed for tip conditioning (low bias / high current)")
             return out
 
     budget = int(wf.pulse_budget)
@@ -592,8 +672,10 @@ def pulse_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
             spot = yield from _relocate(executor, step_prefix=sp, purpose="pulse",
                                         used=_dirty(executor))
         if spot is None:
-            out["reason"] = ("这片表面已经没有可用的落点了 —— 该粗动换区"
-                             "(RelocateCoarseXY),或者换一块样品区域。")
+            out["reason"] = tr("这片表面已经没有可用的落点了 —— 该粗动换区"
+                               "(RelocateCoarseXY),或者换一块样品区域。",
+                               "No usable landing spot is left on this surface - use coarse motion "
+                               "to change area (RelocateCoarseXY), or pick another sample region.")
             out["surface_spent"] = True
             break
         x, y, map_known = spot
@@ -635,7 +717,7 @@ def pulse_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
             entry = {"shot": shot, "x_m": x, "y_m": y, "bias_v": bias,
                      "outcome": "failed"}
             log.append(entry)
-            out["reason"] = "脉冲执行失败 —— 停下来让人看,不要继续打。"
+            out["reason"] = tr("脉冲执行失败 —— 停下来让人看,不要继续打。", "Pulse execution failed - stop and let a person look; do not keep pulsing.")
             _stash(executor, prefix, log, used, polarity, streak, fired)
             break
 
@@ -665,7 +747,7 @@ def pulse_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
                  "dz_m": (float(raw_dz) if raw_dz is not None else None)}
         log.append(entry)
 
-        # 「A 的判据可以是 down 也行。」
+        # 2026-08-14 起 A 的判据也接受 down。
         # 判的是**针尖被改变了没有**,不是改变的方向 —— 向上向下都算脉冲起了作用。
         # ⚠️ 阈值 ``pulse_success_dz_nm`` 原本是照「向上几十 nm」定的下沿,
         # down 方向沿用同一个数**没有数据支持**(up/down 的幅度分布可能不同)。
@@ -695,7 +777,7 @@ def pulse_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
         streak += 1
         # 递减序列跑完就停 —— 那是一串定好的电压,不是「打到满意为止」。
         if seq and fired >= len(seq):
-            out["reason"] = f"递减脉冲序列 {seq} 已打完"
+            out["reason"] = tr(f"递减脉冲序列 {seq} 已打完", f"Decreasing pulse sequence {seq} has been fired in full")
             _stash(executor, prefix, log, used, polarity, streak, fired)
             break
         if not seq and streak >= int(wf.pulses_per_polarity):
@@ -709,10 +791,14 @@ def pulse_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
         # 「读不到」的发数要说出来 —— 见上面那段注释:20 发 no_effect 和
         # 20 发 unreadable 指向完全不同的下一步。
         unread = int(out.get("unreadable") or 0)
-        tail = (f";其中 **{unread} 发读不到 Z 跳变**(判不了,不等于没效果 —— "
-                "先查 Z 读回和信号链,别急着加大脉冲)" if unread else "")
-        out["reason"] = (f"打满 {fired} 发(预算 {budget})仍未出现 "
-                         f"±{wf.pulse_success_dz_nm:.0f} nm 的 Z 跳变{tail}")
+        tail = tr(f";其中 **{unread} 发读不到 Z 跳变**(判不了,不等于没效果 —— "
+                  "先查 Z 读回和信号链,别急着加大脉冲)",
+                  f"; **{unread} pulses had no readable Z jump** (undecidable, not the same as no effect - "
+                  "check the Z read-back and signal chain before raising the pulse)") if unread else ""
+        out["reason"] = tr(f"打满 {fired} 发(预算 {budget})仍未出现 "
+                           f"±{wf.pulse_success_dz_nm:.0f} nm 的 Z 跳变{tail}",
+                           f"Fired the full {fired} pulses (budget {budget}) without a Z jump of "
+                           f"±{wf.pulse_success_dz_nm:.0f} nm{tail}")
     # 没出现过也要有这个键:缺字段和 0 在报告里读起来一样,但一个是「没统计」
     # 一个是「统计了,是零」。
     out["unreadable"] = int(out.get("unreadable") or 0)
@@ -781,7 +867,7 @@ def verify_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
         params={"setpoint_a": wf.verify_setpoint_a},
         optional=False, checkpoint_after=False, tags=("verify",))
     if not (_ok(executor, f"{prefix}:bias") and _ok(executor, f"{prefix}:setpoint")):
-        return _unmeasured("回不到正常成像条件,这一帧没扫成 —— 针尖没被测到")
+        return _unmeasured(tr("回不到正常成像条件,这一帧没扫成 —— 针尖没被测到", "Could not return to normal imaging conditions, this frame was not scanned - the tip was not measured"))
 
     # 找一块干净地方扫 —— 在刚打过脉冲的坑上验证针尖,验的是坑不是针尖。
     # 本轮已弄脏的落点全部排除 —— 传空表就是「在坑上判针尖」的那半个原因。
@@ -797,7 +883,7 @@ def verify_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
         # 两个位一起打:``surface_spent`` 说**为什么**停(该换区,不是该打脉冲),
         # ``inconclusive`` 说**针尖没被测过**(所以后面任何关于针尖的话都不成立)。
         out["surface_spent"] = True
-        return _unmeasured("这片表面没有干净落点了,验证图没地方扫 —— 针尖没被测到")
+        return _unmeasured(tr("这片表面没有干净落点了,验证图没地方扫 —— 针尖没被测到", "No clean landing spot left on this surface, nowhere to scan the verification image - the tip was not measured"))
     x, y, map_known = spot
     out["map_known"] = map_known
 
@@ -852,8 +938,10 @@ def verify_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
     if not _ok(executor, f"{prefix}:prescan"):
         # 失败原文比「扫描验证没能完成」有用得多 —— 后者对用户没有信息量。
         why = _err(executor, f"{prefix}:prescan")
-        return _unmeasured("扫描验证没能完成" + (f":{why}" if why else "")
-                           + " —— 针尖没被测到")
+        return _unmeasured(tr("扫描验证没能完成" + (f":{why}" if why else "")
+                              + " —— 针尖没被测到",
+                              "Verification scan did not complete" + (f": {why}" if why else "")
+                              + " - the tip was not measured"))
 
     # ── 把这一帧留下来给 level 相用(2026-08-14 合并)────────────────────
     #
@@ -881,14 +969,14 @@ def verify_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
     else:
         # 存不下来 ⇒ 这一问**根本没被问过**,而下面那道一票否决因此不生效。
         #
-        # 沉默在这里最危险:``step_split`` 那张卡片不会出现,用户看到的是
+        # 沉默在这里最危险:``step_split`` 那张卡片不会出现,看到的是
         # 「重合度过了」然后放行 —— 和「问了,是单尖」长得一模一样。
         # 说出来,而且说清是**没问**不是「没有」。
         out["split_tip_unasked"] = True
         _say("step_split", result={
             "verdict": "undecidable",
             # 模板自己会说「多针尖这一项判不了——」,这里只给**原因**,别重复主语。
-            "reason": "验证图未存盘、取不到文件,本轮无法判读"})
+            "reason": tr("验证图未存盘、取不到文件,本轮无法判读", "the verification image was not saved and no file can be fetched, so this round cannot be read")})
 
     d = _data(executor, f"{prefix}:prescan")
     sim = d.get("similarity")
@@ -913,7 +1001,7 @@ def verify_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
             d.get("abstain_reason")
             or d.get("read_failure")
             or d.get("unusable_reason")
-            or "读不到正反扫描线数据,判不了针尖好坏 —— 这不是「针尖没问题」。")
+            or tr("读不到正反扫描线数据,判不了针尖好坏 —— 这不是「针尖没问题」。", "Cannot read the forward/backward scan-line data, so the tip cannot be judged - this is NOT 'the tip is fine'."))
         _say("fwd_bwd_result", inconclusive=True, reason=out["reason"],
              threshold=float(wf.fwdbwd_threshold))
         return out
@@ -924,10 +1012,14 @@ def verify_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
     split = bool(out.get("split_tip"))
     out["passed"] = fwd_bwd_ok and not split
     out["vetoed_by_split_tip"] = fwd_bwd_ok and split
-    out["reason"] = (f"正反扫描线相似度 {float(sim):.3f}"
-                     f"（阈值 {wf.fwdbwd_threshold:.2f}）"
-                     + ("；但大图上台阶被画了两遍（多针尖）—— 一票否决"
-                        if out["vetoed_by_split_tip"] else ""))
+    out["reason"] = tr(f"正反扫描线相似度 {float(sim):.3f}"
+                       f"（阈值 {wf.fwdbwd_threshold:.2f}）"
+                       + ("；但大图上台阶被画了两遍（多针尖）—— 一票否决"
+                          if out["vetoed_by_split_tip"] else ""),
+                       f"Forward/backward line similarity {float(sim):.3f} "
+                       f"(threshold {wf.fwdbwd_threshold:.2f})"
+                       + ("; but the steps appear twice in the large image (multiple tips) - vetoed"
+                          if out["vetoed_by_split_tip"] else ""))
     _say("fwd_bwd_result", passed=out["passed"], inconclusive=False,
          fwd_bwd_ok=fwd_bwd_ok, split_tip=split,
          similarity=float(sim), threshold=float(wf.fwdbwd_threshold))
@@ -960,7 +1052,7 @@ def level_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
         spot = yield from _relocate(executor, step_prefix=prefix,
                                     purpose="pulse", used=_dirty(executor))
         if spot is None:
-            out["reason"] = "找不到干净区域找台阶"
+            out["reason"] = tr("找不到干净区域找台阶", "No clean area found to look for steps")
             return out
         x, y, _known = spot
 
@@ -973,7 +1065,7 @@ def level_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
                                   origin="clean_spot"),
             optional=False, checkpoint_after=False, tags=("level", "wide"))
         if not _ok(executor, f"{prefix}:scan"):
-            out["reason"] = "台阶扫描没能完成"
+            out["reason"] = tr("台阶扫描没能完成", "Step scan did not complete")
             return out
         yield CompositeStep(
             step_id=f"{prefix}:save", skill_name="SaveScan", params={},
@@ -982,7 +1074,7 @@ def level_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
             step_id=f"{prefix}:latest", skill_name="GetLatestScanFile", params={},
             optional=True, checkpoint_after=True, tags=("level",))
         path = _scan_path(executor, f"{prefix}:save", f"{prefix}:latest")
-        # 每一张大图都问一句「台阶被劈开了吗」(# 「所有的图都应该有自动检测」)。只在**劈裂**时出声,见 _step_split_look。
+        # 每一张大图都问一句「台阶被劈开了吗」(所有的图都做自动检测)。只在**劈裂**时出声,见 _step_split_look。
         if path:
             sp = _step_split_look(executor, scan_path=path, flat=None,
                                   frame_nm=float(wf.step_scan_nm))
@@ -993,7 +1085,7 @@ def level_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
     out["wide_scan_path"] = path
     out["wide_scan_center"] = [x, y]
     if not path:
-        out["reason"] = "扫完了但拿不到文件路径,后面的分析无从做起"
+        out["reason"] = tr("扫完了但拿不到文件路径,后面的分析无从做起", "Scan finished but the file path is unavailable, so the later analysis cannot proceed")
         return out
 
     # 台阶是否主导 —— 同时给出 AutoTilt 需要的 surface_rms_m。
@@ -1005,8 +1097,7 @@ def level_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
 
     # ── 找不到台阶 → 退到更大的视野再找一次 ─────────────────────────────
     #
-    # 「如果找不到台阶,那就换 200 nm 接着找,
-    # 不要把小起伏硬算作台阶。」
+    # 找不到台阶时换 200 nm 接着找,不要把小起伏硬算作台阶。
     #
     # 只退**一次**,而且回退图**只用来找台阶**:正反扫在 100 nm 那张上已经判过
     # (回退图不重判),验收图仍固定 ``step_scan_nm``(尺度浮动会让锐度阈值失去
@@ -1037,7 +1128,7 @@ def level_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
         # 帧时 = 行数 × 线时 × 2,视野不在式子里 —— 所以这里买到的确实是安全,
         # 不是别的东西。
         #
-        # ⚠️ **但用户逐字说过的数不缩放** —— 规矩连同公式一起住在
+        # ⚠️ **但用户明确指定过的数不缩放** —— 规矩连同公式一起住在
         # ``forge_fallback_line_time_s``(2026-08-15 抽出去:报告那一侧也要说
         # 「回退图跑多快」,而抄一份就会把这条分支抄丢,报告里的数与真正下发的数
         # 从此不是一个)。这里只负责把结果说出来。
@@ -1048,8 +1139,10 @@ def level_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
             # 说出来 —— 静默地不缩放和静默地缩放一样坏。
             out["step_fallback_line_time_s"] = float(fb_line_time or 0.0)
             out["step_fallback_speed_note"] = (
-                f"回退图按你钉的 {fb_line_time} s/线跑,未按视野缩放 ⇒ "
-                f"针尖 {float(fallback_nm) / float(fb_line_time):.0f} nm/s"
+                tr(f"回退图按你钉的 {fb_line_time} s/线跑,未按视野缩放 ⇒ "
+                   f"针尖 {float(fallback_nm) / float(fb_line_time):.0f} nm/s",
+                   f"The fallback image ran at your pinned {fb_line_time} s/line, not scaled to the field of view => "
+                   f"tip speed {float(fallback_nm) / float(fb_line_time):.0f} nm/s")
                 if fb_line_time else "")
         yield CompositeStep(
             step_id=f"{prefix}:fb_scan", skill_name="ScanAt",
@@ -1083,18 +1176,44 @@ def level_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
                     out["wide_scan_path"] = fb_path
                     out["step_found_at_nm"] = float(fallback_nm)
                 else:
-                    out["step_fallback_result"] = (
+                    out["step_fallback_result"] = tr(
                         f"{fallback_nm:.0f} nm 上也没有台阶主导 —— "
-                        "这一片确实没有可用台阶(不是判据的问题)。")
+                        "这一片确实没有可用台阶(不是判据的问题)。",
+                        f"No step dominates at {fallback_nm:.0f} nm either - "
+                        "this area really has no usable steps (not a criterion problem).")
 
     out["step_analysis"] = {k: steps_d.get(k) for k in
                             ("step_dominated", "step_ratio", "surface_rms_m",
                              "tilt_valid", "tilt_deg") if k in steps_d}
 
-    # 调平应选择同一台面内的平区，避免把台阶包络作为表面倾斜。
-    # same_terrace 受分层质量限制，不代表已经证明窗口无台阶。
-    # FindFlatRegion 失败时由本阶段调整位置或尺寸，因此此步骤必须为 optional，
-    # 不能把缺少合适平区升级为整个外环的全局故障。
+    # 无台阶的平区:调平要量的是表面,不是台阶包络。
+    #
+    # `same_terrace=True` 是**执行上面这句注释的那个参数**。
+    # 台面窄的图上有相当多窗口会跨台阶,默认档挑中的可能正是
+    # 一个跨台阶窗 —— 它的斜率可以是同图单台面窗的数倍。交给 AutoTilt 的就是
+    # 这个斜率,于是它去归零一个主要由台阶包络构成的「倾斜」。正弦叠加上阶跃函数
+    # 之后,算出来的结果就不对 —— 所以找到平面是前提。
+    #
+    # ⚠️ 代价是**这一步会更常失败**(台面窄的表面上可能一个单台面窗都凑不出)。
+    # 那是正确的失败:此处量不出真实倾斜,给一个错的倾斜比不给更糟。
+    #
+    # ⚠️ 这一条是必要的,但并不充分:`same_terrace` 背后的 `kde_layers` 在有些帧上
+    # 只返回一个层,而 `flat_region.py` 遇到单层就把约束**整个关掉**,注释写的是
+    # 「单层 = 整帧同一台面,约束自动满足」—— 整帧带残余倾斜、峰糊在一起时这句话是反的。
+    # ⇒ 传了这个参数,它在这类帧上可能**根本不生效**(「看着在防护其实没有」)。
+    # 这取决于区域与针尖状态,**不是这个函数的一般行为**。所以:
+    #   · 看到「只有一层」时先怀疑**这一帧**(太平 / 单台面 / 起伏低于噪声),
+    #     不要直接怀疑 kde_layers;
+    #   · 更稳的做法在 `FindFlatRegion` 里:打分用**窗内局部平面残差**,而不是
+    #     「离整帧平面多远」;分层**逐窗**做,不是整帧做。
+    # 在那之前这里保持传参:它在部分帧上生效,生效时是对的,
+    # 而且它让「谁该负责这件事」留在正确的位置上。
+    # ⚠️ `optional=True` 是**必须的**:
+    # `FindFlatRegion` 从此会**真的失败**(「这一片没有可用平区」),而在此之前它
+    # 总是返回 argmin、从不失败。非 optional 的步骤失败会让 `GraphExecutor`
+    # **中止整个计划**(`graph_executor.py:729`)—— 也就是说不改这一行,一次
+    # 「这块表面不够平」会把整个 ForgeAuTip 断掉,而不是让本阶段说一句理由退出。
+    # 「换个尺寸/换个地方」是本阶段自己该处理的事,不是全局故障。
     yield CompositeStep(
         step_id=f"{prefix}:flat", skill_name="FindFlatRegion",
         params={"scan_path": path, "min_window_m": wf.flat_region_nm * 1e-9,
@@ -1108,7 +1227,18 @@ def level_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
          window_nm=float(wf.flat_region_nm))
 
     if fx is None or fy is None:
-        # 同时处理较小窗口建议与跨台阶导致的失败原因，不只接其中一个返回分支。
+        # ── 听建议:**两种**「换小一档」都要听 ──────────────────────────
+        #
+        # ⭐ 原来只听 ``smaller_windows``(「量过了但都太糙,小一档
+        # 就够平」)。另一条路是**全跨台阶**
+        # (``checked 0, cross-terrace N``):窗相对台面宽度过大时,
+        # 窗必然横跨台阶,一个都没轮到评平坦度。
+        #
+        # 那条路若不产出任何建议,这里的重试就拿不到尺寸,直接放弃 ——
+        # 结果是台面足够大时仍然找不到,而且会继续在原处重试。
+        #
+        # 所以 ``FindFlatRegion`` 在全跨台阶时也会报 ``smaller_windows_same_terrace``
+        # (「某尺寸的窗能落在单个台面里」)。两种建议一起收,先到先用。
         line = float(flat.get("usable_rms_m") or 0.0)
         cands = [s for s in (flat.get("smaller_windows") or [])
                  if isinstance(s, dict) and s.get("best_rms_m") is not None
@@ -1118,10 +1248,10 @@ def level_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
         side = None
         if cands:
             side = float(cands[0]["side_m"])
-            why_small = "小一档就够平"
+            why_small = tr("小一档就够平", "one size smaller is flat enough")
         elif cross_cands:
             side = float(cross_cands[0]["side_m"])
-            why_small = "小一档就装得进单个台面"
+            why_small = tr("小一档就装得进单个台面", "one size smaller fits within a single terrace")
         if side is not None:
             out["flat_window_downsized_m"] = side
             _say("terrace_window_shrink", from_nm=float(wf.flat_region_nm),
@@ -1141,9 +1271,12 @@ def level_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
         # 说清是**为什么**找不到 —— 「跨台阶被否掉了 N 个」和「图太小/太脏」是
         # 两种完全不同的处境,给的下一步也不同(换更小的窗 vs 换地方)。
         n_cross = flat.get("windows_cross_terrace")
-        detail = (f"(跨台阶否决 {n_cross} 个窗口,台面比 "
-                  f"{wf.flat_region_nm:.0f} nm 窄)" if n_cross else "")
-        out["reason"] = f"这张图里找不到够大的**单台面**平区来调平{detail}"
+        detail = (tr(f"(跨台阶否决 {n_cross} 个窗口,台面比 "
+                     f"{wf.flat_region_nm:.0f} nm 窄)",
+                     f" ({n_cross} windows vetoed for crossing a step; terraces are narrower than "
+                     f"{wf.flat_region_nm:.0f} nm)") if n_cross else "")
+        out["reason"] = tr(f"这张图里找不到够大的**单台面**平区来调平{detail}",
+                           f"No flat area on a **single terrace** large enough for leveling in this image{detail}")
         _say("find_terrace_result", found=0, why=out["reason"],
              windows_checked=flat.get("windows_checked"),
              windows_cross_terrace=n_cross,
@@ -1178,8 +1311,7 @@ def level_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
     # D 相(``_level_on_terrace``)08-17 就补上了 level_begin / level_result,
     # 而 C 相 —— 这一相的名字就叫 level_phase —— 从头到尾只有 GraphExecutor
     # 自动发的那两条通用句(auto_tilt / auto_tilt_result),结论只进
-    # ``out["tilt"]`` 这份报文。「调平做没做、效果如何,
-    # 旁白里看不到。」两相各改一半,正是本仓「一侧改了,另一侧没跟上」的同形。
+    # ``out["tilt"]`` 这份报文,旁白里看不到调平做没做、效果如何。
     #
     # 这里用的窗与残差是**真正下发给 AutoTilt 的那一份**(tilt_params 与 flat),
     # 不是另取一份 —— 句子里的数与仪器收到的数中间没有人有机会改写。
@@ -1206,7 +1338,7 @@ def level_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
     out["leveled"] = bool(t["done"] or t.get("no_action"))
     if not out["leveled"]:
         out["reason"] = (t["detail"] or t["reason"]
-                         or "调平未执行(多半是本机还没做过倾斜标定)")
+                         or tr("调平未执行(多半是本机还没做过倾斜标定)", "Leveling was not run (most likely the tilt calibration has not been done on this machine)"))
     return out
 
 
@@ -1262,14 +1394,14 @@ def ringdown_report(base_rms: "float | None", after_rms: "float | None",
                     wf: NobleTipWorkflow) -> dict:
     """把两段振幅变成一句**可报的观察**,而不是一个判决。
 
-    这里回答的是「怎么发现起跳?怎么应对?」。发现的机制在这里;**判决不在**:
+    起跳的发现机制在这里;**判决不在**:
 
         ``ring_up_detected`` 只有 None(判不了)与 True(比值远超阈值)两种取值,
         **永远不会是 False**。
 
     为什么不给 False:阈值(``poke_ringdown_settle_ratio``)是个**占位数**,还没有
     任何真机数据标定过。一个未标定的阈值给出「没起跳」,就是把「我不知道」说成
-    「没问题」—— 本仓反复栽的正是这一跤。等用户采回四样数据(扎针前后的振幅
+    「没问题」。等采回四样数据(扎针前后的振幅
     序列、故意高偏压的正例、20 mV 的负例、f₀ 与 Q)再让它能说 False。
 
     ``ratio`` 与两段 RMS 一律如实带出:即使判不了,数字本身就是要采的那批数据。
@@ -1278,23 +1410,29 @@ def ringdown_report(base_rms: "float | None", after_rms: "float | None",
                            "ratio": None, "ring_up_detected": None,
                            "threshold_calibrated": False}
     if base_rms is None or after_rms is None:
-        out["reason"] = "读不到振幅(没配 qplus_amplitude_signal_index,或采集失败)"
+        out["reason"] = tr("读不到振幅(没配 qplus_amplitude_signal_index,或采集失败)", "Cannot read the amplitude (qplus_amplitude_signal_index is not configured, or acquisition failed)")
         return out
     if base_rms <= 0:
-        out["reason"] = "基线 RMS 为 0 —— 比值无意义"
+        out["reason"] = tr("基线 RMS 为 0 —— 比值无意义", "Baseline RMS is 0 - the ratio is meaningless")
         return out
     ratio = after_rms / base_rms
     out["ratio"] = ratio
     if ratio >= float(wf.poke_ringdown_settle_ratio):
         out["ring_up_detected"] = True
-        out["reason"] = (f"扎针后振幅 RMS 是基线的 {ratio:.1f} 倍"
-                         f"(≥{wf.poke_ringdown_settle_ratio:g})—— 疑似音叉起跳。"
-                         "**阈值未标定**,这是观察不是判决。")
+        out["reason"] = tr(f"扎针后振幅 RMS 是基线的 {ratio:.1f} 倍"
+                           f"(≥{wf.poke_ringdown_settle_ratio:g})—— 疑似音叉起跳。"
+                           "**阈值未标定**,这是观察不是判决。",
+                           f"Amplitude RMS after poking is {ratio:.1f}x the baseline "
+                           f"(>= {wf.poke_ringdown_settle_ratio:g}) - the tuning fork probably rang up. "
+                           "**The threshold is uncalibrated**; this is an observation, not a verdict.")
     else:
         # 刻意不写 False:见 docstring。
-        out["reason"] = (f"扎针后振幅 RMS 是基线的 {ratio:.1f} 倍,未达占位阈值 "
-                         f"{wf.poke_ringdown_settle_ratio:g} —— **阈值未标定,"
-                         "因此不下「没起跳」的结论**。")
+        out["reason"] = tr(f"扎针后振幅 RMS 是基线的 {ratio:.1f} 倍,未达占位阈值 "
+                           f"{wf.poke_ringdown_settle_ratio:g} —— **阈值未标定,"
+                           "因此不下「没起跳」的结论**。",
+                           f"Amplitude RMS after poking is {ratio:.1f}x the baseline, below the placeholder "
+                           f"threshold {wf.poke_ringdown_settle_ratio:g} - **the threshold is uncalibrated, "
+                           "so no 'did not ring up' conclusion is drawn**.")
     return out
 
 
@@ -1314,8 +1452,8 @@ def poke_bias_v(wf: NobleTipWorkflow) -> "float | None":
 def _narrate_indent(poke_data: dict, ind: dict, depth_m: float) -> None:
     """把这一针的 Z 曲线判读念出来，并把曲线本身画成图挂上去。
 
-    扎针的检测应该写进旁白，包括读取到的 z 曲线也应该画出来。在此之前屏幕上
-    只看得见「扎了一针」，判定连同它依据的整条曲线都只活在报文里。
+    扎针的检测结果和读取到的 z 曲线都应出现在旁白里。此前屏幕上只看得见「扎了一针」，判定连同它依据
+    的整条曲线都只活在报文里。
 
     ⚠️ 旁白与配图**都不许弄坏实验** —— 与 ``narrate()`` 同一条纪律，全程吞异常。
     """
@@ -1370,30 +1508,29 @@ def _poke_step(executor: GraphExecutor, wf: NobleTipWorkflow, *,
     让固件自己把反馈收回去 —— 软件侧另有 finalize 兜底。
 
     ``lift_height_m`` 取 ``tip_lift_m`` 的相反数:压下去多少就抬回来多少
-    (用户参数组:``lift height`` = ``tip lift`` 的相反数)。
+    (参数组约定:``lift height`` = ``tip lift`` 的相反数)。
 
     ## 20 mV 走哪条路(C2 的歧义,这里选了第一条)
 
-    有两条要求:参数组里**change bias 关**、bias value 跟随现在的 bias,
-    以及对 qPlus 针尖**换 20 mV bias** 来扎针。两条只有在一种读法下
+    需求有两条:参数组为 **change bias 关**、bias value 跟随当前 bias;
+    qPlus 针尖用 **20 mV bias** 扎针。两条只有在一种读法下
     同时成立:**先把仪器的偏压设成 20 mV,再用 change-bias 关着扎**。若是让 shaper
-    自己 change-bias 打到 20 mV,「change bias 关」这条要求就被推翻了。
+    自己 change-bias 打到 20 mV,「change bias 关」就被推翻了。
 
     所以默认走这条(``wf.poke_bias_via_shaper=False``):
     ``SetBias(20 mV)`` → 扎(change_bias 关)→ ``SetBias(扎之前那个值)``。
     另一条也实现了(``poke_bias_via_shaper=True``):shaper 的 ``change_bias=True``
     + ``bias_v=20 mV``。两条都能跑,默认是前者。
 
-    ⚠️ **这是从两句话里推出来的,不是用户逐字说的**。要推翻它只需要用户回答
-    一句:扎的时候 Nanonis 的 bias 读数是 20 mV,还是仍是成像偏压?
-    (2026-08-10 已把这个问题记录在案。)
+    ⚠️ **这是由上述两条需求推出的读法**。要推翻它只需确认:
+    扎的时候 Nanonis 的 bias 读数是 20 mV,还是仍是成像偏压(尚未核实)。
 
     扎完**一定把偏压设回去**:不设回去的话后面每一张评估图都跑在 20 mV 上,而
-    那不是用户看团簇用的条件 —— 也正是本仓「改了不说、也不改回来」那一类。
+    那不是看团簇用的条件。
     """
     # ── shaper 那条路已停用 ────────────────────────────────────────────
-    # 要求：要考虑 bias change 的时间,另外考虑针尖 z
-    # 改变的时间,**要先慢慢改了 bias,z 的扎入要控制在其之后**。
+    # 需考虑 bias change 的时间和针尖 z 改变的时间,
+    # **要先慢慢改了 bias,z 的扎入要控制在它之后**。
     #
     # 顺序那一半 shaper 做得到:``Bias Settling Time`` 的文档明说它「**也是施加
     # Bias(V) 之后、第一次 Z 斜坡之前要等的时间**」(nanonis_spm
@@ -1405,10 +1542,14 @@ def _poke_step(executor: GraphExecutor, wf: NobleTipWorkflow, *,
     # 针的可选项比没有更坏,而一个被静默忽略的开关是本仓记过的「死配置」。
     if wf.poke_bias_via_shaper and bias_v is not None:
         return {"ok": False, "verdict": "refused",
-                "reason": ("poke_bias_via_shaper=True 已停用:Nanonis TipShaper 的 "
-                           "change-bias 只能**阶跃**改偏压,做不到要求的"
-                           "「先慢慢改 bias」。请走默认路径(先 SetBias 缓变、"
-                           "change_bias 关着扎)。")}
+                "reason": tr("poke_bias_via_shaper=True 已停用:Nanonis TipShaper 的 "
+                             "change-bias 只能**阶跃**改偏压,做不到"
+                             "「先慢慢改 bias」。请走默认路径(先 SetBias 缓变、"
+                             "change_bias 关着扎)。",
+                             "poke_bias_via_shaper=True is retired: the Nanonis TipShaper "
+                             "change-bias can only change the bias in a **step**, it cannot "
+                             "'ramp the bias slowly first'. Use the default path (ramp with SetBias first, "
+                             "poke with change_bias off).")}
 
     set_bias_first = bias_v is not None
     if set_bias_first:
@@ -1513,7 +1654,7 @@ def _cluster_look(executor: GraphExecutor, wf: NobleTipWorkflow, *,
                               origin="just_poked"),
         optional=False, checkpoint_after=False, tags=("cluster",))
     if not _ok(executor, f"{step_prefix}:cluster_scan"):
-        return {"ok": False, "reason": "簇扫描没能完成"}
+        return {"ok": False, "reason": tr("簇扫描没能完成", "Cluster scan did not complete")}
     yield CompositeStep(
         step_id=f"{step_prefix}:cluster_save", skill_name="SaveScan", params={},
         optional=True, checkpoint_after=False, tags=("cluster",))
@@ -1523,20 +1664,50 @@ def _cluster_look(executor: GraphExecutor, wf: NobleTipWorkflow, *,
     path = _scan_path(executor, f"{step_prefix}:cluster_save",
                       f"{step_prefix}:cluster_latest")
     if not path:
-        return {"ok": False, "reason": "簇扫描拿不到文件路径"}
+        return {"ok": False, "reason": tr("簇扫描拿不到文件路径", "Cluster scan file path unavailable")}
 
     yield CompositeStep(
         step_id=f"{step_prefix}:roundness", skill_name="AssessClusterRoundness",
-        # 评估以本次处理点为中心的凸起，避免选中其他轮次的形貌。
-        # 显式使用 bright 极性，防止大团簇占据画面时把背景识别成目标。
-        # 使用 physical 阈值与 boundary 形状；weighted 指标可附带报告，不能替代对肩部的识别。
-        # 指标稳定性与识别目标不同，不能只优化代理指标。
+        # 这张图是**以刚扎的那个点为中心**扫的(上面 ScanAt 的 x/y 就是扎针位置),
+        # 所以「离画面中心最近的那个团簇」就是新扎的那个。典型情形:
+        # 扫描框里有好几个团簇 —— 修到第三下时,
+        # 画面里最大的那个常常是两轮之前的坑,拿它评针尖是在评错对象。
+        # ⭐ polarity **必须显式给 bright**。
+        #
+        # 扎出来的簇是**堆上去的材料**,一定是凸起 —— 评一个刚扎出来的簇时,
+        # 根本没有理由去找暗的东西。而不传这个参数就落到 `auto`,它按
+        # 「哪一侧像素多选哪侧」(cluster_roundness.py:288),团簇大到占了画面
+        # 相当一块时,少数派反而是背景 ⇒ **选中背景当团簇**。
+        #
+        # 实测发现 auto 在一部分图上会选中暗侧,而人工逐帧判读认为这些恰是判错的图
+        # (团簇太大占据画面导致分割搞反,或识别了更低的一个台面的整体)。
+        #
+        # 参数自己的说明里早就写着 "'bright' for an up-bump (most metal
+        # clusters)" —— 对的值一直在文档里,只是三个调用点都没传。
+        #
+        # ⭐ threshold_mode / shape_mode 也显式给。
+        # 出厂的 `sigma` + `boundary` 两条都**自指**:阈值由含着团簇的那张图的
+        # std 决定(簇越大切得越高),形状只看二值化后的边界(阈值以上的高度全丢)。
+        # 在人工判为「阈值不够低」的图上,sigma 阈值切得过高(约数个台阶高度)。
+        # physical + weighted 能多切出数倍面积、稳定性也明显更好。
+        # ⚠️ 但 ``shape_mode`` 最终用 **boundary**。
+        #
+        # weighted 的优点是**阈值稳定性**:阈值挪 ±20% 时轴比变化小得多。
+        # 那个结论没错,但它是个**代理量** —— 目标不是「稳」,是「能识别坏针尖」。
+        #
+        # 用盲标数据验证(界面不显示任何判据数字、顺序打乱、夹重复帧):
+        # 边界轴比抓到的坏针尖明显多于加权轴比。
+        # 加权把**肩膀**压没了(肩膀矮 ⇒ 权重小)。而肩膀正是「有两个离群小峰」那一类。
+        #
+        # ⇒ 判决用 boundary。weighted 仍然**报数**(`weighted_axis_ratio` 字段),
+        #   它的稳定性优势在「比较相继几次哪次更圆」上仍然有用。
+        #
         params={"scan_path": path, "min_axis_ratio": wf.min_axis_ratio,
                 "select": "center", "polarity": "bright",
                 "threshold_mode": "physical", "shape_mode": "boundary"},
         optional=True, checkpoint_after=True, tags=("cluster",))
     if not _ok(executor, f"{step_prefix}:roundness"):
-        return {"ok": False, "reason": "簇分析没能完成", "scan_path": path}
+        return {"ok": False, "reason": tr("簇分析没能完成", "Cluster analysis did not complete"), "scan_path": path}
     d = _data(executor, f"{step_prefix}:roundness")
     n_peaks = int(d.get("n_components") or 0)
     return {
@@ -1597,9 +1768,12 @@ def flat_poke_sites(executor: GraphExecutor, wf: NobleTipWorkflow, *,
     """
     if wf.poke_flat_window_nm >= wf.poke_site_scan_nm:
         raise ValueError(
-            f"平区窗 {wf.poke_flat_window_nm:g} nm ≥ 找台面图视野 "
-            f"{wf.poke_site_scan_nm:g} nm —— 这样永远找不到落点。"
-            f"要么把 poke_flat_window_nm 调小,要么把 poke_site_scan_nm 调大。")
+            tr(f"平区窗 {wf.poke_flat_window_nm:g} nm ≥ 找台面图视野 "
+               f"{wf.poke_site_scan_nm:g} nm —— 这样永远找不到落点。"
+               f"要么把 poke_flat_window_nm 调小,要么把 poke_site_scan_nm 调大。",
+               f"Flat-area window {wf.poke_flat_window_nm:g} nm >= terrace-search field of view "
+               f"{wf.poke_site_scan_nm:g} nm - no landing spot can ever be found. "
+               f"Either decrease poke_flat_window_nm or increase poke_site_scan_nm."))
 
     pd = executor.progress.partial_data
     searched = [tuple(t) for t in (pd.get(_SEARCHED_KEY) or [])]
@@ -1627,7 +1801,7 @@ def flat_poke_sites(executor: GraphExecutor, wf: NobleTipWorkflow, *,
     if not _ok(executor, f"{step_prefix}:scan"):
         # 扫不成 —— **不是**「这里没台面」,但处置一样:换一块。
         # 绝不退回「随便扎」:那一步的代价是一根针,而换一块只花几十秒。
-        _say("find_terrace_result", found=0, why="这一片没扫成 —— 换一块再扫")
+        _say("find_terrace_result", found=0, why=tr("这一片没扫成 —— 换一块再扫", "This area was not scanned - scan another one"))
         _remember_searched(executor, cx, cy)
         return "ok", []
 
@@ -1639,7 +1813,7 @@ def flat_poke_sites(executor: GraphExecutor, wf: NobleTipWorkflow, *,
         optional=True, checkpoint_after=False, tags=("poke", "sites"))
     path = _scan_path(executor, f"{step_prefix}:save", f"{step_prefix}:latest")
     if not path:
-        _say("find_terrace_result", found=0, why="拿不到刚扫那张图的路径 —— 换一块再扫")
+        _say("find_terrace_result", found=0, why=tr("拿不到刚扫那张图的路径 —— 换一块再扫", "Cannot get the path of the image just scanned - scan another area"))
         _remember_searched(executor, cx, cy)
         return "ok", []
 
@@ -1653,8 +1827,27 @@ def flat_poke_sites(executor: GraphExecutor, wf: NobleTipWorkflow, *,
                     "min_window_m": window_m,
                     "min_separation_m": wf.poke_site_separation_nm * 1e-9,
                     "count": max(1, int(want)),
-                    # 将累计处理位置传入 exclude_used_spots，防止新一批候选重新选中旧点。
-                    # 排除半径复用 min_separation_m，不只限制当前批次点之间的距离。
+                    # ⭐ **别再挑这一跑已经扎过的那个点**。
+                    #
+                    # ``min_separation_m`` 只管**这一批**交出来的几个点互相隔开;
+                    # 换一批(重扫一次)时这张图上最平的还是那一块,于是它**又被
+                    # 交出来一次**。典型表现:
+                    #
+                    #     连续多针的落点坐标一位不差;
+                    #     相邻两针间距中位只有几 nm,其中多次间距为 **0**。
+                    #
+                    # 而簇图视野是 10 nm ⇒ 上一针的坑就**留在这张图里**,判据看见
+                    # 两坨、报「疑似多针尖」。逐帧量下来第二坨**全部**是
+                    # 自己的旧坑(见 ``poke_site_separation_nm`` 的注释)。
+                    #
+                    # ``exclude_used_spots`` 这个参数**一直就在**(``FindFlatRegion``
+                    # 的 ParameterSpec 自述:「so retries don't re-pick the same
+                    # spot」),只是从来没有调用方传过 —— 而这一跑的落点表就攥在
+                    # ``_dirty()`` 手里。生产方接好了、消费方缺席。
+                    #
+                    # 排除半径复用 ``min_separation_m``(30 nm,技能里就是同一个键):
+                    # 30 nm > 簇图视野 10 nm ⇒ 旧坑**不可能**再进簇图。
+                    # 这是「移除诱因」,不是「给诱因造一个检测器」。
                     "exclude_used_spots": _spot_list(_dirty(executor), used),
                     # 落点必须在**单台面内** —— 一个「两半各自平坦但中间有台阶」
                     # 的窗对扎针毫无用处,而最小 RMS 恰恰会选到它。
@@ -1697,9 +1890,11 @@ def flat_poke_sites(executor: GraphExecutor, wf: NobleTipWorkflow, *,
             return "split_tip", None
 
         _say("find_terrace_result", found=0,
-             why=(f"这一片最平的一块残差 {best * 1e12:.0f} pm,超过可用线"
-                  if best is not None else "这一片没有可用台面")
-                 + " —— 台阶未见重影(非多针尖),是这一片确实不平;记下来,换一块再扫",
+             why=(tr(f"这一片最平的一块残差 {best * 1e12:.0f} pm,超过可用线",
+                     f"The flattest patch in this area has a residual of {best * 1e12:.0f} pm, above the usable line")
+                  if best is not None else tr("这一片没有可用台面", "No usable terrace in this area"))
+                 + tr(" —— 台阶未见重影(非多针尖),是这一片确实不平;记下来,换一块再扫",
+                      " - no doubled steps (not a multi-tip), this area is really not flat; noted, scan another one"),
              usable_rms_pm=(_finite_num(d.get("usable_rms_m")) or 0.0) * 1e12,
              windows_checked=d.get("windows_checked"),
              windows_skipped=d.get("windows_skipped"),
@@ -1721,7 +1916,7 @@ def flat_poke_sites(executor: GraphExecutor, wf: NobleTipWorkflow, *,
         if one_x is not None and one_y is not None:
             sites = [(float(one_x), float(one_y))]
     if not sites:
-        _say("find_terrace_result", found=0, why="技能说找到了却没给落点 —— 换一块再扫")
+        _say("find_terrace_result", found=0, why=tr("技能说找到了却没给落点 —— 换一块再扫", "The skill reported a find but gave no landing spot - scan another area"))
         _remember_searched(executor, cx, cy)
         return "ok", []
 
@@ -1740,8 +1935,36 @@ def flat_poke_sites(executor: GraphExecutor, wf: NobleTipWorkflow, *,
          levels_pm=sp.get("levels_pm"),
          x_m=sites[0][0], y_m=sites[0][1])
 
-    # 找到台面仍需消费 split 判决；台面存在不能推翻独立的多针尖判据。
-    # split 时丢弃本批落点并返回对应分支；undecidable 保持不同含义。
+    # ⭐ **找到台面也一样要认这个判决**────────────────────────
+    #
+    # 在这一行之前,``sp`` 算出来、旁白说出去、**返回值把它丢了**:上面那条
+    # ``verdict == "split"`` 的分支只长在 ``FindFlatRegion`` **失败**的那一支上
+    # (见本函数前面 ``return "split_tip", None`` 那处),找到台面就直接
+    # ``return "ok", sites``。于是「多针尖」这三个字对下一步没有任何影响。
+    #
+    # 表现为:旁白显示多针尖判定之后,没有针对性的处置。
+    # 在一次长跑里逐条对上:
+    #
+    #     多次判成多针尖,其中只有走「找台面失败」那一支的会回去打脉冲 ✓;
+    #     其余的下一条旁白是 ``find_terrace_result`` 找到落点,再下一条就是
+    #       ``poke_begin`` —— **与判成单针尖时完全一样**。
+    #
+    # 代价是实打实的:判成多针尖之后又接连扎了好几针,轴比全部卡在
+    # 同一个区间,耗时很久,最后以 time_budget_exhausted 收场。
+    #
+    # 为什么「找到台面」不该让判决失效,反而更该认它:早先的
+    # 判据是「**多针尖分裂了台面,导致找不到台面**」——「找不到台面」是多针尖的
+    # 一个**后果**,不是它的**判据**。拿后果当判据,就漏掉了后果还没显现的那些。
+    # 而且这一帧上的台面坐标本身也可疑:劈开的针尖把每条台阶画成两道,
+    # 「台面」的边界是谁的还说不清。
+    #
+    # ⇒ split 时**丢掉这批落点**,和失败那一支走同一个出口。扎针改的是形状,
+    #   而一根劈成两个顶点的针,换多少地方扎都长不回一个顶点 —— 那是脉冲的活。
+    #
+    # 这个阈值有资格否决:``DOUBLE_TIP_SCORE_ON_STEPS`` 是拿人工标注的图定的,
+    # 多针尖与其余两类的得分之间有一条干净的空档,阈值落在里面;
+    # 样本外复核同样零重叠。
+    # 三态照旧:只有 ``split`` 否决,``undecidable`` 不否决。
     if str(sp.get("verdict") or "") == "split":
         return "split_tip", None
 
@@ -1876,9 +2099,11 @@ def poke_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
                     why = ""
                 if why:
                     out["stopped_early"] = str(why)
-                    out["reason"] = (
+                    out["reason"] = tr(
                         f"精修中止({why}) —— **这不是关于针尖的结论**,"
-                        f"已扎 {pokes} 次,判据没走完。")
+                        f"已扎 {pokes} 次,判据没走完。",
+                        f"Refinement aborted ({why}) - **this is not a conclusion about the tip**; "
+                        f"{pokes} pokes done, the criterion did not run to completion.")
                     break
             # ⚠️ **补落点必须在 ``pokes += 1`` 之前。** 重扫一张图找不到平区时
             # 这里会 ``continue``,而计数已经加过的话就等于**白吃一次扎针预算**
@@ -1902,15 +2127,18 @@ def poke_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
                     used=used, want=max(1, budget - pokes))
                 refills += 1
                 if status == "spent":
-                    out["reason"] = "没有干净的地方可以继续扎了 —— 该换区或换样品位置。"
+                    out["reason"] = tr("没有干净的地方可以继续扎了 —— 该换区或换样品位置。", "No clean place left to keep poking - change area or sample position.")
                     out["surface_spent"] = True
                     break
                 if status == "split_tip":
                     # 多针尖造成的台阶分裂不能靠反复更换落点解决，需返回相应的处理分支。
                     out["needs_pulse"] = True
                     out["split_tip"] = True
-                    out["reason"] = ("大图上台阶出现重影(多针尖)—— 找不到台面的原因在针尖,"
-                                     "不在表面;换位置无效。回去打脉冲。")
+                    out["reason"] = tr("大图上台阶出现重影(多针尖)—— 找不到台面的原因在针尖,"
+                                       "不在表面;换位置无效。回去打脉冲。",
+                                       "Steps appear doubled in the large image (multiple tips) - the reason no terrace "
+                                       "can be found is the tip, not the surface; changing position will not help. "
+                                       "Go back to pulsing.")
                     break
                 if not got:
                     # 这一片没有可用台面 —— 换一块再扫。**不是**表面用完。
@@ -1919,9 +2147,11 @@ def poke_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
                     # 记住并避开)。
                     dry_refills += 1
                     if dry_refills >= int(wf.poke_flat_dry_refills):
-                        out["reason"] = (
+                        out["reason"] = tr(
                             f"连续 {dry_refills} 次重扫都找不到可用平区 —— "
-                            "这一片台阶太密,该换区。**这不是针尖的结论。**")
+                            "这一片台阶太密,该换区。**这不是针尖的结论。**",
+                            f"{dry_refills} consecutive rescans found no usable flat area - "
+                            "the steps here are too dense, change area. **This is not a conclusion about the tip.**")
                         out["surface_spent"] = True
                         break
                     continue
@@ -1958,14 +2188,34 @@ def poke_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
             log.append(entry)
 
             if not res.get("ok"):
-                out["reason"] = "扎针尖执行失败 —— 停下来让人看。"
+                out["reason"] = tr("扎针尖执行失败 —— 停下来让人看。", "Tip poke execution failed - stop and let a person look.")
                 break
 
             verdict = res["verdict"]
 
             # ── D1 深扎 ────────────────────────────────────────────────
             if stage == "deep":
-                # 每次扎针之后都采图评估，Z 变化保留为辅助读数，不能单独阻止图像采集。
+                # ═══════════════════════════════════════════════════════════
+                # 扎没扎上,**由扫图说了算** —— Z 读数只留档
+                # ═══════════════════════════════════════════════════════════
+                #
+                # 若以 Z 跳变为主判据:只有 ``cluster``(Z 向上超过 4σ)才去
+                # 扫图,``no_change`` 直接加深、``tip_changed_or_pit`` 直接转
+                # critical —— 两条都**一张图都不扫**。
+                #
+                # 扎针的 Z 判定并非每次都对 —— 有些扎针实际没扎上却没有扫图。
+                #
+                # 用标定数据对了一遍,结论比「阈值太小」更要命:图上确有簇的扎针里,
+                # 相当一部分被 Z 判成 no_change;真簇的 |dz| 中位数**比基线噪声 σ 还小**。
+                # 阈值调大漏得更多,调小淹在噪声里 —— **这个量没有判别力**,
+                # 不该由它来当家。而扫图有:那张图本来就要扫(D 相的目的就是
+                # 判簇圆不圆),Z 只是常常**错误地把它跳过了**。
+                #
+                # ⇒ 每扎一针都扫一张,由图判。Z 三态照旧记进 log(它对**大**变化
+                #   仍然有信息),但不再决定任何分支。
+                #
+                # 代价:``no_change`` 那些针从前不扫图,现在扫 —— D 相的图变多。
+                # 换来的是不再「在一个常常会错的信号上做深度搜索」。
                 cl = yield from _cluster_look(executor, wf, step_prefix=sp,
                                               x=x, y=y)
                 entry["z_verdict"] = verdict      # 留档:不再用它分支
@@ -1976,8 +2226,10 @@ def poke_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
                     # ⚠️ 三态照旧:这不等于「表面上什么都没有」,只等于
                     # 「没有大到能判的东西」。所以下一步是**加深再试**,
                     # 不是「这根针不行」。
-                    entry["note"] = (f"扫图上没有大到能判的簇(面积 {cl.get('area_px')} px,"
-                                     f"Z 判定 {verdict})—— 加深再来")
+                    entry["note"] = tr(f"扫图上没有大到能判的簇(面积 {cl.get('area_px')} px,"
+                                       f"Z 判定 {verdict})—— 加深再来",
+                                       f"No cluster large enough to judge in the scan (area {cl.get('area_px')} px, "
+                                       f"Z verdict {verdict}) - go deeper and retry")
                     prev_nm = depth_nm
                     depth_nm = min(depth_nm * (1.0 + wf.poke_deepen_frac),
                                    wf.poke_depth_max_nm)
@@ -1985,16 +2237,18 @@ def poke_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
                     _decide(entry, "deeper", depth_pm=prev_nm * 1e3,
                             next_depth_pm=depth_nm * 1e3)
                     if depth_nm >= wf.poke_depth_max_nm:
-                        entry["note"] = "已到深扎上限"
-                        out["reason"] = (f"扎到 {wf.poke_depth_max_nm:.1f} nm 仍然"
-                                         f"扫不出簇 —— 结条件或 Z 标定可能有问题。")
+                        entry["note"] = tr("已到深扎上限", "Reached the deep-poke limit")
+                        out["reason"] = tr(f"扎到 {wf.poke_depth_max_nm:.1f} nm 仍然"
+                                           f"扫不出簇 —— 结条件或 Z 标定可能有问题。",
+                                           f"Still no cluster in the scan after poking to {wf.poke_depth_max_nm:.1f} nm - "
+                                           f"the junction conditions or the Z calibration may be wrong.")
                         break
                     _stash_poke(executor, prefix, log, used, pokes, stage,
                                 critical_nm, repeats)
                     continue
                 if stage == "deep" and verdict == "tip_changed_or_pit":
                     # 负向 Z 变化触发阶段转换前必须已有图像支持；cluster 本身不代表可以切换到浅扎。
-                    entry["note"] = f"扫图确认表面有变化 —— 转临界深度搜索"
+                    entry["note"] = tr("扫图确认表面有变化 —— 转临界深度搜索", "The scan confirms a change on the surface - switching to critical-depth search")
                     _decide(entry, "stage_switch",
                             next_depth_pm=float(wf.critical_start_pm))
                     stage = "critical"
@@ -2044,33 +2298,44 @@ def poke_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
                         if depth_nm >= prev_nm:
                             # 已经贴着地板了,再浅没有数据支持 —— **说出来**,
                             # 别让「变浅了」这句话在日志里变成一句假话。
-                            entry["note"] = (
+                            entry["note"] = tr(
                                 f"同一深度换了 {same_depth} 个地方都不圆,"
                                 f"但已在最浅档 {depth_nm * 1000:.0f} pm —— 不再变浅,"
-                                f"继续换地方")
+                                f"继续换地方",
+                                f"Not round at {same_depth} places at the same depth, "
+                                f"but already at the shallowest level {depth_nm * 1000:.0f} pm - "
+                                f"no shallower, keep changing place")
                             _decide(entry, "floor", tries=same_depth,
                                     depth_pm=depth_nm * 1e3)
                         else:
-                            entry["note"] = (
+                            entry["note"] = tr(
                                 f"同一深度换了 {same_depth} 个地方都不圆 —— "
                                 f"接触上了但搬多了,变浅到 {depth_nm * 1000:.0f} pm"
-                                f"(原 {prev_nm * 1000:.0f} pm)")
+                                f"(原 {prev_nm * 1000:.0f} pm)",
+                                f"Not round at {same_depth} places at the same depth - "
+                                f"made contact but moved too much, going shallower to {depth_nm * 1000:.0f} pm "
+                                f"(was {prev_nm * 1000:.0f} pm)")
                             _decide(entry, "shallower", tries=same_depth,
                                     depth_pm=prev_nm * 1e3,
                                     next_depth_pm=depth_nm * 1e3)
                         same_depth = 0
                     else:
-                        entry["note"] = (f"扎上了但不够圆 —— 换个地方,仍用 "
-                                         f"{depth_nm * 1000:.0f} pm")
+                        entry["note"] = tr(f"扎上了但不够圆 —— 换个地方,仍用 "
+                                           f"{depth_nm * 1000:.0f} pm",
+                                           f"Poked but not round enough - change place, still using "
+                                           f"{depth_nm * 1000:.0f} pm")
                         _decide(entry, "same_depth", depth_pm=depth_nm * 1e3)
                     executor.set_partial(f"{prefix}:same_depth", same_depth)
                     unround += 1
                     if unround >= int(wf.poke_unround_streak_to_pulse):
                         out["needs_pulse"] = True
-                        out["reason"] = (
+                        out["reason"] = tr(
                             f"连续 {unround} 针都做不出单峰圆簇 —— "
                             f"退回去打脉冲重修一次再来扎。"
-                            f"(一直扎下去是拿位置的问题当形状的问题解。)")
+                            f"(一直扎下去是拿位置的问题当形状的问题解。)",
+                            f"{unround} consecutive pokes could not make a single-peak round cluster - "
+                            f"go back, pulse to recondition once, then poke again. "
+                            f"(Poking on would treat a position problem as a shape problem.)")
                         _say("back_to_pulse", tries=unround)
                         _stash_poke(executor, prefix, log, used, pokes, stage,
                                     critical_nm, repeats)
@@ -2080,7 +2345,7 @@ def poke_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
                     continue
                 # 单峰且圆 → 换思路,从浅及深找临界。
                 unround = 0          # 连续不圆的账清零
-                entry["note"] = "单峰且圆 — 转入临界浅扎"
+                entry["note"] = tr("单峰且圆 — 转入临界浅扎", "Single-peak and round - switching to critical shallow poking")
                 _decide(entry, "stage_switch",
                         next_depth_pm=float(wf.critical_start_pm))
                 stage = "critical"
@@ -2089,8 +2354,28 @@ def poke_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
                             critical_nm, repeats)
                 continue
 
-            # D2 每针均采图，成功后将深度恢复起步值重新搜索。
-            # 连续成功次数统计单峰圆簇，不能用同一深度的重复次数代替质量验证。
+            # ── D2 临界浅扎 ────────────────────────────────────────────
+            #
+            # ═══════════════════════════════════════════════════════════════
+            # **看图判、不锁深度**
+            # ═══════════════════════════════════════════════════════════════
+            #
+            # 旧版两处都错:
+            #
+            #   · 「扎没扎上」问 Z —— 而标定数据说 Z 没有判别力
+            #     (真簇的 |dz| 中位数比基线噪声 σ 还小)。曾经「锁死在 200」正是
+            #     一个 −0.10 nm 的读数锁的。
+            #
+            #   · 找到一次接触就**把那个深度锁住**,之后一直在那儿扎。
+            #     每扎上一次针尖都会变化,所以这个数并不是一成不变的,
+            #     应每一次再从头来过:临界深度是
+            #     **当前这根针**的性质,而每一次成功的扎针都换了一根针。
+            #     锁住它等于拿上一根针的答案去扎这一根。
+            #
+            # 新版:每针都扫图;扎上了就**把深度退回起步值重新找**。
+            # ``repeats`` 的含义也跟着变了 —— 从「在同一深度扎了几次」变成
+            # **「连续几次扎出单峰圆簇」**。后者才是「这根针稳定地能做出好簇」,
+            # 而前者只是「我们在一个深度上重复了几次」。
             cl = yield from _cluster_look(executor, wf, step_prefix=sp, x=x, y=y)
             entry["cluster"] = cl
             entry["z_verdict"] = verdict          # 留档,不再分支
@@ -2102,14 +2387,18 @@ def poke_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
                 # ⚠️ 三态:这不等于「表面什么都没有」,只等于「没有大到能判的」。
                 nxt = (depth_nm * 1000.0 + wf.critical_step_pm) / 1000.0
                 if nxt > wf.poke_depth_max_nm:
-                    out["reason"] = (f"浅扎从 {wf.critical_start_pm:.0f} pm 一路加到"
-                                     f"上限都没扎出能判的簇")
+                    out["reason"] = tr(f"浅扎从 {wf.critical_start_pm:.0f} pm 一路加到"
+                                       f"上限都没扎出能判的簇",
+                                       f"Shallow poking from {wf.critical_start_pm:.0f} pm up to "
+                                       f"the limit never produced a cluster that could be judged")
                     break
                 prev_nm = depth_nm
                 depth_nm = nxt
                 entry["next_depth_nm"] = nxt
-                entry["note"] = (f"扫图上没有大到能判的簇(面积 {cl.get('area_px')} px)"
-                                 f" —— 加到 {nxt * 1000:.0f} pm")
+                entry["note"] = tr(f"扫图上没有大到能判的簇(面积 {cl.get('area_px')} px)"
+                                   f" —— 加到 {nxt * 1000:.0f} pm",
+                                   f"No cluster large enough to judge in the scan (area {cl.get('area_px')} px)"
+                                   f" - going to {nxt * 1000:.0f} pm")
                 _decide(entry, "deeper", depth_pm=prev_nm * 1e3,
                         next_depth_pm=nxt * 1e3)
                 _stash_poke(executor, prefix, log, used, pokes, stage,
@@ -2119,7 +2408,7 @@ def poke_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
 
             if not cl.get("ok"):
                 # 扫不成 / 分析不成 —— **不是**「没扎上」,也不该动深度。
-                entry["note"] = f"簇图判不了({cl.get('reason')})—— 换个地方再扎"
+                entry["note"] = tr(f"簇图判不了({cl.get('reason')})—— 换个地方再扎", f"Cluster image cannot be judged ({cl.get('reason')}) - poke at another place")
                 _stash_poke(executor, prefix, log, used, pokes, stage,
                             critical_nm, repeats, depth_nm=depth_nm,
                             in_critical=_in_critical_search)
@@ -2132,8 +2421,10 @@ def poke_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
             if good:
                 repeats += 1
                 unround = 0
-                entry["note"] = (f"{depth_nm * 1000:.0f} pm 扎出单峰圆簇"
-                                 f"(连续第 {repeats} 次)")
+                entry["note"] = tr(f"{depth_nm * 1000:.0f} pm 扎出单峰圆簇"
+                                   f"(连续第 {repeats} 次)",
+                                   f"{depth_nm * 1000:.0f} pm gave a single-peak round cluster "
+                                   f"(consecutive #{repeats})")
                 # ``need`` 必须是**收工判据真正用的那个字段** —— 下面
                 # ``repeats >= int(wf.critical_repeat_n)`` 就是它。写成别的名字,
                 # 旁白会一直报一个不决定任何事情的数(而且没人会去核)。
@@ -2145,14 +2436,17 @@ def poke_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
                 # 而不是「连续 N 次没被否掉」。
                 repeats = 0
                 why = (cl.get("roundness_undecidable")
-                       or f"等效轴比 {cl.get('axis_ratio')}")
-                entry["note"] = f"{depth_nm * 1000:.0f} pm 扎上了但不达标({why})"
+                       or tr(f"等效轴比 {cl.get('axis_ratio')}", f"equivalent axis ratio {cl.get('axis_ratio')}"))
+                entry["note"] = tr(f"{depth_nm * 1000:.0f} pm 扎上了但不达标({why})",
+                                   f"{depth_nm * 1000:.0f} pm poked but not up to standard ({why})")
                 unround += 1
                 if unround >= int(wf.poke_unround_streak_to_pulse):
                     out["needs_pulse"] = True
-                    out["reason"] = (
+                    out["reason"] = tr(
                         f"连续 {unround} 针都做不出单峰圆簇 —— "
-                        f"退回去打脉冲重修一次再来扎。")
+                        f"退回去打脉冲重修一次再来扎。",
+                        f"{unround} consecutive pokes could not make a single-peak round cluster - "
+                        f"go back, pulse to recondition once, then poke again.")
                     _say("back_to_pulse", tries=unround)
                     _stash_poke(executor, prefix, log, used, pokes, stage,
                                 critical_nm, repeats, depth_nm=depth_nm,
@@ -2175,17 +2469,23 @@ def poke_phase(executor: GraphExecutor, wf: NobleTipWorkflow, *,
                 mt = cl.get("double_tip")
                 single = ("单峰" if mt is False
                           else "多针尖这一项**判不了**(不拦收工)")
-                out["reason"] = (f"连续 {repeats} 次扎出{single}且圆的簇"
-                                 f"(最后一次深度 {float(critical_nm) * 1000:.0f} pm;"
-                                 f"每次都从 {wf.critical_start_pm:.0f} pm 重新找 ——"
-                                 f"针尖每扎一次就变一次,那个深度不是常数)")
+                single_en = ("single-peak" if mt is False
+                             else "multi-tip check **undecidable**, does not block finishing")
+                out["reason"] = tr(f"连续 {repeats} 次扎出{single}且圆的簇"
+                                   f"(最后一次深度 {float(critical_nm) * 1000:.0f} pm;"
+                                   f"每次都从 {wf.critical_start_pm:.0f} pm 重新找 ——"
+                                   f"针尖每扎一次就变一次,那个深度不是常数)",
+                                   f"{repeats} consecutive pokes gave round clusters ({single_en}; "
+                                   f"last depth {float(critical_nm) * 1000:.0f} pm; "
+                                   f"each time searched afresh from {wf.critical_start_pm:.0f} pm - "
+                                   f"the tip changes with every poke, that depth is not a constant)")
                 if mt is None and cl.get("multi_tip_undecidable"):
                     out["multi_tip_undecidable"] = cl["multi_tip_undecidable"]
                 break
             continue
 
         if pokes >= budget and "reason" not in out:
-            out["reason"] = f"扎针次数用满预算 {budget}"
+            out["reason"] = tr(f"扎针次数用满预算 {budget}", f"Poke count used up the budget {budget}")
         break
 
     # 收尾:把反馈开回来。

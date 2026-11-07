@@ -35,6 +35,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.skills.base import BaseSkill
 
 
@@ -80,7 +81,7 @@ class ConfigurePiController(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "配置一个通用 PI 控制器（V5e）：它**监视**哪个信号（输入）、**驱动**哪个信号（控制信号）"
+                tr("配置一个通用 PI 控制器（V5e）：它**监视**哪个信号（输入）、**驱动**哪个信号（控制信号）"
                 "、设定值、增益，以及输出限值。\n"
                 "\n"
                 "输出限值是这里最要紧的参数。这个环会毫无边界地驱动它的控制信号，直到输入达到设定值为止 —— 如果设定值根本到不了（传感器坏了、"
@@ -90,35 +91,47 @@ class ConfigurePiController(BaseSkill):
                 "slope 会把环的作用方向反过来。slope 弄错的环不会振荡 —— 它会朝**背离**设定值的方向一路跑到限值。"
                 "\n"
                 "\n"
-                "配置并不会闭合这个环；闭合是 SetPiControllerOnOff 的事。"
+                "配置并不会闭合这个环；闭合是 SetPiControllerOnOff 的事。",
+                   "Configure a generic PI controller (V5e): which signal it **monitors** (input), which signal it **drives** (control signal)"
+                   ", the setpoint, gains, and output limits.\n"
+                   "\n"
+                   "The output limits are the most important parameters here. The loop drives its control signal without bound until the input reaches the setpoint - if the setpoint can never be reached (broken sensor, "
+                   "wrong sign), it drives all the way to the limit and stays there. Set the limits to the range the output may safely occupy, not to the hardware maximum."
+                   "\n"
+                   "\n"
+                   "slope reverses the direction in which the loop acts. A loop with the wrong slope does not oscillate - it runs straight to the limit **away from** the setpoint."
+                   "\n"
+                   "\n"
+                   "Configuring does not close the loop; closing is the job of SetPiControllerOnOff.")
             ),
             parameters=[
                 ParameterSpec(name="controller_index", type="int",
-                              description="第几个 PI 控制器（0 起算）",
+                              description=tr("第几个 PI 控制器（0 起算）", "Which PI controller (counted from 0)"),
                               required=True, min_value=0, max_value=15),
                 ParameterSpec(name="input_index", type="int",
-                              description="环所**监视**的信号",
+                              description=tr("环所**监视**的信号", "Signal the loop **monitors**"),
                               required=True, min_value=0, max_value=127),
                 ParameterSpec(name="control_signal_index", type="int",
-                              description="环所**驱动**的信号",
+                              description=tr("环所**驱动**的信号", "Signal the loop **drives**"),
                               required=True, min_value=0, max_value=127),
                 ParameterSpec(name="setpoint", type="float",
-                              description="输入信号的目标值",
+                              description=tr("输入信号的目标值", "Target value of the input signal"),
                               required=True),
                 ParameterSpec(name="output_lower_limit", type="float",
-                              description="环可以把输出驱动到的最低值",
+                              description=tr("环可以把输出驱动到的最低值", "Lowest value the loop may drive the output to"),
                               required=True),
                 ParameterSpec(name="output_upper_limit", type="float",
-                              description="环可以把输出驱动到的最高值",
+                              description=tr("环可以把输出驱动到的最高值", "Highest value the loop may drive the output to"),
                               required=True),
                 ParameterSpec(name="p_gain", type="float",
-                              description="比例增益",
+                              description=tr("比例增益", "Proportional gain"),
                               required=False, default=1.0, min_value=0.0),
                 ParameterSpec(name="i_gain", type="float",
-                              description="积分增益",
+                              description=tr("积分增益", "Integral gain"),
                               required=False, default=0.0, min_value=0.0),
                 ParameterSpec(name="slope", type="int",
-                              description="0 = 负，1 = 正。slope **弄错**会让输出一路跑到限值。",
+                              description=tr("0 = 负，1 = 正。slope **弄错**会让输出一路跑到限值。",
+                                             "0 = negative, 1 = positive. A **wrong** slope makes the output run to the limit."),
                               required=False, default=0, min_value=0, max_value=1),
             ],
             estimated_duration_s=2.0,
@@ -133,8 +146,10 @@ class ConfigurePiController(BaseSkill):
         hi = float(params["output_upper_limit"])
         if lo >= hi:
             return _fail(name,
-                         f"output_lower_limit ({lo:g}) 必须小于 output_upper_limit ({hi:g})"
-                         "——限值反了，环会立刻把输出推到轨上", [])
+                         tr(f"output_lower_limit ({lo:g}) 必须小于 output_upper_limit ({hi:g})"
+                         "——限值反了，环会立刻把输出推到轨上",
+                            f"output_lower_limit ({lo:g}) must be smaller than output_upper_limit ({hi:g})"
+                            " - with the limits reversed the loop would push the output to the rails at once"), [])
         calls: list = []
 
         # Limits FIRST — same reasoning as the Kelvin loop: if a later call fails,
@@ -167,8 +182,10 @@ class ConfigurePiController(BaseSkill):
             skill_name=name, success=True, nanonis_calls=calls,
             data={"controller_index": idx, "setpoint": float(params["setpoint"]),
                   "output_limits": [lo, hi], "controller_on": False},
-            summary=(f"PI 控制器 {idx} 已配置：输出限 [{lo:g}, {hi:g}]"
-                     "（环仍开路——需 SetPiControllerOnOff 才闭合）"),
+            summary=(tr(f"PI 控制器 {idx} 已配置：输出限 [{lo:g}, {hi:g}]"
+                     "（环仍开路——需 SetPiControllerOnOff 才闭合）",
+                        f"PI controller {idx} configured: output limits [{lo:g}, {hi:g}]"
+                        " (loop still open - SetPiControllerOnOff is needed to close it)")),
         )
 
 
@@ -182,20 +199,27 @@ class SetPiControllerOnOff(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.DANGEROUS,
             description=(
-                "闭合或断开一个通用 PI 控制环（V5e）。\n"
+                tr("闭合或断开一个通用 PI 控制环（V5e）。\n"
                 "\n"
                 "闭合时是 DANGEROUS。从那一刻起，这个环就会自主地**驱动它的输出** —— 而这个输出可能是一块压电、"
                 "是偏压、是加热器、是激光。模块本身并不知道是哪一个。先调 GetPiController 读一下这个环实际接的是什么、"
                 "它的输出限值是多少。\n"
                 "\n"
-                "断开这个环是安全的，输出会停在环最后放它的地方 —— 它并不会被送回任何静止值。"
+                "断开这个环是安全的，输出会停在环最后放它的地方 —— 它并不会被送回任何静止值。",
+                   "Close or open a generic PI control loop (V5e).\n"
+                   "\n"
+                   "Closing is DANGEROUS. From that moment the loop autonomously **drives its output** - and that output may be a piezo, "
+                   "the bias, a heater, or the laser. The module itself does not know which. First call GetPiController to read what the loop is actually wired to "
+                   "and what its output limits are.\n"
+                   "\n"
+                   "Opening the loop is safe; the output stays where the loop last left it - it is not sent back to any rest value.")
             ),
             parameters=[
                 ParameterSpec(name="controller_index", type="int",
-                              description="第几个 PI 控制器（0 起算）",
+                              description=tr("第几个 PI 控制器（0 起算）", "Which PI controller (counted from 0)"),
                               required=True, min_value=0, max_value=15),
                 ParameterSpec(name="on", type="bool",
-                              description="True = 闭合此环（它随即开始驱动）",
+                              description=tr("True = 闭合此环（它随即开始驱动）", "True = close this loop (it then starts driving)"),
                               required=True),
             ],
             estimated_duration_s=1.0,
@@ -212,8 +236,10 @@ class SetPiControllerOnOff(BaseSkill):
         return SkillResult(
             skill_name="SetPiControllerOnOff", success=True, nanonis_calls=[rec],
             data={"controller_index": idx, "controller_on": on},
-            summary=(f"PI 控制器 {idx} 已闭合——它现在正在自主驱动输出" if on
-                     else f"PI 控制器 {idx} 已开路（输出停在环最后给的值）"),
+            summary=(tr(f"PI 控制器 {idx} 已闭合——它现在正在自主驱动输出",
+                        f"PI controller {idx} closed - it is now driving its output autonomously") if on
+                     else tr(f"PI 控制器 {idx} 已开路（输出停在环最后给的值）",
+                             f"PI controller {idx} opened (the output stays at the last value the loop gave)")),
         )
 
 
@@ -227,14 +253,18 @@ class GetPiController(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读一个通用 PI 控制器（V5e）：它是否闭合、监视哪个信号、**驱动哪个信号**、它的设定值、"
+                tr("读一个通用 PI 控制器（V5e）：它是否闭合、监视哪个信号、**驱动哪个信号**、它的设定值、"
                 "增益与输出限值。\n"
                 "\n"
-                "闭合任何一个不是你自己配的环之前，先读这个。控制信号才是要紧的那一项 —— 那是环将要去移动的东西。"
+                "闭合任何一个不是你自己配的环之前，先读这个。控制信号才是要紧的那一项 —— 那是环将要去移动的东西。",
+                   "Read a generic PI controller (V5e): whether it is closed, which signal it monitors, **which signal it drives**, its setpoint, "
+                   "gains and output limits.\n"
+                   "\n"
+                   "Read this before closing any loop you did not configure yourself. The control signal is the item that matters - it is what the loop is about to move.")
             ),
             parameters=[
                 ParameterSpec(name="controller_index", type="int",
-                              description="第几个 PI 控制器（0 起算）",
+                              description=tr("第几个 PI 控制器（0 起算）", "Which PI controller (counted from 0)"),
                               required=True, min_value=0, max_value=15),
             ],
             estimated_duration_s=1.0,
@@ -267,7 +297,7 @@ class SetGenericPiOutput(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "直接设定 V5 通用 PI 控制器的模拟输出，用它**自己的物理单位**（不是伏特 —— 模块会套用它自己的标定）"
+                tr("直接设定 V5 通用 PI 控制器的模拟输出，用它**自己的物理单位**（不是伏特 —— 模块会套用它自己的标定）"
                 "。\n"
                 "\n"
                 "当心：这是直接写到一个 MAST 看不见其接线的物理输出上。先读 GetGenericPiController —— 它会报出这个输出的名称、"
@@ -276,11 +306,22 @@ class SetGenericPiOutput(BaseSkill):
                 "直接写输出只有在环**断开**时才讲得通。环闭合时，控制器会在下一拍就把你设的值覆盖掉。"
                 "\n"
                 "\n"
-                "这是 V5 模块。V5e 机箱上请改用 ConfigurePiController；这里报错就说明你手上是另一代。"
+                "这是 V5 模块。V5e 机箱上请改用 ConfigurePiController；这里报错就说明你手上是另一代。",
+                   "Set the analog output of the V5 generic PI controller directly, in **its own physical unit** (not volts - the module applies its own calibration)"
+                   ".\n"
+                   "\n"
+                   "Caution: this writes directly to a physical output whose wiring MAST cannot see. First read GetGenericPiController - it reports the name, "
+                   "unit and limits of this output, which is the only way to find out what you are about to drive.\n"
+                   "\n"
+                   "Writing the output directly only makes sense while the loop is **open**. With the loop closed, the controller overwrites the value you set on the next cycle."
+                   "\n"
+                   "\n"
+                   "This is the V5 module. On a V5e chassis use ConfigurePiController instead; an error here means you have the other generation.")
             ),
             parameters=[
                 ParameterSpec(name="value", type="float",
-                              description="输出值，用该输出**自己的**物理单位（见 GetGenericPiController）",
+                              description=tr("输出值，用该输出**自己的**物理单位（见 GetGenericPiController）",
+                                             "Output value, in the output's **own** physical unit (see GetGenericPiController)"),
                               required=True),
             ],
             estimated_duration_s=1.0,
@@ -294,7 +335,8 @@ class SetGenericPiOutput(BaseSkill):
             return _fail("SetGenericPiOutput", f"GenPICtrl_AOValSet failed: {rec.error}", [rec])
         return SkillResult(skill_name="SetGenericPiOutput", success=True, nanonis_calls=[rec],
                            data={"value": float(params["value"])},
-                           summary=f"通用 PI(V5) 模拟输出 = {float(params['value']):g}（物理单位）")
+                           summary=tr(f"通用 PI(V5) 模拟输出 = {float(params['value']):g}（物理单位）",
+                                      f"Generic PI (V5) analog output = {float(params['value']):g} (physical unit)"))
 
 
 class GetGenericPiController(BaseSkill):
@@ -307,8 +349,10 @@ class GetGenericPiController(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读 V5 通用 PI 控制器：环的状态、设定值与增益、模拟输出的当前值，以及 —— 写任何东西之前你都需要的那一项 —— 输出的**名称、"
-                "单位与限值**。"
+                tr("读 V5 通用 PI 控制器：环的状态、设定值与增益、模拟输出的当前值，以及 —— 写任何东西之前你都需要的那一项 —— 输出的**名称、"
+                "单位与限值**。",
+                   "Read the V5 generic PI controller: loop state, setpoint and gains, the current value of the analog output, and - the item you need before writing anything - the output's **name, "
+                   "unit and limits**.")
             ),
             parameters=[],
             estimated_duration_s=1.0,
@@ -341,28 +385,34 @@ class ConfigurePreamp(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "设定 MCVA5 前置放大器某个通道的增益、耦合方式（AC/DC）与输入模式。\n"
+                tr("设定 MCVA5 前置放大器某个通道的增益、耦合方式（AC/DC）与输入模式。\n"
                 "\n"
                 "改前放增益，会改变同一个物理电流**读出来是多少**。Z 控制器闭合时，反馈环会把这看成电流突变，"
                 "并据此**移动针尖**。改增益之前先退针，或者先断开 Z 环。\n"
                 "\n"
-                "前放编号与通道编号沿用 MCVA5 自己的编号方式。"
+                "前放编号与通道编号沿用 MCVA5 自己的编号方式。",
+                   "Set the gain, coupling (AC/DC) and input mode of one channel of an MCVA5 preamplifier.\n"
+                   "\n"
+                   "Changing the preamp gain changes **what the same physical current reads as**. With the Z controller closed, the feedback loop sees this as a sudden current change "
+                   "and **moves the tip** accordingly. Withdraw the tip, or open the Z loop, before changing the gain.\n"
+                   "\n"
+                   "Preamp and channel numbers follow the MCVA5's own numbering.")
             ),
             parameters=[
                 ParameterSpec(name="preamp", type="int",
-                              description="前放编号（MCVA5 编号方式）",
+                              description=tr("前放编号（MCVA5 编号方式）", "Preamp number (MCVA5 numbering)"),
                               required=True, min_value=0, max_value=7),
                 ParameterSpec(name="channel", type="int",
-                              description="该前放上的通道号",
+                              description=tr("该前放上的通道号", "Channel number on that preamp"),
                               required=True, min_value=0, max_value=7),
                 ParameterSpec(name="gain", type="int",
-                              description="增益档位序号 —— 不传则保持不变",
+                              description=tr("增益档位序号 —— 不传则保持不变", "Gain step index - unchanged if not given"),
                               required=False, default=None, min_value=0, max_value=31),
                 ParameterSpec(name="coupling", type="int",
-                              description="耦合方式序号（AC/DC）—— 不传则保持不变",
+                              description=tr("耦合方式序号（AC/DC）—— 不传则保持不变", "Coupling index (AC/DC) - unchanged if not given"),
                               required=False, default=None, min_value=0, max_value=7),
                 ParameterSpec(name="input_mode", type="int",
-                              description="输入模式序号 —— 不传则保持不变",
+                              description=tr("输入模式序号 —— 不传则保持不变", "Input mode index - unchanged if not given"),
                               required=False, default=None, min_value=0, max_value=7),
             ],
             estimated_duration_s=2.0,
@@ -396,10 +446,12 @@ class ConfigurePreamp(BaseSkill):
             touched.append("input_mode")
 
         if not touched:
-            return _fail(name, "gain / coupling / input_mode 至少要给一个", calls)
+            return _fail(name, tr("gain / coupling / input_mode 至少要给一个",
+                                  "at least one of gain / coupling / input_mode must be given"), calls)
         return SkillResult(skill_name=name, success=True, nanonis_calls=calls,
                            data={"preamp": pre, "channel": ch, "changed": touched},
-                           summary=f"MCVA5 前放 {pre}/{ch} 已设置：{', '.join(touched)}")
+                           summary=tr(f"MCVA5 前放 {pre}/{ch} 已设置：{', '.join(touched)}",
+                                      f"MCVA5 preamp {pre}/{ch} set: {', '.join(touched)}"))
 
 
 class GetPreamp(BaseSkill):
@@ -412,15 +464,17 @@ class GetPreamp(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读 MCVA5 前置放大器某个通道：它的增益、耦合方式与输入模式。解读任何电流之前先读增益 —— 没有它，"
-                "ADC 报出来的数字什么也不是。"
+                tr("读 MCVA5 前置放大器某个通道：它的增益、耦合方式与输入模式。解读任何电流之前先读增益 —— 没有它，"
+                "ADC 报出来的数字什么也不是。",
+                   "Read one channel of an MCVA5 preamplifier: its gain, coupling and input mode. Read the gain before interpreting any current - without it, "
+                   "the numbers the ADC reports mean nothing.")
             ),
             parameters=[
                 ParameterSpec(name="preamp", type="int",
-                              description="前放编号",
+                              description=tr("前放编号", "Preamp number"),
                               required=True, min_value=0, max_value=7),
                 ParameterSpec(name="channel", type="int",
-                              description="通道号",
+                              description=tr("通道号", "Channel number"),
                               required=True, min_value=0, max_value=7),
             ],
             estimated_duration_s=1.0,
@@ -451,30 +505,36 @@ class RunPllZoomFft(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "打开 PLL Zoom-FFT 并在某个通道上启动它，带窗函数与平均。只读 —— FFT 不驱动任何东西。"
+                tr("打开 PLL Zoom-FFT 并在某个通道上启动它，带窗函数与平均。只读 —— FFT 不驱动任何东西。"
                 "\n"
                 "\n"
                 "用它来看噪声本底和共振附近的杂散峰：zoom FFT 能分辨出普通频谱糊掉的那些结构。restart_averaging=true 会把旧的平均丢掉，"
-                "改动过针尖或驱动之后你正需要这么做。"
+                "改动过针尖或驱动之后你正需要这么做。",
+                   "Open the PLL Zoom-FFT and start it on a channel, with window function and averaging. Read-only - the FFT drives nothing."
+                   "\n"
+                   "\n"
+                   "Use it to look at the noise floor and spurious peaks near the resonance: the zoom FFT resolves structure that an ordinary spectrum smears out. restart_averaging=true throws away the old average, "
+                   "which is what you need after changing the tip or the drive.")
             ),
             parameters=[
                 ParameterSpec(name="channel_index", type="int",
-                              description="要分析的 PLL 通道",
+                              description=tr("要分析的 PLL 通道", "PLL channel to analyze"),
                               required=True, min_value=0, max_value=127),
                 ParameterSpec(name="fft_window", type="int",
-                              description="FFT 窗类型序号（0 = 矩形窗；通常该用 Hann）",
+                              description=tr("FFT 窗类型序号（0 = 矩形窗；通常该用 Hann）",
+                                             "FFT window type index (0 = rectangular; Hann is usually the right choice)"),
                               required=False, default=1, min_value=0, max_value=8),
                 ParameterSpec(name="averaging_mode", type="int",
-                              description="平均模式序号",
+                              description=tr("平均模式序号", "Averaging mode index"),
                               required=False, default=0, min_value=0, max_value=4),
                 ParameterSpec(name="weighting_mode", type="int",
-                              description="加权模式序号",
+                              description=tr("加权模式序号", "Weighting mode index"),
                               required=False, default=0, min_value=0, max_value=4),
                 ParameterSpec(name="count", type="int",
-                              description="平均次数",
+                              description=tr("平均次数", "Number of averages"),
                               required=False, default=10, min_value=1, max_value=10_000),
                 ParameterSpec(name="restart_averaging", type="bool",
-                              description="丢弃已有的平均",
+                              description=tr("丢弃已有的平均", "Discard the existing average"),
                               required=False, default=True),
             ],
             estimated_duration_s=3.0,
@@ -508,7 +568,8 @@ class RunPllZoomFft(BaseSkill):
                 return _fail(name, f"PLLZoomFFT_AvgRestart failed: {rec.error}", calls)
         return SkillResult(skill_name=name, success=True, nanonis_calls=calls,
                            data={"channel_index": int(params["channel_index"])},
-                           summary="PLL Zoom FFT 已启动 —— 用 GetPllZoomFftData 读频谱")
+                           summary=tr("PLL Zoom FFT 已启动 —— 用 GetPllZoomFftData 读频谱",
+                                      "PLL Zoom FFT started - read the spectrum with GetPllZoomFftData"))
 
 
 class GetPllZoomFftData(BaseSkill):
@@ -520,7 +581,7 @@ class GetPllZoomFftData(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读 PLL Zoom-FFT 的频谱及其当前设置。",
+            description=tr("读 PLL Zoom-FFT 的频谱及其当前设置。", "Read the PLL Zoom-FFT spectrum and its current settings."),
             parameters=[],
             estimated_duration_s=2.0,
             composition_level=0,
@@ -545,17 +606,21 @@ class RunPllPhaseSweep(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "在一个调制器上扫 PLL 的相位，并（可选地）返回得到的曲线。\n"
+                tr("在一个调制器上扫 PLL 的相位，并（可选地）返回得到的曲线。\n"
                 "\n"
                 "这是你找出 PLL 实际锁在哪个相位上的办法。扫描期间它**驱动激励** —— 一根悬臂或音叉会在整段扫描里被摇动 —— 但它不移动针尖。"
-                "StopPllPhaseSweep 能中止它，按 中止 也能。"
+                "StopPllPhaseSweep 能中止它，按 中止 也能。",
+                   "Sweep the PLL phase on one modulator and (optionally) return the resulting curve.\n"
+                   "\n"
+                   "This is how you find out which phase the PLL actually locks at. During the sweep it **drives the excitation** - a cantilever or tuning fork is shaken throughout the sweep - but it does not move the tip. "
+                   "StopPllPhaseSweep can abort it, and so can the Abort button.")
             ),
             parameters=[
                 ParameterSpec(name="modulator_index", type="int",
-                              description="第几个 PLL 调制器（0 起算）",
+                              description=tr("第几个 PLL 调制器（0 起算）", "Which PLL modulator (counted from 0)"),
                               required=False, default=0, min_value=0, max_value=7),
                 ParameterSpec(name="get_data", type="bool",
-                              description="是否返回扫描曲线",
+                              description=tr("是否返回扫描曲线", "Whether to return the sweep curve"),
                               required=False, default=True),
             ],
             estimated_duration_s=20.0,
@@ -571,7 +636,7 @@ class RunPllPhaseSweep(BaseSkill):
             return _fail("RunPllPhaseSweep", f"PLLPhasSwp_Start failed: {rec.error}", [rec])
         return SkillResult(skill_name="RunPllPhaseSweep", success=True, nanonis_calls=[rec],
                            data={"modulator_index": idx, "curve": _rv(rec)},
-                           summary=f"PLL 相位扫描完成（调制器 {idx}）")
+                           summary=tr(f"PLL 相位扫描完成（调制器 {idx}）", f"PLL phase sweep finished (modulator {idx})"))
 
 
 class StopPllPhaseSweep(BaseSkill):
@@ -584,11 +649,12 @@ class StopPllPhaseSweep(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "停止一次正在跑的 PLL 相位扫描。永远允许，包括在 abort 之后。"
+                tr("停止一次正在跑的 PLL 相位扫描。永远允许，包括在 abort 之后。",
+                   "Stop a running PLL phase sweep. Always allowed, including after an abort.")
             ),
             parameters=[
                 ParameterSpec(name="modulator_index", type="int",
-                              description="第几个 PLL 调制器（0 起算）",
+                              description=tr("第几个 PLL 调制器（0 起算）", "Which PLL modulator (counted from 0)"),
                               required=False, default=0, min_value=0, max_value=7),
             ],
             estimated_duration_s=1.0,
@@ -603,7 +669,7 @@ class StopPllPhaseSweep(BaseSkill):
             return _fail("StopPllPhaseSweep", f"PLLPhasSwp_Stop failed: {rec.error}", [rec])
         return SkillResult(skill_name="StopPllPhaseSweep", success=True, nanonis_calls=[rec],
                            data={"modulator_index": idx},
-                           summary=f"PLL 相位扫描已停止（调制器 {idx}）")
+                           summary=tr(f"PLL 相位扫描已停止（调制器 {idx}）", f"PLL phase sweep stopped (modulator {idx})"))
 
 
 class ConfigurePllSignalAnalyzer(BaseSkill):
@@ -616,32 +682,36 @@ class ConfigurePllSignalAnalyzer(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "配置 PLL 信号分析仪：用哪个通道、时基，以及 FFT 窗／平均。它就是架在 PLL 自身信号上的一台示波器 + FFT —— 只读，"
+                tr("配置 PLL 信号分析仪：用哪个通道、时基，以及 FFT 窗／平均。它就是架在 PLL 自身信号上的一台示波器 + FFT —— 只读，"
                 "不驱动任何东西。\n"
                 "\n"
-                "用 GetPllSignalAnalyzerData 把时域波形和频谱一起取回来。"
+                "用 GetPllSignalAnalyzerData 把时域波形和频谱一起取回来。",
+                   "Configure the PLL signal analyzer: which channel, the time base, and the FFT window / averaging. It is an oscilloscope + FFT hung on the PLL's own signal - read-only, "
+                   "drives nothing.\n"
+                   "\n"
+                   "Use GetPllSignalAnalyzerData to fetch the time-domain waveform and the spectrum together.")
             ),
             parameters=[
                 ParameterSpec(name="channel_index", type="int",
-                              description="要分析的 PLL 通道",
+                              description=tr("要分析的 PLL 通道", "PLL channel to analyze"),
                               required=True, min_value=0, max_value=127),
                 ParameterSpec(name="timebase", type="float",
-                              description="时基 —— 不传则保持不变",
+                              description=tr("时基 —— 不传则保持不变", "Time base - unchanged if not given"),
                               required=False, default=None),
                 ParameterSpec(name="update_rate", type="int",
-                              description="刷新率 —— 不传则保持不变",
+                              description=tr("刷新率 —— 不传则保持不变", "Refresh rate - unchanged if not given"),
                               required=False, default=None, min_value=1),
                 ParameterSpec(name="fft_window", type="int",
-                              description="FFT 窗类型序号",
+                              description=tr("FFT 窗类型序号", "FFT window type index"),
                               required=False, default=1, min_value=0, max_value=8),
                 ParameterSpec(name="averaging_mode", type="int",
-                              description="平均模式序号",
+                              description=tr("平均模式序号", "Averaging mode index"),
                               required=False, default=0, min_value=0, max_value=4),
                 ParameterSpec(name="weighting_mode", type="int",
-                              description="加权模式序号",
+                              description=tr("加权模式序号", "Weighting mode index"),
                               required=False, default=0, min_value=0, max_value=4),
                 ParameterSpec(name="count", type="int",
-                              description="平均次数",
+                              description=tr("平均次数", "Number of averages"),
                               required=False, default=10, min_value=1, max_value=10_000),
             ],
             estimated_duration_s=2.0,
@@ -689,7 +759,7 @@ class ConfigurePllSignalAnalyzer(BaseSkill):
 
         return SkillResult(skill_name=name, success=True, nanonis_calls=calls,
                            data={"channel_index": int(params["channel_index"])},
-                           summary="PLL 信号分析仪已配置")
+                           summary=tr("PLL 信号分析仪已配置", "PLL signal analyzer configured"))
 
 
 class GetPllSignalAnalyzerData(BaseSkill):
@@ -702,13 +772,16 @@ class GetPllSignalAnalyzerData(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读 PLL 信号分析仪：示波器时域波形**和** FFT 频谱，外加触发状态。\n"
+                tr("读 PLL 信号分析仪：示波器时域波形**和** FFT 频谱，外加触发状态。\n"
                 "\n"
-                "rearm=true 会在读之前重新武装触发 —— 触发不是自由运行时就该这么做，否则你拿回来的是上一次的捕获。"
+                "rearm=true 会在读之前重新武装触发 —— 触发不是自由运行时就该这么做，否则你拿回来的是上一次的捕获。",
+                   "Read the PLL signal analyzer: the oscilloscope time-domain waveform **and** the FFT spectrum, plus the trigger state.\n"
+                   "\n"
+                   "rearm=true re-arms the trigger before reading - do this when the trigger is not free-running, otherwise what you get back is the previous capture.")
             ),
             parameters=[
                 ParameterSpec(name="rearm", type="bool",
-                              description="先重新武装触发",
+                              description=tr("先重新武装触发", "Re-arm the trigger first"),
                               required=False, default=False),
             ],
             estimated_duration_s=3.0,
@@ -744,27 +817,32 @@ class ConfigureOcSync(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "设定 OC Sync 模块的开／关相位角，单位是**度**。它们把振荡控制的输出闸门化，"
+                tr("设定 OC Sync 模块的开／关相位角，单位是**度**。它们把振荡控制的输出闸门化，"
                 "使其只在振荡的某个相位窗内触发 —— 这是在振荡探针上做相位分辨（pump-probe 式）"
                 "测量的基础。\n"
                 "\n"
-                "link_channels 会把通道 2 的角度绑到通道 1 上。"
+                "link_channels 会把通道 2 的角度绑到通道 1 上。",
+                   "Set the ON / OFF phase angles of the OC Sync module, in **degrees**. They gate the oscillation-control output "
+                   "so that it fires only within a phase window of the oscillation - the basis of phase-resolved (pump-probe style) "
+                   "measurements on an oscillating probe.\n"
+                   "\n"
+                   "link_channels binds the angles of channel 2 to channel 1.")
             ),
             parameters=[
                 ParameterSpec(name="ch1_on_deg", type="float",
-                              description="通道 1 的 ON 相位角",
+                              description=tr("通道 1 的 ON 相位角", "ON phase angle of channel 1"),
                               unit="deg", required=True, min_value=-360.0, max_value=360.0),
                 ParameterSpec(name="ch1_off_deg", type="float",
-                              description="通道 1 的 OFF 相位角",
+                              description=tr("通道 1 的 OFF 相位角", "OFF phase angle of channel 1"),
                               unit="deg", required=True, min_value=-360.0, max_value=360.0),
                 ParameterSpec(name="ch2_on_deg", type="float",
-                              description="通道 2 的 ON 相位角",
+                              description=tr("通道 2 的 ON 相位角", "ON phase angle of channel 2"),
                               unit="deg", required=True, min_value=-360.0, max_value=360.0),
                 ParameterSpec(name="ch2_off_deg", type="float",
-                              description="通道 2 的 OFF 相位角",
+                              description=tr("通道 2 的 OFF 相位角", "OFF phase angle of channel 2"),
                               unit="deg", required=True, min_value=-360.0, max_value=360.0),
                 ParameterSpec(name="link_channels", type="bool",
-                              description="把通道 2 的角度绑到通道 1 上",
+                              description=tr("把通道 2 的角度绑到通道 1 上", "Bind the angles of channel 2 to channel 1"),
                               required=False, default=False),
             ],
             estimated_duration_s=1.0,
@@ -789,7 +867,7 @@ class ConfigureOcSync(BaseSkill):
         return SkillResult(skill_name=name, success=True, nanonis_calls=calls,
                            data={"ch1_on_deg": float(params["ch1_on_deg"]),
                                  "ch1_off_deg": float(params["ch1_off_deg"])},
-                           summary="OC Sync 相位角已设置")
+                           summary=tr("OC Sync 相位角已设置", "OC Sync phase angles set"))
 
 
 class GetOcSync(BaseSkill):
@@ -801,7 +879,7 @@ class GetOcSync(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读 OC Sync 模块的相位角与通道绑定关系。",
+            description=tr("读 OC Sync 模块的相位角与通道绑定关系。", "Read the phase angles and channel binding of the OC Sync module."),
             parameters=[],
             estimated_duration_s=1.0,
             composition_level=0,
@@ -825,18 +903,23 @@ class ConfigureTipRecorder(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "设定针尖移动记录器的缓冲区大小，并可选地清空它。\n"
+                tr("设定针尖移动记录器的缓冲区大小，并可选地清空它。\n"
                 "\n"
                 "这个记录器把每一次针尖移动都记进一个环形缓冲区 —— 它是你重建针尖**去过哪里**的依据，"
                 "而那正是一次无人值守运行出岔子之后你想要的东西。清空会把这段历史丢掉，所以要清就在一次运行**开始时**清，"
-                "而不是在诊断它的时候清。"
+                "而不是在诊断它的时候清。",
+                   "Set the buffer size of the tip-move recorder, and optionally clear it.\n"
+                   "\n"
+                   "This recorder logs every tip move into a ring buffer - it is what you reconstruct **where the tip has been** from, "
+                   "and that is exactly what you want after an unattended run goes wrong. Clearing throws this history away, so clear at the **start** of a run, "
+                   "not while diagnosing it.")
             ),
             parameters=[
                 ParameterSpec(name="buffer_size", type="int",
-                              description="保留多少次针尖移动",
+                              description=tr("保留多少次针尖移动", "How many tip moves to keep"),
                               required=True, min_value=1, max_value=1_000_000),
                 ParameterSpec(name="clear", type="bool",
-                              description="清空缓冲区（会把移动历史丢掉）",
+                              description=tr("清空缓冲区（会把移动历史丢掉）", "Clear the buffer (throws away the move history)"),
                               required=False, default=False),
             ],
             estimated_duration_s=1.0,
@@ -859,7 +942,8 @@ class ConfigureTipRecorder(BaseSkill):
         return SkillResult(skill_name=name, success=True, nanonis_calls=calls,
                            data={"buffer_size": int(params["buffer_size"]),
                                  "cleared": bool(params.get("clear", False))},
-                           summary=f"针尖记录器缓冲区 = {params['buffer_size']} 条")
+                           summary=tr(f"针尖记录器缓冲区 = {params['buffer_size']} 条",
+                                      f"Tip recorder buffer = {params['buffer_size']} entries"))
 
 
 class GetTipRecorderData(BaseSkill):
@@ -872,8 +956,10 @@ class GetTipRecorderData(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "从针尖记录器的缓冲区里读出记录下来的针尖移动历史。用它重建针尖去了哪里 —— 一次无人值守运行停在意料之外的地方时，"
-                "这是第一个该看的东西。"
+                tr("从针尖记录器的缓冲区里读出记录下来的针尖移动历史。用它重建针尖去了哪里 —— 一次无人值守运行停在意料之外的地方时，"
+                "这是第一个该看的东西。",
+                   "Read the recorded tip-move history from the tip recorder's buffer. Use it to reconstruct where the tip went - when an unattended run stops somewhere unexpected, "
+                   "this is the first thing to look at.")
             ),
             parameters=[],
             estimated_duration_s=2.0,

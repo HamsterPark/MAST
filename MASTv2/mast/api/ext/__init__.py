@@ -25,7 +25,7 @@ agent 白拿的那些东西翻译成外部拿得到的形状：
 
 ## 刻意不进外部面的东西
 
-HITL / 审批的 resolve（外部 agent 不替人拍板）、admin、settings 写、技能覆盖层、
+HITL / 审批的 resolve（外部 agent 不替人做决定）、admin、settings 写、技能覆盖层、
 运行模式切换 —— 运行模式是操作员的选择；SAFE 下需要针尖处理就经 ``/requests`` 问人。
 """
 

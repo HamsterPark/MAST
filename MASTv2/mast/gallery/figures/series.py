@@ -30,6 +30,7 @@ import numpy as np
 
 from mast.gallery import paths as _paths
 from mast.gallery.figures import common as C
+from mast.i18n import tr
 
 VER = 1
 CAT = "series"
@@ -42,11 +43,11 @@ ROBUST = 1.4826
 def load_series(doc: dict, marks: dict, sid: str) -> tuple[dict, list[dict]]:
     sv = (marks.get("series") or {}).get(sid)
     if not isinstance(sv, dict):
-        raise C.JobError(f"系列 {sid} 不存在")
+        raise C.JobError(tr(f"系列 {sid} 不存在", f"Series {sid} does not exist"))
     by = C.by_id(doc)
     ids = [i for i in (sv.get("ids") or []) if (by.get(i) or {}).get("k") == "f"]
     if not ids:
-        raise C.JobError("系列里没有在索引里的帧")
+        raise C.JobError(tr("系列里没有在索引里的帧", "The series has no frames that are in the index"))
     ids.sort(key=lambda i: (by[i].get("t") or 0, i))
     frames = []
     for i in ids:
@@ -199,11 +200,13 @@ def make_slides(lay: _paths.Layout, doc: dict, marks: dict, sid: str, options: d
         r0 = sum(len(pg) for pg in pages[:pi]) + 1
         rounds = [r0 + ri for ri, r in enumerate(page) if r and min(r) == 0] or [r0, r0 + len(page) - 1]
         extra = any(r and min(r) != 0 for r in page)
-        d.text((x0, 4), "旋转系列「%s」%d 帧 · 第 %d/%d 页 · 第 %d–%d 轮%s · %s → %s" % (
-            name0, len(frames), pi + 1, len(pages), rounds[0], rounds[-1], " + 补扫" if extra else "",
+        d.text((x0, 4), tr("旋转系列「%s」%d 帧 · 第 %d/%d 页 · 第 %d–%d 轮%s · %s → %s",
+                           "Rotation series \"%s\" %d frames · page %d/%d · rounds %d–%d%s · %s → %s") % (
+            name0, len(frames), pi + 1, len(pages), rounds[0], rounds[-1], tr(" + 补扫", " + extra scans") if extra else "",
             C.local(frames[min(ks)]["it"].get("t"), "%m-%d %H:%M"), C.local(_mtime(frames[max(ks)]), "%m-%d %H:%M")),
             fill=C.INK, font=F_T)
-        d.text((x0, 56), "每列一个扫描转角；图像已全部转到第 1 帧（%s，%g°）的朝向，以中心锚点为中心，每格 %g×%g nm；逐行调平；每格色标各自 1–99%%；黑角是转到帧外的部分" % (
+        d.text((x0, 56), tr("每列一个扫描转角；图像已全部转到第 1 帧（%s，%g°）的朝向，以中心锚点为中心，每格 %g×%g nm；逐行调平；每格色标各自 1–99%%；黑角是转到帧外的部分",
+                            "One scan angle per column; all images are rotated to the orientation of frame 1 (%s, %g°), centred on the anchor, %g×%g nm per cell; line-by-line flattening; colour scale per cell 1–99%%; black corners are the parts rotated outside the frame") % (
             C.num4(frames[0]["it"]["fn"]), th1, fov, fov), fill=C.DIM, font=F_S)
         y = top                                     # 两页都顶部对齐：翻页时列与行的位置不动
         for ci, ang in enumerate(cols):
@@ -216,9 +219,9 @@ def make_slides(lay: _paths.Layout, doc: dict, marks: dict, sid: str, options: d
                 continue
             kr = sorted(r.values())
             if min(r) != 0:
-                rl = "补扫"
+                rl = tr("补扫", "Extra scan")
             else:
-                rl = "第 %d 轮" % (r0 + ri) + ("（只扫了 %d 个转角）" % len(r) if len(r) < nc else "")
+                rl = tr("第 %d 轮", "Round %d") % (r0 + ri) + (tr("（只扫了 %d 个转角）", " (only %d angles scanned)") % len(r) if len(r) < nc else "")
             d.text((x0, y + 2), "%s · %s → %s" % (rl, C.local(frames[kr[0]]["it"].get("t"), "%m-%d %H:%M"),
                                                  C.local(_mtime(frames[kr[-1]]), "%H:%M")), fill=C.DIM, font=F_L)
             yc = y + lab
@@ -234,7 +237,7 @@ def make_slides(lay: _paths.Layout, doc: dict, marks: dict, sid: str, options: d
                 d.text((x + 2, yc + cell + 30), "%s · %s" % (C.fmt_bias(it.get("b")), C.fmt_cur(it.get("sp"))),
                        fill=C.INK, font=F_B)
                 if keys[k] not in cols:             # 不在转角档里的帧：图左上角橙字注明
-                    wt = "扫描角 %g°" % fr["th"]
+                    wt = tr("扫描角 %g°", "Scan angle %g°") % fr["th"]
                     tw = d.textlength(wt, font=F_c)
                     d.rectangle([x + 3, yc + 3, x + 9 + tw, yc + 27], fill=(0, 0, 0))
                     d.text((x + 6, yc + 4), wt, fill=(245, 165, 90), font=F_c)
@@ -247,11 +250,12 @@ def make_slides(lay: _paths.Layout, doc: dict, marks: dict, sid: str, options: d
         C.write_bytes(lay, CAT, stem + ".png", C.png_bytes(canvas))
         C.write_bytes(lay, CAT, stem + ".jpg", C.jpeg_bytes(canvas, 92))
         files += [stem + ".png", stem + ".jpg"]
-    summary = {"帧数": len(frames), "转角列": nc, "轮数": len(rows), "格子 px": cell}
+    summary = {tr("帧数", "Frames"): len(frames), tr("转角列", "Angle columns"): nc, tr("轮数", "Rounds"): len(rows),
+               tr("格子 px", "Cell px"): cell}
     detail = {"cols": cols, "rounds": [{str(c): frames[k]["id"] for c, k in r.items()} for r in rows],
               "pages": len(pages), "cell": cell, "anchor": str(options.get("anchor") or "darkest"),
               "anchors_uv": [a.tolist() for a in anc]}
-    return C.write_figure_json(lay, CAT, base, kind="series_slides", title="%s · 16:9 拼图" % name0,
+    return C.write_figure_json(lay, CAT, base, kind="series_slides", title=tr("%s · 16:9 拼图", "%s · 16:9 montage") % name0,
                                files=files, ids=[fr["id"] for fr in frames], series=[sid], options=options,
                                summary=summary, detail=detail, maker_version=VER)
 
@@ -333,7 +337,7 @@ def lattice_maps(frames: list[dict], th1: float):
     zw0, wsum0, XY0 = _windowed(frames[0])
     seed = seed_basis(frames[0]["z"], _nmpp(frames[0]))
     if seed is None:
-        return [np.eye(2)] * N, [False] * N, None, "首帧功率谱里找不到两个非共线的晶格峰 —— 只做刚性叠加"
+        return [np.eye(2)] * N, [False] * N, None, tr("首帧功率谱里找不到两个非共线的晶格峰 —— 只做刚性叠加", "Cannot find two non-collinear lattice peaks in the power spectrum of the first frame - rigid stacking only")
     Gref = np.array([_refine(zw0, wsum0, XY0, seed[q]) for q in (0, 1)])
     meas = []
     for fr in frames:
@@ -434,7 +438,7 @@ def make_stack(lay: _paths.Layout, doc: dict, marks: dict, sid: str, options: di
     mode = str(options.get("anchor") or "darkest")
     sv, frames = load_series(doc, marks, sid)
     if cancel is not None and cancel.is_set():
-        raise C.JobError("已取消")
+        raise C.JobError(tr("已取消", "Cancelled"))
     name0 = str(sv.get("name") or sid)
     th1 = frames[0]["th"]
     nmpp = _nmpp(frames[0])
@@ -446,7 +450,7 @@ def make_stack(lay: _paths.Layout, doc: dict, marks: dict, sid: str, options: di
     I2 = [np.eye(2)] * N
     S_rig, _anc_rig, _sd_rig, _sh_rig = stack(frames, th1, I2, anc, L, n)
     if cancel is not None and cancel.is_set():
-        raise C.JobError("已取消")
+        raise C.JobError(tr("已取消", "Cancelled"))
     S_aff, anc_aff, sd_aff, sh_aff = stack(frames, th1, Ms, anc, L, n)
     pm = float(np.median(sd_aff))                    # 归一化单位 → pm（全体帧稳健标准差的中位数）
     cover = np.sum(np.isfinite(S_aff), 0)
@@ -474,7 +478,8 @@ def make_stack(lay: _paths.Layout, doc: dict, marks: dict, sid: str, options: di
         use_aff = bool(amp["基矢 1"][1] + amp["基矢 2"][1] >= amp["基矢 1"][0] + amp["基矢 2"][0])
     else:
         use_aff = False
-    amp_txt = "，".join("%s %.2f→%.2f" % (k, v[0], v[1]) for k, v in amp.items()) or "没有晶格种子"
+    basis_en = {"基矢 1": "basis 1", "基矢 2": "basis 2", "基矢1+基矢2": "basis 1+2", "基矢1−基矢2": "basis 1−2"}
+    amp_txt = tr("，", ", ").join("%s %.2f→%.2f" % (tr(k, basis_en.get(k, k)), v[0], v[1]) for k, v in amp.items()) or tr("没有晶格种子", "no lattice seed")
 
     table = C.lut("afmhot")
     gap = 4
@@ -484,9 +489,10 @@ def make_stack(lay: _paths.Layout, doc: dict, marks: dict, sid: str, options: di
     Wc = 4 * pw + 3 * gap
     canvas = Image.new("RGB", (Wc, pw + 72), C.BG)
     d = ImageDraw.Draw(canvas)
-    labels = ["刚性叠加（只旋转+平移）平均" + ("" if use_aff else " · 主图"),
-              "晶格校正叠加 · 平均" + (" · 主图" if use_aff else ""), "晶格校正叠加 · 中位数",
-              "每像素覆盖帧数（黑 0 → 白 %d）" % N]
+    labels = [tr("刚性叠加（只旋转+平移）平均", "Rigid stack (rotation + translation only) mean") + ("" if use_aff else tr(" · 主图", " · main")),
+              tr("晶格校正叠加 · 平均", "Lattice-corrected stack · mean") + (tr(" · 主图", " · main") if use_aff else ""),
+              tr("晶格校正叠加 · 中位数", "Lattice-corrected stack · median"),
+              tr("每像素覆盖帧数（黑 0 → 白 %d）", "Frames covering each pixel (black 0 → white %d)") % N]
     for k, (img, lab) in enumerate(zip([p[0] for p in pans] + [cimg], labels)):
         x = k * (pw + gap)
         canvas.paste(img, (x, 0))
@@ -496,19 +502,21 @@ def make_stack(lay: _paths.Layout, doc: dict, marks: dict, sid: str, options: di
     t1 = max((_mtime(fr) or 0) for fr in frames)
     cur = sorted({round(float(fr["it"].get("sp") or 0.0)) for fr in frames})
     ncur = {c: sum(1 for fr in frames if round(float(fr["it"].get("sp") or 0.0)) == c) for c in cur}
-    cur_txt = " / ".join("%s（%d 帧）" % (C.fmt_cur(c), ncur[c]) for c in sorted(cur, key=lambda c: -ncur[c]))
-    left = "%s → %s    %s    %s    视野 %.1f×%.1f nm" % (
+    cur_txt = " / ".join(tr("%s（%d 帧）", "%s (%d frames)") % (C.fmt_cur(c), ncur[c]) for c in sorted(cur, key=lambda c: -ncur[c]))
+    left = tr("%s → %s    %s    %s    视野 %.1f×%.1f nm", "%s → %s    %s    %s    FOV %.1f×%.1f nm") % (
         C.local(t0, "%Y-%m-%d %H:%M:%S"), C.local(t1, "%m-%d %H:%M:%S"),
         " / ".join(sorted({C.fmt_bias(fr["it"].get("b")) for fr in frames})), cur_txt, L, L)
-    right = ("%d 帧叠加 · 朝向＝第 1 帧（%s，%g°）· 锚点＝%s · 平移按全体平均互相关精修 3 轮 · 仿射按各帧实测晶格（%d 帧可用）"
-             " · 每帧按稳健标准差归一 · 覆盖 <%d%% 的像素留黑 · 色标 1–99.5%%" % (
+    right = (tr("%d 帧叠加 · 朝向＝第 1 帧（%s，%g°）· 锚点＝%s · 平移按全体平均互相关精修 3 轮 · 仿射按各帧实测晶格（%d 帧可用）"
+                " · 每帧按稳健标准差归一 · 覆盖 <%d%% 的像素留黑 · 色标 1–99.5%%",
+                "%d frames stacked · orientation = frame 1 (%s, %g°) · anchor = %s · translation refined by cross-correlation with the overall mean, 3 rounds · affine from the measured lattice of each frame (%d frames usable)"
+                " · each frame normalised by robust standard deviation · pixels with coverage <%d%% left black · colour scale 1–99.5%%") % (
                  N, C.num4(frames[0]["it"]["fn"]), th1,
-                 {"darkest": "视野中心的暗点", "brightest": "视野中心的亮点", "center": "帧心"}.get(mode, mode),
+                 {"darkest": tr("视野中心的暗点", "dark spot at the centre of the view"), "brightest": tr("视野中心的亮点", "bright spot at the centre of the view"), "center": tr("帧心", "frame centre")}.get(mode, mode),
                  sum(good), round(min_cover * 100)))
     f16, f12, f14 = C.pil_font(16), C.pil_font(12), C.pil_font(14)
     d.text((6, pw + 4), left, fill=C.INK, font=f16)
     d.text((6, pw + 28), right, fill=C.DIM, font=f12)
-    d.text((6, pw + 46), ("晶格峰振幅（⌀%.1f nm 全覆盖区，pm）刚性 → 晶格校正：%s" % (2 * rad, amp_txt)) + (" · " + note if note else ""),
+    d.text((6, pw + 46), (tr("晶格峰振幅（⌀%.1f nm 全覆盖区，pm）刚性 → 晶格校正：%s", "Lattice peak amplitude (⌀%.1f nm fully covered area, pm) rigid → lattice-corrected: %s") % (2 * rad, amp_txt)) + (" · " + note if note else ""),
            fill=C.DIM, font=f12)
     base = C.safe_name(name0 + "_叠加")
     C.write_bytes(lay, CAT, base + ".png", C.png_bytes(canvas))
@@ -517,11 +525,12 @@ def make_stack(lay: _paths.Layout, doc: dict, marks: dict, sid: str, options: di
     bc = Image.new("RGB", (big.width, big.height + 52), C.BG)
     bc.paste(big, (0, 0))
     bd = ImageDraw.Draw(bc)
-    C.tag(bd, (6, 6), "%s · %d 帧平均  %.0f pm" % ("晶格校正叠加" if use_aff else "刚性叠加", N, hi - lo), font=f14)
+    C.tag(bd, (6, 6), tr("%s · %d 帧平均  %.0f pm", "%s · %d frames mean  %.0f pm") % (tr("晶格校正叠加", "Lattice-corrected stack") if use_aff else tr("刚性叠加", "Rigid stack"), N, hi - lo), font=f14)
     _scalebar(bd, 16, big.height - 20, int(round(2 / (L / n))))
     bd.text((6, big.height + 4), left, fill=C.INK, font=f16)
-    bd.text((6, big.height + 28), "朝向＝第 1 帧（%s，%g°）· 平移精修%s · 覆盖 <%d%% 留黑 · 晶格峰振幅 刚性→校正 %s" % (
-        C.num4(frames[0]["it"]["fn"]), th1, " + 晶格仿射校正" if use_aff else "（晶格校正没有更锐，主图用刚性）",
+    bd.text((6, big.height + 28), tr("朝向＝第 1 帧（%s，%g°）· 平移精修%s · 覆盖 <%d%% 留黑 · 晶格峰振幅 刚性→校正 %s",
+                                     "Orientation = frame 1 (%s, %g°) · translation refinement%s · coverage <%d%% left black · lattice peak amplitude rigid→corrected %s") % (
+        C.num4(frames[0]["it"]["fn"]), th1, tr(" + 晶格仿射校正", " + lattice affine correction") if use_aff else tr("（晶格校正没有更锐，主图用刚性）", " (lattice correction is not sharper; main image uses rigid)"),
         round(min_cover * 100), amp_txt), fill=C.DIM, font=f12)
     C.write_bytes(lay, CAT, base + "_主图_2x.png", C.png_bytes(bc))
     C.write_bytes(lay, CAT, base + "_晶格校正平均.npy", _npy_bytes(aff_mean))
@@ -531,9 +540,16 @@ def make_stack(lay: _paths.Layout, doc: dict, marks: dict, sid: str, options: di
     th1r = math.radians(th1)
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\r\n")
-    w.writerow(["序号", "文件", "开始时刻", "SCAN_ANGLE", "设定电流 pA", "帧中心 X nm", "帧中心 Y nm",
-                "锚点帧内 u nm（第1帧朝向）", "锚点帧内 v nm", "锚点压电 X nm", "锚点压电 Y nm",
-                "仿射奇异值大", "仿射奇异值小", "仿射残余转角°", "仿射已用", "平移精修 du nm", "平移精修 dv nm", "帧稳健标准差 pm"])
+    w.writerow([tr("序号", "No."), tr("文件", "File"), tr("开始时刻", "Start time"), "SCAN_ANGLE",
+                tr("设定电流 pA", "Setpoint current pA"), tr("帧中心 X nm", "Frame centre X nm"),
+                tr("帧中心 Y nm", "Frame centre Y nm"),
+                tr("锚点帧内 u nm（第1帧朝向）", "Anchor in-frame u nm (frame-1 orientation)"),
+                tr("锚点帧内 v nm", "Anchor in-frame v nm"), tr("锚点压电 X nm", "Anchor piezo X nm"),
+                tr("锚点压电 Y nm", "Anchor piezo Y nm"),
+                tr("仿射奇异值大", "Affine singular value (large)"), tr("仿射奇异值小", "Affine singular value (small)"),
+                tr("仿射残余转角°", "Affine residual rotation °"), tr("仿射已用", "Affine used"),
+                tr("平移精修 du nm", "Translation refinement du nm"), tr("平移精修 dv nm", "Translation refinement dv nm"),
+                tr("帧稳健标准差 pm", "Frame robust std pm")])
     for k, (fr, a, M, g, sh, sd) in enumerate(zip(frames, anc_aff, Ms, good, sh_aff, sd_aff)):
         it = fr["it"]
         cx, cy = float(it.get("cx") or 0.0), float(it.get("cy") or 0.0)
@@ -551,9 +567,11 @@ def make_stack(lay: _paths.Layout, doc: dict, marks: dict, sid: str, options: di
     sv_all = np.array([np.linalg.svd(M, compute_uv=False) for M in Ms])
     files = [base + ".png", base + "_主图_2x.png", base + "_配准表.csv", base + "_晶格校正平均.npy",
              base + "_刚性平均.npy", base + "_覆盖帧数.npy"]
-    summary = {"帧数": N, "主图": "晶格校正" if use_aff else "刚性", "仿射可用帧": int(sum(good)),
-               "奇异值": "%.3f–%.3f" % (float(sv_all.min()), float(sv_all.max())),
-               "最大平移 nm": round(float(max(np.linalg.norm(s) for s in sh_aff)), 3)}
+    summary = {tr("帧数", "Frames"): N,
+               tr("主图", "Main image"): tr("晶格校正", "lattice-corrected") if use_aff else tr("刚性", "rigid"),
+               tr("仿射可用帧", "Affine-usable frames"): int(sum(good)),
+               tr("奇异值", "Singular values"): "%.3f–%.3f" % (float(sv_all.min()), float(sv_all.max())),
+               tr("最大平移 nm", "Max shift nm"): round(float(max(np.linalg.norm(s) for s in sh_aff)), 3)}
     detail = {"use_aff": use_aff, "amp": {k: list(v) for k, v in amp.items()}, "rad": rad, "good": int(sum(good)),
               "sv_min": float(sv_all.min()), "sv_max": float(sv_all.max()),
               "shift_max": float(max(np.linalg.norm(s) for s in sh_aff)),
@@ -562,6 +580,6 @@ def make_stack(lay: _paths.Layout, doc: dict, marks: dict, sid: str, options: di
               "sharp_aff": float(np.nanstd(np.where(mask, aff_mean, np.nan))),
               "gref": Gref.tolist() if Gref is not None else None, "note": note, "anchor": mode, "fov_nm": L,
               "anchors_final_uv": [a.tolist() for a in anc_aff]}
-    return C.write_figure_json(lay, CAT, base, kind="series_stack", title="%s · 叠加" % name0, files=files,
+    return C.write_figure_json(lay, CAT, base, kind="series_stack", title=tr("%s · 叠加", "%s · stack") % name0, files=files,
                                ids=[fr["id"] for fr in frames], series=[sid], options=options, summary=summary,
                                detail=detail, maker_version=VER)

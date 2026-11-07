@@ -25,15 +25,15 @@ Compass §4.3 pattern:
          ceiling), and the numbers come from the billing ledger rather than from
          a guess. See the constants for the measurements.
   - Budget hard-gate: state["budget_remaining_usd"] <= 0 → END. This was a
-    CALLER-SEEDED guard () and an audit on 2026-07-30 found that no
-    caller anywhere in the tree ever seeded it — inert for its whole life, while
-    one measured run spent $30.66 in an hour on a loop of SUCCESSES that
+    CALLER-SEEDED guard; no
+    caller anywhere in the tree ever seeded it, so it was inert, while
+    a run could spend heavily on a loop of SUCCESSES that
     StallGuard cannot see. It is now refreshed every hop from ``budget_probe``, a
     zero-arg callable the host supplies (wired from mast.billing.run_meter, whose
     docstring states the attribution caveat). The graph still performs no billing
     and imports nothing from the billing layer; absent a probe the gate behaves
     exactly as before.
-  - Budget SOFT-limit (review MEDIUM #7): a non-blocking, fire-once warning
+  - Budget SOFT-limit: a non-blocking, fire-once warning
     injected into the message stream at ~80% consumption of whichever loop-guard
     ceiling is reached first — hop total >= 48 of 60, or one real agent >= 7 of
     10 — so the agent converges before the hard gate aborts it mid-thought.
@@ -91,8 +91,8 @@ def _effective_safety_limits(
 ) -> "SafetyLimits | None":
     """Merge admin SafetyLimits overrides on top of the supplied (code-default) limits.
 
-    Why this lives in the orchestrator (review: admin safety override lost on the
-    multi-agent path): instrument_control.build() exposes a ``safety_limits`` knob
+    Why this lives in the orchestrator (the admin safety override would otherwise be
+    lost on the multi-agent path): instrument_control.build() exposes a ``safety_limits`` knob
     and a ``get_state`` knob, but does NOT accept a ConfigOverrideRegistry — its
     SafetyGateMiddleware is constructed with ``registry=None``, so the admin
     JSON-override merge that the manual executor path enjoys (via
@@ -111,7 +111,7 @@ def _effective_safety_limits(
     Fail-OPEN to the supplied limits on any merge failure: a corrupt override file
     must never disable the agent (which would crash build_ic and silently take the
     instrument agent offline), but the failure is logged at WARNING (mirrors
-    core.safety._get_effective_limits, security ).
+    core.safety._get_effective_limits).
     """
     if override_registry is None:
         return safety_limits
@@ -141,7 +141,7 @@ def _effective_safety_limits(
 #: 曾经得 import 这个即将被删的模块。这里保留旧名字，调用点一个都不用改。
 _AGENT_NAMES = AGENT_NAMES
 
-# ── Budget soft-limit (review: MEDIUM #7) ──
+# ── Budget soft-limit ──
 # Hard gates END the run; the soft limit is a NON-blocking, fire-once nudge at
 # ~80% consumption so the agent steers toward a conclusion before the hard gate
 # trips and aborts mid-thought. The unique marker below is what makes the
@@ -289,7 +289,7 @@ def _plan_parent_prune(messages: list) -> "tuple[set, Any]":
 # 2026-07-30 — the full history, both root causes and the measured numbers behind
 # the new thresholds are with the constants above.
 # NB: a "$ budget soft limit" (warn at <20% of budget_initial_usd) was REMOVED
-# — budget_initial_usd is not a declared MASTState channel,
+# (2026-06-10) — budget_initial_usd is not a declared MASTState channel,
 # so it never propagated through the real graph and the dimension was dead code.
 # The hard USD gate (budget_remaining_usd <= 0 → END) is a real channel, and as of
 # 2026-07-30 it is finally SEEDED + refreshed by a caller-supplied probe
@@ -483,8 +483,8 @@ def _goal_note(verdict, decision: str, extra: str = "") -> AIMessage:
 def _goal_record(verdict, decision: str, state: MASTState) -> None:
     """把这次求值记进诊断台账。**永不抛。**
 
-    用户问「它为什么停了 / 为什么没停」时看的就是这本账（``kinds=("goal_verdict",)``），
-    与 fail_silent 那 621 条同一本 —— 那正是这道闸要治的病。
+    “为什么停了 / 为什么没停”的答案就在这本账里（``kinds=("goal_verdict",)``），
+    与 fail_silent 记录同一本。
     """
     try:
         from mast.core import diagnostics
@@ -523,8 +523,8 @@ def _goal_hold_question(verdict, state: MASTState, valid_targets) -> dict:
 
     # 只差「用户确认」这一条 ⇒ 问的不是「继续还是结束」，而是「够了吗」。
     # 同一张问答预算（每 run 一次）、同一条 replay 安全的路径，只是卡面不同 ——
-    # 问错问题比不问更糟：一个已经做完全部工作的 run 被问「要不要继续推进」，
-    # 用户只能靠猜我们在说什么。
+    # 一个已经做完全部工作的 run 若被问「要不要继续推进」，问题本身就是错的，
+    # 所以这里换成「够了吗」。
     if unmet_items and all(i.kind == "operator_confirmed" for i in unmet_items):
         return {
             "question": ("目标里写着「要你点头才算完」。该做的都做完了"
@@ -921,7 +921,7 @@ def _budget_softlimit_warning(
     supervisor's key is excluded from it by ``_guard_dimensions`` — counting it
     was half of why the old cap misfired.
 
-    NB: a third "remaining USD < 20% of budget_initial_usd"
+    NB (2026-06-10): a third "remaining USD < 20% of budget_initial_usd"
     dimension USED to live here but was DEAD CODE — ``budget_initial_usd`` is not
     a declared ``MASTState`` channel, so inside the real compiled graph LangGraph
     drops it and ``state.get("budget_initial_usd")`` is always None (verified:
@@ -975,7 +975,7 @@ class Route(TypedDict):
     reason: str
 
 
-# ── Parallel dispatch (2026-07-11, ) ─────────────────────────
+# ── Parallel dispatch (2026-07-11) ─────────────────────────
 # The supervisor was strictly serial hub-and-spoke: ONE agent per hop, so a
 # literature survey could not run while the instrument scanned, and a 6-phase
 # campaign paid the sum of every phase's latency.
@@ -996,7 +996,7 @@ class Route(TypedDict):
 _MAX_PARALLEL = 4
 
 
-# ── Automatic backgrounding (conservative whitelist; ) ─────
+# ── Automatic backgrounding (conservative whitelist; 2026-07-20) ─────
 # When the router pairs an INDEPENDENT analysis agent with instrument_control in
 # ONE fan-out, that analysis is a long side-task the operator wants running WHILE
 # they keep working the instrument — but the super-step barrier makes the whole
@@ -1274,7 +1274,7 @@ _ROUTER_PROMPT = _ROUTER_PROMPT.replace("{max_parallel}", str(_MAX_PARALLEL))
 _ROUTER_PROMPT = _ROUTER_PROMPT.replace("{hop_hard_cap}", str(_HOP_HARD_CAP))
 
 
-# ── Provider-agnostic supervisor routing ──
+# ── Provider-agnostic supervisor routing (2026-06-08) ──
 # LangChain's default with_structured_output(Route) uses response_format
 # (json_schema / json_object), which is NOT portable across the 6 providers MAST
 # advertises. Full v2 testing on the simulator showed the supervisor routed
@@ -1407,9 +1407,18 @@ def _parallel_route_decision(supervisor_model, routing_messages) -> dict:
     """
     flat = _shared_flatten_messages(routing_messages)
 
-    # Structured function-call output forces tool_choice to the schema tool.
-    # Always-on reasoning endpoints that reject forced tool choice skip this
-    # tier and use text-JSON directly, avoiding a predictably failing request.
+    # Tier 1 — structured output (function_calling; NOT response_format).
+    #
+    # SKIPPED on always-on reasoning models. function_calling pins tool_choice to
+    # the schema's tool, and those endpoints reject a forced tool choice while
+    # thinking is enabled — and their thinking cannot be turned off:
+    #     400 - tool_choice 'specified' is incompatible with thinking enabled
+    # Measured: every attempt failed, each one a wasted LLM
+    # round-trip before the text-JSON tier did the actual work. The failure logs
+    # at INFO and the fallback succeeds, so the only visible symptom is latency.
+    #
+    # Not a fallback fix — the fallback was always fine. The fix is to stop
+    # making a request we know the provider will refuse.
     _skip_t1 = _rejects_forced_tool_choice(_model_id_of(supervisor_model))
     if _skip_t1:
         logger.debug("parallel route: skipping function_calling tier — %s "
@@ -1524,8 +1533,8 @@ def _drain_interjections(control_provider) -> "tuple[list, list[str]]":
       * ``directed_targets`` — agent ids the operator ADDRESSED explicitly (via
         POST /agents/<id>/interject). The supervisor dispatches to these
         DETERMINISTICALLY (a hard @agent route) instead of leaving the LLM router
-        to infer intent from the "(指向 X)" text — which it often ignored, the
-        "@agent 不管用" report . Empty when the operator broadcast to
+        to infer intent from the "(指向 X)" text — which it often ignored.
+        Empty when the operator broadcast to
         all / addressed the supervisor, or the provider surfaced no targets.
 
     NB: must stay non-blocking — graph nodes may not sleep / block 钩子
@@ -1690,7 +1699,7 @@ def _supervisor_node_factory(
     into the message stream as operator input. The GUI wires this to the
     Agents-tab interject queue so operator messages reach a running task.
 
-    ``wired_agents`` () is the set of agent node names ACTUALLY added
+    ``wired_agents`` is the set of agent node names ACTUALLY added
     to the parent graph (``build()``'s ``include_agents``). The supervisor must
     validate every routing decision against THIS set, not the full
     ``_AGENT_NAMES`` roster: when only a subset of agents is wired, an LLM router
@@ -1806,9 +1815,9 @@ def _supervisor_node_factory(
         # ── Loop / budget guards ──
         # Runs on EVERY inter-agent hop: all handoffs (incl. sibling→sibling)
         # route through this node now, so the guard cannot be bypassed
-        #. visit_count accumulates per agent via the
+        # visit_count accumulates per agent via the
         # sum_int_dicts reducer, so per_agent_max reflects the real running
-        # total (). NB: every visit_count write below is a +1 DELTA,
+        # total. NB: every visit_count write below is a +1 DELTA,
         # NOT an absolute snapshot — the adding reducer would otherwise
         # double-count.
         vc = state.get("visit_count") or {}
@@ -1853,9 +1862,9 @@ def _supervisor_node_factory(
                     "routing_hints": None,
                 },
             )
-        # Budget hard-gate (). Was CALLER-SEEDED and, as an audit
-        # found on 2026-07-30, seeded by NOBODY — inert for its whole life while
-        # one measured run spent $30.66 (see mast.billing.run_meter). It is now
+        # Budget hard-gate. Was CALLER-SEEDED and
+        # never seeded by any caller (inert) while
+        # runs could spend heavily (see mast.billing.run_meter). It is now
         # refreshed here from ``budget_probe``, a zero-arg callable the host wires
         # in; the graph itself still does no billing and imports nothing from the
         # billing layer.
@@ -1906,7 +1915,7 @@ def _supervisor_node_factory(
         # (@agent) — dispatched deterministically below, not left to the router.
         injected, directed_targets = _drain_interjections(control_provider)
 
-        # ── Budget soft-limit nudge (review MEDIUM #7) ──
+        # ── Budget soft-limit nudge ──
         # Hard gates above already END at <=0 / loop-cap; this is a NON-blocking,
         # fire-once warning at ~80% consumption so the agent converges before the
         # hard gate aborts it mid-thought. Prepended to `injected` so it rides
@@ -1958,7 +1967,7 @@ def _supervisor_node_factory(
         if _goal_out:
             control_extra = {**control_extra, "goal": {**_goal, **_goal_out}}
 
-        # ── Honour the agents' routing hints (; plural 2026-07-11) ──
+        # ── Honour the agents' routing hints (plural since 2026-07-11) ──
         # A handoff toward a sibling agent appends its intended next hop to
         # state["routing_hints"] and routes here so the guards above run. Valid
         # hints dispatch straight through (clearing the channel) WITHOUT spending
@@ -1968,7 +1977,7 @@ def _supervisor_node_factory(
         # parallel request. (Operator interjections are still surfaced into the
         # message stream so the next agents see them.)
         #
-        # Validate against the WIRED set (), not the full roster: a hint
+        # Validate against the WIRED set, not the full roster: a hint
         # toward an agent that wasn't included in this build would route to a
         # non-existent node and crash. Unwired hints are dropped; if nothing valid
         # remains we fall through to the LLM router (the stale channel is cleared
@@ -1976,7 +1985,7 @@ def _supervisor_node_factory(
         agent_hints = [h for h in (state.get("routing_hints") or []) if h in valid_targets]
         # Operator @agent directions dispatch DETERMINISTICALLY (a hard route),
         # taking precedence over the LLM router — the whole point of "@agent" is
-        # that it reaches THAT agent, not one the router guessed . They
+        # that it reaches THAT agent, not one the router guessed. They
         # ride the same guarded hint-dispatch path as agent handoffs. Order:
         # operator's explicit targets first, then agent-requested hops; deduped +
         # capped (dedupe is also what keeps instrument_control to at most one).
@@ -2017,7 +2026,7 @@ def _supervisor_node_factory(
             # ── Activation gating on AGENT-requested hops only (2026-07-30) ──
             # An operator's explicit @agent is NEVER parked. That is the same rule
             # auto-background already follows: "@agent" means it reaches THAT agent,
-            # not one something else decided for them . If the operator
+            # not one something else decided for them. If the operator
             # wants the reviewer run with no draft on disk, that is their call to
             # make and their result to read — and the agent will say so honestly.
             #
@@ -2125,7 +2134,7 @@ def _supervisor_node_factory(
                 + _trim_for_routing(state.get("messages", []))
                 + injected
             )
-            # Provider-agnostic routing: the default
+            # Provider-agnostic routing (2026-06-08): the default
             # with_structured_output(Route) only worked on Kimi;
             # _parallel_route_decision preserves that hard-won portability
             # (function_calling on flattened text → tolerant text-JSON → the
@@ -2147,8 +2156,8 @@ def _supervisor_node_factory(
                 },
             )
 
-        # _coerce_targets already dropped anything outside the WIRED set (review
-        # #53: a valid agent NAME that wasn't included in this build is not a real
+        # _coerce_targets already dropped anything outside the WIRED set
+        # (a valid agent NAME that wasn't included in this build is not a real
         # node — dispatching to it crashes LangGraph), de-duplicated (which is
         # what keeps instrument_control from appearing twice in one fan-out), and
         # absorbed "__end__". An empty list = the router named nothing
@@ -2263,7 +2272,7 @@ def _supervisor_node_factory(
                 },
             )
 
-        # Conservative auto-background: peel a whitelisted
+        # Conservative auto-background (2026-07-20): peel a whitelisted
         # INDEPENDENT analysis agent (literature) off the fan-out to a DETACHED
         # background run when it's paired with instrument_control, so the fast
         # instrument turn isn't barrier-blocked behind a long survey. Gate OFF
@@ -2326,7 +2335,7 @@ def _supervisor_node_factory(
         # +1 DELTA for the supervisor's own visit, plus +1 for EACH FOREGROUND
         # agent — the backgrounded agent runs in its OWN detached run with its own
         # loop guards, so it is NOT counted against this thread's hop budget. The
-        # sum_int_dicts reducer accumulates the deltas ().
+        # sum_int_dicts reducer accumulates the deltas.
         visit_delta: dict[str, int] = {"supervisor": 1}
         for t in fg_targets:
             visit_delta[t] = visit_delta.get(t, 0) + 1
@@ -2360,6 +2369,9 @@ def build(
     # 群聊 IC 一个都看不到,而私聊看得到。同一个 agent 两个入口两套能力,谁也不会
     # 收到报错。2026-08-25 补上。
     instrument_registry: Any | None = None,
+    # conduct 工具的编译器要的 plan 库与技能注册表（零参调用 → dict，
+    # ``CoreRuntime._conduct_tool_context``）。不传 = 编译类工具如实回「plan 库没接上」。
+    conduct_context=None,
     recorder=None,
     safety_recorder=None,
     turn_recorder=None,
@@ -2437,7 +2449,7 @@ def build(
             # NB: the supervisor routes via with_structured_output(Route), which
             # on Anthropic forces a tool call — and Claude extended thinking is
             # INCOMPATIBLE with forced tool_choice (the call errors and the
-            # supervisor silently routes to END → task dies; review 2.1.13 #4).
+            # supervisor silently routes to END → task dies).
             # So we do NOT enable extended thinking here. Routing is a cheap
             # classification, not reasoning-heavy; the default Kimi orchestrator
             # model already reasons intrinsically at full strength regardless.
@@ -2469,7 +2481,7 @@ def build(
 
     g: StateGraph = StateGraph(MASTState)
     # Pass include_agents so the supervisor only routes to nodes that are
-    # actually wired (). Routing to a valid-but-unwired agent would
+    # actually wired. Routing to a valid-but-unwired agent would
     # otherwise crash LangGraph with a missing-node error.
     # Asking the operator to disambiguate needs somewhere to pause. Without a
     # checkpointer the graph cannot be resumed at all, so the supervisor must
@@ -2500,7 +2512,7 @@ def build(
         try:
             from mast.agents._shared.conduct_tools import make_conduct_tools
 
-            return make_conduct_tools(agent_name)
+            return make_conduct_tools(agent_name, context=conduct_context)
         except Exception as exc:  # noqa: BLE001
             # 起不来不该拦住整张图 —— conduct 引擎默认就是关着的，
             # 而这些工具在引擎关着时仍然能读，所以这里失败是真的异常。
@@ -2555,8 +2567,8 @@ def build(
                 "context_provider required when 'instrument_control' is included"
             )
         # Thread the live-state + safety knobs down to the instrument agent's
-        # safety stack (review: admin override + live-state injection lost on the
-        # multi-agent path). instrument_control.build() exposes get_state +
+        # safety stack (without this the admin override and live-state injection are
+        # lost on the multi-agent path). instrument_control.build() exposes get_state +
         # safety_limits; we resolve the EFFECTIVE limits (code defaults merged with
         # admin SafetyLimits overrides — IC's build has no registry knob) and pass
         # get_state straight through. This makes:
@@ -2570,8 +2582,8 @@ def build(
         # enable_hitl=False silently removed human approval for every DANGEROUS
         # instrument action (EmergencyRetract / AutoApproach / TipShape /
         # BiasPulse / MotorMove / SetBias…) on the live multi-agent path, while
-        # the prompt still told the model approval was required (review
-        # 2026-05-30 CRITICAL). It is now an explicit parameter (default True);
+        # the prompt still told the model approval was required.
+        # It is now an explicit parameter (default True);
         # only an LLM-less test harness passes False. HITL interrupts require the
         # graph be compiled with a checkpointer — build() warns if it isn't.
         g.add_node(
@@ -2638,7 +2650,7 @@ def build(
             "checkpointer both are dead ends. Pass one (e.g. MemorySaver)."
         )
     compiled = g.compile(checkpointer=checkpointer)
-    # Bind recursion_limit=50 as a build-time DEFAULT (). LangGraph
+    # Bind recursion_limit=50 as a build-time DEFAULT. LangGraph
     # has no compile() recursion_limit param — it is purely an invoke-time config
     # (default 25). Without this, any caller that invokes WITHOUT passing
     # recursion_limit (tests, library users) gets 25, which is too tight for the

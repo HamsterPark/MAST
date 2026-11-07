@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+from mast.i18n import tr
 import logging
 import statistics
 import threading
@@ -58,7 +59,7 @@ class SkillIndex:
         try:
             metas = list(registry.list_skills())
         except Exception as exc:  # noqa: BLE001
-            raise ExtError(503, "not_wired", f"技能注册表读不到：{exc}") from exc
+            raise ExtError(503, "not_wired", tr(f"技能注册表读不到：{exc}", f"Cannot read the skill registry: {exc}")) from exc
         classes: dict[str, Any] = {}
         for m in metas:
             try:
@@ -137,6 +138,19 @@ def _enum_value(v: Any) -> str:
     return str(getattr(v, "value", v) or "").lower()
 
 
+def _station_hidden(registry: Any) -> frozenset[str]:
+    """Skills this station profile withholds (``station_face``): on an STM station only the
+    optical station's own skills (none until their modules register some); empty whenever the
+    gate cannot be read (a gate we cannot read is not a gate)."""
+    try:
+        from mast.skills.station_face import hidden_names
+
+        return hidden_names(registry)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("ext skills: station gate unreadable (%s)", exc)
+        return frozenset()
+
+
 @router.get("/skills/search")
 def search_skills(request: Request, q: str = Query(..., min_length=1, max_length=200),
                   limit: int = Query(20, ge=1, le=100)):
@@ -147,8 +161,14 @@ def search_skills(request: Request, q: str = Query(..., min_length=1, max_length
     """
     registry = registry_of(request)
     if registry is None:
-        raise ExtError(503, "not_wired", "技能注册表未接线", missing=["skill_registry"])
+        raise ExtError(503, "not_wired", tr("技能注册表未接线", "Skill registry not wired"), missing=["skill_registry"])
     rows = _INDEX.rows(registry)
+    # 光学站画像：不属于这个站的技能（约 400 个 STM 技能）不出现在检索里 —— 搜 "scan" 搜到
+    # 一个只会失败的 StartScan，比搜不到更糟。STM 画像下它只收光学站自己的技能（那些模块里
+    # 还没有技能时是空集，rows 原样不动）。
+    hidden = _station_hidden(registry)
+    if hidden:
+        rows = {n: r for n, r in rows.items() if n not in hidden}
     import re
 
     terms = [t for t in re.split(r"[\s,，]+", q.strip().lower()) if t]
@@ -187,10 +207,16 @@ def search_skills(request: Request, q: str = Query(..., min_length=1, max_length
         if score:
             _, official, _code = _origin(registry, name)
             scored.append((score, official, name, list(dict.fromkeys(why))))
+    # MAST 的仪器 agent 工具（不在注册表里，见 agent_tools）：与技能同一套计分，注册表同名的让位
+    tools = _agent_tool_hits(terms, exclude=rows)
+    scored += [(score, False, name, why) for score, name, why in tools]
     scored.sort(key=lambda x: (-x[0], not x[1], x[2]))
     results = []
     for score, official, name, why in scored[:limit]:
-        row = rows[name]
+        row = rows.get(name)
+        if row is None:
+            results.append(_agent_tool_result(name, score, why))
+            continue
         meta = row["meta"]
         origin, _, origin_code = _origin(registry, name)
         results.append({
@@ -204,23 +230,59 @@ def search_skills(request: Request, q: str = Query(..., min_length=1, max_length
     return {"query": q, "count": len(results), "total_matched": len(scored), "results": results}
 
 
+def _agent_tool_hits(terms: list[str], *, exclude: dict) -> list[tuple[int, str, list[str]]]:
+    try:
+        from mast.api.ext import agent_tools
+
+        return [h for h in agent_tools.search(terms) if h[1] not in exclude]
+    except Exception as exc:  # noqa: BLE001 — 工具目录坏了只少这一类结果
+        logger.warning("ext skills: 仪器 agent 工具检索不可用(%s)", exc)
+        return []
+
+
+def _agent_tool_result(name: str, score: int, why: list[str]) -> dict:
+    from mast.api.ext import agent_tools
+
+    d = agent_tools.describe().get(name) or {}
+    return {"name": name, "score": score, "origin": agent_tools.ORIGIN_LABEL,
+            "origin_code": agent_tools.ORIGIN_CODE, "official": False, "safety_level": "auto",
+            "category": agent_tools.CATEGORY, "footprint": d.get("footprint", "unknown"),
+            "matched_on": why, "description": str(d.get("description") or "")[:200]}
+
+
 def _measured(request: Request, name: str) -> tuple[dict | None, str]:
     rt = runtime_of(request)
     repos = getattr(rt, "_v2_repos", None)
     if repos is None:
-        return None, "v2 记录未接线，没有这台仪器上的实测耗时"
+        return None, tr("v2 记录未接线，没有这台仪器上的实测耗时", "v2 records not wired; no measured durations on this instrument")
     try:
         rows = repos.actions._fetchall(
             "SELECT duration_ms FROM actions WHERE action_type = ? AND status = 'succeeded' "
             "AND duration_ms IS NOT NULL ORDER BY hlc DESC LIMIT 200", (name,))
     except Exception as exc:  # noqa: BLE001
-        return None, f"读不到实测耗时：{exc}"
+        return None, tr(f"读不到实测耗时：{exc}", f"Cannot read measured durations: {exc}")
     vals = sorted(float(r["duration_ms"]) / 1000.0 for r in rows if r.get("duration_ms") is not None)
     if not vals:
-        return None, "这台仪器上还没有这个技能的成功记录"
+        return None, tr("这台仪器上还没有这个技能的成功记录", "No successful run of this skill on this instrument yet")
     p95 = vals[min(len(vals) - 1, int(round(0.95 * (len(vals) - 1))))]
     return {"n": len(vals), "p50_s": round(statistics.median(vals), 2),
             "p95_s": round(p95, 2), "max_s": round(vals[-1], 2)}, ""
+
+
+def _agent_tool_card(request: Request, name: str) -> dict | None:
+    """注册表里没有的名字：仪器 agent 工具的卡（与技能卡同形状），不开放的那几个 403 说理由；
+    都不是 → None（调用方回 404）。"""
+    from mast.api.ext import agent_tools
+
+    reason = agent_tools.excluded_reason(name)
+    if reason:
+        raise ExtError(403, "not_offered", reason, skill=name)
+    card = agent_tools.card(name)
+    if card is None:
+        return None
+    measured, note = _measured(request, name)
+    card["duration"] = {"estimated_s": None, "measured": measured, "note": note}
+    return direct_exec.jsonable(card)
 
 
 @router.get("/skills/{name}")
@@ -230,12 +292,15 @@ def skill_card(name: str, request: Request):
     接受 ``"5n"`` 写法、本机是否关闭、这台仪器上的实测耗时。"""
     registry = registry_of(request)
     if registry is None:
-        raise ExtError(503, "not_wired", "技能注册表未接线", missing=["skill_registry"])
+        raise ExtError(503, "not_wired", tr("技能注册表未接线", "Skill registry not wired"), missing=["skill_registry"])
     rows = _INDEX.rows(registry)
     row = rows.get(name)
     if row is None:
+        tool_card = _agent_tool_card(request, name)
+        if tool_card is not None:
+            return tool_card
         near = sorted(n for n in rows if name.lower() in n.lower())[:8]
-        raise ExtError(404, "unknown_skill", f"没有叫 {name!r} 的技能；按动作搜用 /skills/search",
+        raise ExtError(404, "unknown_skill", tr(f"没有叫 {name!r} 的技能；按动作搜用 /skills/search", f"No skill named {name!r}; search by action with /skills/search"),
                        did_you_mean=near)
     meta = row["meta"]
     try:
@@ -268,15 +333,24 @@ def skill_card(name: str, request: Request):
     try:
         from mast.skills.tool_face import compute
 
-        f = compute()
-        if name in f.hardware:
-            face = {"disabled": True, "reason": "硬件模块关闭（这台仪器没有这个硬件）"}
+        f = compute(registry=registry)
+        if name in f.station:
+            from mast import station as _station
+
+            if _station.is_optical():
+                face = {"disabled": True, "reason": tr("不属于光学站（这个技能要 STM / Nanonis；站点画像是 optical）",
+                                                       "Not part of the optical station (this skill needs an STM / Nanonis; the station profile is optical)")}
+            else:
+                face = {"disabled": True, "reason": tr("只属于光学站（这是一台 STM 站，站点画像是 stm）",
+                                                       "Belongs to the optical station only (this is an STM station: the station profile is stm)")}
+        elif name in f.hardware:
+            face = {"disabled": True, "reason": tr("硬件模块关闭（这台仪器没有这个硬件）", "Hardware module disabled (this instrument does not have this hardware)")}
         elif name in f.advanced:
-            face = {"disabled": True, "reason": "高级能力未授予"}
+            face = {"disabled": True, "reason": tr("高级能力未授予", "Advanced capability not granted")}
         elif name in f.unsubscribed:
-            face = {"disabled": False, "reason": "未订阅（只影响内部 agent 的工具表，不影响执行）"}
+            face = {"disabled": False, "reason": tr("未订阅（只影响内部 agent 的工具表，不影响执行）", "Not subscribed (only affects the internal agents' tool table, not execution)")}
     except Exception as exc:  # noqa: BLE001
-        face = {"disabled": None, "reason": f"关闭名单读不到：{exc}"}
+        face = {"disabled": None, "reason": tr(f"关闭名单读不到：{exc}", f"Cannot read the disabled list: {exc}")}
     measured, note = _measured(request, name)
     card.update({
         "origin_code": origin_code,
@@ -315,18 +389,18 @@ def draft_composite(body: CompositeBody, request: Request):
     spec = body.spec
     if isinstance(spec, str):
         if spec.strip() in ("", "?", "？", "help"):
-            return {"ok": False, "syntax": SPEC_SYNTAX, "problems": ["(没给 spec —— 上面是格式说明)"]}
+            return {"ok": False, "syntax": SPEC_SYNTAX, "problems": [tr("(没给 spec —— 上面是格式说明)", "(no spec given - the format description is above)")]}
         import json
 
         try:
             spec = json.loads(spec)
         except ValueError as exc:
-            return {"ok": False, "syntax": SPEC_SYNTAX, "problems": [f"spec 不是合法 JSON：{exc}"]}
+            return {"ok": False, "syntax": SPEC_SYNTAX, "problems": [tr(f"spec 不是合法 JSON：{exc}", f"spec is not valid JSON: {exc}")]}
     if not isinstance(spec, dict):
-        return {"ok": False, "syntax": SPEC_SYNTAX, "problems": ["spec 要是一个 JSON 对象"]}
+        return {"ok": False, "syntax": SPEC_SYNTAX, "problems": [tr("spec 要是一个 JSON 对象", "spec must be a JSON object")]}
     registry = registry_of(request)
     if registry is None:
-        raise ExtError(503, "not_wired", "技能注册表未接线", missing=["skill_registry"])
+        raise ExtError(503, "not_wired", tr("技能注册表未接线", "Skill registry not wired"), missing=["skill_registry"])
     store = _default_store()
     rep = _validate(spec, registry, store=store)
     rep["hints"] = official_overlap_hints(spec, registry, store=store)
@@ -343,14 +417,16 @@ def save_composite(body: CompositeBody, request: Request):
 
     registry = registry_of(request)
     if registry is None:
-        raise ExtError(503, "not_wired", "技能注册表未接线", missing=["skill_registry"])
+        raise ExtError(503, "not_wired", tr("技能注册表未接线", "Skill registry not wired"), missing=["skill_registry"])
     caller = caller_of(request)
     rep = save_composite_impl(registry, caller.agent_id, body.spec, body.base_version,
                               origin="ext_gateway")
     rep = dict(rep)
     if rep.get("ok"):
-        rep["message"] = (f"{rep.get('name')} v{rep.get('version')} 已保存并热注册。用 POST /jobs "
-                          "按名字执行它；在交接报告里说明你造了什么、为什么。")
+        rep["message"] = tr(f"{rep.get('name')} v{rep.get('version')} 已保存并热注册。用 POST /jobs "
+                            "按名字执行它；在交接报告里说明你造了什么、为什么。",
+                            f"{rep.get('name')} v{rep.get('version')} saved and hot-registered. Run it by "
+                            "name with POST /jobs; say in the handover report what you built and why.")
     return direct_exec.jsonable(rep)
 
 
@@ -365,7 +441,7 @@ def propose_skill(body: ProposalBody, request: Request):
 
     registry = registry_of(request)
     if registry is None:
-        raise ExtError(503, "not_wired", "技能注册表未接线", missing=["skill_registry"])
+        raise ExtError(503, "not_wired", tr("技能注册表未接线", "Skill registry not wired"), missing=["skill_registry"])
     caller = caller_of(request)
     rep = dict(propose_python_skill_impl(registry, caller.agent_id, body.name.strip(),
                                          body.code, body.rationale))

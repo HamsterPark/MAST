@@ -1,12 +1,30 @@
-"""Instrument profile: configured hardware facts and learned calibration.
+"""Instrument profile — per-rig hardware facts, approach/retract config + learned calibration.
 
-The skill and agent layers share this dependency-light data and rendering layer.
-Approach/retract direction must be configured for the target instrument; direction
-checks use raw Z motion rather than current after the junction has opened.
-Contact dI/dV depends on tip state, modulation and bias. Successful approaches
-update that calibration with EWMA and an injected persistence sink.
-Runtime writers validate incoming values; missing facts remain distinguishable
-from configured defaults. No measured instrument profile is bundled here.
+Data + render layer (no langchain / no agent deps) so BOTH the skill layer
+(retract composite / approach) and the agent layer (a middleware) can use it:
+  * skills import ``mast.core.instrument_profile`` (skills→core is standard);
+  * the injecting middleware lives in
+    ``mast.agents._shared.instrument_profile_mw`` and imports this.
+
+Companion to :mod:`mast.agents._shared.experiment_prefs`. Where that
+module holds the operator's *soft preferences* (preferred scan size / speed —
+hints, never bounds), THIS holds *hard instrument facts* the approach / retract
+logic **depends on**, plus a *learned* dI/dV-at-contact calibration that
+updates itself every successful approach.
+
+Design notes (2026-07-20, sample change / shutdown retract and dI/dV ranging):
+
+  * 退针方向是可设定的（不同仪器 Z± 定义可能不同）——搞反=撞针。
+  * 退针方向自检看 **Z 压电走向**而非电流（退远后电流可能已到 0，失去符号）。
+  * 进针时 lock-in 加在电流上做 **dI/dV**（20mV 调制），其 R 幅度随接近指数增大，
+    可在 DC 电流还看不出时判断"离样品还有多远"。
+  * "到样品的 dI/dV 幅度"依赖针尖态/调制幅度/bias，只能靠**每轮成功进针记录**
+    并给下一轮用（EWMA 学习），不是普适常数——所以它是 learned + 持久化的。
+
+``set_calibration(...)`` is the RUNTIME writer (called from the approach skill
+on a verified engage); it EWMA-updates the learned dI/dV and fires an INJECTED
+persist sink so the value survives to the next run/session. Never raises on bad
+input (sanitises + drops). Dependency-light: stdlib only.
 """
 
 from __future__ import annotations
@@ -16,6 +34,7 @@ import math
 import threading
 import time
 from typing import Any, Callable
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -28,55 +47,90 @@ logger = logging.getLogger(__name__)
 _CONFIG_SPEC: dict[str, tuple[str, str, type, tuple[float, float], Any]] = {
 
     "lockin_signal_index": (
-        "dI/dV lock-in 信号索引", "", int, (0, 127), None),
+        tr("dI/dV lock-in 信号索引", "dI/dV lock-in signal index"), "", int, (0, 127), None),
     # 解调 X / Y 各自走哪一路 RT 信号 —— **接线事实,软件观测不到**,只能由用户
     # 填。AutoPhase 在两者缺一时直接拒绝而不是猜:猜错读到的是另一路信号,而由它
     # 算出来的相位角看上去一样合理,然后会被写进硬件。
     "lockin_x_signal_index": (
-        "解调 X 的 RT 信号索引(AutoPhase 用)", "", int, (0, 127), None),
+        tr(
+            "解调 X 的 RT 信号索引(AutoPhase 用)",
+            "RT signal index of demodulation X (used by AutoPhase)"), "", int, (0, 127), None),
     "lockin_y_signal_index": (
-        "解调 Y 的 RT 信号索引(AutoPhase 用)", "", int, (0, 127), None),
+        tr(
+            "解调 Y 的 RT 信号索引(AutoPhase 用)",
+            "RT signal index of demodulation Y (used by AutoPhase)"), "", int, (0, 127), None),
     "lockin_mod_amp_v": (
-        "dI/dV 调制幅度", "V", float, (0.0, 1.0), 0.02),
+        tr("dI/dV 调制幅度", "dI/dV modulation amplitude"), "V", float, (0.0, 1.0), 0.02),
     "lockin_mod_freq_hz": (
-        "dI/dV 调制频率", "Hz", float, (0.0, 1.0e5), 973.0),
+        tr("dI/dV 调制频率", "dI/dV modulation frequency"), "Hz", float, (0.0, 1.0e5), 973.0),
     "z_recede_min_nm": (
-        "退针方向自检: Z 伸长超过此阈值判定为远离", "nm", float, (0.0, 1.0e4), 1.0),
+        tr(
+            "退针方向自检: Z 伸长超过此阈值判定为远离",
+            "Retract direction self-check: Z extension above this threshold means "
+            "moving away"), "nm", float, (0.0, 1.0e4), 1.0),
 
     "z_settle_timeout_s": (
-        "退针自检: 等 Z 反馈稳定的预算上限", "s", float, (0.5, 300.0), 20.0),
+        tr(
+            "退针自检: 等 Z 反馈稳定的预算上限",
+            "Retract self-check: upper time budget for Z feedback to settle"), "s", float, (0.5, 300.0), 20.0),
     "retract_total_steps": (
-        "换样品退针总步数(粗动马达)", "步", int, (1, 1_000_000), 3000),
+        tr(
+            "换样品退针总步数(粗动马达)",
+            "Total retract steps for sample change (coarse motor)"), tr("步", "steps"), int, (1, 1_000_000), 3000),
     "retract_step_max": (
-        "单次粗动最大步数(Nanonis 硬件上限 1000)", "步", int, (1, 1000), 1000),
+        tr(
+            "单次粗动最大步数(Nanonis 硬件上限 1000)",
+            "Maximum steps per coarse move (Nanonis hardware limit 1000)"), tr("步", "steps"), int, (1, 1000), 1000),
     "approach_didv_engage_frac": (
-        "进针 dI/dV 判据: 达到标定值的此比例算接触在望", "", float, (0.0, 2.0), 0.7),
+        tr(
+            "进针 dI/dV 判据: 达到标定值的此比例算接触在望",
+            "Approach dI/dV criterion: contact is imminent at this fraction of "
+            "the calibrated value"), "", float, (0.0, 2.0), 0.7),
 
     "approach_p_gain_m": (
-        "进针 Z 比例增益 (Nanonis 面板 Proportional)", "m",
+        tr(
+            "进针 Z 比例增益 (Nanonis 面板 Proportional)",
+            "Approach Z proportional gain (Nanonis panel Proportional)"), "m",
         float, (1.0e-15, 1.0e-6), None),
     "approach_i_gain_m_per_s": (
-        "进针 Z 积分增益 (Nanonis 面板 Integral)", "m/s",
+        tr(
+            "进针 Z 积分增益 (Nanonis 面板 Integral)",
+            "Approach Z integral gain (Nanonis panel Integral)"), "m/s",
         float, (1.0e-12, 1.0e-3), None),
     "approach_setpoint_a": (
-        "进针电流设定点", "A", float, (1.0e-12, 1.0e-7), None),
+        tr("进针电流设定点", "Approach current setpoint"), "A", float, (1.0e-12, 1.0e-7), None),
 
     "approach_steps_per_cycle": (
-        "Auto Approach 每轮步数 (Number of Pulses)——**镜像值**:抄自 Nanonis 面板,"
-        "TCP 读不回也写不了;面板上改了这里不会自动跟,核对靠 "
-        "/api/diagnostics/screenshot", "步", int, (1, 1000), None),
+        tr(
+            "Auto Approach 每轮步数 (Number of Pulses)——**镜像值**:抄自 Nanonis 面板,"
+            "TCP 读不回也写不了;面板上改了这里不会自动跟,核对靠 "
+            "/api/diagnostics/screenshot",
+            "Auto Approach steps per cycle (Number of Pulses) -- **mirrored value**: "
+            "copied from the Nanonis panel; TCP can neither read nor write it, "
+            "so changes made on the panel do not follow here; verify with /api/diagnostics/screenshot"), tr("步", "steps"), int, (1, 1000), None),
     "approach_expected_steps": (
-        "进针预计总步数(用户经验值,用于判断是否异常)——**镜像/经验值**,"
-        "同样无法回读核对", "步",
+        tr(
+            "进针预计总步数(用户经验值,用于判断是否异常)——**镜像/经验值**,"
+            "同样无法回读核对",
+            "Expected total approach steps (user's empirical value, used to judge "
+            "whether something is abnormal) -- **mirrored / empirical value**, "
+            "also cannot be read back for verification"), tr("步", "steps"),
         int, (1, 1_000_000), None),
     # qPlus 振荡振幅 —— 独立于电流的撞针判据。
-    # 基线是「针尖自由振荡时的振幅」，撞针判据是「当前振幅 / 基线 < 10%」。
+    # 基线是「针尖未接触时的振幅」，撞针判据是「当前振幅 / 基线 < 10%」(激励开)或
+    # 「< 25%」(激励关、看残余振幅)。基线取于哪种激励状态记在
+    # _CALIB_KEYS 的 qplus_amplitude_baseline_excited 里,只与同态读数相比。
     # 上界给到 1e3 是因为不同机器上这条信号的单位不一样（V / nm / 无量纲刻度都见过），
     # 判据用的是比值，所以量纲无关；这里只拦明显不是读数的值。
     "qplus_amplitude_baseline": (
-        "qPlus 自由振荡振幅基线(撞针判据的分母)", "", float, (0.0, 1.0e3), None),
+        tr(
+            "qPlus 自由振荡振幅基线(撞针判据的分母)",
+            "qPlus free-oscillation amplitude baseline (denominator of the tip-crash "
+            "criterion)"), "", float, (0.0, 1.0e3), None),
     "qplus_amplitude_signal_index": (
-        "qPlus 振幅信号索引(-1 = 按通道名自动查找)", "", int, (-1, 127), -1),
+        tr(
+            "qPlus 振幅信号索引(-1 = 按通道名自动查找)",
+            "qPlus amplitude signal index (-1 = auto-detect by channel name)"), "", int, (-1, 127), -1),
     # ── 信号链 (2026-07-31, 针尖登记同批) ─────────────────────────────
     # 前置放大器的跨阻增益:电流 = 读数电压 / 增益。Nanonis 侧
     # ``Current_GainsGet`` 只给得到**索引**和一串标签,索引→实际 V/A 倍数的
@@ -84,7 +138,10 @@ _CONFIG_SPEC: dict[str, tuple[str, str, type, tuple[float, float], Any]] = {
     # 它错一个量级,MAST 报出去的每一个电流值就整体错一个量级,而且是静默的
     # (readback.GetMiscInstrumentConfig 的 docstring 早就写下了这句警告)。
     "preamp_gain_v_per_a": (
-        "前置放大器跨阻增益(电流 = 读数电压 / 此值)", "V/A",
+        tr(
+            "前置放大器跨阻增益(电流 = 读数电压 / 此值)",
+            "Preamplifier transimpedance gain (current = measured voltage / this "
+            "value)"), "V/A",
         float, (1.0e3, 1.0e13), None),
     # 前放的**可测最大电流** —— 与上面的增益是同一件事的两种说法
     # (满量程 ≈ ±10 V ÷ 增益)。分开存两个数是刻意的,理由有两条:
@@ -102,7 +159,9 @@ _CONFIG_SPEC: dict[str, tuple[str, str, type, tuple[float, float], Any]] = {
     # 导出**只给建议值**,不自动写入(见 instrument_init.derived_from_preamp:
     # 一条被程序悄悄改过的安全上限,就不再是用户声明过的那条线)。
     "preamp_full_scale_a": (
-        "前置放大器满量程电流(可测的最大电流)", "A",
+        tr(
+            "前置放大器满量程电流(可测的最大电流)",
+            "Preamplifier full-scale current (maximum measurable current)"), "A",
         float, (1.0e-12, 1.0e-2), None),
     # ── 扫描地图避让半径 (2026-07-30) ─────────────────────────────────
     # How much surface each kind of damage/contamination event costs us. These
@@ -115,27 +174,37 @@ _CONFIG_SPEC: dict[str, tuple[str, str, type, tuple[float, float], Any]] = {
     # Read by mast.io.map_analysis to decide where the tip may still go, so a
     # value that is too small silently walks the tip back into a ruined patch.
     "avoid_radius_tip_shape_nm": (
-        "修针尖避让半径(该点周围多大范围内不再扫图)", "nm", float,
+        tr(
+            "修针尖避让半径(该点周围多大范围内不再扫图)",
+            "Tip conditioning avoidance radius (no scans within this range around "
+            "the point)"), "nm", float,
         (0.0, 1.0e5), 30.0),
-    # 计划扫描范围要生成得更分散。
+    # Planned scan ranges should be generated more spread out.
     #
-    # 这个量一直存在（``map_analysis.AnalysisConfig.point_spacing_factor``），
-    # 只是从来没有人设过它 —— ``map_scope.build_analysis_config`` 不传，于是永远
-    # 是 1.2。1.2 的意思是「相邻帧留一条缝、不重叠」，也就是**尽可能挨着排**，
-    # 正是要求的不够分散。调到 3 就是每帧之间留两帧的空。
+    # The knob maps to ``map_analysis.AnalysisConfig.point_spacing_factor``; when
+    # ``map_scope.build_analysis_config`` does not pass it the default is 1.2,
+    # which means "leave a thin gap between adjacent frames, no overlap", i.e.
+    # packed as tightly as possible. A value of 3 leaves two frame widths
+    # between frames.
     #
     # 两个策略（center_first / perimeter_inward）都受它影响，所以这是「分散程度」
     # 这一个旋钮，不是第三种模式。真正的「最大分散」（最远点 / 泊松盘采样）是另
     # 一件事，需要新算法，见报告。
     "scan_spacing_factor": (
-        "计划扫描点的间距(相邻帧中心相距几个扫描框;1.2=紧挨着,3=留两帧空)", "",
+        tr(
+            "计划扫描点的间距(相邻帧中心相距几个扫描框;1.2=紧挨着,3=留两帧空)",
+            "Spacing of planned scan points (distance between adjacent frame centers "
+            "in scan frames; 1.2 = adjacent, 3 = two frames of gap)"), "",
         float, (1.0, 20.0), 1.2),
     "avoid_radius_pulse_nm": (
-        "电脉冲避让半径", "nm", float, (0.0, 1.0e5), 150.0),
+        tr("电脉冲避让半径", "Electrical pulse avoidance radius"), "nm", float, (0.0, 1.0e5), 150.0),
     "avoid_radius_crash_nm": (
-        "撞针避让半径", "nm", float, (0.0, 1.0e5), 150.0),
+        tr("撞针避让半径", "Tip crash avoidance radius"), "nm", float, (0.0, 1.0e5), 150.0),
     "avoid_radius_approach_nm": (
-        "进针扎痕避让半径(仅当「进针会扎表面」时生效)", "nm", float,
+        tr(
+            "进针扎痕避让半径(仅当「进针会扎表面」时生效)",
+            "Approach punch-mark avoidance radius (only when \"approach damages "
+            "the surface\")"), "nm", float,
         (0.0, 1.0e5), 200.0),
     # Optional, and honestly weak: a coarse piezo actuator has no position
     # feedback and its step size drifts with amplitude/temperature/load. Used
@@ -143,31 +212,56 @@ _CONFIG_SPEC: dict[str, tuple[str, str, type, tuple[float, float], Any]] = {
     # this far"; nothing navigates by it. Left None → the annotation is omitted
     # rather than invented.
     "xy_motor_step_m": (
-        "XY 粗动单步位移标定(可选;开环仅供估算)", "m", float, (0.0, 1.0e-3), None),
+        tr(
+            "XY 粗动单步位移标定(可选;开环仅供估算)",
+            "XY coarse step displacement calibration (optional; open loop, for "
+            "estimation only)"), "m", float, (0.0, 1.0e-3), None),
     # ── XY 粗动换区 (2026-07-31) ──────────────────────────────────────
     # 横向粗动前必须用**粗动马达**把针尖退开。压电退针只有 1–2 µm 余量,而样品台
     # 侧滑时的垂直跳动、样品倾斜、以及针尖本身的长度都远不止这个数。
     # 100 步是个起点,真值只能实机标(移一次、扫一张图、看有没有刮痕)。
     "xy_prewithdraw_steps": (
-        "横向粗动前的粗动退针步数(清障)", "步", int, (0, 100_000), 100),
+        tr(
+            "横向粗动前的粗动退针步数(清障)",
+            "Coarse retract steps before lateral coarse motion (clearance)"), tr("步", "steps"), int, (0, 100_000), 100),
     # 分块移动:每块之后回读电流(+qPlus 振幅)+重评真空。块越小看护越密,
     # 但每块都有一次 TCP 往返,太小会把一次换区拖成几分钟。
     "xy_move_chunk_steps": (
-        "横向粗动分块步数(每块之后做一次看护)", "步", int, (1, 1000), 50),
+        tr(
+            "横向粗动分块步数(每块之后做一次看护)",
+            "Lateral coarse motion chunk size in steps (a check is made after each "
+            "chunk)"), tr("步", "steps"), int, (1, 1000), 50),
     # 两个站点之间的最小步距。必须让新区域**完全**跳出压电量程(±1.5 µm),
     # 否则「换了区」其实只是把旧区域挪进视野。同样只能实机标。
     "xy_site_spacing_steps": (
-        "粗动站点最小间距", "步", int, (1, 1_000_000), 200),
-
+        tr("粗动站点最小间距", "Minimum spacing between coarse sites"), tr("步", "steps"), int, (1, 1_000_000), 200),
+    # 单轴行程预算。粗动台的行程是有限的,走到头只会空滑(无害)但位置认知全丢。
+    # ── 台阶高度(多针尖判据的尺子)────────────────────────────────────
+    #
+    # Au(111) 单原子台阶的**物理值**是 235.5 pm。但那是真实高度,而判据量的是
+    # **这台仪器读出来的高度** —— Z 未校准时读数可能有系统偏差,
+    # 按「金的读数同样差这么多」处理。
+    #
+    # ⚠️ 这个数是**尺子的零点**,不是一个可以随手调松的阈值:调大调小都会把
+    # 「整数倍台阶」这条判据整体平移,让单针尖读成劈裂或者反过来。
+    # 换扫描器 / 重新标定 Z 之后必须重测(拿一张干净的多台阶图,看相邻台面差)。
     "au_step_pm": (
-        "本机读出的 Au(111) 单原子台阶高度(多针尖判据用)", "pm",
+        tr(
+            "本机读出的 Au(111) 单原子台阶高度(多针尖判据用)",
+            "Au(111) monatomic step height measured on this machine (used by the "
+            "multi-tip criterion)"), "pm",
         float, (50.0, 500.0), 235.5),
     "xy_axis_step_budget": (
-        "单轴粗动行程预算(步)", "步", int, (1, 10_000_000), 10_000),
+        tr(
+            "单轴粗动行程预算(步)",
+            "Per-axis coarse travel budget (steps)"), tr("步", "steps"), int, (1, 10_000_000), 10_000),
     # 每步位移的相对不确定度。开环步进器的步长随驱动幅度/温度/负载漂移,
     # 里程表因此是个带模糊半径的估计,不是坐标。低温下这个值应当更大。
     "xy_step_uncertainty_frac": (
-        "粗动单步位移的相对不确定度(画模糊半径用)", "", float, (0.0, 1.0), 0.3),
+        tr(
+            "粗动单步位移的相对不确定度(画模糊半径用)",
+            "Relative uncertainty of coarse step displacement (used to draw the "
+            "blur radius)"), "", float, (0.0, 1.0), 0.3),
     # ── 粗动真空互锁 (2026-07-31) ─────────────────────────────────────
     # 在中间真空区(约 1e-3 … 10 mbar = 0.1 … 1000 Pa,Paschen 极小值附近)给粗动
     # 压电加几百伏会打火,电弧沿绝缘层爬过去就把叠堆废了。抽气和放气途中正好穿过
@@ -176,10 +270,15 @@ _CONFIG_SPEC: dict[str, tuple[str, str, type, tuple[float, float], Any]] = {
     # 默认上限 1e-2 Pa 比放电区下沿低一个数量级,而且在冷阴极规的量程之内;
     # 任何真实的 UHV STM 都远低于它。
     "coarse_motion_max_pressure_pa": (
-        "允许粗动的压强上限", "Pa", float, (0.0, 1.0e5), 1.0e-2),
+        tr(
+            "允许粗动的压强上限",
+            "Pressure limit for allowing coarse motion"), "Pa", float, (0.0, 1.0e5), 1.0e-2),
     # 几分钟前的读数不能给现在授权 —— 抽/放气时压强变化很快。
     "vacuum_reading_max_age_s": (
-        "真空计读数最长可用时长(超过即视为不可信)", "s", float, (1.0, 3600.0), 60.0),
+        tr(
+            "真空计读数最长可用时长(超过即视为不可信)",
+            "Maximum usable age of a vacuum gauge reading (older is treated as "
+            "untrustworthy)"), "s", float, (1.0, 3600.0), 60.0),
     # 规的**可用量程**。判据本身与规的型号无关 —— 型号相关的只有这两个数:
     # 读数只有落在量程内才算证据,出了量程(两端都算)规就不是在测量而是在饱和,
     # 饱和读数不是数据。DL-7 = 5e-8 … 1e-1 Pa。
@@ -187,14 +286,19 @@ _CONFIG_SPEC: dict[str, tuple[str, str, type, tuple[float, float], Any]] = {
     # 上端:到满量程附近意味着「超量程、判断不了」而不是「刚好卡在阈值下」——
     # DL-7 的帧解析不校验指数位,超量程可能解出一个看着合理的小数。
     "vacuum_gauge_full_scale_pa": (
-        "真空计满量程(到此附近视为超量程)", "Pa", float, (1.0e-9, 1.0e6), 1.0e-1),
+        tr(
+            "真空计满量程(到此附近视为超量程)",
+            "Vacuum gauge full scale (readings near it count as over-range)"), "Pa", float, (1.0e-9, 1.0e6), 1.0e-1),
     # 下端:规触底时发出的数(下限值/0/噪声)看起来正好像「真空非常好」。
     # 这在 DL-7 上无害(下限 5e-8 Pa 远低于允许上限,触底本来就意味着更安全),
     # 但在**粗糙真空规**(Pirani / 电容薄膜规,下限 ~0.5–1 Pa)上是 fail-open:
     # 触底只说明「低于 1 Pa」,而那包含 0.5 Pa —— 正在放电区里。
     # 所以判据不是「有没有触底」,而是「这只规的下限本身是否已经低于允许上限」。
     "vacuum_gauge_min_pa": (
-        "真空计量程下限(触底判据;粗糙真空规填 ~1 Pa)", "Pa", float,
+        tr(
+            "真空计量程下限(触底判据;粗糙真空规填 ~1 Pa)",
+            "Vacuum gauge range lower limit (floor criterion; enter ~1 Pa for a "
+            "rough gauge)"), "Pa", float,
         (1.0e-12, 1.0e6), 5.0e-8),
     # ── 扫描 / 自动调平的仪器事实 (2026-07-30) ─────────────────────────
     # 设计文档 docs/v2/design/scan_intelligence_scripted_rfc.md
@@ -206,31 +310,39 @@ _CONFIG_SPEC: dict[str, tuple[str, str, type, tuple[float, float], Any]] = {
     # (z_span = L·tanθ),这样同一个角度在 1 µm 帧和 10 nm 帧上自动给出不同的
     # 紧迫程度,不需要为粗扫/精扫各设一个角度阈值。
     "z_range_m": (
-        "Z 压电总量程", "m", float, (1.0e-9, 1.0e-4), 1.5e-6),
+        tr("Z 压电总量程", "Z piezo total range"), "m", float, (1.0e-9, 1.0e-4), 1.5e-6),
     # 单轴倾斜补偿的绝对上限。压电倾斜补偿把扫描平面转过来,转过头会吃掉 XY
     # 行程并让 Z 在帧角上打满;5° 对任何 STM 都已经是很大的失配角了。
     "tilt_limit_deg": (
-        "压电倾斜补偿绝对上限(单轴)", "°", float, (0.0, 45.0), 5.0),
+        tr(
+            "压电倾斜补偿绝对上限(单轴)",
+            "Absolute piezo tilt compensation limit (per axis)"), "°", float, (0.0, 45.0), 5.0),
     # 针尖横向速度上限。像素数、每线时间、帧宽单独看都合法,乘起来才知道针尖
     # 扫得多快 —— 这类组合约束由 scan_resolver 检查。
     "v_tip_max_m_s": (
-        "针尖横向扫描速度上限", "m/s", float, (1.0e-12, 1.0e-3), 2.0e-6),
+        tr("针尖横向扫描速度上限", "Tip lateral scan speed limit"), "m/s", float, (1.0e-12, 1.0e-3), 2.0e-6),
     # Z 读数的噪声底。留空 = 每次从数据现估(RANSAC 内点阈、圆拟合的台阶否决、
     # PI 整定验证都要用它)。填了就当本机的基准值,省掉每次估计。
     "z_noise_floor_m": (
-        "Z 噪声底(留空 = 每次从数据估计)", "m", float, (0.0, 1.0e-9), None),
+        tr(
+            "Z 噪声底(留空 = 每次从数据估计)",
+            "Z noise floor (leave empty = estimate from the data each time)"), "m", float, (0.0, 1.0e-9), None),
 }
 
 # Enumerated config — stored value MUST be one of the choices; else dropped.
 # key -> (中文标签, choices, {value: 显示文本}, 默认值).
 _CHOICE_SPEC: dict[str, tuple[str, tuple[str, ...], dict[str, str], str]] = {
     "retract_motor_dir": (
-        "退针方向(粗动马达 远离样品)", ("z+", "z-"),
-        {"z+": "Z+ (Nanonis 标准: 远离样品)", "z-": "Z- (反向装置)"},
+        tr("退针方向(粗动马达 远离样品)", "Retract direction (coarse motor away from sample)"), ("z+", "z-"),
+        {"z+": tr(
+            "Z+ (Nanonis 标准: 远离样品)",
+            "Z+ (Nanonis standard: away from sample)"), "z-": tr("Z- (反向装置)", "Z- (reversed setup)")},
         "z+"),
     "z_extend_sign": (
-        "压电伸长(趋向样品)对应 Z 读数符号", ("+1", "-1"),
-        {"+1": "伸长时 Z 增大", "-1": "伸长时 Z 减小"},
+        tr(
+            "压电伸长(趋向样品)对应 Z 读数符号",
+            "Z reading sign for piezo extension (toward sample)"), ("+1", "-1"),
+        {"+1": tr("伸长时 Z 增大", "Z increases on extension"), "-1": tr("伸长时 Z 减小", "Z decreases on extension")},
         "+1"),
     # ── 扫描地图策略能力 (2026-07-30) ─────────────────────────────────
     # Whether this rig can move to a fresh patch of surface at all. On a rig
@@ -238,19 +350,28 @@ _CHOICE_SPEC: dict[str, tuple[str, tuple[str, ...], dict[str, str], str]] = {
     # you will ever see until someone physically pulls the sample out, so
     # spending it well matters far more.
     "xy_coarse_motion": (
-        "是否有 XY 粗动马达(可换区)", ("yes", "no"),
-        {"yes": "有 — 可粗动换到新区域",
-         "no": "无 — 只能用当前压电范围内的表面(换区靠插拔样品)"},
+        tr(
+            "是否有 XY 粗动马达(可换区)",
+            "Whether there is an XY coarse motor (allows relocation)"), ("yes", "no"),
+        {"yes": tr("有 — 可粗动换到新区域", "Yes - can coarse-move to a new area"),
+         "no": tr(
+             "无 — 只能用当前压电范围内的表面(换区靠插拔样品)",
+             "No - only the surface within the current piezo range is usable (relocate "
+             "by swapping the sample)")},
         "yes"),
     # Some approach mechanisms tap the surface on the way in; good ones do not.
     # "unknown" is deliberately treated as "yes" downstream: the cost of
     # avoiding a dimple that was never made is a couple hundred nm of surface,
     # while the cost of scanning one is a wasted image and possibly the tip.
     "approach_damages_surface": (
-        "进针是否会在表面留下扎痕", ("yes", "no", "unknown"),
-        {"yes": "会 — 避开进针点",
-         "no": "不会(好机器) — 进针点只作历史记录",
-         "unknown": "未知 — 按保守处理(同「会」)"},
+        tr(
+            "进针是否会在表面留下扎痕",
+            "Whether approach leaves punch marks on the surface"), ("yes", "no", "unknown"),
+        {"yes": tr("会 — 避开进针点", "Yes - avoid the approach point"),
+         "no": tr(
+             "不会(好机器) — 进针点只作历史记录",
+             "No (good machine) - the approach point is only recorded for history"),
+         "unknown": tr("未知 — 按保守处理(同「会」)", "Unknown - treated conservatively (same as \"Yes\")")},
         "unknown"),
     # ── 进针要不要有人看着 (2026-08-04) ────────────────────────────────
     # 与上一条描述两种不同风险：
@@ -261,41 +382,112 @@ _CHOICE_SPEC: dict[str, tuple[str, tuple[str, ...], dict[str, str], str]] = {
     # 后者决定「agent 敢不敢自己发起进针」。⚠️ **本字段目前只注入给模型,不是硬门**
     # —— HITL 门是**构建时**从 safety_level 派生的(`AutoApproach` 现为 AUTO),
     # 运行时字段改不了它。要做成硬门需要在 AutoApproach 的入口加软门 + 重建图,
-    # 那是一次会改变硬件行为的改动,应当由用户拍板,不该随初始化页面顺手带上。
+    # 那是一次会改变硬件行为的改动,不应随初始化页面顺手带上。
     # 在那之前,如实告诉模型「这台机器进针必须有人在场」比什么都不说强,
-    # 而这一行本身也是**事实**不是劝说(见 既有教训:
-    # 物理安全判据属于要保留的事实那一类)。
+    # 而这一行本身是事实陈述,不是劝说(物理安全判据属于要保留的事实)。
     "approach_supervision": (
-        "进针是否需要有人在场", ("unattended", "attended", "unknown"),
-        {"unattended": "可无人值守 — 本机 Auto Approach 不扎针",
-         "attended": "必须有人在场 — 本机进针会撞/扎针,不可自主发起",
-         "unknown": "未知 — 按保守处理(同「必须有人在场」)"},
+        tr(
+            "进针是否需要有人在场",
+            "Whether approach needs an operator present"), ("unattended", "attended", "unknown"),
+        {"unattended": tr(
+            "可无人值守 — 本机 Auto Approach 不扎针",
+            "Can run unattended - Auto Approach on this machine does not crash "
+            "the tip"),
+         "attended": tr(
+             "必须有人在场 — 本机进针会撞/扎针,不可自主发起",
+             "Operator must be present - approach here can crash the tip, so it "
+             "must not be started autonomously"),
+         "unknown": tr(
+             "未知 — 按保守处理(同「必须有人在场」)",
+             "Unknown - treated conservatively (same as \"Operator must be present\")")},
         "unknown"),
-
+    # ── 进针途中盯 qPlus 振幅 (2026-11-03) ─────────────────────────────
+    # AutoApproach 在起跑前取一个静止基线,等待相里一边轮询模块一边读振幅;振幅归零
+    # (激励关:单次 < 25% 或连续两次 < 50% 基线;激励开:连续两次 < 10%)就停模块并退针。
+    # 这是**加法**:电流判停、Z 进展、超时一样都不少。默认开,因为它的失效方向是
+    # 「多停一次进针」;给开关是因为一台残余振幅在隧穿距离上也会掉的机器,会被它
+    # 反复停在设定点前后 —— 那时让操作员关掉,比让每次进针都失败强。
+    "approach_qplus_watch": (
+        tr(
+            "进针途中盯 qPlus 振幅(归零即停进针并退针)",
+            "Watch the qPlus amplitude during approach (stop and withdraw when it "
+            "drops to zero)"), ("on", "off"),
+        {"on": tr(
+            "开 — 起跑前取静止基线,途中振幅归零就停模块并退针(默认)",
+            "On - take an at-rest baseline before starting; stop the module and "
+            "withdraw if the amplitude drops to zero on the way (default)"),
+         "off": tr(
+             "关 — 进针只靠电流判停(本机残余振幅在隧穿距离上也会掉时用)",
+             "Off - the approach relies on the current stop only (use when this "
+             "machine's residual amplitude also drops at tunnelling distance)")},
+        "on"),
+    # Where to put the next scan. Two genuinely different optima:
+    #   center_first      — the scan tube creeps least near the centre of its
+    #                       range, so if you can coarse-move to a fresh area
+    #                       you should always image at the middle of the frame.
+    #   perimeter_inward  — outer ring → middle ring → inner ring. On a rig that
+    #                       cannot relocate, tip-forming debris eats the usable
+    #                       area from wherever you worked, so a fixed
+    #                       outside-in route keeps the largest contiguous clean
+    #                       region available for the longest time.
+    # 拿不到可信压强时怎么办。出厂默认 off(不阻断,裁决仍计算并报告);
+    # 装了真空计的机器可改为 gauge_or_attest / gauge_only 启用阻断。
+    #   gauge_or_attest —— 有效读数放行;否则看用户有没有签「当前气压安全」
+    #                      (带 TTL,进程内,重启即失效)。装了真空计的机器全自动,
+    #                      没装的机器要人签一次。
+    #   gauge_only      —— 只认真空计,不接受签署。
+    #   off             —— 不阻断,**但仍然计算并报告裁决** ——「我们选择不检查」
+    #                      要留得下痕迹,不能悄悄变成「没什么可检查的」。
     "vacuum_interlock_mode": (
-        "粗动真空互锁模式", ("gauge_or_attest", "gauge_only", "off"),
-        {"gauge_or_attest": "真空计优先,读不到时可由用户签署(默认)",
-         "gauge_only": "只认真空计 — 读不到就绝不粗动",
-         "off": "关闭阻断 — 仍记录裁决,风险由人承担"},
-        "gauge_or_attest"),
+        tr(
+            "粗动真空互锁模式",
+            "Coarse-motion vacuum interlock mode"), ("gauge_or_attest", "gauge_only", "off"),
+        {"gauge_or_attest": tr(
+            "真空计优先,读不到时可由用户签署",
+            "Gauge first; the user may attest when it cannot be read"),
+         "gauge_only": tr(
+             "只认真空计 — 读不到就绝不粗动",
+             "Gauge only - never move coarse if it cannot be read"),
+         "off": tr(
+             "关闭阻断 — 仍记录裁决,风险由人承担(默认)",
+             "Blocking off - verdicts are still recorded, risk is on the operator "
+             "(default)")},
+        "off"),
     "scan_path_strategy": (
-        "扫描选点策略", ("auto", "center_first", "perimeter_inward"),
-        {"auto": "自动 — 按有无 XY 粗动推导",
-         "center_first": "中心优先 — 压电蠕变最小",
-         "perimeter_inward": "外圈→内圈 — 可用面积利用最大化"},
+        tr("扫描选点策略", "Scan site selection strategy"), ("auto", "center_first", "perimeter_inward"),
+        {"auto": tr("自动 — 按有无 XY 粗动推导", "Auto - derived from whether XY coarse motion exists"),
+         "center_first": tr("中心优先 — 压电蠕变最小", "Center first - minimal piezo creep"),
+         "perimeter_inward": tr(
+             "外圈→内圈 — 可用面积利用最大化",
+             "Perimeter inward - maximises use of the available area")},
         "auto"),
 
     "lockin_readout_form": (
-        "lock-in 解调形式(登记的那个信号是什么)", ("xy", "r_phi", "unknown"),
-        {"xy": "X / Y（带符号投影 —— 需要先把相位调到信号全落在 X 上）",
-         "r_phi": "R / Φ（幅度 —— 恒为正，随接近单调增大）",
-         "unknown": "未声明 — 判据只报绝对值，不声称它是幅度"},
+        tr(
+            "lock-in 解调形式(登记的那个信号是什么)",
+            "Lock-in demodulation form (what the registered signal is)"), ("xy", "r_phi", "unknown"),
+        {"xy": tr(
+            "X / Y（带符号投影 —— 需要先把相位调到信号全落在 X 上）",
+            "X / Y (signed projection - the phase must first be adjusted so the "
+            "whole signal falls on X)"),
+         "r_phi": tr(
+             "R / Φ（幅度 —— 恒为正，随接近单调增大）",
+             "R / Φ (amplitude - always positive, increases monotonically on approach)"),
+         "unknown": tr(
+             "未声明 — 判据只报绝对值，不声称它是幅度",
+             "Not declared - the criterion reports only the absolute value and does "
+             "not claim it is an amplitude")},
         "unknown"),
     "bias_applied_to": (
-        "偏压加在哪一侧", ("sample", "tip", "unknown"),
-        {"sample": "样品 — 常规约定(正偏压探测样品空态)",
-         "tip": "针尖 — 符号与常规整体反号",
-         "unknown": "未声明 — 注入块会明确告知模型「不知道」"},
+        tr("偏压加在哪一侧", "Which side the bias is applied to"), ("sample", "tip", "unknown"),
+        {"sample": tr(
+            "样品 — 常规约定(正偏压探测样品空态)",
+            "Sample - conventional (positive bias probes empty sample states)"),
+         "tip": tr("针尖 — 符号与常规整体反号", "Tip - all signs reversed relative to convention"),
+         "unknown": tr(
+             "未声明 — 注入块会明确告知模型「不知道」",
+             "Not declared - the injected block tells the model explicitly that "
+             "it does not know")},
         "unknown"),
 }
 
@@ -307,7 +499,7 @@ _CHOICE_SPEC: dict[str, tuple[str, tuple[str, ...], dict[str, str], str]] = {
 # calib 键也只回显 typeof === "number",字符串会在下一次任意设置保存时被静默
 # 抹掉。自由文本需要独立的类型处理和前端回显。
 _TEXT_SPEC: dict[str, tuple[str, int]] = {
-    "preamp_model": ("前置放大器型号", 120),
+    "preamp_model": (tr("前置放大器型号", "Preamplifier model"), 120),
 }
 
 # Learned calibration — WRITTEN BY THE RUNTIME (set_calibration), not the UI.
@@ -340,6 +532,13 @@ _CALIB_KEYS: tuple[str, ...] = (
     "qplus_f0_measured_hz",  # PLL 频率扫描测得的共振频率
     "qplus_q_measured",      # 同次扫描测得的 Q
     "qplus_fq_updated_at",   # unix ts
+    # ── qPlus 振幅基线的两个伴随量 (2026-11-03, ReadTipOscillationAmplitude 写入) ──
+    # 基线本身仍是 _CONFIG_SPEC 的 qplus_amplitude_baseline(历史原因,见上);这两个
+    # 是运行时写的,所以在这里。excited = 取基线时音叉有没有被驱动(1.0 / 0.0),
+    # 撞针判据只与同一激励状态下的读数相比 —— 拿未驱动读数比驱动基线会误报。
+    # sigma = 取基线那几次读数的稳健散布(1.4826·MAD),散布太大的基线会被拒绝。
+    "qplus_amplitude_baseline_excited",
+    "qplus_amplitude_baseline_sigma",
 )
 
 #: 倾斜响应矩阵的四个元素(按行)。
@@ -382,6 +581,8 @@ TIP_BOUND_KEYS: tuple[str, ...] = (
     "didv_cal_mod_amp_v",
     "didv_cal_updated_at",
     "qplus_amplitude_baseline",   # ← _CONFIG_SPEC 键
+    "qplus_amplitude_baseline_excited",   # 与基线同生同灭
+    "qplus_amplitude_baseline_sigma",
     "qplus_f0_measured_hz",
     "qplus_q_measured",
     "qplus_fq_updated_at",
@@ -538,6 +739,32 @@ def get_retract_dir_code() -> int:
     return _MOTOR_DIR_CODE.get(str(get_config("retract_motor_dir", "z+")), 4)
 
 
+def retract_dir_code_or_none() -> "int | None":
+    """同一个方向码（粗动马达「远离样品」），但**本机没声明过就返回 None**，不返回出厂值。
+
+    与 :func:`z_extend_sign_or_none` 同一个坑、**不同的约定**：``retract_motor_dir``
+    （粗动马达朝哪边走是远离样品）与 ``z_extend_sign``（压电伸长时 Z 读数的符号）是两件
+    独立的接线事实，谁也推不出谁。出厂 ``"z+"`` 是两个互斥答案里的一个 ——
+    粗动反装（Z− 才远离样品）而从没声明过的机器上，出厂值给出的正是**朝样品**的方向；
+    ``get_retract_dir_code()`` 把「没人回答过」和「有人回答了 z+」压成同一个返回值。
+
+    凡是靠这个方向决定往哪边走、或据此**放行**运动的地方用这个读法 —— 例如 MotorMove
+    把 ``z-retract`` / ``z-approach`` 换算成 Z+ / Z−（``skills/builtins/motor.py``），
+    没声明时它按 Nanonis 标准走并在结果里警告。只读不改：``get_retract_dir_code()``
+    与它的既有调用方保持原样。
+
+    判据同 ``z_extend_sign_or_none``：值在不在 ``_profile`` 里。成立的前提是「键在
+    ``_profile`` 里 ⇔ 有人明确选过」—— 设置页只保存明确的选择（保存时只回显已存过的
+    枚举键）。没声明时界面怎么显示与此无关：7.0.1 的设置页在下拉框里显示出厂值，之后的
+    版本显示「（未声明）」占位；两种界面都只在有人明确选择时才写盘。
+    """
+    with _lock:
+        raw = _profile.get("retract_motor_dir")
+    if raw is None:
+        return None
+    return _MOTOR_DIR_CODE.get(str(raw).strip())
+
+
 def get_z_extend_sign() -> int:
     """+1 if piezo extension (toward sample) shows as INCREASING Z, else -1.
 
@@ -555,13 +782,53 @@ def get_z_extend_sign() -> int:
 
 
 def z_extend_sign_or_none() -> "int | None":
-    """读取显式登记的 Z 伸长方向：+1、-1；未声明或无效时返回 None。
-    
-    方向取决于目标仪器的接线，不能由出厂显示值推断。退针自检与有向余量
-    均依赖此符号，因此同一符号的下游解释不能反过来证明它正确。
-    核验应使用未经方向翻译的原始 Z 读数与已知动作。
-    
-    只有实际保存在 _profile 中的声明才算已配置；UI 的默认显示不构成声明。
+    """同一个符号，但**本机没声明过就返回 None**，不返回出厂值。
+
+    为什么要有第二个读法：``z_extend_sign`` 的出厂默认是 ``"+1"``，
+    而出厂默认在这一项上**不是中性的** —— 它是两个互斥答案里的一个，
+    ``get_z_extend_sign()`` 把「没人回答过」和「有人回答了 +1」压成同一个返回值。
+    有的机器的正确值是 ``-1``，也就是说：**从没配过的机器上，
+    出厂值给出的可能正是相反的那个方向。**
+
+    ⚠️ 这个符号**不随温度翻转**：量程随降温减半，符号不变。
+
+
+
+
+
+    ⇒ **这一族错误的通用形态：**
+    仓里那些中文标注（「Z 压电伸长 N nm」「−360 nm 收回端」「方向其实是好的」）
+    **全都是这个符号的下游产物** —— 它们由 ``* z_extend_sign`` 或由它翻译出的
+    ``receding`` 算出来。**下游产物不能用来证明上游假设。**
+    能证明这个符号的只有**未经解释的原始读数**：
+    ``WithdrawTip`` 之后停在哪一轨、以及反馈开着空追时往哪一侧跑。
+
+    ⇒ 出厂默认仍然不中性（有的机器的正确值是 ``-1``，而默认给 ``+1``），
+    「没声明就不许判」这条依然成立 —— **只是理由是「默认值本来就可能不对」，
+    不是「它会随温度变」**。（若哪天真的观测到翻转，请用上面那两种**原始读数**
+    立论，不要引用任何带「伸长 / 收回」字样的既有标注。）
+
+    危害等级取决于下游拿它去做什么。**不能把退针自检划到
+    「可以猜」那一档**，有人会以为「那条链上还有分级退针的
+    兜底(第一级只走 1 步就回读)」——
+
+    **那个兜底就是 ``_judge_recede`` 本身，而它读的正是这个符号。**
+    第一级走 1 步、回读 Z、翻译成「远离还是靠近」，翻译用的就是它。符号反了，
+    1 步探针会自信地报 ``receding``，梯子照常爬到 10 步、89 步 ——
+    「被保护的东西」和「保护它的东西」是同一个机制，那不叫兜底。
+    (既有教训：发现一个「看着在防护其实没有」就当场扫同形状。)
+
+    ⇒ 所以**两类都必须能说「不知道」**，两类的代价也是同一句话：
+
+    * 退针/清障的方向自检 —— 反了就把一次正确的退针判成逼近(烦，安全)，
+      **而把一次真正的逼近判成退针，然后放行几百步粗动**(往样品里送)；
+    * 有向余量 —— 反了就把「该退」说成「该进」，同样是往样品里送。
+
+    判据是**内容判据**：值在不在 ``_profile`` 里。成立的前提是「键在 ``_profile`` 里 ⇔
+    有人明确选过」—— 设置页只保存明确的选择（``SettingsPage`` 保存时只回显**已存过**的
+    枚举键）。没声明时界面怎么显示与此无关：7.0.1 的设置页在下拉框里显示出厂值 ``+1``，
+    之后的版本显示「（未声明）」占位；两种界面都只在有人明确选择时才写盘。
+    （这一点是这个函数能成立的前提，被 ``test_z_extend_sign_tri_state`` 钉住。）
     """
     with _lock:
         raw = _profile.get("z_extend_sign")
@@ -585,6 +852,19 @@ def approach_damages_surface() -> bool:
     couple hundred nanometres of surface; being wrong the other way costs a
     wasted image on a dimple and possibly the tip."""
     return str(get_config("approach_damages_surface", "unknown")).strip().lower() != "no"
+
+
+def approach_qplus_watch_enabled() -> bool:
+    """True unless the operator switched the approach-time amplitude watch off.
+
+    Anything other than an explicit "off" — including an unreadable profile —
+    keeps it on: the watch only ever adds a stop, so the cost of leaving it on
+    by mistake is one stopped approach, while the cost of a silent "off" is the
+    crash it exists to catch."""
+    try:
+        return str(get_config("approach_qplus_watch", "on")).strip().lower() != "off"
+    except Exception:  # noqa: BLE001
+        return True
 
 
 def get_scan_path_strategy() -> str:
@@ -961,7 +1241,7 @@ def _format_approach_supervision_line(cfg) -> str:
 
     ⚠️ 这是**注入**不是门。HITL 门在 graph build 时从 ``safety_level`` 派生
     （``AutoApproach`` 现为 AUTO），运行时字段改不了它。把它做成硬门需要在技能
-    入口加软门并重建图，那是一次改变硬件行为的改动，该由用户拍板。
+    入口加软门并重建图，那是一次改变硬件行为的改动，需单独评审。
     """
     mode = str(cfg("approach_supervision") or "unknown").strip().lower()
     if mode == "unattended":
@@ -1082,10 +1362,12 @@ __all__ = [
     "get_profile",
     "get_config",
     "get_retract_dir_code",
+    "retract_dir_code_or_none",
     "get_z_extend_sign",
     "z_extend_sign_or_none",
     "has_xy_coarse_motion",
     "approach_damages_surface",
+    "approach_qplus_watch_enabled",
     "get_scan_path_strategy",
     "get_calibration",
     "set_calibration",

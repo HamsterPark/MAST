@@ -9,6 +9,7 @@ mast.knowledge.skill_guidance and is re-exported here for backward compat.
 
 from __future__ import annotations
 
+from mast.i18n import tr
 from mast.knowledge.skill_guidance import (  # noqa: F401
     SKILL_EXTRA,
     DECISION_TREES,
@@ -24,8 +25,8 @@ from mast.knowledge.skill_guidance import (  # noqa: F401
 DOMAINS: list[dict] = [
     {
         "id": "bias_current",
-        "name": "偏压与电流",
-        "desc": "读写偏压电压和隧穿电流，是所有 STM 操作的基础参量。",
+        "name": tr("偏压与电流", "Bias and current"),
+        "desc": tr("读写偏压电压和隧穿电流，是所有 STM 操作的基础参量。", "Read and write bias voltage and tunneling current, the basic quantities of every STM operation."),
         "skills": [
             "GetBias", "SetBias", "GetCurrent", "BiasPulse", "SetCurrentGain",
             "GetBiasCalibration", "SetBiasCalibration", "SetBiasRange",
@@ -34,8 +35,8 @@ DOMAINS: list[dict] = [
     },
     {
         "id": "z_control",
-        "name": "Z控制",
-        "desc": "Z 轴压电位置和反馈控制器管理。",
+        "name": tr("Z控制", "Z control"),
+        "desc": tr("Z 轴压电位置和反馈控制器管理。", "Z-axis piezo position and feedback controller management."),
         "skills": [
             "GetZPosition", "SetSetpoint", "ZControllerOnOff", "GetZCtrlGain", "SetZCtrlGain",
             "SetZPosition", "SetTipLift", "GetTipLift",
@@ -45,8 +46,8 @@ DOMAINS: list[dict] = [
     },
     {
         "id": "scanning",
-        "name": "扫描成像",
-        "desc": "配置扫描帧、速度，执行扫描。FullScan 是一步组合。",
+        "name": tr("扫描成像", "Scanning and imaging"),
+        "desc": tr("配置扫描帧、速度，执行扫描。FullScan 是一步组合。", "Configure the scan frame and speed, and run scans. FullScan is the one-step composite."),
         "skills": [
             "ConfigureScan", "SetScanSpeed", "StartScan", "StopScan", "FullScan",
             "GetScanFrame", "GetScanSpeed", "GetScanBuffer", "SaveScan",
@@ -56,8 +57,8 @@ DOMAINS: list[dict] = [
     },
     {
         "id": "navigation",
-        "name": "导航",
-        "desc": "使用 Follow Me 功能移动针尖到指定 XY 坐标。",
+        "name": tr("导航", "Navigation"),
+        "desc": tr("使用 Follow Me 功能移动针尖到指定 XY 坐标。", "Move the tip to a given XY coordinate with the Follow Me function."),
         "skills": [
             "MoveToXY", "MotorMove", "MotorGetPos", "StopMotor",
             "MotorMoveClosedLoop", "GetMotorStepCounter", "SetMotorFreqAmp",
@@ -68,8 +69,8 @@ DOMAINS: list[dict] = [
     },
     {
         "id": "tip_management",
-        "name": "针尖管理",
-        "desc": "针尖安全操作和修针。从简单到复杂：SafeRetract < TipPulse < ConditionTip < ConditionTip_DQN。",
+        "name": tr("针尖管理", "Tip management"),
+        "desc": tr("针尖安全操作和修针。从简单到复杂：SafeRetract < TipPulse < ConditionTip < ConditionTip_DQN。", "Safe tip operations and tip conditioning. From simple to complex: SafeRetract < TipPulse < ConditionTip < ConditionTip_DQN."),
         "skills": [
             "SafeRetract", "EmergencyRetract", "WithdrawTip", "AutoApproach",
             "TipPulse", "ConditionTip", "ConditionTip_DQN",
@@ -79,8 +80,8 @@ DOMAINS: list[dict] = [
     },
     {
         "id": "spectroscopy",
-        "name": "谱学",
-        "desc": "STS 偏压谱、Z 谱以及网格/自适应谱采集。",
+        "name": tr("谱学", "Spectroscopy"),
+        "desc": tr("STS 偏压谱、Z 谱以及网格/自适应谱采集。", "STS bias spectra, Z spectra, and grid / adaptive spectrum acquisition."),
         "skills": [
             "ConfigureSTS", "AcquireSTS", "ConfigureZSpectr", "AcquireZSpectr",
             "GridSTS", "AdaptiveSTS_GP",
@@ -103,8 +104,8 @@ DOMAINS: list[dict] = [
     },
     {
         "id": "lockin_sweep",
-        "name": "锁相与扫频",
-        "desc": "Lock-in 放大器调制配置、偏压扫描和频率扫描。",
+        "name": tr("锁相与扫频", "Lock-in and sweeps"),
+        "desc": tr("Lock-in 放大器调制配置、偏压扫描和频率扫描。", "Lock-in amplifier modulation setup, bias sweeps and frequency sweeps."),
         "skills": [
             "ConfigureLockIn", "ConfigureBiasSweep", "AcquireBiasSweep",
             "ConfigureLockInSweep", "AcquireLockInSweep",
@@ -134,8 +135,8 @@ DOMAINS: list[dict] = [
     },
     {
         "id": "data_processing",
-        "name": "数据处理",
-        "desc": "离线图像后处理：平面扣除、行校正、漂移估计、空白区域搜索。",
+        "name": tr("数据处理", "Data processing"),
+        "desc": tr("离线图像后处理：平面扣除、行校正、漂移估计、空白区域搜索。", "Offline image post-processing: plane subtraction, line leveling, drift estimation, empty-area search."),
         "skills": [
             "SubtractPlane_RANSAC", "LevelLines_Median", "CorrectDrift_XCorr", "FindEmptySpot",
             "Destripe_MorphOpen", "SubtractPoly2D", "DeconvolveTip_RL", "Denoise_AE",
@@ -145,8 +146,8 @@ DOMAINS: list[dict] = [
     },
     {
         "id": "image_analysis",
-        "name": "图像分析",
-        "desc": "图像质量评估、针尖状态判断、区域分割、原子检测。",
+        "name": tr("图像分析", "Image analysis"),
+        "desc": tr("图像质量评估、针尖状态判断、区域分割、原子检测。", "Image quality assessment, tip state judgement, region segmentation, atom detection."),
         "skills": [
             "AssessImageQuality", "AssessTip_VGG", "AssessTip_ResNet",
             "SegmentRegion_UNet", "DetectAtoms_FCN",
@@ -155,26 +156,26 @@ DOMAINS: list[dict] = [
     },
     {
         "id": "molecular_recognition",
-        "name": "分子结构识别",
-        "desc": "从 STM 图像预测分子结构或拓扑类型。需要预训练模型。",
+        "name": tr("分子结构识别", "Molecular structure recognition"),
+        "desc": tr("从 STM 图像预测分子结构或拓扑类型。需要预训练模型。", "Predict molecular structure or topology type from STM images. Needs a pretrained model."),
         "skills": ["PredictStructure_ASD", "IdentifyTopology_CARP"],
     },
     {
         "id": "spectral_analysis",
-        "name": "谱分析",
-        "desc": "dI/dV 谱线型拟合：Fano/Frota-Fano（Kondo）和 BCS 超导能隙。",
+        "name": tr("谱分析", "Spectrum analysis"),
+        "desc": tr("dI/dV 谱线型拟合：Fano/Frota-Fano（Kondo）和 BCS 超导能隙。", "dI/dV line-shape fitting: Fano/Frota-Fano (Kondo) and BCS superconducting gap."),
         "skills": ["FitFano_Kondo", "FitGap_BCS", "UnmixSpectra", "PredictSpectrumFromTopo"],
     },
     {
         "id": "optimization",
-        "name": "参数优化",
-        "desc": "贝叶斯优化自动调参，搜索最佳原子分辨率。",
+        "name": tr("参数优化", "Parameter optimization"),
+        "desc": tr("贝叶斯优化自动调参，搜索最佳原子分辨率。", "Bayesian optimization for automatic tuning, searching for the best atomic resolution."),
         "skills": ["OptimizeResolution_BO"],
     },
     {
         "id": "autonomous",
-        "name": "自主工作流",
-        "desc": "多步自主流程：区域搜索、多区域巡查、持续成像。",
+        "name": tr("自主工作流", "Autonomous workflows"),
+        "desc": tr("多步自主流程：区域搜索、多区域巡查、持续成像。", "Multi-step autonomous flows: area search, multi-area survey, continuous imaging."),
         "skills": [
             "FindGoodRegion_Heuristic", "FindGoodRegion_UNet",
             "AutonomousSurvey_Scanbot", "ContinuousImaging_Auto",
@@ -182,14 +183,14 @@ DOMAINS: list[dict] = [
     },
     {
         "id": "atom_manipulation",
-        "name": "原子操纵",
-        "desc": "单原子搬运和表面化学反应。高危操作。",
+        "name": tr("原子操纵", "Atom manipulation"),
+        "desc": tr("单原子搬运和表面化学反应。高危操作。", "Single-atom manipulation and on-surface chemical reactions. High-risk operations."),
         "skills": ["AtomManip_SAC", "AutoOSS_Dehalogenation"],
     },
     {
         "id": "safety",
-        "name": "安全",
-        "desc": "安全联锁和针尖保护机制。",
+        "name": tr("安全", "Safety"),
+        "desc": tr("安全联锁和针尖保护机制。", "Safety interlocks and tip protection mechanisms."),
         "skills": [
             "EnableSafeTip", "GetSafeTipStatus",
             "GetAutoApproachStatus", "GetSafeTipProps", "GetSafeTipSignal",
@@ -197,8 +198,8 @@ DOMAINS: list[dict] = [
     },
     {
         "id": "utility",
-        "name": "工具",
-        "desc": "UI 锁定、设置保存、漂移补偿等通用工具。",
+        "name": tr("工具", "Utilities"),
+        "desc": tr("UI 锁定、设置保存、漂移补偿等通用工具。", "General utilities such as UI locking, saving settings and drift compensation."),
         "skills": [
             "LockNanonisUI", "SaveSettings", "SetDriftCompensation", "GetDriftCompensation",
             "GetAcqPeriod", "LoadLayout", "SaveLayout",
@@ -215,14 +216,14 @@ DOMAINS: list[dict] = [
     },
     {
         "id": "feedback",
-        "name": "反馈",
-        "desc": "扫描前检查和漂移追踪等反馈监控功能。",
+        "name": tr("反馈", "Feedback"),
+        "desc": tr("扫描前检查和漂移追踪等反馈监控功能。", "Feedback monitoring such as pre-scan checks and drift tracking."),
         "skills": ["PreScanCheck", "TrackDrift_ReferenceScan"],
     },
     {
         "id": "optics_bench",
-        "name": "光学平台",
-        "desc": "TERS/THz 光学部分：位移台、泵浦-探测延迟线与延迟扫描（非 Nanonis 硬件）。",
+        "name": tr("光学平台", "Optics stage"),
+        "desc": tr("TERS/THz 光学部分：位移台、泵浦-探测延迟线与延迟扫描（非 Nanonis 硬件）。", "TERS/THz optics: translation stages, pump-probe delay line and delay scans (not Nanonis hardware)."),
         "skills": [
             "ListOpticalDevices", "OpticalStageGetPos", "OpticalStageMove",
             "OpticalStageWiggle", "StopOpticalStage", "HomeOpticalStage",
@@ -288,14 +289,14 @@ SKILL_AGENT: dict[str, str] = {
 #
 # (agent_id, 中文+缩写 label) in workflow order.
 AGENT_ORDER: list[tuple[str, str]] = [
-    ("literature",          "文献 LIT"),
-    ("experiment_design",   "实验设计 XD"),
-    ("instrument_control",  "仪器控制 IC"),
-    ("data_processing",     "数据处理 DP"),
-    ("paper_writing",       "论文写作 PW"),
-    ("paper_review",        "论文审稿 PR"),
-    ("buffer_summarizer",   "视觉摘要 BUF"),
-    ("_supervisor",         "编排 SUP"),
+    ("literature",          tr("文献 LIT", "Literature LIT")),
+    ("experiment_design",   tr("实验设计 XD", "Experiment design XD")),
+    ("instrument_control",  tr("仪器控制 IC", "Instrument control IC")),
+    ("data_processing",     tr("数据处理 DP", "Data processing DP")),
+    ("paper_writing",       tr("论文写作 PW", "Paper writing PW")),
+    ("paper_review",        tr("论文审稿 PR", "Paper review PR")),
+    ("buffer_summarizer",   tr("视觉摘要 BUF", "Visual summary BUF")),
+    ("_supervisor",         tr("编排 SUP", "Orchestration SUP")),
 ]
 
 # Agents that actually OWN registry skills today (SkillRegistry.list_skills()
@@ -350,12 +351,12 @@ _PAPER = {
 def get_source(skill_name: str) -> str:
     """Return source label for a skill: '内置' / '组合' / '论文'."""
     if skill_name in _BUILTIN:
-        return "内置"
+        return tr("内置", "Built-in")
     if skill_name in _COMPOSITE:
-        return "组合"
+        return tr("组合", "Composite")
     if skill_name in _PAPER:
-        return "论文"
-    return "自定义"
+        return tr("论文", "Paper")
+    return tr("自定义", "Custom")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -384,15 +385,15 @@ COMPOSITE_HIERARCHY: dict[str, list[str]] = {
 # ═══════════════════════════════════════════════════════════════════════
 
 INTENT_MAPPING: list[dict] = [
-    {"keywords": "扫描 / 拍照 / 成像", "skill": "FullScan", "note": "一步完成"},
-    {"keywords": "偏压 / 电压", "skill": "GetBias / SetBias", "note": "读/写"},
-    {"keywords": "电流 / 隧穿", "skill": "GetCurrent", "note": "只读"},
+    {"keywords": "扫描 / 拍照 / 成像", "skill": "FullScan", "note": tr("一步完成", "one step")},
+    {"keywords": "偏压 / 电压", "skill": "GetBias / SetBias", "note": tr("读/写", "read/write")},
+    {"keywords": "电流 / 隧穿", "skill": "GetCurrent", "note": tr("只读", "read-only")},
     {"keywords": "setpoint / 设定值", "skill": "SetSetpoint", "note": ""},
-    {"keywords": "移动 / 去 / 位置", "skill": "MoveToXY", "note": "需 z_controller_on"},
+    {"keywords": "移动 / 去 / 位置", "skill": "MoveToXY", "note": tr("需 z_controller_on", "needs z_controller_on")},
     {"keywords": "STS / 谱 / dI/dV", "skill": "ConfigureSTS + AcquireSTS", "note": ""},
-    {"keywords": "网格谱 / 谱映射", "skill": "GridSTS / AdaptiveSTS_GP", "note": "均匀 vs 自适应"},
+    {"keywords": "网格谱 / 谱映射", "skill": "GridSTS / AdaptiveSTS_GP", "note": tr("均匀 vs 自适应", "uniform vs adaptive")},
     {"keywords": "Z谱 / I(z)", "skill": "ConfigureZSpectr + AcquireZSpectr", "note": ""},
-    {"keywords": "修针 / 针尖不好", "skill": "TipPulse -> ConditionTip", "note": "分级升级"},
+    {"keywords": "修针 / 针尖不好", "skill": "TipPulse -> ConditionTip", "note": tr("分级升级", "graded escalation")},
     {"keywords": "退针 / 缩回", "skill": "SafeRetract", "note": ""},
     {"keywords": "紧急 / 停止", "skill": "EmergencyRetract / StopScan", "note": ""},
     {"keywords": "逼近 / 进针", "skill": "AutoApproach", "note": ""},
@@ -417,71 +418,74 @@ INTENT_MAPPING: list[dict] = [
 #  Skill Verification Status
 # ═══════════════════════════════════════════════════════════════════════
 
+_VERIFIED_SIM = tr("模拟器验证", "Simulator-verified")
+_UNVERIFIED = tr("未验证", "Unverified")
+
 SKILL_VERIFICATION: dict[str, str] = {
     # -- Bias & Current (verified via test_full_system G1/G3) --
-    "GetBias": "模拟器验证",
-    "SetBias": "模拟器验证",
-    "GetCurrent": "模拟器验证",
+    "GetBias": _VERIFIED_SIM,
+    "SetBias": _VERIFIED_SIM,
+    "GetCurrent": _VERIFIED_SIM,
     # -- Z Control (verified via test_full_system G1/G2) --
-    "GetZPosition": "模拟器验证",
-    "SetSetpoint": "模拟器验证",
-    "ZControllerOnOff": "模拟器验证",
+    "GetZPosition": _VERIFIED_SIM,
+    "SetSetpoint": _VERIFIED_SIM,
+    "ZControllerOnOff": _VERIFIED_SIM,
     # -- Scanning (verified via test_full_system G6) --
-    "ConfigureScan": "模拟器验证",
-    "SetScanSpeed": "模拟器验证",
-    "StartScan": "模拟器验证",
-    "StopScan": "模拟器验证",
-    "FullScan": "模拟器验证",
+    "ConfigureScan": _VERIFIED_SIM,
+    "SetScanSpeed": _VERIFIED_SIM,
+    "StartScan": _VERIFIED_SIM,
+    "StopScan": _VERIFIED_SIM,
+    "FullScan": _VERIFIED_SIM,
     # -- Navigation (verified via test_full_system G5) --
-    "MoveToXY": "模拟器验证",
+    "MoveToXY": _VERIFIED_SIM,
     # -- Tip Management (verified via test_full_system G4/G9/G10) --
-    "SafeRetract": "模拟器验证",
-    "EmergencyRetract": "模拟器验证",
-    "WithdrawTip": "模拟器验证",
-    "AutoApproach": "模拟器验证",
-    "TipPulse": "模拟器验证",
-    "ConditionTip": "模拟器验证",
-    "ConditionTip_DQN": "未验证",
+    "SafeRetract": _VERIFIED_SIM,
+    "EmergencyRetract": _VERIFIED_SIM,
+    "WithdrawTip": _VERIFIED_SIM,
+    "AutoApproach": _VERIFIED_SIM,
+    "TipPulse": _VERIFIED_SIM,
+    "ConditionTip": _VERIFIED_SIM,
+    "ConditionTip_DQN": _UNVERIFIED,
     # -- Spectroscopy (verified via test_full_system G7) --
-    "ConfigureSTS": "模拟器验证",
-    "AcquireSTS": "模拟器验证",
-    "ConfigureZSpectr": "模拟器验证",
-    "AcquireZSpectr": "模拟器验证",
-    "GridSTS": "模拟器验证",
-    "AdaptiveSTS_GP": "未验证",
+    "ConfigureSTS": _VERIFIED_SIM,
+    "AcquireSTS": _VERIFIED_SIM,
+    "ConfigureZSpectr": _VERIFIED_SIM,
+    "AcquireZSpectr": _VERIFIED_SIM,
+    "GridSTS": _VERIFIED_SIM,
+    "AdaptiveSTS_GP": _UNVERIFIED,
     # -- Lock-in & Sweep (verified via test_full_system G8/G14/G15) --
-    "ConfigureLockIn": "模拟器验证",
-    "ConfigureBiasSweep": "模拟器验证",
-    "AcquireBiasSweep": "模拟器验证",
-    "ConfigureLockInSweep": "模拟器验证",
-    "AcquireLockInSweep": "模拟器验证",
+    "ConfigureLockIn": _VERIFIED_SIM,
+    "ConfigureBiasSweep": _VERIFIED_SIM,
+    "AcquireBiasSweep": _VERIFIED_SIM,
+    "ConfigureLockInSweep": _VERIFIED_SIM,
+    "AcquireLockInSweep": _VERIFIED_SIM,
     # -- Data Processing (verified via test_paper_skills_sim G20) --
-    "SubtractPlane_RANSAC": "模拟器验证",
-    "LevelLines_Median": "模拟器验证",
-    "CorrectDrift_XCorr": "模拟器验证",
-    "FindEmptySpot": "模拟器验证",
+    "SubtractPlane_RANSAC": _VERIFIED_SIM,
+    "LevelLines_Median": _VERIFIED_SIM,
+    "CorrectDrift_XCorr": _VERIFIED_SIM,
+    "FindEmptySpot": _VERIFIED_SIM,
     # -- Image Analysis (verified via test_full_system + G20) --
-    "AssessImageQuality": "模拟器验证",
-    "AssessTip_VGG": "模拟器验证",
-    "AssessTip_ResNet": "模拟器验证",
-    "SegmentRegion_UNet": "模拟器验证",
-    "DetectAtoms_FCN": "模拟器验证",
+    "AssessImageQuality": _VERIFIED_SIM,
+    "AssessTip_VGG": _VERIFIED_SIM,
+    "AssessTip_ResNet": _VERIFIED_SIM,
+    "SegmentRegion_UNet": _VERIFIED_SIM,
+    "DetectAtoms_FCN": _VERIFIED_SIM,
     # -- Molecular Recognition (require trained models) --
-    "PredictStructure_ASD": "未验证",
-    "IdentifyTopology_CARP": "未验证",
+    "PredictStructure_ASD": _UNVERIFIED,
+    "IdentifyTopology_CARP": _UNVERIFIED,
     # -- Spectral Analysis (verified via test_paper_skills_sim G20) --
-    "FitFano_Kondo": "模拟器验证",
-    "FitGap_BCS": "模拟器验证",
+    "FitFano_Kondo": _VERIFIED_SIM,
+    "FitGap_BCS": _VERIFIED_SIM,
     # -- Optimization (pending G21 Nanonis test) --
-    "OptimizeResolution_BO": "未验证",
+    "OptimizeResolution_BO": _UNVERIFIED,
     # -- Autonomous (pending G22-G23 Nanonis test) --
-    "FindGoodRegion_Heuristic": "未验证",
-    "FindGoodRegion_UNet": "未验证",
-    "AutonomousSurvey_Scanbot": "未验证",
-    "ContinuousImaging_Auto": "未验证",
+    "FindGoodRegion_Heuristic": _UNVERIFIED,
+    "FindGoodRegion_UNet": _UNVERIFIED,
+    "AutonomousSurvey_Scanbot": _UNVERIFIED,
+    "ContinuousImaging_Auto": _UNVERIFIED,
     # -- Atom Manipulation (pending G24 Nanonis test) --
-    "AtomManip_SAC": "未验证",
-    "AutoOSS_Dehalogenation": "未验证",
+    "AtomManip_SAC": _UNVERIFIED,
+    "AutoOSS_Dehalogenation": _UNVERIFIED,
 }
 
 
@@ -506,7 +510,8 @@ _STATIC_HINT_COUNTS: dict[str, int] = {
 }
 
 _FREQ_LEVELS: list[tuple[int, str]] = [
-    (40, "热门"), (15, "活跃"), (5, "一般"), (1, "冷门"), (0, "未用"),
+    (40, tr("热门", "Hot")), (15, tr("活跃", "Active")), (5, tr("一般", "Regular")),
+    (1, tr("冷门", "Rare")), (0, tr("未用", "Unused")),
 ]
 
 
@@ -515,7 +520,7 @@ def classify_usage_freq(count: int) -> str:
     for threshold, label in _FREQ_LEVELS:
         if count >= threshold:
             return label
-    return "未用"
+    return tr("未用", "Unused")
 
 
 def get_verification(skill_name: str) -> str:
@@ -529,7 +534,7 @@ def get_verification(skill_name: str) -> str:
             return sv[skill_name]
     except (ImportError, Exception):
         pass
-    return SKILL_VERIFICATION.get(skill_name, "未验证")
+    return SKILL_VERIFICATION.get(skill_name, _UNVERIFIED)
 
 
 def get_usage_freq(skill_name: str, counts: dict[str, int] | None = None) -> str:

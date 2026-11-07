@@ -1,7 +1,20 @@
-/** Resolve a readable library label without creating a library on a read path.
- * An experiment library may have a derived id before a registry row exists;
- * in that case use the current experiment name as the label.
+/**
+ * How to name the "currently effective library"; pure, runnable under `node --test`.
+ *
+ * Why it is needed: the effective library id is derived deterministically from the
+ * experiment id (`exp_<id8>`), and `resolve_effective_library(ensure=False)`
+ * deliberately does not create the library, since a read path must not have side
+ * effects (see the docstring in experiment_library.py). Until the experiment first
+ * ingests a paper, `effective_library_id` therefore points at a library that is not in
+ * the registry yet: `GET /api/literature/libraries` returns an `effective_library_id`
+ * of `exp_<id8>` while `libraries` holds only `reading`.
+ *
+ * Three views look the name up with `libraries.find(...)` and fall back to the bare id,
+ * so the user saw only that id. The name is available, though: it is the current
+ * experiment's name (what `experiment_library._default_name()` uses when the library is
+ * actually created).
  */
+import { tr } from "./i18n.ts";
 
 export interface LibraryRowLike {
   library_id: string;
@@ -10,20 +23,21 @@ export interface LibraryRowLike {
 }
 
 export interface LibraryLabel {
-  /** 给人看的名字。永远非空 —— 最差也是那个裸 id。 */
+  /** Human-readable name. Never empty: the worst case is the bare id. */
   text: string;
   /**
-   * 这个库还没被建出来（懒创建，首次收录时才落盘）。为真时界面应当说清楚，
-   * 不要假装它已经在那儿了 —— 名字是推导出来的，库不是。
+   * The library has not been created yet (lazy creation: it is written on first
+   * ingest). When true the UI should say so rather than pretend it exists: the name is
+   * derived, the library is not.
    */
   pending: boolean;
 }
 
 /**
- * @param libraryId       有效库 id（或面板显式选中的库 id）
+ * @param libraryId       effective library id (or the id explicitly picked in the panel)
  * @param source          "experiment" | "manual" | "fallback" | "picked"
- * @param libraries       `/api/literature/libraries` 的 libraries 数组
- * @param experimentName  当前实验名（`/api/experiments/current`），可空
+ * @param libraries       the libraries array of `/api/literature/libraries`
+ * @param experimentName  current experiment name (`/api/experiments/current`), may be empty
  */
 export function libraryLabel(
   libraryId: string,
@@ -36,19 +50,20 @@ export function libraryLabel(
 
   const row = libraries.find((l) => l.library_id === id) ?? null;
   if (row) {
-    // 实验库优先用实验名 —— 一个裸 exp_1a2b3c4d 说明不了任何事。
+    // An experiment library prefers the experiment name; a bare exp_1a2b3c4d says nothing.
     const exp = (row.experiment_name || "").trim();
-    if (exp) return { text: `《${exp}》的文献库`, pending: false };
+    if (exp) return { text: tr(`《${exp}》的文献库`, `Library of "${exp}"`), pending: false };
     const name = (row.name || "").trim();
     if (name) return { text: name, pending: false };
     return { text: id, pending: false };
   }
 
-  // 库不在列表里。只有一种情况下这不是错误：实验库还没被懒创建出来。此时名字
-  // 可以从当前实验推出来，但必须说明它还没落盘。
+  // The library is not in the list. The only non-error case is an experiment library
+  // that has not been lazily created yet: the name can be derived from the current
+  // experiment, but it must be marked as not yet on disk.
   const exp = (experimentName || "").trim();
   if (source === "experiment" && exp) {
-    return { text: `《${exp}》的文献库`, pending: true };
+    return { text: tr(`《${exp}》的文献库`, `Library of "${exp}"`), pending: true };
   }
   return { text: id, pending: source === "experiment" };
 }

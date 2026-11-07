@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from mast.i18n import tr
 
 
 def _print(line: str) -> None:
@@ -24,23 +25,24 @@ def main(argv: list[str] | None = None) -> int:
         pass
     from mast.gallery.figures import service
 
-    ap = argparse.ArgumentParser(prog="python -m mast.gallery.figures", description="数据图库 → 出图")
+    ap = argparse.ArgumentParser(prog="python -m mast.gallery.figures", description=tr("数据图库 → 出图", "Data gallery -> figures"))
     sub = ap.add_subparsers(dest="cmd", required=True)
-    r = sub.add_parser("run", help="出图（同步）")
+    r = sub.add_parser("run", help=tr("出图（同步）", "Make figures (synchronous)"))
     r.add_argument("kind", choices=service.KINDS)
     r.add_argument("--ids", nargs="*", default=[])
     r.add_argument("--series", nargs="*", default=[])
-    r.add_argument("--options", default="{}", help="JSON 对象")
-    p = sub.add_parser("plan", help="拉线谱站位推断预演")
+    r.add_argument("--options", default="{}", help=tr("JSON 对象", "JSON object"))
+    p = sub.add_parser("plan", help=tr("拉线谱站位推断预演", "Dry run of line-spectrum station inference"))
     p.add_argument("--series", nargs="+", required=True)
     p.add_argument("--options", default="{}")
-    sub.add_parser("list", help="列出已有产物")
+    sub.add_parser("list", help=tr("列出已有产物", "List existing outputs"))
     a = ap.parse_args(argv)
 
     if a.cmd == "run":
         res = service.run_job(a.kind, a.ids, a.series, json.loads(a.options),
                               progress=service.JobProgress(echo=_print))
-        _print("阶段 %s · 出了 %d 项 · 失败 %d 项" % (res["phase"], len(res["made"]), len(res["errors"])))
+        _print(tr("阶段 %s · 出了 %d 项 · 失败 %d 项", "Phase %s · %d made · %d failed")
+               % (res["phase"], len(res["made"]), len(res["errors"])))
         if res.get("detail"):
             _print("  " + str(res["detail"]))
         return 0 if res["phase"] in ("done", "cancelled") else 1

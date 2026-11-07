@@ -41,6 +41,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from mast.i18n import tr
+
 logger = logging.getLogger(__name__)
 
 #: Advisory rules — surface in the UI, never stop anything.
@@ -332,54 +334,90 @@ def summarize_zh(rule: str, feats: dict, detail: dict | None = None) -> str:
         frac = (d.get("sat_frac") or _num(feats.get("sat_frac")) or 0.0) * 100
         # ⚠️ 2026-08-25 改：先分诊，再给处置。
         #
-        # 原文是「疑似撞针或前置放大器过载,建议停止扫描并检查针尖」——
-        # 它点了两个病因，而**最常见的那个不在里面**：Z 顶在退针上限 + 电流远超
-        # setpoint = **热漂移**（样品漂近、压电吃满行程），不是针尖问题。
-        # 按原处方去「检查针尖」，等于去修一根根本没坏的针尖。
+        # Besides the two obvious causes (tip crash, preamp overload),
+        # the most common one is: Z pinned at the retract limit with current
+        # far above setpoint is **thermal drift** (sample drifted closer, piezo at
+        # full travel). The remedy is to retract a few steps, not to repair a tip
+        # that is not damaged.
         #
         # 三者用 **Z 的位置** 分得开，所以把判别式写进告警正文 ——
         # 读它的是 agent，而它此刻手上就有 GetZControllerState。
-        return (f"隧道电流持续贴轨饱和(段内 {frac:.0f}% 的样本达到满量程)。"
-                f"**先读 Z 再下结论**："
-                f"① Z 顶在**退针上限**(接近 +压电半程) ⇒ **热漂移**，样品漂近、"
-                f"压电吃满行程 —— 处置是 SafeRetract + 粗动 z-retract **退几步**"
-                f"再 AutoApproach，**不是**修针；"
-                f"② Z 在中段而电流贴轨 ⇒ 疑似撞针或针尖脏 —— 停扫、查针尖；"
-                f"③ 换个偏压电流不变 ⇒ 那是**前放满量程这条轨**，不是真实电流，"
-                f"读数本身不可信。")
+        return tr(f"隧道电流持续贴轨饱和(段内 {frac:.0f}% 的样本达到满量程)。"
+                  f"**先读 Z 再下结论**："
+                  f"① Z 顶在**退针上限**(接近 +压电半程) ⇒ **热漂移**，样品漂近、"
+                  f"压电吃满行程 —— 处置是 SafeRetract + 粗动 z-retract **退几步**"
+                  f"(方向码按本机声明的粗动退针方向换算；没声明时按 Nanonis 标准 Z+)"
+                  f"再 AutoApproach，**不是**修针；"
+                  f"② Z 在中段而电流贴轨 ⇒ 疑似撞针或针尖脏 —— 停扫、查针尖；"
+                  f"③ 换个偏压电流不变 ⇒ 那是**前放满量程这条轨**，不是真实电流，"
+                  f"读数本身不可信。",
+                  f"The tunnelling current is pinned at the rail ({frac:.0f}% of the samples in this "
+                  f"segment reached full scale). **Read Z before drawing a conclusion**: "
+                  f"(1) Z at the **retract limit** (close to +half the piezo range) => **thermal drift**: "
+                  f"the sample has drifted closer and the piezo is at full travel. The remedy is "
+                  f"SafeRetract + coarse z-retract **a few steps** "
+                  f"(convert the direction code from this machine's declared coarse retract direction; "
+                  f"if none is declared, use the Nanonis standard Z+) "
+                  f"then AutoApproach, **not** tip conditioning; "
+                  f"(2) Z mid-range while the current is railed => suspected tip crash or dirty tip: "
+                  f"stop the scan and check the tip; "
+                  f"(3) the current does not change when the bias is changed => that is the "
+                  f"**preamp full-scale rail**, not a real current, and the reading itself cannot be "
+                  f"trusted.")
     if rule == "freeze":
-        return ("隧道电流读数完全不变(整段只有一个数值)——测量链路可能已中断"
-                "(ADC/前放/通信),读到的数不能当作真实电流。")
+        return tr("隧道电流读数完全不变(整段只有一个数值)——测量链路可能已中断"
+                  "(ADC/前放/通信),读到的数不能当作真实电流。",
+                  "The tunnelling current reading does not change at all (the whole segment holds a "
+                  "single value) - the measurement chain may be broken (ADC/preamp/communication); "
+                  "the readings cannot be taken as the real current.")
     if rule == "giant_spike":
         sig = d.get("spike_max_sigma") or _num(feats.get("spike_max_sigma")) or 0.0
         step = d.get("max_step_a") or _num(feats.get("max_step_a")) or 0.0
-        return (f"隧道电流出现巨幅瞬变(偏离背景噪声 {sig:.0f}σ,最大跳变 "
-                f"{step * 1e12:.0f} pA)——疑似放电或针尖接触表面。")
+        return tr(f"隧道电流出现巨幅瞬变(偏离背景噪声 {sig:.0f}σ,最大跳变 "
+                  f"{step * 1e12:.0f} pA)——疑似放电或针尖接触表面。",
+                  f"Giant transient in the tunnelling current ({sig:.0f}σ off the background noise, "
+                  f"largest step {step * 1e12:.0f} pA) - suspected discharge or the tip touching "
+                  f"the surface.")
     if rule == "rms_high":
         rms = d.get("rms_detrended_a") or _num(feats.get("rms_detrended_a")) or 0.0
-        return f"电流噪声偏高(去趋势 RMS {rms * 1e12:.1f} pA)——针尖或环境可能不稳。"
+        return tr(f"电流噪声偏高(去趋势 RMS {rms * 1e12:.1f} pA)——针尖或环境可能不稳。",
+                  f"High current noise (detrended RMS {rms * 1e12:.1f} pA) - the tip or the "
+                  f"environment may be unstable.")
     if rule == "rtn_bistable":
         score = d.get("rtn_score") or _num(feats.get("rtn_score")) or 0.0
         rate = d.get("rtn_rate_hz") or _num(feats.get("rtn_rate_hz")) or 0.0
         gap = _num(feats.get("rtn_gap_a")) or 0.0
-        return (f"电流在两个电平之间来回跳变(RTN 判分 {score:.2f},速率 "
-                f"{rate:.1f} Hz,间距 {gap * 1e12:.1f} pA)——典型的针尖顶端不稳定。")
+        return tr(f"电流在两个电平之间来回跳变(RTN 判分 {score:.2f},速率 "
+                  f"{rate:.1f} Hz,间距 {gap * 1e12:.1f} pA)——典型的针尖顶端不稳定。",
+                  f"The current flips back and forth between two levels (RTN score {score:.2f}, "
+                  f"rate {rate:.1f} Hz, spacing {gap * 1e12:.1f} pA) - typical of an unstable "
+                  f"tip apex.")
     if rule == "line_hum":
         ratio = d.get("line_ratio") or _num(feats.get("line_ratio")) or 0.0
-        return f"工频干扰明显(50 Hz 峰高出邻频 {ratio:.0f} 倍)——检查接地与屏蔽。"
+        return tr(f"工频干扰明显(50 Hz 峰高出邻频 {ratio:.0f} 倍)——检查接地与屏蔽。",
+                  f"Clear mains pickup (the 50 Hz peak is {ratio:.0f}x above the neighbouring "
+                  f"frequencies) - check grounding and shielding.")
     if rule == "jump_burst":
         rate = d.get("jump_rate_hz") or _num(feats.get("jump_rate_hz")) or 0.0
-        return f"电流频繁突跳({rate:.1f} 次/秒)——针尖状态可能正在变化。"
+        return tr(f"电流频繁突跳({rate:.1f} 次/秒)——针尖状态可能正在变化。",
+                  f"Frequent current jumps ({rate:.1f} per second) - the tip state may be changing.")
     if rule == "saturation_no_junction":
         frac = (d.get("sat_frac") or _num(feats.get("sat_frac")) or 0.0) * 100
-        return (f"电流贴轨饱和(段内 {frac:.0f}%),但 Z 反馈未开——可能是退针、"
-                f"停泊或正在做谱,未按故障处理,仅记录。")
+        return tr(f"电流贴轨饱和(段内 {frac:.0f}%),但 Z 反馈未开——可能是退针、"
+                  f"停泊或正在做谱,未按故障处理,仅记录。",
+                  f"Current pinned at the rail ({frac:.0f}% of the segment), but the Z feedback is "
+                  f"off - possibly withdrawn, parked or taking a spectrum; not treated as a fault, "
+                  f"only recorded.")
     if rule == "freeze_no_junction":
-        return "电流读数完全不变,但 Z 反馈未开——未按故障处理,仅记录。"
+        return tr("电流读数完全不变,但 Z 反馈未开——未按故障处理,仅记录。",
+                  "The current reading does not change at all, but the Z feedback is off - not "
+                  "treated as a fault, only recorded.")
     if rule == "spike_warn":
         sig = d.get("spike_max_sigma") or _num(feats.get("spike_max_sigma")) or 0.0
-        return f"电流出现瞬时尖峰(偏离背景噪声 {sig:.0f}σ)——留意放电或接触。"
-    return f"电流监控规则 {rule} 触发。"
+        return tr(f"电流出现瞬时尖峰(偏离背景噪声 {sig:.0f}σ)——留意放电或接触。",
+                  f"Transient current spike ({sig:.0f}σ off the background noise) - watch for "
+                  f"discharge or contact.")
+    return tr(f"电流监控规则 {rule} 触发。", f"Current monitor rule {rule} triggered.")
 
 
 # ── evidence ────────────────────────────────────────────────────────────────
@@ -492,8 +530,8 @@ def emit_critical(rule: str, summary_zh: str, feats: dict,
                                    "max_step_a", "rms_detrended_a", "rtn_score",
                                    "frozen")},
             # In SAFE the gate refuses ConditionTip, so recommending it would be
-            # the system asking for an action it will then reject — the shape of
-            # . The CRITICAL itself still fires and still halts:
+            # the system asking for an action it will then reject. The CRITICAL
+            # itself still fires and still halts:
             # this is physical safety, and SAFE only means "do not repair the tip".
             "recommend": (["StopScan"] if _safe_mode_quiet()
                           else ["StopScan", "ConditionTip"]),

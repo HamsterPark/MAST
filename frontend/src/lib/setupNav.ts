@@ -1,38 +1,49 @@
-// 显式 `.ts` 后缀是本目录的约定：`node --test` 直接跑 TS 源码，ESM 解析器不会
-// 替你补后缀（envHistory.ts / monitoring.ts / initFilter.ts 同）。
+// An explicit `.ts` suffix is the convention in this directory: `node --test` runs
+// the TS sources directly and the ESM resolver does not add the suffix for you
+// (same for envHistory.ts / monitoring.ts / initFilter.ts).
 import { LEGACY_REDIRECTS } from "./nav.ts";
 
 // ════════════════════════════════════════════════════════════════════════════
-// 「用户此刻是不是正站在初始化页上」—— 横幅用它决定要不要闭嘴。
+// "Is the user standing on the setup page right now" — the banner uses this to
+// decide whether to stay quiet.
 //
-// 为什么单独一个纯函数：这个判断有一个**写在别的文件里的前提**。
+// Why a separate pure function: the check depends on a **premise that is
+// written in another file**.
 //
-// 2026-08-06初始化页从 `/setup` 挪到 `/settings/setup`，旧地址改成
-// 重定向。于是「判 `/settings/setup` 就够了」成立，但它成立的理由是
-// **「`/setup` 只作为重定向存在」** —— 而那句话住在 router.tsx 里，不在横幅里。
+// The setup page moved from `/setup` to `/settings/setup` and the old address
+// became a redirect. So "checking `/settings/setup` is enough" holds, but only
+// because **`/setup` exists solely as a redirect** — and that fact lives in
+// router.tsx, not in the banner.
 //
-// 两件事因此是安静的：
+// Two things follow silently:
 //
-//   1. `<Navigate>` 是在 effect 里跳的，不是渲染期。所以走旧书签进来时，有**一帧**
-//      的 pathname 仍是 `/setup`，而 AppLayout（连同横幅）已经挂上了 —— 横幅会闪
-//      一下，指着一个人正要去的地方。
-//   2. 更要紧的是：哪天有人把 `/setup` 变回真路由、或者重定向改成服务端做，
-//      横幅就会**结结实实地挂在初始化页自己头上**，而改动的人没有任何理由会想到
-//      来看这个文件。
+//   1. `<Navigate>` redirects in an effect, not during render. So arriving via
+//      an old bookmark leaves **one frame** where the pathname is still `/setup`
+//      while AppLayout (and the banner) is already mounted — the banner flashes,
+//      pointing at the place the user is about to land.
+//   2. More importantly: if `/setup` ever becomes a real route again, or the
+//      redirect moves server-side, the banner would sit squarely **on top of the
+//      setup page itself**, and whoever makes that change has no reason to look
+//      at this file.
 //
-// 所以别名不写死，从 `LEGACY_REDIRECTS` **派生** —— 那张表是「哪些旧地址指向这里」
-// 的真源，而且它「只增不改」。往表里再加一条指向初始化页的旧地址，这里自动跟上。
+// So the aliases are not hard-coded; they are **derived** from
+// `LEGACY_REDIRECTS` — that table is the source of truth for "which old
+// addresses point here", and it only ever grows. Add another old address that
+// points at the setup page and this follows automatically.
 // ════════════════════════════════════════════════════════════════════════════
 
-/** 初始化页的正规地址。与 router.tsx 的 `SECTION_ELEMENTS` 键、nav.ts 的段名同源，
- *  三处一致由 `tests/v2/unit/api/test_instrument_init_frontend_parity.py` 钉住。 */
+/** Canonical address of the setup page. It shares its source with the `SECTION_ELEMENTS`
+ *  key in router.tsx and the section name in nav.ts; agreement between the three is pinned
+ *  by `tests/v2/unit/api/test_instrument_init_frontend_parity.py`. */
 export const SETUP_PATH = "/settings/setup";
 
 /**
- * 所有会把人送到初始化页的地址：正规地址 + 全部指向它的旧地址。
+ * Every address that lands on the setup page: the canonical address plus all old
+ * addresses pointing at it.
  *
- * 导出给测试 —— 一个「本该有两条却只剩一条」的名单，从行为上看和正确的一模一样，
- * 直到有人真的用了那条旧书签。
+ * Exported for tests — a list that should have two entries but has only one
+ * behaves exactly like a correct one until someone actually uses the old
+ * bookmark.
  */
 export const SETUP_ALIASES: string[] = [
   SETUP_PATH,
@@ -42,11 +53,13 @@ export const SETUP_ALIASES: string[] = [
 ];
 
 /**
- * True 表示这个 pathname 就是初始化页（或它的某个旧地址）。
+ * True when this pathname is the setup page (or one of its old addresses).
  *
- * 用前缀匹配而不是相等：将来若初始化页自己长出子段（`/settings/setup/xxx`），
- * 横幅仍然该闭嘴。`/settings/setupfoo` 这种**不**算 —— 边界必须落在路径分隔符上，
- * 否则一个名字碰巧同前缀的新页面会让横幅在那里神秘消失。
+ * Prefix match rather than equality: if the setup page later grows sub-segments
+ * (`/settings/setup/xxx`), the banner should still stay quiet. Something like
+ * `/settings/setupfoo` does **not** count — the boundary must fall on a path
+ * separator, otherwise a new page whose name merely shares the prefix would make
+ * the banner mysteriously vanish there.
  */
 export function isSetupPath(pathname: string): boolean {
   const p = (pathname || "").replace(/\/+$/, "") || "/";

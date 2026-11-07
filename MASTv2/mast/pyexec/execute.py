@@ -138,13 +138,16 @@ def build_env(session, *, scan_dirs: str = "", blocked_ports: str = "") -> dict:
 
 
 def nanonis_ports() -> str:
-    """从 config 读真实端口，**不硬编码** —— 那几个数是可配的。"""
+    """从 config 读真实端口，**不硬编码** —— 那几个数是可配的（``MAST_NANONIS_PORT_*``）。
+
+    不能依赖一个不存在的 ``mast.config.Config``，否则会永远退回默认四个
+    端口：端口一改（模拟器的临时端口、腾出一个端口给外部直连），分析进程就拦不住
+    真正的控制器端口。这里读 ``NanonisConfig``（它自己读环境变量覆盖）；0 = 停用的角色不列。"""
     try:
-        from mast.config import Config
-        cfg = Config()
-        ports = getattr(getattr(cfg, "nanonis", None), "ports", None)
+        from mast.config import NanonisConfig
+        ports = [int(p) for p in NanonisConfig().all_ports if int(p) > 0]
         if ports:
-            return ",".join(str(int(p)) for p in ports)
+            return ",".join(str(p) for p in ports)
     except Exception:  # noqa: BLE001
         pass
     return "6501,6502,6503,6504"

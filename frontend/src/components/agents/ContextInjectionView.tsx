@@ -14,6 +14,7 @@ import {
   ErrorNote,
   Spinner,
 } from "@/components/ui";
+import { tr } from "@/lib/i18n";
 import {
   type InjectionBlock,
   ALL_AGENTS,
@@ -32,24 +33,25 @@ import {
 } from "@/lib/contextInjection";
 
 // ════════════════════════════════════════════════════════════════════════
-// 「上下文注入」子页 —— 只读。
+// "Context injection" sub-page (read-only).
 //
-// 它回答两个问题，而这两个在 2026-08-24 之前都没有地方能答：
-//   1. 不同角色有针对性的注入吗？        → 「全部」视图的矩阵 + 逐 agent 足迹
-//   2. 这一次调用到底由什么构成？        → 单 agent 视图的分段快照 + 占比条
+// It answers two questions:
+//   1. Do different roles get targeted injections?   → matrix in the "All" view + per-agent footprint
+//   2. What exactly makes up one call?               → segmented snapshot + share bar in the single-agent view
 //
-// 编辑仍然留在 高级管理 → 上下文注入（PIN 门后面）。这里一个写请求都没有 ——
-// 它不在 PIN 后面，能写的话那道 PIN 就形同虚设。
+// Editing stays under Advanced admin → Context injection (behind the PIN gate).
+// This page issues no write requests: it is not behind the PIN, so any write
+// here would defeat the PIN.
 // ════════════════════════════════════════════════════════════════════════
 
 export const ALL_VIEW = "__all__";
 
-// ── 取数 ────────────────────────────────────────────────────────────────
+// ── data fetching ────────────────────────────────────────────────────────────────
 
 function useMatrix() {
   return useQuery({
-    // 挂在 ["admin","prompts"] 前缀下：PromptInspector 保存覆写后会
-    // invalidate 这个前缀，矩阵跟着失效，那边零改动。
+    // Lives under the ["admin","prompts"] prefix: PromptInspector invalidates that
+    // prefix after saving an override, so the matrix is invalidated with no change there.
     queryKey: ["admin", "prompts", "manifest"],
     queryFn: async () => {
       const { data, error } = await api.GET("/api/prompts/manifest");
@@ -77,8 +79,8 @@ function useAgentManifest(backendId: string, enabled: boolean) {
 
 function useLatestCapture(backendId: string, enabled: boolean) {
   return useQuery({
-    // staleTime 不设 Infinity：latest 会变（每来一次调用就换一条），
-    // 设了就等于「刷新」按钮永远不刷。
+    // Do not set staleTime to Infinity: "latest" changes with every call, and
+    // Infinity would make the refresh button never refetch.
     queryKey: ["prompt-capture", "latest", backendId],
     enabled,
     queryFn: async () => {
@@ -86,12 +88,12 @@ function useLatestCapture(backendId: string, enabled: boolean) {
         "/api/prompts/capture/latest/{agent}",
         { params: { path: { agent: backendId } } },
       );
-      // 404 = 「还没有这个 agent 的快照」，是**空态**不是错误。
-      // openapi-fetch 把非 2xx 的 body 放进 error，直接 throw 会让「还没跑过」
-      // 画成一条红色的「加载失败」，而它们要的动作完全不同。
-      // 后端在 404 上返回的仍然是 LatestCaptureResponse（found=false + 原因），
-      // 而 openapi-fetch 把非 2xx 的 body 一律归到 error 并按 HTTPValidationError
-      // 打类型。经 unknown 转一次是这里唯一诚实的写法。
+      // 404 means "no snapshot for this agent yet": an empty state, not an error.
+      // openapi-fetch puts non-2xx bodies into `error`, and throwing would render
+      // "never ran" as a red "failed to load", which calls for a different action.
+      // On 404 the backend still returns a LatestCaptureResponse (found=false plus
+      // a reason), but openapi-fetch types every non-2xx body as
+      // HTTPValidationError, so a cast through unknown is the only accurate option.
       if (response.status === 404 && error) {
         return error as unknown as typeof data;
       }
@@ -101,7 +103,7 @@ function useLatestCapture(backendId: string, enabled: boolean) {
   });
 }
 
-// ── 单块 ────────────────────────────────────────────────────────────────
+// ── single block ────────────────────────────────────────────────────────────────
 
 function BlockRow({
   block,
@@ -115,7 +117,7 @@ function BlockRow({
   const [open, setOpen] = useState(false);
   const showable = canShowText(block);
   const detail = useQuery({
-    // 与 PromptInspector 同一个 key，共享缓存。
+    // Same key as PromptInspector, so the cache is shared.
     queryKey: ["admin", "prompt", block.id],
     enabled: open && showable,
     queryFn: async () => {
@@ -138,13 +140,13 @@ function BlockRow({
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-2">
             <span className="text-sm text-mast-text">{block.label}</span>
-            {block.overridden && <Badge tone="WARN">已覆写</Badge>}
-            {block.exclusive && <Badge tone="INFO">专属</Badge>}
-            {(block.agents ?? []).includes(ALL_AGENTS) && <Badge>全员</Badge>}
+            {block.overridden && <Badge tone="WARN">{tr("已覆写", "Overridden")}</Badge>}
+            {block.exclusive && <Badge tone="INFO">{tr("专属", "Exclusive")}</Badge>}
+            {(block.agents ?? []).includes(ALL_AGENTS) && <Badge>{tr("全员", "All roles")}</Badge>}
           </span>
           <span className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-mast-muted">
             <span>{whenLabel(block.when ?? "always")}</span>
-            <span>落在 {positionLabel(block.position ?? "system")}</span>
+            <span>{tr(`落在 ${positionLabel(block.position ?? "system")}`, `Position: ${positionLabel(block.position ?? "system")}`)}</span>
             <span>{availabilityLabel(block.availability)}</span>
             <span className="font-mono text-mast-faint">{block.id}</span>
           </span>
@@ -163,24 +165,24 @@ function BlockRow({
             <>
               {detail.isPending && <Spinner />}
               {detail.error != null && <ErrorNote error={detail.error} />}
-              {detail.data?.degraded && <DegradedNote what="这一块的正文" />}
+              {detail.data?.degraded && <DegradedNote what={tr("这一块的正文", "This block's text")} />}
               {detail.data && !detail.data.degraded && (
                 <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-mast-ctl border border-mast-border bg-mast-bg p-2.5 font-mono text-xs text-mast-text">
-                  {detail.data.effective_text || "（这一块当前是空的）"}
+                  {detail.data.effective_text || tr("（这一块当前是空的）", "(This block is currently empty)")}
                 </pre>
               )}
             </>
           ) : (
-            // 诚实性铁律：拿不到就说拿不到，**绝不填示例文本**。
+            // If the text is unavailable, say so; never fill in sample text.
             <div className="rounded-mast-ctl border border-mast-warn-border bg-mast-warn-bg px-3 py-2 text-xs text-mast-warn">
-              <p>{block.unavailable_reason || "这一块只在真实请求里才有内容。"}</p>
+              <p>{block.unavailable_reason || tr("这一块只在真实请求里才有内容。", "This block has content only in real requests.")}</p>
               {presentInCapture && (
                 <button
                   type="button"
                   className="mt-1.5 underline"
                   onClick={() => onJump(block.id)}
                 >
-                  ↓ 到下面那次真实请求里看这一段
+                  {tr("↓ 到下面那次真实请求里看这一段", "↓ See this segment in the real request below")}
                 </button>
               )}
             </div>
@@ -192,7 +194,7 @@ function BlockRow({
   );
 }
 
-// ── 单 agent 视图 ───────────────────────────────────────────────────────
+// ── single-agent view ───────────────────────────────────────────────────────
 
 function AgentView({ uiId }: { uiId: string }) {
   const backendId = toBackendAgentId(uiId);
@@ -240,21 +242,21 @@ function AgentView({ uiId }: { uiId: string }) {
 
   return (
     <div className="space-y-4">
-      {/* ── 组成 ── */}
+      {/* ── composition ── */}
       <Card>
         <div className="mb-2 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-mast-text">
-            每次调用收到的块（按挂载顺序）
+            {tr("每次调用收到的块（按挂载顺序）", "Blocks received on each call (in mount order)")}
           </h3>
           <span className="text-xs text-mast-faint">
             {manifest.data?.order_source === "build"
-              ? "顺序来自这个进程真的建过的那次图"
-              : "顺序来自登记表的声明（这个进程还没建过它的图）"}
+              ? tr("顺序来自这个进程真的建过的那次图", "Order comes from the graph this process actually built")
+              : tr("顺序来自登记表的声明（这个进程还没建过它的图）", "Order comes from the registry declaration (this process has not built its graph yet)")}
           </span>
         </div>
         {manifest.isPending && <Spinner />}
         {manifest.error != null && <ErrorNote error={manifest.error} />}
-        {manifest.data?.degraded && <DegradedNote what="注入清单" />}
+        {manifest.data?.degraded && <DegradedNote what={tr("注入清单", "Injection manifest")} />}
         {manifest.data && !manifest.data.degraded && (
           <ul className="rounded-mast-ctl border border-mast-border">
             {(manifest.data.blocks ?? []).map((b) => (
@@ -265,29 +267,29 @@ function AgentView({ uiId }: { uiId: string }) {
         )}
       </Card>
 
-      {/* ── 工具面 ── */}
+      {/* ── tool surface ── */}
       <Card>
         <h3 className="mb-2 text-sm font-semibold text-mast-text">
-          工具面 —— 一次调用里最大的一块，而它不在消息列表里
+          {tr("工具面 —— 一次调用里最大的一块，而它不在消息列表里", "Tool surface: the largest part of a call, and it is not in the message list")}
         </h3>
         {manifest.isPending && <Spinner />}
         {!manifest.isPending && !surface && (
-          <EmptyNote label={manifest.data?.tool_surface_note || "没有工具面数据。"} />
+          <EmptyNote label={manifest.data?.tool_surface_note || tr("没有工具面数据。", "No tool surface data.")} />
         )}
         {surface && (
           <div className="space-y-2 text-sm text-mast-text">
             <p>
-              {surface.count} 个工具，schema 合计{" "}
+              {tr(`${surface.count} 个工具，schema 合计`, `${surface.count} tools, schema total`)}{" "}
               <strong>{fmtChars(surface.schema_chars)}</strong>
               {surface.core_tools !== null && surface.core_tools !== undefined && (
                 <>
-                  {" "}—— 按需加载开着，这一次只发核心的{" "}
-                  <strong>{surface.core_tools}</strong> 个（
-                  {fmtChars(surface.core_chars)}，省{" "}
+                  {" "}{tr("—— 按需加载开着，这一次只发核心的", "— on-demand loading is on; this call sent only the core")}{" "}
+                  <strong>{surface.core_tools}</strong> {tr("个（", "(")}
+                  {fmtChars(surface.core_chars)}{tr("，省", ", saves")}{" "}
                   {surface.schema_chars > 0
                     ? Math.round(100 * (1 - (surface.core_chars ?? 0) / surface.schema_chars))
                     : 0}
-                  %）
+                  {tr("%）", "%)")}
                 </>
               )}
             </p>
@@ -297,7 +299,7 @@ function AgentView({ uiId }: { uiId: string }) {
                   <li key={p.name}
                       className="rounded-mast-badge border border-mast-border px-2 py-0.5 text-xs text-mast-muted">
                     <span className="text-mast-text">{p.name}</span> {p.label} ·{" "}
-                    {p.tools} 个 · {fmtChars(p.chars)}
+                    {tr(`${p.tools} 个`, `${p.tools} tools`)} · {fmtChars(p.chars)}
                   </li>
                 ))}
               </ul>
@@ -305,7 +307,7 @@ function AgentView({ uiId }: { uiId: string }) {
             {(surface.top ?? []).length > 0 && (
               <details>
                 <summary className="cursor-pointer text-xs text-mast-muted">
-                  最大的几个工具
+                  {tr("最大的几个工具", "Largest tools")}
                 </summary>
                 <ul className="mt-1.5 space-y-0.5 text-xs text-mast-muted">
                   {(surface.top ?? []).map((t) => (
@@ -321,15 +323,15 @@ function AgentView({ uiId }: { uiId: string }) {
         )}
       </Card>
 
-      {/* ── 最近一次真实请求 ── */}
+      {/* ── latest real request ── */}
       <Card>
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-mast-text">最近一次真实请求</h3>
-          <Button onClick={() => capture.refetch()}>刷新</Button>
+          <h3 className="text-sm font-semibold text-mast-text">{tr("最近一次真实请求", "Latest real request")}</h3>
+          <Button onClick={() => capture.refetch()}>{tr("刷新", "Refresh")}</Button>
         </div>
         {capture.isPending && <Spinner />}
         {capture.error != null && <ErrorNote error={capture.error} />}
-        {cap?.degraded && <DegradedNote what="注入记录" />}
+        {cap?.degraded && <DegradedNote what={tr("注入记录", "Injection record")} />}
         {cap && !cap.degraded && !hasCapture && (
           <EmptyNote label={captureEmptyMessage(cap.reason_code ?? "", cap.reason ?? "")} />
         )}
@@ -339,21 +341,20 @@ function AgentView({ uiId }: { uiId: string }) {
               <span>#{cap.seq}</span>
               <span>{fmtAge(cap.age_s)}</span>
               <span>{cap.model_id} · {cap.provider}</span>
-              {cap.node && <span>节点 {cap.node}</span>}
+              {cap.node && <span>{tr(`节点 ${cap.node}`, `Node ${cap.node}`)}</span>}
               <span>
-                输入 token：
+                {tr("输入 token：", "Input tokens: ")}
                 {cap.tokens_source === "provider" && cap.input_tokens !== null
                   ? cap.input_tokens
-                  : "provider 未上报"}
+                  : tr("provider 未上报", "not reported by provider")}
               </span>
               {cap.cache_read_tokens !== null && cap.cache_read_tokens !== undefined && (
-                <span>缓存命中 {cap.cache_read_tokens}</span>
+                <span>{tr(`缓存命中 ${cap.cache_read_tokens}`, `Cache hit ${cap.cache_read_tokens}`)}</span>
               )}
             </p>
             {cap.blocks_source === "none" && (
               <p className="text-xs text-mast-warn">
-                这一次的分段归属查不到（多半是这条消息没经过注入 helper）——
-                下面按整段显示，不猜。
+                {tr("这一次的分段归属查不到（多半是这条消息没经过注入 helper）—— 下面按整段显示，不猜。", "Segment attribution for this call is unavailable (most likely the message did not go through the injection helper). It is shown as one block below, without guessing.")}
               </p>
             )}
             {issues.length > 0 && (
@@ -365,12 +366,12 @@ function AgentView({ uiId }: { uiId: string }) {
             <ShareBar
               shares={shares}
               agentId={uiId}
-              caption="条按**字符**分；token 由 provider 上报，两者不可互换。带斜纹的那段是估算。"
+              caption={tr("条按**字符**分；token 由 provider 上报，两者不可互换。带斜纹的那段是估算。", "The bar splits by characters; tokens are reported by the provider and the two are not interchangeable. Hatched segments are estimates.")}
             />
 
             <div>
               <h4 className="mb-1.5 text-xs font-semibold text-mast-muted">
-                系统消息，按来源切分
+                {tr("系统消息，按来源切分", "System message, split by source")}
               </h4>
               <ul className="space-y-1.5">
                 {segments.map((seg, i) => (
@@ -379,10 +380,10 @@ function AgentView({ uiId }: { uiId: string }) {
                     <details className="rounded-mast-ctl border border-mast-border">
                       <summary className="cursor-pointer px-2.5 py-1.5 text-xs text-mast-muted">
                         <span className="text-mast-text">
-                          {seg.id ? (labelById.get(seg.id) ?? seg.id) : "未归属"}
+                          {seg.id ? (labelById.get(seg.id) ?? seg.id) : tr("未归属", "Unattributed")}
                         </span>{" "}
                         · {fmtChars(seg.chars)}
-                        {seg.clipped && <span className="text-mast-warn">（原文被截断）</span>}
+                        {seg.clipped && <span className="text-mast-warn">{tr("（原文被截断）", "(source truncated)")}</span>}
                       </summary>
                       <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words border-t border-mast-border p-2.5 font-mono text-xs text-mast-text">
                         {seg.text}
@@ -395,14 +396,14 @@ function AgentView({ uiId }: { uiId: string }) {
 
             <details>
               <summary className="cursor-pointer text-xs text-mast-muted">
-                对话历史 {history.length} 条（这些不是注入，屏幕上本来就看得见）
+                {tr(`对话历史 ${history.length} 条（这些不是注入，屏幕上本来就看得见）`, `Conversation history: ${history.length} messages (not injections; already visible on screen)`)}
               </summary>
               <ul className="mt-1.5 space-y-1">
                 {history.map((m, i) => (
                   <li key={i} className="text-xs text-mast-muted">
                     <span className="font-mono text-mast-text">{m.role}</span> ·{" "}
                     {fmtChars(m.chars)}
-                    {m.truncated && <span className="text-mast-warn">（已截断）</span>}
+                    {m.truncated && <span className="text-mast-warn">{tr("（已截断）", "(truncated)")}</span>}
                   </li>
                 ))}
               </ul>
@@ -414,7 +415,7 @@ function AgentView({ uiId }: { uiId: string }) {
   );
 }
 
-// ── 主体 ────────────────────────────────────────────────────────────────
+// ── main ────────────────────────────────────────────────────────────────
 
 export function ContextInjectionView({
   picks,
@@ -434,9 +435,8 @@ export function ContextInjectionView({
   return (
     <div className="space-y-4">
       <p className="text-xs text-mast-muted">
-        这一页是**只读**的：它回答「不同角色有针对性的注入吗」与「这一次调用由什么
-        构成」。要改话术请去{" "}
-        <a className="underline" href="/settings/admin">高级管理 → 上下文注入</a>。
+        {tr("这一页是**只读**的：它回答「不同角色有针对性的注入吗」与「这一次调用由什么构成」。要改话术请去", "This page is read-only: it answers \"do different roles get targeted injections?\" and \"what makes up this call?\". To change the wording, go to")}{" "}
+        <a className="underline" href="/settings/admin">{tr("高级管理 → 上下文注入", "Advanced admin → Context injection")}</a>{tr("。", ".")}
       </p>
 
       <div className="flex flex-wrap gap-1.5">
@@ -458,8 +458,8 @@ export function ContextInjectionView({
               {!isAll && <Avatar id={p.id} size={16} />}
               <span>{p.label}</span>
               {!isAll && matrix.data && !known.has(toBackendAgentId(p.id)) && (
-                <span className="text-mast-warn" title="后端的注入清单里没有这个 agent">
-                  ·未登记
+                <span className="text-mast-warn" title={tr("后端的注入清单里没有这个 agent", "The backend injection manifest does not list this agent")}>
+                  {tr("·未登记", "· unregistered")}
                 </span>
               )}
             </button>
@@ -469,7 +469,7 @@ export function ContextInjectionView({
 
       {matrix.isPending && <Spinner />}
       {matrix.error != null && <ErrorNote error={matrix.error} />}
-      {matrix.data?.degraded && <DegradedNote what="注入清单" />}
+      {matrix.data?.degraded && <DegradedNote what={tr("注入清单", "Injection manifest")} />}
 
       {matrix.data && !matrix.data.degraded && pick === ALL_VIEW && (
         <ContextInjectionMatrix matrix={matrix.data} onPick={onPick} />

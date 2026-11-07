@@ -316,7 +316,6 @@ class BufferService:
             # crash were events (E_STOP / VISION_ERROR / edge drops) or when a
             # session emitted events but never wrote a tip status — causing seqno
             # collisions and silent INSERT OR REPLACE overwrite of earlier rows.
-            # 审查 finding [17].
             async with self._wal_db.execute(
                 "SELECT MAX(s) FROM ("
                 "SELECT MAX(seqno) AS s FROM tip_status_journal "

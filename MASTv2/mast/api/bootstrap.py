@@ -160,7 +160,7 @@ def build_live_context(config=None) -> AppContext:
     # 上面那条只报告。这条**会改包络** —— 但只按用户自己登记的仪器常数收紧，
     # 而且只有一个方向。起因：出厂 setpoint_max_a 是 100 nA，真机的前放是
     # ±10 nA，于是「设定点高于量程 → 电流恒小于设定点 → 反馈把 Z 一路推向样品」
-    # 这条撞针路径一直敞着，且不报任何错（这是刻意的取舍）。
+    # 这条撞针路径一直敞着，且不报任何错。
     # 放在对账之后，是为了让日志里「测到什么」先于「据此改了什么」。
     try:
         from mast.core.safety import report_instrument_clamps

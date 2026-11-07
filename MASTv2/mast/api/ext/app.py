@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from mast.i18n import tr
 import ipaddress
 import logging
 import threading
@@ -83,22 +84,22 @@ def browser_refusal(request: Request) -> tuple[int, str, str] | None:
         if not (ctype == "application/json" or (ctype.startswith("application/")
                                                  and ctype.endswith("+json"))):
             return (415, "unsupported_media_type",
-                    "写请求必须带 Content-Type: application/json 与一个 JSON 请求体（没有内容就发 {}）")
+                    tr("写请求必须带 Content-Type: application/json 与一个 JSON 请求体（没有内容就发 {}）", "Write requests must carry Content-Type: application/json and a JSON body (send {} if there is no content)"))
     browserish = "origin" in h or any(k.lower().startswith("sec-fetch-") for k in h.keys())
     if not browserish:
         return None
     host = h.get("host") or ""
     if not _is_ip_or_loopback(_host_part(host)):
         return (403, "cross_origin_refused",
-                "浏览器经主机名访问外部面被拒（DNS 重绑定的形状）；用 IP 地址或 127.0.0.1")
+                tr("浏览器经主机名访问外部面被拒（DNS 重绑定的形状）；用 IP 地址或 127.0.0.1", "A browser reaching the external surface by hostname was refused (looks like DNS rebinding); use an IP address or 127.0.0.1"))
     site = (h.get("sec-fetch-site") or "").strip().lower()
     if site and site not in ("same-origin", "none"):
-        return (403, "cross_origin_refused", f"跨站请求被拒（Sec-Fetch-Site: {site}）")
+        return (403, "cross_origin_refused", tr(f"跨站请求被拒（Sec-Fetch-Site: {site}）", f"Cross-site request refused (Sec-Fetch-Site: {site})"))
     origin = h.get("origin")
     if origin is not None:
         o = urlsplit(origin.strip())
         if o.scheme != request.url.scheme or o.netloc.lower() != host.strip().lower():
-            return (403, "cross_origin_refused", f"跨站请求被拒（Origin: {origin[:120]}）")
+            return (403, "cross_origin_refused", tr(f"跨站请求被拒（Origin: {origin[:120]}）", f"Cross-site request refused (Origin: {origin[:120]})"))
     return None
 
 
@@ -160,7 +161,7 @@ def create_ext_app(ctx: Any, *, job_manager: JobManager | None = None) -> FastAP
     async def _http(request: Request, exc: StarletteHTTPException):
         code = {404: "not_found", 405: "method_not_allowed"}.get(exc.status_code, "http_error")
         detail = exc.detail if exc.status_code != 404 else (
-            f"外部面没有这个端点：{request.url.path}（端点清单见 /api/ext/v1/openapi.json）")
+            tr(f"外部面没有这个端点：{request.url.path}（端点清单见 /api/ext/v1/openapi.json）", f"The external surface has no such endpoint: {request.url.path} (see /api/ext/v1/openapi.json for the endpoint list)"))
         return JSONResponse(status_code=exc.status_code, headers=hdr,
                             content={"error": code, "detail": str(detail)})
 
@@ -170,9 +171,26 @@ def create_ext_app(ctx: Any, *, job_manager: JobManager | None = None) -> FastAP
         return JSONResponse(status_code=500, headers=hdr, content={
             "error": "internal", "detail": f"{type(exc).__name__}: {exc}"[:500]})
 
-    from mast.api.ext import collab, data, jobs, overview, skills
+    from mast.api.ext import collab, data, jobs, optical_layout, overview, skills
 
-    for module in (overview, jobs, skills, data, collab):
+    for module in (overview, jobs, skills, data, collab, optical_layout):
+        app.include_router(module.router)
+
+    # 7.0：VISTA 视觉回路（一动一观、帧档案、回看与量尺、笔记）、等待、探测器、文献、运行器。
+    # 服务是进程级单例；绑到这个 ctx 与作业管理器上（换了 ctx = 换了仪器，状态清零）。
+    from mast.vista.service import get_service
+
+    svc = get_service().bind(ctx, jobs=jm, disabled=jobs._disabled_names)
+    app.state.vista = svc
+    if callable(hook):
+        try:
+            hook(svc.shutdown, name="ext-gateway vista")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ext-gateway: VISTA 关停钩子登记失败(%s)", exc)
+    # 静态 import：PyInstaller 的分析要看得见它们；坏了就大声报错，而不是悄悄少一组端点。
+    from mast.api.ext import detectors, literature, runner, vista, wait
+
+    for module in (vista, wait, detectors, literature, runner):
         app.include_router(module.router)
     return app
 

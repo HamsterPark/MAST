@@ -1,7 +1,7 @@
 """User Outputs + Digital Lines — driving hardware that is NOT the microscope.
 
-THE GAP THIS FILLS: Nanonis had some custom output control with no skill
-wrapping it, and it was total: Nanonis exposes 12 ``UserOut_*`` methods and
+THE GAP THIS FILLS (2026-07-13): Nanonis exposes custom output controls with
+no matching skill. The gap was total: Nanonis exposes 12 ``UserOut_*`` methods and
 4 ``DigLines_*`` methods, and MAST had a skill for **zero of them**. The agent
 could scan, sweep, pulse the tip and read every signal in the machine — and could
 not turn on a single output.
@@ -72,6 +72,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.skills.base import BaseSkill
 
 # Nanonis output modes (protocol §User Outputs).
@@ -91,6 +92,17 @@ def _fail(name: str, error: str, calls: list) -> SkillResult:
     return SkillResult(skill_name=name, success=False, error=error, nanonis_calls=calls)
 
 
+def _reserved_port_refusal(name: str, port: int) -> SkillResult | None:
+    """The machine's reserved digital ports (``reserved_digital_ports`` in
+    nanonis_motor_groups.json; on a PMD4 rig Port A is its control link) are never
+    written — direction, level or pulse. Checked before anything is sent; the
+    port is never swapped for another. Reads are not gated."""
+    from mast.instruments.motor_groups import digital_port_refusal
+
+    why = digital_port_refusal(port)
+    return _fail(name, why, []) if why else None
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Reads
 # ═════════════════════════════════════════════════════════════════════════════
@@ -104,19 +116,24 @@ class GetUserOutputLimits(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description=(
+            description=tr(
                 "读某个用户输出通道的物理上／下限。这两个限值就是 SetUserOutput 的**安全包络** —— 它们由用户在 Nanonis 里配置，"
-                "从这里改不了。要驱动一个你没把握的输出之前，先读它们。"
+                "从这里改不了。要驱动一个你没把握的输出之前，先读它们。",
+                "Read the physical upper/lower limits of a user output channel. These two limits are "
+                "the **safety envelope** of SetUserOutput -- they are configured by the user in "
+                "Nanonis and cannot be changed from here. Read them before driving an output you "
+                "are not sure about.",
             ),
             parameters=[
                 ParameterSpec(
                     name="output_index", type="int",
-                    description="用户输出通道，1 起算（1..N）",
+                    description=tr("用户输出通道，1 起算（1..N）", "User output channel, 1-based (1..N)"),
                     required=True, min_value=1, max_value=24,
                 ),
                 ParameterSpec(
                     name="raw", type="int",
-                    description="0 = 物理（已标定）限值；1 = 原始限值",
+                    description=tr("0 = 物理（已标定）限值；1 = 原始限值",
+                                   "0 = physical (calibrated) limits; 1 = raw limits"),
                     required=False, default=0, min_value=0, max_value=1,
                 ),
             ],
@@ -138,7 +155,8 @@ class GetUserOutputLimits(BaseSkill):
             skill_name="GetUserOutputLimits", success=True,
             data={"output_index": idx, "upper_limit": upper, "lower_limit": lower,
                   "raw": bool(raw),
-                  "note": "单位是该通道的物理单位（可能不是伏特）——由 Nanonis 里的校准决定。"},
+                  "note": tr("单位是该通道的物理单位（可能不是伏特）——由 Nanonis 里的校准决定。",
+                             "The unit is the channel's physical unit (possibly not volts) -- set by the calibration in Nanonis.")},
             nanonis_calls=[rec],
         )
 
@@ -152,15 +170,18 @@ class GetUserOutputMode(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description=(
+            description=tr(
                 "读某个用户输出的模式：0=User Output（由你驱动），1=Monitor（它镜像一路信号）"
                 "，2=Calc.Signal。SetUserOutput 只有在模式 0 下才起作用 —— Monitor 模式下这个通道由仪器驱动，"
-                "不由你。"
+                "不由你。",
+                "Read the mode of a user output: 0=User Output (driven by you), 1=Monitor (it mirrors "
+                "a signal), 2=Calc.Signal. SetUserOutput only works in mode 0 -- in Monitor mode the "
+                "channel is driven by the instrument, not by you.",
             ),
             parameters=[
                 ParameterSpec(
                     name="output_index", type="int",
-                    description="用户输出通道，1 起算",
+                    description=tr("用户输出通道，1 起算", "User output channel, 1-based"),
                     required=True, min_value=1, max_value=24,
                 ),
             ],
@@ -193,11 +214,12 @@ class GetUserOutputMonitorChannel(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读某个用户输出的监视通道序号（Monitor 模式）。",
+            description=tr("读某个用户输出的监视通道序号（Monitor 模式）。",
+                           "Read the monitor channel index of a user output (Monitor mode)."),
             parameters=[
                 ParameterSpec(
                     name="output_index", type="int",
-                    description="用户输出通道，1 起算",
+                    description=tr("用户输出通道，1 起算", "User output channel, 1-based"),
                     required=True, min_value=1, max_value=24,
                 ),
             ],
@@ -229,11 +251,13 @@ class GetDigitalLineTTL(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读某个数字端口上全部 8 条线的 TTL 值。",
+            description=tr("读某个数字端口上全部 8 条线的 TTL 值。",
+                           "Read the TTL values of all 8 lines on a digital port."),
             parameters=[
                 ParameterSpec(
                     name="port", type="int",
-                    description="0=Port A，1=B，2=C，3=D，4+ = 扩展 DIO",
+                    description=tr("0=Port A，1=B，2=C，3=D，4+ = 扩展 DIO",
+                                   "0=Port A, 1=B, 2=C, 3=D, 4+ = expanded DIO"),
                     required=True, min_value=0, max_value=8,
                 ),
             ],
@@ -268,24 +292,35 @@ class SetUserOutput(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description=(
+            description=tr(
                 "把某个用户输出通道设成一个值，用该通道**已标定的物理单位**（**不一定是伏特** —— 依它在 Nanonis 里的标定，"
                 "一个通道可能是 µm、mW 或别的任何东西）。\n"
                 "\n"
                 "这驱动的是 MAST 看不见的**外部**硬件（一路栅压、一台压电放大器、一个激光快门、"
                 "一条延时线）。要在一个你没把握的通道上设值之前，先调 GetUserOutputLimits 和 GetUserOutputMode —— Monitor 模式的通道根本不理你，"
-                "而超出用户所设限值的值会被**拒绝**，不是被夹到边界。"
+                "而超出用户所设限值的值会被**拒绝**，不是被夹到边界。",
+                "Set a user output channel to a value, in the channel's **calibrated physical unit** "
+                "(**not necessarily volts** -- depending on its calibration in Nanonis, a channel may be "
+                "in µm, mW or anything else).\n"
+                "\n"
+                "This drives **external** hardware that MAST cannot see (a gate voltage, a piezo "
+                "amplifier, a laser shutter, a delay line). Before setting a value on a channel you are "
+                "not sure about, call GetUserOutputLimits and GetUserOutputMode -- a channel in Monitor "
+                "mode ignores you entirely, and a value outside the user-set limits is **refused**, "
+                "not clamped to the boundary.",
             ),
             parameters=[
                 ParameterSpec(
                     name="output_index", type="int",
-                    description="用户输出通道，1 起算（1..N）",
+                    description=tr("用户输出通道，1 起算（1..N）", "User output channel, 1-based (1..N)"),
                     required=True, min_value=1, max_value=24,
                 ),
                 ParameterSpec(
                     name="value", type="float",
-                    description=(
-                        "目标值，用该通道的物理单位。必须落在该通道在 Nanonis 里配置的限值之内。"
+                    description=tr(
+                        "目标值，用该通道的物理单位。必须落在该通道在 Nanonis 里配置的限值之内。",
+                        "Target value, in the channel's physical unit. Must lie within the limits "
+                        "configured for the channel in Nanonis.",
                     ),
                     required=True,
                 ),
@@ -309,16 +344,21 @@ class SetUserOutput(BaseSkill):
         if lim.error:
             return _fail(
                 "SetUserOutput",
-                f"拒绝写入：无法读取输出 {idx} 的物理限值（{lim.error}）。"
-                "MAST 不知道这个输出口接的是什么，读不到用户配置的限值就不写——"
-                "未知的边界不等于没有边界。",
+                tr(f"拒绝写入：无法读取输出 {idx} 的物理限值（{lim.error}）。"
+                   "MAST 不知道这个输出口接的是什么，读不到用户配置的限值就不写——"
+                   "未知的边界不等于没有边界。",
+                   f"Write refused: cannot read the physical limits of output {idx} ({lim.error}). "
+                   "MAST does not know what is connected to this output, so it does not write "
+                   "when it cannot read the user-configured limits -- an unknown boundary is "
+                   "not the absence of a boundary."),
                 calls,
             )
         vals = _values(lim)
         if len(vals) < 2:
             return _fail(
                 "SetUserOutput",
-                f"拒绝写入：输出 {idx} 的限值回读格式异常（{vals!r}）。",
+                tr(f"拒绝写入：输出 {idx} 的限值回读格式异常（{vals!r}）。",
+                   f"Write refused: the limits readback of output {idx} has an unexpected format ({vals!r})."),
                 calls,
             )
         upper, lower = float(vals[0]), float(vals[1])
@@ -326,9 +366,13 @@ class SetUserOutput(BaseSkill):
         if not (lo <= value <= hi):
             return _fail(
                 "SetUserOutput",
-                f"拒绝写入：{value:g} 超出输出 {idx} 的物理限值 [{lo:g}, {hi:g}]（该限值由"
-                "用户在 Nanonis 中配置，是这个通道的安全包络）。若确需更大范围，请在"
-                "Nanonis 界面上调整该输出的 Limits——智能体不能拓宽自己的护栏。",
+                tr(f"拒绝写入：{value:g} 超出输出 {idx} 的物理限值 [{lo:g}, {hi:g}]（该限值由"
+                   "用户在 Nanonis 中配置，是这个通道的安全包络）。若确需更大范围，请在"
+                   "Nanonis 界面上调整该输出的 Limits——智能体不能拓宽自己的护栏。",
+                   f"Write refused: {value:g} is outside the physical limits [{lo:g}, {hi:g}] of "
+                   f"output {idx} (configured by the user in Nanonis; it is this channel's safety "
+                   "envelope). If a larger range is really needed, adjust the output's Limits in "
+                   "the Nanonis GUI -- an agent cannot widen its own guardrail."),
                 calls,
             )
 
@@ -340,7 +384,8 @@ class SetUserOutput(BaseSkill):
             skill_name="SetUserOutput", success=True,
             data={"output_index": idx, "value": value,
                   "limits": {"lower": lo, "upper": hi},
-                  "note": "值的单位由该通道的 Nanonis 校准决定，未必是伏特。"},
+                  "note": tr("值的单位由该通道的 Nanonis 校准决定，未必是伏特。",
+                             "The unit of the value is set by the channel's Nanonis calibration; it may not be volts.")},
             nanonis_calls=calls,
         )
 
@@ -354,20 +399,25 @@ class SetUserOutputMode(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description=(
+            description=tr(
                 "设定某个用户输出的模式：0=User Output（由你驱动），1=Monitor（它镜像一路仪器信号）"
                 "，2=Calc.Signal。把一个通道切**进**模式 0，等于把外部硬件的控制权交给 agent；"
-                "把它切**出**去，则是把控制权交还给仪器。"
+                "把它切**出**去，则是把控制权交还给仪器。",
+                "Set the mode of a user output: 0=User Output (driven by you), 1=Monitor (it mirrors "
+                "an instrument signal), 2=Calc.Signal. Switching a channel **into** mode 0 hands "
+                "control of the external hardware to the agent; switching it **out** hands control "
+                "back to the instrument.",
             ),
             parameters=[
                 ParameterSpec(
                     name="output_index", type="int",
-                    description="用户输出通道，1 起算",
+                    description=tr("用户输出通道，1 起算", "User output channel, 1-based"),
                     required=True, min_value=1, max_value=24,
                 ),
                 ParameterSpec(
                     name="mode", type="int",
-                    description="0=User Output，1=Monitor，2=Calc.Signal",
+                    description=tr("0=User Output，1=Monitor，2=Calc.Signal",
+                                   "0=User Output, 1=Monitor, 2=Calc.Signal"),
                     required=True, min_value=0, max_value=2,
                 ),
             ],
@@ -399,18 +449,20 @@ class SetUserOutputMonitorChannel(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description=(
-                "设定某个用户输出镜像哪一路信号（只在 Monitor 模式下有意义）。用 ListSignalNames／信号目录去找通道序号。"
+            description=tr(
+                "设定某个用户输出镜像哪一路信号（只在 Monitor 模式下有意义）。用 ListSignalNames／信号目录去找通道序号。",
+                "Set which signal a user output mirrors (only meaningful in Monitor mode). Use "
+                "ListSignalNames / the signal catalogue to find the channel index.",
             ),
             parameters=[
                 ParameterSpec(
                     name="output_index", type="int",
-                    description="用户输出通道，1 起算",
+                    description=tr("用户输出通道，1 起算", "User output channel, 1-based"),
                     required=True, min_value=1, max_value=24,
                 ),
                 ParameterSpec(
                     name="monitor_channel_index", type="int",
-                    description="要镜像的信号序号（0..127）",
+                    description=tr("要镜像的信号序号（0..127）", "Index of the signal to mirror (0..127)"),
                     required=True, min_value=0, max_value=127,
                 ),
             ],
@@ -441,40 +493,46 @@ class PulseDigitalLine(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description=(
+            description=tr(
                 "在一条或多条数字输出线上发一列 TTL 脉冲。Nanonis 就是这样触发**外部**硬件的 —— 一次相机曝光、"
-                "一台脉冲发生器、一个斩波器、一个快门。MAST 并不知道线上接的是什么：对不熟悉的线，打脉冲之前先问用户。"
+                "一台脉冲发生器、一个斩波器、一个快门。MAST 并不知道线上接的是什么：对不熟悉的线，打脉冲之前先问用户。",
+                "Fire a train of TTL pulses on one or more digital output lines. This is how Nanonis "
+                "triggers **external** hardware -- a camera exposure, a pulse generator, a chopper, a "
+                "shutter. MAST does not know what is connected to the line: for an unfamiliar line, "
+                "ask the user before pulsing.",
             ),
             parameters=[
                 ParameterSpec(
                     name="port", type="int",
-                    description="0=Port A，1=B，2=C，3=D，4+ = 扩展 DIO",
+                    description=tr("0=Port A，1=B，2=C，3=D，4+ = 扩展 DIO",
+                                   "0=Port A, 1=B, 2=C, 3=D, 4+ = expanded DIO"),
                     required=True, min_value=0, max_value=8,
                 ),
                 ParameterSpec(
                     name="lines", type="str",
-                    description="要打脉冲的数字线，1..8，逗号分隔（例如 '1' 或 '1,3'）",
+                    description=tr("要打脉冲的数字线，1..8，逗号分隔（例如 '1' 或 '1,3'）",
+                                   "Digital lines to pulse, 1..8, comma-separated (e.g. '1' or '1,3')"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="pulse_width_s", type="float",
-                    description="每个脉冲持续多久（s）",
+                    description=tr("每个脉冲持续多久（s）", "How long each pulse lasts (s)"),
                     unit="s", required=True, min_value=1e-6, max_value=60.0,
                 ),
                 ParameterSpec(
                     name="pulse_pause_s", type="float",
-                    description="脉冲之间的间隔（s）",
+                    description=tr("脉冲之间的间隔（s）", "Interval between pulses (s)"),
                     unit="s", required=False, default=0.001,
                     min_value=0.0, max_value=60.0,
                 ),
                 ParameterSpec(
                     name="n_pulses", type="int",
-                    description="脉冲个数",
+                    description=tr("脉冲个数", "Number of pulses"),
                     required=False, default=1, min_value=1, max_value=10000,
                 ),
                 ParameterSpec(
                     name="wait_until_finished", type="bool",
-                    description="阻塞直到整列脉冲发完",
+                    description=tr("阻塞直到整列脉冲发完", "Block until the whole pulse train has been sent"),
                     required=False, default=True,
                 ),
             ],
@@ -490,16 +548,21 @@ class PulseDigitalLine(BaseSkill):
             lines = [int(x) for x in str(raw_lines).replace(",", " ").split()]
         except ValueError:
             return _fail("PulseDigitalLine",
-                         f"lines 解析失败：{raw_lines!r}（应为 1..8 的逗号分隔列表）", [])
+                         tr(f"lines 解析失败：{raw_lines!r}（应为 1..8 的逗号分隔列表）",
+                            f"Failed to parse lines: {raw_lines!r} (expected a comma-separated list of 1..8)"), [])
         if not lines or any(not 1 <= v <= 8 for v in lines):
             return _fail("PulseDigitalLine",
-                         f"digital line 必须在 1..8 之间，收到 {lines}", [])
+                         tr(f"digital line 必须在 1..8 之间，收到 {lines}",
+                            f"digital line must be between 1 and 8, got {lines}"), [])
 
         width = float(params["pulse_width_s"])
         pause = float(params.get("pulse_pause_s", 0.001) or 0.0)
         n = int(params.get("n_pulses", 1) or 1)
         wait = 1 if params.get("wait_until_finished", True) else 0
 
+        refusal = _reserved_port_refusal("PulseDigitalLine", port)
+        if refusal is not None:
+            return refusal
         rec = context.safe_call("DigLines_Pulse", port, lines, width, pause, n, wait)
         if rec.error:
             return _fail("PulseDigitalLine", rec.error, [rec])
@@ -521,26 +584,31 @@ class SetDigitalLineStatus(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description=(
+            description=tr(
                 "把一条数字输出线置为 HIGH 或 LOW 并**保持**在那里（不像 PulseDigitalLine，"
                 "那个会把它送回去）。用于需要锁存的使能 —— 一个一直开着的快门、一台一直开着的放大器。"
                 "MAST 并不知道线上接的是什么，而且 abort 时它**不会**被复位：abort 只是让 MAST 停止写入，"
-                "它不会去猜哪一个电平才叫「关」。"
+                "它不会去猜哪一个电平才叫「关」。",
+                "Set a digital output line HIGH or LOW and **hold** it there (unlike PulseDigitalLine, "
+                "which returns it). For latched enables -- a shutter held open, an amplifier held on. "
+                "MAST does not know what is connected to the line, and on abort it is **not** reset: "
+                "abort only makes MAST stop writing; it does not guess which level means \"off\".",
             ),
             parameters=[
                 ParameterSpec(
                     name="port", type="int",
-                    description="0=Port A，1=B，2=C，3=D，4+ = 扩展 DIO",
+                    description=tr("0=Port A，1=B，2=C，3=D，4+ = 扩展 DIO",
+                                   "0=Port A, 1=B, 2=C, 3=D, 4+ = expanded DIO"),
                     required=True, min_value=0, max_value=8,
                 ),
                 ParameterSpec(
                     name="line", type="int",
-                    description="端口内的数字线，1..8",
+                    description=tr("端口内的数字线，1..8", "Digital line within the port, 1..8"),
                     required=True, min_value=1, max_value=8,
                 ),
                 ParameterSpec(
                     name="status", type="bool",
-                    description="True = HIGH，False = LOW",
+                    description=tr("True = HIGH，False = LOW", "True = HIGH, False = LOW"),
                     required=True,
                 ),
             ],
@@ -553,6 +621,9 @@ class SetDigitalLineStatus(BaseSkill):
         port = int(params["port"])
         line = int(params["line"])
         status = 1 if params["status"] else 0
+        refusal = _reserved_port_refusal("SetDigitalLineStatus", port)
+        if refusal is not None:
+            return refusal
         rec = context.safe_call("DigLines_OutStatusSet", port, line, status)
         if rec.error:
             return _fail("SetDigitalLineStatus", rec.error, [rec])
@@ -572,28 +643,32 @@ class ConfigureDigitalLine(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description=(
-                "配置一条数字线的方向（输入／输出）与极性（高有效／低有效）。把一条线从输入翻成输出，就开始**驱动**另一端接着的任何东西 —— 先核对接线。"
+            description=tr(
+                "配置一条数字线的方向（输入／输出）与极性（高有效／低有效）。把一条线从输入翻成输出，就开始**驱动**另一端接着的任何东西 —— 先核对接线。",
+                "Configure the direction (input/output) and polarity (active high/active low) of a "
+                "digital line. Flipping a line from input to output starts **driving** whatever is "
+                "connected at the other end -- check the wiring first.",
             ),
             parameters=[
                 ParameterSpec(
                     name="line", type="int",
-                    description="数字线，1..8",
+                    description=tr("数字线，1..8", "Digital line, 1..8"),
                     required=True, min_value=1, max_value=8,
                 ),
                 ParameterSpec(
                     name="port", type="int",
-                    description="0=Port A，1=B，2=C，3=D，4+ = 扩展 DIO",
+                    description=tr("0=Port A，1=B，2=C，3=D，4+ = 扩展 DIO",
+                                   "0=Port A, 1=B, 2=C, 3=D, 4+ = expanded DIO"),
                     required=True, min_value=0, max_value=8,
                 ),
                 ParameterSpec(
                     name="direction", type="int",
-                    description="0 = 输入，1 = 输出",
+                    description=tr("0 = 输入，1 = 输出", "0 = input, 1 = output"),
                     required=True, min_value=0, max_value=1,
                 ),
                 ParameterSpec(
                     name="polarity", type="int",
-                    description="0 = 低有效，1 = 高有效",
+                    description=tr("0 = 低有效，1 = 高有效", "0 = active low, 1 = active high"),
                     required=True, min_value=0, max_value=1,
                 ),
             ],
@@ -607,6 +682,10 @@ class ConfigureDigitalLine(BaseSkill):
         port = int(params["port"])
         direction = int(params["direction"])
         polarity = int(params["polarity"])
+        # either direction: turning a control line into an input breaks the link too
+        refusal = _reserved_port_refusal("ConfigureDigitalLine", port)
+        if refusal is not None:
+            return refusal
         rec = context.safe_call("DigLines_PropsSet", line, port, direction, polarity)
         if rec.error:
             return _fail("ConfigureDigitalLine", rec.error, [rec])
@@ -628,31 +707,37 @@ class SetUserOutputLimits(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description=(
+            description=tr(
                 "设定某个用户输出通道的物理上／下限。这两个限值就是 SetUserOutput 据以核对的那道包络，"
-                "所以把它们放宽，就等于放宽了 agent 被允许驱动的范围 —— 这是一次护栏改动，它需要用户确认，"
+                "所以把它们放宽，就等于放宽了 agent 被允许驱动的范围 —— 这是一次护栏改动，需要用户确认，"
                 "并且会被记入诊断账本（记录 → 诊断）。收紧它们可以保护一个通道；只有在接线确实容许更大范围时，"
-                "才把它们放宽。"
+                "才把它们放宽。",
+                "Set the physical upper/lower limits of a user output channel. These limits are the "
+                "envelope SetUserOutput checks against, so widening them widens the range the agent is "
+                "allowed to drive -- this is a guardrail change, requires user confirmation, and is "
+                "recorded in the diagnostics ledger (Records -> Diagnostics). Tightening them protects "
+                "a channel; only widen them when the wiring really tolerates a larger range.",
             ),
             parameters=[
                 ParameterSpec(
                     name="output_index", type="int",
-                    description="用户输出通道，1 起算",
+                    description=tr("用户输出通道，1 起算", "User output channel, 1-based"),
                     required=True, min_value=1, max_value=24,
                 ),
                 ParameterSpec(
                     name="upper_limit", type="float",
-                    description="物理上限（该通道已标定的单位）",
+                    description=tr("物理上限（该通道已标定的单位）", "Physical upper limit (in the channel's calibrated unit)"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="lower_limit", type="float",
-                    description="物理下限（该通道已标定的单位）",
+                    description=tr("物理下限（该通道已标定的单位）", "Physical lower limit (in the channel's calibrated unit)"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="raw", type="int",
-                    description="0 = 物理（已标定）限值；1 = 原始限值",
+                    description=tr("0 = 物理（已标定）限值；1 = 原始限值",
+                                   "0 = physical (calibrated) limits; 1 = raw limits"),
                     required=False, default=0, min_value=0, max_value=1,
                 ),
             ],
@@ -698,8 +783,10 @@ class SetUserOutputLimits(BaseSkill):
             )
             record(
                 "note", f"UserOut[{idx}].limits",
-                ("护栏被放宽" if widened else "护栏被调整")
-                + f"：{before} → {{'upper': {upper}, 'lower': {lower}}}",
+                (tr("护栏被放宽", "Guardrail widened") if widened
+                 else tr("护栏被调整", "Guardrail adjusted"))
+                + tr(f"：{before} → {{'upper': {upper}, 'lower': {lower}}}",
+                     f": {before} -> {{'upper': {upper}, 'lower': {lower}}}"),
                 output_index=idx, before=before,
                 after={"upper": upper, "lower": lower},
                 widened=widened, raw=bool(raw),
@@ -724,25 +811,30 @@ class SetUserOutputCalibration(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description=(
+            description=tr(
                 "设定某个用户输出或监视通道的标定（每伏对应多少物理单位 + 偏移）。这会重新定义在该通道上「一个物理单位」"
                 "**意味着什么**：改完标定之后，同一个数值驱动出的是**另一个**电压，而且每一条限值都会按新单位重新解释。"
-                "用它来把该通道真实的缩放关系告诉 MAST；不要用它来绕开一条限值。"
+                "用它来把该通道真实的缩放关系告诉 MAST；不要用它来绕开一条限值。",
+                "Set the calibration of a user output or monitor channel (physical units per volt + "
+                "offset). This redefines what \"one physical unit\" **means** on the channel: after "
+                "the calibration changes, the same number drives a **different** voltage, and every "
+                "limit is reinterpreted in the new unit. Use it to tell MAST the channel's real "
+                "scaling; do not use it to get around a limit.",
             ),
             parameters=[
                 ParameterSpec(
                     name="output_index", type="int",
-                    description="用户输出通道，1 起算",
+                    description=tr("用户输出通道，1 起算", "User output channel, 1-based"),
                     required=True, min_value=1, max_value=24,
                 ),
                 ParameterSpec(
                     name="calibration_per_volt", type="float",
-                    description="DAC 每输出一伏对应多少物理单位",
+                    description=tr("DAC 每输出一伏对应多少物理单位", "Physical units per volt of DAC output"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="offset", type="float",
-                    description="偏移，用物理单位表示",
+                    description=tr("偏移，用物理单位表示", "Offset, in physical units"),
                     required=False, default=0.0,
                 ),
             ],
@@ -762,8 +854,11 @@ class SetUserOutputCalibration(BaseSkill):
             from mast.core.diagnostics import record
 
             record("note", f"UserOut[{idx}].calibration",
-                   f"校准被改写：{cal} 物理单位/V，offset={off}"
-                   "（此后同一个数值会驱动不同的电压，且所有限值按新单位重新解释）",
+                   tr(f"校准被改写：{cal} 物理单位/V，offset={off}"
+                      "（此后同一个数值会驱动不同的电压，且所有限值按新单位重新解释）",
+                      f"Calibration rewritten: {cal} physical units/V, offset={off} "
+                      "(from now on the same number drives a different voltage, and all limits "
+                      "are reinterpreted in the new unit)"),
                    output_index=idx, calibration_per_volt=cal, offset=off)
         except Exception:  # noqa: BLE001
             pass
@@ -786,38 +881,47 @@ class ConfigureCalculatedOutput(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description=(
+            description=tr(
                 "让某个用户输出承载两路信号做一次算术运算的**结果**（Calc.Signal 模式）："
                 "例如把 (Signal_A − Signal_B) 作为一条实时模拟线输出。适合做差分通道、"
                 "归一化信号，或者你想送上示波器、送进外部硬件的某个导出量。\n"
                 "\n"
                 "要让它生效，请用 SetUserOutputMode 把该输出切到模式 2（Calc.Signal）"
-                "。"
+                "。",
+                "Make a user output carry the **result** of an arithmetic operation on two signals "
+                "(Calc.Signal mode): e.g. output (Signal_A - Signal_B) as a live analog line. Useful "
+                "for difference channels, normalised signals, or any derived quantity you want to "
+                "send to an oscilloscope or external hardware.\n"
+                "\n"
+                "For it to take effect, switch the output to mode 2 (Calc.Signal) with "
+                "SetUserOutputMode.",
             ),
             parameters=[
                 ParameterSpec(
                     name="output_index", type="int",
-                    description="用户输出通道，1 起算",
+                    description=tr("用户输出通道，1 起算", "User output channel, 1-based"),
                     required=True, min_value=1, max_value=24,
                 ),
                 ParameterSpec(
                     name="signal_1", type="int",
-                    description="第一路信号的序号（见 ListSignalNames）",
+                    description=tr("第一路信号的序号（见 ListSignalNames）",
+                                   "Index of the first signal (see ListSignalNames)"),
                     required=True, min_value=0, max_value=127,
                 ),
                 ParameterSpec(
                     name="operation", type="str",
-                    description="算术运算：+ - * /",
+                    description=tr("算术运算：+ - * /", "Arithmetic operation: + - * /"),
                     required=True, allowed_values=["+", "-", "*", "/"],
                 ),
                 ParameterSpec(
                     name="signal_2", type="int",
-                    description="第二路信号的序号",
+                    description=tr("第二路信号的序号", "Index of the second signal"),
                     required=True, min_value=0, max_value=127,
                 ),
                 ParameterSpec(
                     name="name", type="str",
-                    description="这个计算信号的名字（会显示在 Nanonis 里）",
+                    description=tr("这个计算信号的名字（会显示在 Nanonis 里）",
+                                   "Name of this calculated signal (shown in Nanonis)"),
                     required=False, default="",
                 ),
             ],
@@ -833,7 +937,8 @@ class ConfigureCalculatedOutput(BaseSkill):
         op = str(params["operation"]).strip()
         if op not in self._OPS:
             return _fail("ConfigureCalculatedOutput",
-                         f"operation 必须是 + - * / 之一，收到 {op!r}", [])
+                         tr(f"operation 必须是 + - * / 之一，收到 {op!r}",
+                            f"operation must be one of + - * /, got {op!r}"), [])
         calls = []
         rec = context.safe_call("UserOut_CalcSignalConfigSet", idx, s1,
                                 self._OPS[op], s2)
@@ -852,7 +957,8 @@ class ConfigureCalculatedOutput(BaseSkill):
                     skill_name="ConfigureCalculatedOutput", success=True,
                     data={"output_index": idx, "expression": f"S{s1} {op} S{s2}",
                           "name": None,
-                          "warning": f"配置已生效，但命名失败：{rec2.error}"},
+                          "warning": tr(f"配置已生效，但命名失败：{rec2.error}",
+                                        f"The configuration took effect, but naming failed: {rec2.error}")},
                     nanonis_calls=calls,
                 )
         return SkillResult(
@@ -860,7 +966,8 @@ class ConfigureCalculatedOutput(BaseSkill):
             data={"output_index": idx, "expression": f"S{s1} {op} S{s2}",
                   "signal_1": s1, "signal_2": s2, "operation": op,
                   "name": name or None,
-                  "note": "需把该输出设为 mode 2 (Calc.Signal) 才会生效——用 SetUserOutputMode。"},
+                  "note": tr("需把该输出设为 mode 2 (Calc.Signal) 才会生效——用 SetUserOutputMode。",
+                             "The output must be set to mode 2 (Calc.Signal) for this to take effect -- use SetUserOutputMode.")},
             nanonis_calls=calls,
         )
 
@@ -876,14 +983,16 @@ class GetCalculatedOutputConfig(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description=(
+            description=tr(
                 "读某个用户输出把哪两路信号、用什么运算、以什么名字组合起来（Calc.Signal 模式）"
-                "。"
+                "。",
+                "Read which two signals a user output combines, with which operation and under "
+                "which name (Calc.Signal mode).",
             ),
             parameters=[
                 ParameterSpec(
                     name="output_index", type="int",
-                    description="用户输出通道，1 起算",
+                    description=tr("用户输出通道，1 起算", "User output channel, 1-based"),
                     required=True, min_value=1, max_value=24,
                 ),
             ],

@@ -40,9 +40,12 @@ See: https://github.com/AlanGG12/nanonis_spm (upstream repo)
 
 from __future__ import annotations
 
+import logging
 import struct
 import numpy as np
 from nanonis_spm import Nanonis
+
+logger = logging.getLogger(__name__)
 
 
 # Save reference to original method
@@ -165,7 +168,7 @@ def _patched_send(self, Command, Body, BodyType):
     """
     BodyPart = bytearray()
 
-    # ── request framing: verbatim from nanonis_spm v1.0.9 ────────────────
+    # ── request framing: unchanged from nanonis_spm v1.0.9 ────────────────
     for i in range(0, len(Body)):
         if "*" in BodyType[i]:
             instance = Body[i]
@@ -326,7 +329,7 @@ def _patched_decodeArrayPrepended(self, response, index, numOfElements,
                                   responseType):
     """``decodeArrayPrepended`` with the 1-tuple actually unpacked.
 
-    Only the unwrap changes. The ``8 if 'd' else 4`` stride is kept verbatim
+    Only the unwrap changes. The ``8 if 'd' else 4`` stride is kept unchanged
     from upstream **on purpose**: ``parseGeneralResponse`` advances its own byte
     counter for this branch by exactly that rule, so switching one side to
     ``calcsize`` would desynchronise the two for any 2-byte spec. Neither side
@@ -426,6 +429,9 @@ LAYOUT_MISMATCH_PREFIX = "response layout mismatch"
 def _salvage_rejected_reply(Response, ResponseTypes, exc) -> list:
     """声明的字段读越界之后，退回来按「只有错误段」重读一遍回包。
 
+    **这是 `error: unpack requires a buffer of 4 bytes`
+    的解药。** 事情的形状是这样的：
+
     Nanonis 拒绝一条命令时（模块没加载、动词不认识、参数不对），回包体里
     **只有错误段** —— 命令自己声明的那些返回字段一个都不在。而
     `parseGeneralResponse` 是**先读声明字段、最后才读错误段**的，于是它拿
@@ -444,10 +450,11 @@ def _salvage_rejected_reply(Response, ResponseTypes, exc) -> list:
       `NeedModule` 那条判据重新生效；
     * `status == 0` → body 的开头**不是**错误段，说明这是一份**真实回包**，
       而我们照样读越界了 ⇒ **声明的 ResponseTypes 与实际布局不符**。
-      这时返回一句点名 spec 的话，而不是假装模块不在。
+      这时返回一句指明 spec 的话，而不是假装模块不在。
 
     换句话说：**机器自己回答「是模块没开，还是我们的 spec 写错了」**，
-    而不是让调用方从同一种 struct 异常猜测原因。
+    而不是让人对着一句 struct 错误猜。（两种原因产生
+    完全相同的报错，无法区分。）
 
     返回值保持 `[ErrorString, Response, Variables]` 三元形状，调用方不必知道
     这里发生过什么。
@@ -540,6 +547,30 @@ def _error_only_text(body: bytes):
         f"Nanonis error status {status}"
 
 
+def trailing_error_section(body):
+    """回包体末尾的错误段 ``(status, 描述)``；认不出来返回 ``None``。
+
+    与 :func:`_patched_parseError` 同一条判据（从尾部倒推，``desc_len`` 必须正好等于
+    其后的字节数），区别有二：连 ``status`` 一起交回；**不管前置字段解析到了哪里**。
+
+    为什么需要它：Nanonis 拒绝一条命令时，回包不一定「只有错误段」。部分固件的
+    V5e（UI/RT 15016）是**照常给出全部声明字段、数组长度为 0**，后面再跟错误段
+    （例如 ``Osci2T.TimebaseGet``：119 字节 = 2+4+0 + 8 + 105 字节描述）。
+    另一种是 status=0 却带描述：解析器把它当「无错误」，描述就此丢失。两种情况下
+    仪器自己那句话都只在这里还读得到。
+    """
+    b = bytes(body or b"")
+    if len(b) < _ERROR_SECTION_HEADER:
+        return None
+    for n in range(0, min(len(b) - _ERROR_SECTION_HEADER, 4096) + 1):
+        start = len(b) - n
+        (desc_len,) = struct.unpack('>i', b[start - 4:start])
+        if desc_len == n:
+            (status,) = struct.unpack('>i', b[start - _ERROR_SECTION_HEADER:start - 4])
+            return int(status), b[start:].decode('utf-8', errors='replace')
+    return None
+
+
 def _patched_parseGeneralResponse(self, Response, ResponseTypes):
     """Patched version that handles +*c / +*i / +*b / -*X format strings.
 
@@ -610,7 +641,7 @@ def _parse_general_response_strict(self, Response, ResponseTypes):
                     Variables.append(result)
             else:  # '-'
                 # Non-prepended: length from previous variable.
-                # Guard (): if this `-*X` spec is the FIRST response
+                # Guard: if this `-*X` spec is the FIRST response
                 # type, Variables is empty and Variables[-1] would raise
                 # IndexError; if the preceding variable isn't an int count
                 # (e.g. a string/array), range(arr_len) would raise TypeError.
@@ -929,9 +960,76 @@ _SCAN_PROPS_GET_SPEC: list[str] = [
 ]
 
 
+#: ``Scan.PropsGet`` 回包开头永远是三个定长 uint32：continuous / bouncy / autosave。
+#: 它们在 body 的前 12 字节，与后面那些变长字符串/数组数组怎么排、固件版本如何，
+#: 都无关。
+_SCAN_PROPS_LEADING_BYTES = 12   # 3 × uint32
+
+
+def _salvage_scan_props_leading(body: bytes):
+    """整条 ResponseTypes 对不上、读越界时，从回包里**只**救开头三个定长标志。
+
+    返回 ``[continuous, bouncy, autosave]``（GET 编码的 int），救不出来返回 ``None``。
+
+    ── 为什么这是对的，而不是「发明一个兜底值」 ──────────────────────────────
+    开头这三个字段是**定长 uint32**，就在 body 的前 12 字节，它们的字面量不依赖后面
+    那段变长布局怎么排。整条规格只会**在变长数组那里**越界（部分固件的 Nanonis V5e：
+    声明的 16 字段布局 overran 69 字节的回包）。而且走到这里本身
+    就保证了「这是一份正常回包」—— :func:`_salvage_rejected_reply` 只有在回包**不是**
+    纯错误段（即仪器正常作答了）时才返回 ``LAYOUT_MISMATCH``。所以前 12 字节就是这三个
+    标志的字面量，取它不是猜。
+
+    合理性闸：三个标志的 GET 编码是 0/1（给 2 留点余量）。要是前 12 字节其实是别的东西
+    （整条布局被打乱、而不仅仅是尾部变长段不同），这三个数几乎必然超出 0..2 ——
+    那就**不信**，交回原来的错误，绝不拿一段乱码冒充 continuous。
+    """
+    body = bytes(body or b"")
+    if len(body) < _SCAN_PROPS_LEADING_BYTES + _ERROR_SECTION_HEADER:
+        return None
+    try:
+        cont, bouncy, autosave = struct.unpack(
+            '>III', body[:_SCAN_PROPS_LEADING_BYTES])
+    except struct.error:
+        return None
+    if not all(0 <= v <= 2 for v in (cont, bouncy, autosave)):
+        return None
+    return [int(cont), int(bouncy), int(autosave)]
+
+
 def _patched_Scan_PropsGet(self):
-    """Scan.PropsGet —— 用修正过的响应规格（最后一个数组是 2D）。"""
-    return self.quickSend("Scan.PropsGet", [], [], _SCAN_PROPS_GET_SPEC)
+    """Scan.PropsGet —— 用修正过的响应规格（最后一个数组是 2D）。
+
+    某些固件（Nanonis V5e）回的 body 比这份规格短，整条解析越界 ⇒ Variables
+    变空 ⇒ 连带把开头那个 **continuous** 标志也一起丢掉。而 ``StartScan`` 的连续闸门
+    正是靠它放行：读不到 continuous 它就**拒绝起扫**，于是现场表现为「连续扫描明明
+    关着，MAST 却说读不到、不肯扫」（日志里反复出现 LAYOUT_MISMATCH）。
+
+    continuous/bouncy/autosave 是 body 前 12 字节的三个定长 uint32，与后面变长数组
+    怎么排无关。所以整条规格对不上时，退一步只取这三个（见
+    :func:`_salvage_scan_props_leading`），让闸门至少读得到 continuous。模块清单那半
+    这次仍然读不到 —— 而 ``StartScan`` 已能安全处理（读不到就不下发 Scan_PropsSet、
+    保持操作员配好的清单，不覆盖）。
+
+    **规格对得上的机器完全不受影响**：Variables 非空时这段根本不触发，零行为变化。
+    """
+    rv = self.quickSend("Scan.PropsGet", [], [], _SCAN_PROPS_GET_SPEC)
+    if not (isinstance(rv, (list, tuple)) and len(rv) >= 3):
+        return rv
+    err, body, variables = rv[0], rv[1], rv[2]
+    # 只在「布局不符、且因此 Variables 读空」这一确切情形上救；其余一律原样返回。
+    if variables or not (isinstance(err, str) and err.startswith(LAYOUT_MISMATCH_PREFIX)):
+        return rv
+    salvaged = _salvage_scan_props_leading(body)
+    if salvaged is None:
+        return rv
+    logger.warning(
+        "Scan.PropsGet: 这台固件的回包布局与声明的 ResponseTypes 不符（%s）—— "
+        "已退回只取开头的 continuous/bouncy/autosave 三个定长标志（continuous=%d）；"
+        "「保存哪些模块参数」清单这次读不到。", err, salvaged[0])
+    # 清掉错误串、带回这三个标志：下游 safe_call 看到空 error 才会去读 Variables，
+    # _scan_props_continuous 读 Variables[0] 就是 continuous。（connection.py:463
+    # 只有 ret[0] 是非空字符串时才把它当 error。）
+    return ["", body, salvaged]
 
 def _patched_Osci2T_ChsGet(self):
     """Read the two channels Osci2T is displaying. Verb resolved by probing."""
@@ -995,6 +1093,7 @@ def _patched_Osci2T_TimebaseGet(self):
     if cached is not None:
         return self.quickSend("Osci2T.TimebaseGet", [], [], cached)
     last = None
+    said = None
     for spec in _OSCI2T_TIMEBASE_SPECS:
         rv = self.quickSend("Osci2T.TimebaseGet", [], [], list(spec))
         last = rv
@@ -1008,10 +1107,40 @@ def _patched_Osci2T_TimebaseGet(self):
         # 「错误状态」—— 那个数几乎必然非 0（它其实是时基索引），于是一份好端端
         # 的回包被报成一次拒绝。提前返回就等于:第一个候选猜错 ⇒ 第二个永远没
         # 机会。多发一次只读命令的代价，远小于「因为顺序不对而永久退回 1T」。
-    # 一条都不自洽：不缓存（下次重新探），把最后一次的结果如实交回去。
-    # 真的是拒绝时，每个候选都会解出同一段错误描述（错误段在最前面，与声明的
-    # 字段无关），所以"最后一次"带回来的就是仪器自己那句话。
+        if said is None:
+            said = _instrument_words(rv)
+    # 一条都不自洽：不缓存（下次重新探）。交回去的必须是**仪器自己那句话**，
+    # 而不是「最后一个候选」—— 例如第一个候选解出了仪器的拒绝
+    # 原文（全部声明字段 + 空表 + 105 字节描述），第二个候选读同一份回包只得到
+    # 一句「布局不符」，若交出去的是后者，detail 就会写着「回包解不开」，
+    # 让人去查规格；真正该做的（照仪器说的去开模块）就没人知道。
+    if said is not None:
+        return said
     return last if last is not None else ("", b"", [])
+
+
+def _instrument_words(rv):
+    """这份回包里**仪器自己说了话**吗？说了就返回带那句话的回包，否则 ``None``。
+
+    两种情形算「说了」：
+
+    * 解析器给出的错误不是我们自己的诊断（「布局不符」「回包太短」）—— 走到那
+      一步说明长度恒等式已经核过，是仪器的原文；
+    * 没有错误、表是空的，而末尾错误段里有描述（status=0 却带话）。空表用不上，
+      那句话就是仪器对「为什么是空的」的解释，把它当错误交出去。
+    """
+    err = rv[0]
+    if isinstance(err, str) and err:
+        if err.startswith(LAYOUT_MISMATCH_PREFIX) or err.startswith("reply too short"):
+            return None
+        return rv
+    values = rv[2][2] if isinstance(rv[2], list) and len(rv[2]) >= 3 else None
+    if isinstance(values, (list, tuple)) and len(values) == 0:
+        tail = trailing_error_section(rv[1] if isinstance(rv[1], (bytes, bytearray)) else b"")
+        if tail is not None and tail[1].strip():
+            return [f"Osci2T.TimebaseGet: empty timebase table — {tail[1].strip()}",
+                    rv[1], rv[2]]
+    return None
 
 
 def _patched_Osci2T_OversamplGet(self):

@@ -1,6 +1,6 @@
 """Single source of truth for hardware-state precondition vocabulary.
 
-审查 [#86]: the precondition word-lists were duplicated and had
+The precondition word-lists were duplicated and had
 drifted between the two layers that interpret ``SkillMetadata.preconditions``:
 
   * ``mast.skills.base.BaseSkill.check_preconditions`` used an EXACT-key dict
@@ -31,6 +31,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from mast.i18n import tr
+
 if TYPE_CHECKING:  # avoid an import cycle at module load (types imports nothing here)
     from mast.core.types import HardwareState
 
@@ -58,11 +60,16 @@ PRECONDITION_CONTEXT_FIELDS: dict[str, str] = {
 
 #: 布尔为 False 时,各个模块状态各自意味着什么(只用于措辞,不参与判定)。
 _ZCTRL_STATUS_HINT: dict[str, str] = {
-    "Off": "确实被关掉了",
-    "Hold": "被**挂起**(hold)——不是被关掉;挂起它的那一步没有把它放回来",
-    "SwitchingOff": "正在关闭中(switch-off delay 未走完)——再等一下可能就好了",
-    "SafeTip": "Nanonis 自己进了 **SafeTip 保护态**——没有人关它,是仪器躲开了",
-    "Withdrawing": "正在退针",
+    "Off": tr("确实被关掉了", "really switched off"),
+    "Hold": tr("被**挂起**(hold)——不是被关掉;挂起它的那一步没有把它放回来",
+               "**held** (hold), not switched off; the step that held it did not put it back"),
+    "SwitchingOff": tr("正在关闭中(switch-off delay 未走完)——再等一下可能就好了",
+                       "switching off (the switch-off delay has not finished); "
+                       "waiting a little may be enough"),
+    "SafeTip": tr("Nanonis 自己进了 **SafeTip 保护态**——没有人关它,是仪器躲开了",
+                  "Nanonis itself entered the **SafeTip protection state**; nobody "
+                  "switched it off, the instrument pulled away"),
+    "Withdrawing": tr("正在退针", "withdrawing the tip"),
 }
 
 
@@ -80,8 +87,8 @@ def context_suffix(attr: str, state: "HardwareState") -> str:
     text = str(value)
     hint = _ZCTRL_STATUS_HINT.get(text) if attr == "z_controller_on" else None
     if hint:
-        return f"（{companion}={text}：{hint}）"
-    return f"（{companion}={text}）"
+        return tr(f"（{companion}={text}：{hint}）", f" ({companion}={text}: {hint})")
+    return tr(f"（{companion}={text}）", f" ({companion}={text})")
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -106,9 +113,11 @@ def context_suffix(attr: str, state: "HardwareState") -> str:
 #
 # 放行那一侧才是要命的:``MotorMove`` / ``MotorMoveClosedLoop`` 声明的就是
 # ``z_controller_off``,而「反馈环还闭着的时候跑开环粗进针马达」正是这条前置存在
-# 的全部理由(``zcontrol.py`` 里 TryEngageController 那段逐字写过:那是撞针)。
+# 的全部理由(``zcontrol.py`` 里 TryEngageController 那段写过:那是撞针)。
 #
-# 精确前置条件应优先于子串兜底，避免状态快照正确而规则反向解释。
+# 曾复现拒绝那一侧:针尖顶在压电行程尽头、要粗动退针,
+# 而退针被这道门拒了两次,理由是「Z controller is OFF」——**它正是关着的**。
+# 中间还夹了一次真实状态读,仍然拒:快照一直是对的,**错的是规则**。
 #
 # 与 ``core/safety.py`` 的 ``_GLOBAL_CHECKS`` 是同一族教训(那次是「避免宽泛的
 # 'x'/'z',用 'x_m'/'bias_v'」)。宽泛子串在**否定形式**上尤其危险:
@@ -175,7 +184,9 @@ def _vacuum_ok_for_coarse() -> tuple[bool, str]:
         verdict = _vac_check()
         return bool(verdict.allow), verdict.reason
     except Exception as exc:  # noqa: BLE001 — a broken interlock is a refusal
-        return False, f"真空互锁本身不可用({exc}),按 fail-closed 拒绝粗动"
+        return False, tr(f"真空互锁本身不可用({exc}),按 fail-closed 拒绝粗动",
+                         f"The vacuum interlock itself is unavailable ({exc}); "
+                         "coarse motion refused (fail-closed)")
 
 
 #: precondition name (exact, lower-cased) → () -> (ok, reason)
@@ -184,7 +195,7 @@ COMPUTED_CHECKS: dict[str, object] = {
 }
 
 
-#: ``(attr, expected)`` → 人话。措辞与旧的子串模板逐字相同,好让既有断言
+#: ``(attr, expected)`` → 人话。措辞与旧的子串模板完全相同,好让既有断言
 #: (``"Z controller is OFF" in v[0]``)继续通过 —— 这次改的是**判定**,不是措辞。
 _EXACT_MESSAGES: dict[tuple, str] = {
     ("z_controller_on", True): "Z controller is OFF",
@@ -230,7 +241,8 @@ def check_state_preconditions(
                     + _EXACT_MESSAGES.get(
                         (attr, bool(expected) if isinstance(expected, bool) else expected),
                         f"{attr} is {actual!r}, expected {expected!r}")
-                    + f"（读到 {attr}={actual!r}，要求 {expected!r}）"
+                    + tr(f"（读到 {attr}={actual!r}，要求 {expected!r}）",
+                         f" (read {attr}={actual!r}, required {expected!r})")
                     + context_suffix(attr, state)
                 )
             continue

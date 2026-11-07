@@ -1,4 +1,4 @@
-; MAST 旧版卸载工具 — standalone remover for legacy MAST (v1) + MAST2 (v2)
+﻿; MAST 旧版卸载工具 — standalone remover for legacy MAST (v1) + MAST2 (v2)
 ; ============================================================================
 ; Why: starting with the renamed "MAST" (2.6.0+), updates are incremental (OTA
 ; delta), so the full installer is NOT re-run every release — i.e. installing a
@@ -52,6 +52,33 @@ SetupIconFile=..\logo\MAST2_logo.ico
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "czech"; MessagesFile: "Czech.isl"
+
+[CustomMessages]
+; %1 / %2 / %3 由 FmtMessage 填；%n 是换行。
+english.NotInstalled=not installed
+chinesesimplified.NotInstalled=未安装
+czech.NotInstalled=není nainstalováno
+
+english.ChoiceTitle=Choose the old versions to uninstall
+chinesesimplified.ChoiceTitle=选择要卸载的旧版本
+czech.ChoiceTitle=Vyberte staré verze k odinstalaci
+
+english.ChoiceSubTitle=This tool only removes program files; your user data (experiment records / api key / sessions / models / config) is kept.
+chinesesimplified.ChoiceSubTitle=本工具仅删除程序文件,保留你的用户数据(实验记录 / api key / 会话 / 模型 / 配置)。
+czech.ChoiceSubTitle=Tento nástroj odstraní pouze soubory programu; vaše uživatelská data (záznamy experimentů / api key / relace / modely / konfigurace) zůstanou zachována.
+
+english.ChoiceBody=The following old MAST versions were found. Tick the ones to uninstall, then click "Next".%n(Running instances are closed gracefully first, then uninstalled.)
+chinesesimplified.ChoiceBody=检测到以下已安装的旧版 MAST。勾选要卸载的项,然后点"下一步"。%n(运行中的实例会被先优雅关闭,再卸载。)
+czech.ChoiceBody=Byly nalezeny následující nainstalované staré verze MAST. Zaškrtněte ty, které chcete odinstalovat, a klepněte na „Další“.%n(Spuštěné instance se nejprve řádně ukončí a poté se odinstalují.)
+
+english.NothingFound=No installed MAST v1 or MAST2 was found (64-bit registry checked). Nothing to uninstall.
+chinesesimplified.NothingFound=未检测到已安装的 MAST v1 或 MAST2(已查 64 位注册表)。无需卸载。
+czech.NothingFound=Nebyl nalezen nainstalovaný MAST v1 ani MAST2 (zkontrolován 64bitový registr). Není co odinstalovat.
+
+english.Done=Done. The selected old versions were uninstalled (program files removed, user data kept).%nTo remove the data as well, delete the matching data directory manually (e.g. C:\MAST2-data).
+chinesesimplified.Done=完成。已卸载所选旧版(程序文件已删除,用户数据保留)。%n如需彻底清除数据,请手动删除对应的数据目录(如 C:\MAST2-data)。
+czech.Done=Hotovo. Vybrané staré verze byly odinstalovány (soubory programu odstraněny, uživatelská data zachována).%nChcete-li odstranit i data, smažte příslušný adresář s daty ručně (např. C:\MAST2-data).
 
 [Code]
 const
@@ -116,7 +143,7 @@ begin
   if Present then
     Result := Name + '  (v' + Ver + ',  ' + Dir + ')'
   else
-    Result := Name + '  (未安装)';
+    Result := Name + '  (' + CustomMessage('NotInstalled') + ')';
 end;
 
 procedure InitializeWizard;
@@ -128,10 +155,9 @@ begin
 
   ChoicePage := CreateInputOptionPage(
     wpWelcome,
-    '选择要卸载的旧版本',
-    '本工具仅删除程序文件,保留你的用户数据(实验记录 / api key / 会话 / 模型 / 配置)。',
-    '检测到以下已安装的旧版 MAST。勾选要卸载的项,然后点"下一步"。' + #13#10 +
-    '(运行中的实例会被先优雅关闭,再卸载。)',
+    CustomMessage('ChoiceTitle'),
+    CustomMessage('ChoiceSubTitle'),
+    CustomMessage('ChoiceBody'),
     True, False);
   V1Idx := ChoicePage.Add(CapFor(V1Present, 'MAST v1', V1Ver, V1Dir));
   V2Idx := ChoicePage.Add(CapFor(V2Present, 'MAST2', V2Ver, V2Dir));
@@ -146,8 +172,7 @@ procedure CurPageChanged(CurPageID: Integer);
 begin
   if (ChoicePage <> nil) and (CurPageID = ChoicePage.ID) then
     if (not V1Present) and (not V2Present) then
-      MsgBox('未检测到已安装的 MAST v1 或 MAST2(已查 64 位注册表)。无需卸载。',
-             mbInformation, MB_OK);
+      MsgBox(CustomMessage('NothingFound'), mbInformation, MB_OK);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -168,8 +193,6 @@ begin
       removed := removed + 1;
     end;
     if removed > 0 then
-      MsgBox('完成。已卸载所选旧版(程序文件已删除,用户数据保留)。' + #13#10 +
-             '如需彻底清除数据,请手动删除对应的数据目录(如 C:\MAST2-data)。',
-             mbInformation, MB_OK);
+      MsgBox(CustomMessage('Done'), mbInformation, MB_OK);
   end;
 end;

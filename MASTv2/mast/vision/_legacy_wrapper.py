@@ -308,7 +308,6 @@ class LegacyBackend:
         # CrossEntropyLoss on those raw integer labels, so logit index 0 == BAD
         # and index 1 == GOOD. The previous mapping ["good", "bad"] was INVERTED
         # — bad tips were reported as good, defeating the downstream safety gate.
-        # 审查 finding [39].
         labels = ["bad", "good"]
         return TipCoarseResult(
             label=labels[idx if idx < len(labels) else 0],

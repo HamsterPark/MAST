@@ -198,17 +198,17 @@ class ArtifactEntry(BaseModel):
 
 
 class ArtifactGroup(BaseModel):
-    """One artifact CLASS and whether anything is in it (/ #29).
+    """One artifact CLASS and whether anything is in it.
 
     Two things this exists to stop:
 
-      * **#16 — "编辑/填充这些东西还是不会自动生产".** All nine classes showed
+      * **Classes stuck at "pending".** All nine classes showed
         待产出 forever. Half of that was a UI id mismatch; the other half was
         that four classes (文献库 / 实验记录 / 长期记忆 / 视觉缓冲) live in SQLite
         and a JSON registry, and NOTHING enumerated them — so they could not
         report themselves as produced no matter how full they got. ``count``
         comes from each class's own store.
-      * **#29 — a flat list buried everything under .sxm rows.** ``high_volume``
+      * **A flat list buried everything under .sxm rows.** ``high_volume``
         marks the class that arrives in bulk so the UI can start it collapsed.
 
     ``known=False`` means the store could not be read. It is NOT ``count=0``:

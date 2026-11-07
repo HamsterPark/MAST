@@ -31,7 +31,7 @@ class PlanOverlay:
         source=plan so it renders as a ghost regardless of how it was built.
 
         Copies each input marker (dataclasses.replace) instead of mutating it —
-        the caller keeps ownership of its own objects ()."""
+        the caller keeps ownership of its own objects."""
         cleaned: list[MapMarker] = []
         for s in steps or []:
             if s is None or not s.has_xy:

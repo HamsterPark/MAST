@@ -1,10 +1,12 @@
-// 底部操作条（旧版兼容格式 series.js 的 selBarEnsure / selBarUpdate）。
+// Bottom action bar.
 //
-// 选中若干张后出现：一起打分、一起加/去标签、「存为系列…」（填系列名、评级、标签、备注；
-// 也可以「并入」已有系列）、系列页里「从本系列移除」、取消选择。目录总览、已标记页、
-// 出图页、数据根页不显示（原版如此；出图页没有卡片可选）。
+// Appears once cards are selected: rate together, add/remove a tag together, "Save as series…"
+// (series name, rating, tags, note; or merge into an existing series), "Remove from series" on
+// a series page, and clear selection. Not shown on the directory overview, Marked page,
+// Figures page or data-roots page (the figures page has no cards to select).
 //
-// 选中的全是谱时多一个「拼接出图」（设计 §10 D22：单根谱宽范围拼接）。
+// When every selected item is a spectrum, a "stitch figure" control is added (design section 10:
+// single-spectrum wide-range stitching).
 
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -18,6 +20,7 @@ import { useSelectionStore } from "./selectionStore";
 import { toast } from "./toast";
 import { SMALL_BTN, SMALL_SELECT } from "./bits";
 import { StitchSelected } from "./figures/StitchControls";
+import { tr } from "@/lib/i18n";
 
 const ACC = "!border-mast-accent !bg-mast-accent !text-mast-accent-ink";
 
@@ -72,8 +75,9 @@ export function SelectionBar({ view, model }: { view: GalleryView; model: Galler
     setFormOpen(false);
     toast(
       <>
-        {old ? "已并入" : "已存为"}系列{" "}
-        <Link to={{ search: `?${viewSearch({ v: "series", s: sid })}` }}>{finalName}</Link>（{memberIds.length} 个）
+        {old ? tr("已并入系列", "Merged into series") : tr("已存为系列", "Saved as series")}{" "}
+        <Link to={{ search: `?${viewSearch({ v: "series", s: sid })}` }}>{finalName}</Link>
+        {tr(`（${memberIds.length} 个）`, ` (${memberIds.length} items)`)}
       </>,
     );
     clear();
@@ -92,15 +96,15 @@ export function SelectionBar({ view, model }: { view: GalleryView; model: Galler
   return (
     <div className="fixed inset-x-0 bottom-0 z-40 border-t-2 border-mast-accent bg-mast-panel px-[18px] py-2 text-[13px] text-mast-text shadow-[0_-4px_16px_rgba(0,0,0,.14)]">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        <b>已选 {its.length} 个</b>
+        <b>{tr(`已选 ${its.length} 个`, `${its.length} selected`)}</b>
         <span className="text-mast-muted">{rangeText(its)}</span>
         <span className="inline-flex items-center gap-[3px]">
-          一起打分
+          {tr("一起打分", "Rate together")}
           {([
             [1, "✓"],
             [2, "★"],
             [-1, "✗"],
-            [0, "清评级"],
+            [0, tr("清评级", "Clear rating")],
           ] as const).map(([r, lab]) => (
             <button
               key={r}
@@ -108,7 +112,7 @@ export function SelectionBar({ view, model }: { view: GalleryView; model: Galler
               className={SMALL_BTN}
               onClick={() => {
                 for (const it of its) useMarksStore.getState().updateMark(it, { r });
-                toast(`已给 ${its.length} 个打分`);
+                toast(tr(`已给 ${its.length} 个打分`, `Rated ${its.length} items`));
               }}
             >
               {lab}
@@ -124,17 +128,21 @@ export function SelectionBar({ view, model }: { view: GalleryView; model: Galler
             ))}
           </select>
           {([
-            [true, "一起加标签"],
-            [false, "去掉"],
+            [true, tr("一起加标签", "Add tag to all")],
+            [false, tr("去掉", "Remove")],
           ] as const).map(([add, lab]) => (
             <button
-              key={lab}
+              key={String(add)}
               type="button"
               className={SMALL_BTN}
               disabled={!curTag}
               onClick={() => {
                 for (const it of its) useMarksStore.getState().toggleTag(it, curTag, add);
-                toast(`${add ? "已加" : "已去掉"}标签「${curTag}」×${its.length}`);
+                toast(
+                  add
+                    ? tr(`已加标签「${curTag}」×${its.length}`, `Added tag "${curTag}" ×${its.length}`)
+                    : tr(`已去掉标签「${curTag}」×${its.length}`, `Removed tag "${curTag}" ×${its.length}`),
+                );
               }}
             >
               {lab}
@@ -149,16 +157,16 @@ export function SelectionBar({ view, model }: { view: GalleryView; model: Galler
             setFormOpen((o) => !o);
           }}
         >
-          存为系列…
+          {tr("存为系列…", "Save as series…")}
         </button>
         {allSpectra && <StitchSelected ids={its.map((it) => it.id)} />}
         {view.v === "series" && (
           <button type="button" className={SMALL_BTN} onClick={removeFromSeries}>
-            从本系列移除
+            {tr("从本系列移除", "Remove from this series")}
           </button>
         )}
         <button type="button" className={SMALL_BTN} onClick={clear}>
-          取消选择
+          {tr("取消选择", "Clear selection")}
         </button>
       </div>
 
@@ -172,25 +180,25 @@ export function SelectionBar({ view, model }: { view: GalleryView; model: Galler
               fillForm(e.target.value);
             }}
           >
-            <option value="">新建系列</option>
+            <option value="">{tr("新建系列", "New series")}</option>
             {Object.entries(series).map(([sid, s]) => (
               <option key={sid} value={sid}>
-                并入：{s.name}
+                {tr("并入：", "Merge into: ")}{s.name}
               </option>
             ))}
           </select>
           <input
             className={`${SMALL_SELECT} w-[26rem] max-w-full`}
             value={name}
-            placeholder="系列名"
+            placeholder={tr("系列名", "Series name")}
             autoFocus
             onChange={(e) => setName(e.target.value)}
           />
           <span className="inline-flex gap-[3px]">
             {([
-              [1, "✓ 可用"],
-              [2, "★ 重点"],
-              [-1, "✗ 排除"],
+              [1, tr("✓ 可用", "✓ Usable")],
+              [2, tr("★ 重点", "★ Key")],
+              [-1, tr("✗ 排除", "✗ Exclude")],
             ] as const).map(([r, lab]) => (
               <button
                 key={r}
@@ -222,14 +230,14 @@ export function SelectionBar({ view, model }: { view: GalleryView; model: Galler
           <input
             className={`${SMALL_SELECT} w-72 max-w-full`}
             value={note}
-            placeholder="系列备注（这组数据是什么、为什么有用）"
+            placeholder={tr("系列备注（这组数据是什么、为什么有用）", "Series note (what this data is and why it is useful)")}
             onChange={(e) => setNote(e.target.value)}
           />
           <button type="button" className={clsx(SMALL_BTN, ACC)} onClick={saveSeries}>
-            保存系列
+            {tr("保存系列", "Save series")}
           </button>
           <button type="button" className={SMALL_BTN} onClick={() => setFormOpen(false)}>
-            收起
+            {tr("收起", "Collapse")}
           </button>
         </div>
       )}

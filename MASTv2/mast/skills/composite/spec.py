@@ -36,6 +36,7 @@ import operator
 import re
 from dataclasses import dataclass, field
 from typing import Any
+from mast.i18n import tr
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -465,12 +466,15 @@ class CompositeSpec:
                 aid = node.get("agent")
                 if aid == "instrument_control":
                     problems.append(
-                        f"{here}: instrument_control 不可作为 agent 节点委托"
+                        tr(f"{here}: instrument_control 不可作为 agent 节点委托"
                         "——仪器动作必须以 step 节点逐技能出现在图上"
-                        "（最小能动性）")
+                        "（最小能动性）",
+                            f"{here}: instrument_control cannot be delegated as an agent node"
+                            f" -- instrument actions must appear on the graph as step nodes, one skill each (least agency)"))
                 elif aid not in DELEGATABLE_AGENTS:
-                    problems.append(f"{here}: invalid agent {aid!r} "
-                                    f"(可委托：{DELEGATABLE_AGENTS})")
+                    problems.append(tr(f"{here}: invalid agent {aid!r} "
+                                    f"(可委托：{DELEGATABLE_AGENTS})",
+                                        f"{here}: invalid agent {aid!r} (delegable: {DELEGATABLE_AGENTS})"))
                 task = node.get("task")
                 if not isinstance(task, str) or not task.strip():
                     problems.append(f"{here}: agent missing 'task'")

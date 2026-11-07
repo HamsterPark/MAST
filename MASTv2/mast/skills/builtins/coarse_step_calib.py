@@ -33,6 +33,7 @@ from __future__ import annotations
 import logging
 import time
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -83,41 +84,44 @@ class CalibrateCoarseStep(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "量**粗动一步走多远**（x/y 分别量，两者可以不一样）。"
+                tr("量**粗动一步走多远**（x/y 分别量，两者可以不一样）。"
                 "本机粗动没有位置反馈（PMD 不支持 `Motor_GetPos`/`StepCounterGet`），"
                 "所以拿**有标定的压电当尺子**：扎个坑做基准 → 粗动 N 步 → 回扫同一个"
                 "压电中心 → 整幅图相位相关求位移 → 位移÷N。"
                 "\n\n**不要拿 `RelocateCoarseXY` 做这件事**：它要求落点离已访问站点 ≥200 步，"
                 "而标定要的正是小步长。那是「别重复访问」的效率约束；安全那部分"
                 "（降压、退针、**验电流真的归零**）本技能自己做并逐条报出来。"
-                "\n\n**步数要小。** 2026-08-28 反推：若样品倾斜约 1°，每步可能是 100 nm 量级 —— "
+                "\n\n**步数要小。** 反推：若样品倾斜约 1°，每步可能是 100 nm 量级 —— "
                 "20 步就是 2 µm，早跑出视野，怎么扫都看不到位移。默认 2–4 步 / 1500 nm 视野。"
                 "\n\n**位移自证**：相位相关峰的锐度低于 %.0f 就**拒答**，"
                 "而不是报一个凑出来的数 —— 那说明两帧之间没有可对齐的共同特征"
                 "（坑跑出视野，或表面太平）。"
-                "\n\n⚠️ 本技能的方法在 2026-08-28 夜三次尝试都被别的问题打断"
-                "（站点检查、视野太小、仪器锁），**尚未在真机上跑完一次完整标定**。"
+                "\n\n⚠️ 本技能的方法曾被别的问题打断"
+                "（站点检查、视野太小、仪器锁），**尚未在真机上跑完一次完整标定**。",
+                "Measure **how far one coarse step goes** (x/y separately; they may differ). This machine's coarse motion has no position feedback (the PMD does not support `Motor_GetPos`/`StepCounterGet`), so the **calibrated piezo is used as a ruler**: poke a pit as a reference -> coarse move N steps -> rescan the same piezo centre -> phase-correlate the whole image for the displacement -> displacement ÷ N.\n\n**Do not use `RelocateCoarseXY` for this**: it requires the landing site to be >=200 steps from visited sites, while calibration needs exactly small steps. That is the efficiency constraint 'do not revisit'; the safety parts (lowering voltage, withdrawing, **verifying that the current really is zero**) are done by this skill itself and reported one by one.\n\n**Keep the step count small.** Back-calculated: with a sample tilt of about 1°, a step may be of order 100 nm - 20 steps is 2 µm, long out of the field of view, and no scan will show the displacement. Default 2-4 steps / 1500 nm field of view.\n\n**The displacement certifies itself**: if the sharpness of the phase-correlation peak is below %.0f it **refuses to answer**, rather than reporting a made-up number - that means there is no common feature to align between the two frames (the pit moved out of the field of view, or the surface is too flat).\n\nWARNING: attempts with this skill's method have been interrupted by other problems (site check, field of view too small, instrument lock), and **a complete calibration has not yet been run to the end on the real machine**.")
                 % _MIN_CORR_SNR
             ),
             parameters=[
                 ParameterSpec(
                     name="axis", type="str",
-                    description="'x' 或 'y' —— 两个方向要分别量。",
+                    description=tr("'x' 或 'y' —— 两个方向要分别量。", "'x' or 'y' - the two directions must be measured separately."),
                     required=True, allowed_values=["x", "y"]),
                 ParameterSpec(
                     name="steps", type="str",
-                    description=("要测的步数，逗号分隔。默认 '2,4' —— 两个不同步数"
-                                 "才能自证线性（位移应当与步数成比例）。"),
+                    description=(tr("要测的步数，逗号分隔。默认 '2,4' —— 两个不同步数"
+                                 "才能自证线性（位移应当与步数成比例）。",
+                                 "Step counts to measure, comma-separated. Default '2,4' - two different step counts are needed to certify linearity (displacement should be proportional to the step count).")),
                     required=False, default="2,4"),
                 ParameterSpec(
                     name="size_m", type="float", unit="m",
-                    description="扫描视野。要能容下预期位移的 2–3 倍。",
+                    description=tr("扫描视野。要能容下预期位移的 2–3 倍。", "Scan field of view. It must be able to hold 2-3 times the expected displacement."),
                     required=False, default=1.5e-6,
                     min_value=1e-7, max_value=2.5e-6),
                 ParameterSpec(
                     name="make_pit", type="bool",
-                    description=("先扎一个坑做基准特征。表面本来就有足够特征时可以关掉 —— "
-                                 "但**平坦表面上相位相关立不住**，那正是坑的用处。"),
+                    description=(tr("先扎一个坑做基准特征。表面本来就有足够特征时可以关掉 —— "
+                                 "但**平坦表面上相位相关立不住**，那正是坑的用处。",
+                                 "First poke a pit as a reference feature. It can be turned off when the surface already has enough features - but **phase correlation does not hold on a flat surface**, which is exactly what the pit is for.")),
                     required=False, default=True),
             ],
             estimated_duration_s=2400.0,
@@ -163,25 +167,26 @@ class CalibrateCoarseStep(BaseSkill):
         axis = str(params.get("axis") or "").lower()
         if axis not in ("x", "y"):
             return SkillResult(skill_name="CalibrateCoarseStep", success=False,
-                               error="axis 只能是 'x' 或 'y'（给了 %r）" % params.get("axis"))
+                               error=tr("axis 只能是 'x' 或 'y'（给了 %r）", "axis must be 'x' or 'y' (got %r)") % params.get("axis"))
         try:
             steps_list = [int(t) for t in str(params.get("steps") or "2,4").split(",") if t.strip()]
         except ValueError:
             return SkillResult(skill_name="CalibrateCoarseStep", success=False,
-                               error="steps 解析不了：%r" % params.get("steps"))
+                               error=tr("steps 解析不了：%r", "steps could not be parsed: %r") % params.get("steps"))
         steps_list = [s for s in steps_list if s > 0]
         if len(steps_list) < 2:
             return SkillResult(
                 skill_name="CalibrateCoarseStep", success=False,
-                error=("至少要两个不同步数 —— 单个步数算得出一个数，"
-                       "但**没有任何东西能证明它是线性的**（位移该与步数成比例）。"))
+                error=(tr("至少要两个不同步数 —— 单个步数算得出一个数，"
+                       "但**没有任何东西能证明它是线性的**（位移该与步数成比例）。",
+                       "At least two different step counts are needed - a single step count yields a number, but **nothing proves it is linear** (displacement should be proportional to the step count).")))
         size_m = float(params.get("size_m") or 1.5e-6)
 
         free, err = self._lock_is_free(context)
         if not free:
             return SkillResult(
                 skill_name="CalibrateCoarseStep", success=False,
-                error="仪器正被另一条链路占用，不能动马达：" + err[:200],
+                error=tr("仪器正被另一条链路占用，不能动马达：", "The instrument is occupied by another chain and the motor cannot be moved:") + err[:200],
                 data={"blocked_by_lock": True})
 
         fr = getattr(context.run("GetScanFrame", {}), "data", None) or {}
@@ -201,28 +206,28 @@ class CalibrateCoarseStep(BaseSkill):
         ref_path = self._scan(context, cx_m, cy_m, size_m)
         if not ref_path:
             return SkillResult(skill_name="CalibrateCoarseStep", success=False,
-                               error="基准帧扫描失败。")
+                               error=tr("基准帧扫描失败。", "The reference frame scan failed."))
         prev = self._load(ref_path)
 
         runs = []
         for n in steps_list:
             ok, cur = self._clear(context)
             if not ok:
-                runs.append({"steps": n, "abort": "清障未通过",
+                runs.append({"steps": n, "abort": tr("清障未通过", "obstacle clearing did not pass"),
                              "current_a": cur})
                 break
             res = context.run("MotorMove", {"direction": "%s+" % axis, "steps": int(n)})
             if not getattr(res, "success", False):
-                runs.append({"steps": n, "abort": "MotorMove 失败",
+                runs.append({"steps": n, "abort": tr("MotorMove 失败", "MotorMove failed"),
                              "error": str(getattr(res, "error", ""))[:180]})
                 break
             ap = context.run("ApproachTip", {})
             if not getattr(ap, "success", False):
-                runs.append({"steps": n, "abort": "重新进针失败"})
+                runs.append({"steps": n, "abort": tr("重新进针失败", "re-engage failed")})
                 break
             path = self._scan(context, cx_m, cy_m, size_m)
             if not path:
-                runs.append({"steps": n, "abort": "扫描失败"})
+                runs.append({"steps": n, "abort": tr("扫描失败", "scan failed")})
                 break
             img = self._load(path)
             dx, dy, snr = phase_shift(prev, img)
@@ -230,9 +235,10 @@ class CalibrateCoarseStep(BaseSkill):
                    "dy_nm": None if dy is None else dy * nm_px, "corr_snr": snr}
             if snr is not None and snr < _MIN_CORR_SNR:
                 row["refused"] = (
-                    "相关峰锐度 %.1f < %.0f —— 两帧之间没有可对齐的共同特征，"
+                    tr("相关峰锐度 %.1f < %.0f —— 两帧之间没有可对齐的共同特征，"
                     "**不报位移**。多半是位移超出视野（把 steps 调小或 size 调大），"
-                    "或表面太平（开 make_pit）。" % (snr, _MIN_CORR_SNR))
+                    "或表面太平（开 make_pit）。",
+                    "Correlation peak sharpness %.1f < %.0f - there is no common feature to align between the two frames, **no displacement is reported**. Most likely the displacement exceeded the field of view (reduce steps or increase size), or the surface is too flat (turn on make_pit).") % (snr, _MIN_CORR_SNR))
             else:
                 row["nm_per_step_x"] = row["dx_nm"] / n
                 row["nm_per_step_y"] = row["dy_nm"] / n
@@ -244,8 +250,9 @@ class CalibrateCoarseStep(BaseSkill):
                 "min_corr_snr": _MIN_CORR_SNR}
         if len(good) < 2:
             data["verdict"] = "undetermined"
-            data["message"] = ("可用测量不足 2 个 —— **判不了**。单点算得出一个数，"
-                               "但证不了线性；这里不给那个数。")
+            data["message"] = (tr("可用测量不足 2 个 —— **判不了**。单点算得出一个数，"
+                               "但证不了线性；这里不给那个数。",
+                               "Fewer than 2 usable measurements - **cannot judge**. A single point yields a number but cannot prove linearity; that number is not given here."))
             return SkillResult(skill_name="CalibrateCoarseStep", success=True, data=data)
 
         # 线性自证：位移÷步数在不同步数下应当一致
@@ -256,9 +263,10 @@ class CalibrateCoarseStep(BaseSkill):
         data["spread_frac"] = spread
         data["verdict"] = "ok" if spread <= 0.35 else "nonlinear"
         data["message"] = (
-            "%s 轴每步 ≈ %.1f nm（%d 个步数，彼此差 %.0f%%）。%s"
+            tr("%s 轴每步 ≈ %.1f nm（%d 个步数，彼此差 %.0f%%）。%s", "%s axis ≈ %.1f nm per step (%d step counts, differing by %.0f%% from each other). %s")
             % (axis, data["nm_per_step"], len(good), 100 * spread,
                "" if spread <= 0.35 else
-               " **不同步数给出的每步距离差得太多** —— 可能有滑移或黏滑不均，"
-               "这个平均值别当成刻度用。"))
+               tr(" **不同步数给出的每步距离差得太多** —— 可能有滑移或黏滑不均，"
+               "这个平均值别当成刻度用。",
+               " **The per-step distance differs too much between step counts** - there may be slip or uneven stick-slip, so do not use this average as a scale.")))
         return SkillResult(skill_name="CalibrateCoarseStep", success=True, data=data)

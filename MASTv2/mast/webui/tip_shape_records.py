@@ -49,10 +49,16 @@ def make_tip_shape_post_hook(
         if not isinstance(data, dict):
             return None
 
-        # This success-only hook renders the tip-shape figure, attaches it to the
-        # recorded action and emits its vision verdict. General action recording
-        # belongs to CoreRuntime._record_v2_action, which sees both successes and
-        # failures with their actual parameters.
+        # TipShapeWithReadback-specific: render the figure, attach it to the
+        # action as a scan_file + observation, and emit a vision-buffer verdict.
+        #
+        # This used to open with a GLOBAL "record EVERY skill as a v2 action"
+        # writer. That was the wrong seam and it lost the failure record:
+        # wrap_skill only calls a post_hook when the skill SUCCEEDED, so the v2
+        # store logged only successful actions, and logged them with
+        # `params={}`. Every-skill
+        # recording now lives on the recorder seam (CoreRuntime._record_v2_action),
+        # which fires on success AND failure and carries the real params.
         if skill_name != _SKILL:
             return None
         eid = experiment_id_getter()

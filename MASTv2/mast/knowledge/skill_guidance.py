@@ -384,7 +384,7 @@ SKILL_EXTRA: dict[str, dict] = {
         "nanonis": "(组合: MoveToXY + SetBias + TipPulse)",
         "example": '{"name": "AutoOSS_Dehalogenation", "input": {"target_x_m": 5e-9, "target_y_m": 3e-9}}',
     },
-    # -- New Skills (#4-30) --
+    # -- Additional skills --
     "DetectAtomJump": {
         "when_use": "原子操纵动作后判断原子是否移动。替代重新扫描验证。",
         "when_not": "不在操纵模式时无需使用。",
@@ -432,7 +432,8 @@ SKILL_EXTRA: dict[str, dict] = {
         # Layer-0 挡住并要求人工审批(见 mast.core.safety.
         # is_unguarded_lateral_coarse_move)。这里留下的用法只剩 z-retract。
         "when_use": "粗动马达单步原语。**横向换区请用 RelocateCoarseXY,不要用它。**"
-                    "z-retract(远离样品)可以直接用。",
+                    "z-retract(远离样品;方向码按本机声明的粗动退针方向换算,"
+                    "没声明时按 Nanonis 标准 Z+)可以直接用。",
         "when_not": "x±/y± 横向移动:自主路径会被拒绝,因为它只检查压电是否收到顶"
                     "(约 1 µm 余量,读不到状态还会放行),不做粗动退针清障、不看真空、"
                     "不核对驱动电压、移动中不看电流、也不记进粗动大地图。"

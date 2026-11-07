@@ -20,29 +20,30 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 #: 每种「没有值」该做什么。放在**数据里**而不是只写在描述里 —— 描述会被裁剪、
 #: 会被总结，而这一句是跟着答案一起到调用方手上的。
 _WHAT_TO_DO = {
     "no_sensor": (
-        "这台机器上没有真的温度传感器（只有占位实现）。**等下去永远等不到** —— "
-        "不要轮询、不要重试；需要温度判据的步骤应当直接拒绝并告诉用户。"
+        tr("这台机器上没有真的温度传感器（只有占位实现）。**等下去永远等不到** —— "
+        "不要轮询、不要重试；需要温度判据的步骤应当直接拒绝并告诉用户。", "This machine has no real temperature sensor (placeholder implementation only). **Waiting will never succeed** - do not poll or retry; steps that need a temperature criterion should refuse directly and tell the user.")
     ),
     "unavailable": (
-        "已安装温度传感器，但此刻拿不到读数。可能是串口被其他程序占用，"
-        "或归档循环尚未完成一次读取。"
-        "**可能会好**：可以等，但要请用户去看端口占用，不要无限轮询。"
+        tr("有真的温度传感器，但此刻拿不到读数。常见原因是串口被别的程序独占"
+        "，或归档循环还没跑过一拍。"
+        "**可能会好**：可以等，但要请用户去看端口占用，不要无限轮询。", "There is a real temperature sensor, but no reading is available right now. Common causes: the serial port is held by another program, or the archive loop has not yet run a cycle. **May recover**: you can wait, but ask the user to check the port usage; do not poll indefinitely.")
     ),
     "unknown_channel": (
-        "你指名的那个通道这台机器上没有。看 available_channels 里的名字，"
-        "**不是**「没有温度计」。"
+        tr("你指名的那个通道这台机器上没有。看 available_channels 里的名字，"
+        "**不是**「没有温度计」。", "The channel you named does not exist on this machine. Look at the names in available_channels; this is **not** \"no thermometer\".")
     ),
     "ambiguous_channel": (
-        "你给的名字同时对上了不止一个通道。从 available_channels 里挑一个完整名字。"
+        tr("你给的名字同时对上了不止一个通道。从 available_channels 里挑一个完整名字。", "The name you gave matches more than one channel. Pick one full name from available_channels.")
     ),
     "no_source": (
-        "MAST 自己这一侧没接上温度源（独立 API 进程，或环境监控没建起来）。"
-        "与仪器无关；重启/接线才会变。"
+        tr("MAST 自己这一侧没接上温度源（独立 API 进程，或环境监控没建起来）。"
+        "与仪器无关；重启/接线才会变。", "MAST's own side has no temperature source connected (standalone API process, or environment monitoring was not set up). Unrelated to the instrument; only a restart or wiring changes it.")
     ),
 }
 
@@ -57,7 +58,7 @@ class GetTemperature(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读当前温度(K)，带**读数年龄**和**出处**。只读，不碰仪器。\n"
+                tr("读当前温度(K)，带**读数年龄**和**出处**。只读，不碰仪器。\n"
                 "`value_k` 为 null 时看 `reason`,三种「读不到」含义完全不同、"
                 "要做的事相反:\n"
                 "  • `no_sensor` —— 这台机器没有温度计,**等下去永远等不到**,别轮询;\n"
@@ -69,16 +70,16 @@ class GetTemperature(BaseSkill):
                 "fresh/stale/unknown 三态。\n"
                 "多个温度通道时默认取样品台(SPM/stage/sample/tip/cryo);"
                 "磁体杜瓦的温度**不等于**样品台的温度,要哪个就用 `channel` 指名"
-                "(名字见 `available_channels`)。"
+                "(名字见 `available_channels`)。", "Read the current temperature (K), with **reading age** and **provenance**. Read-only, does not touch the instrument.\n`value_k` null: look at `reason`; the three \"cannot read\" cases mean completely different things and call for opposite actions:\n  - `no_sensor`: this machine has no thermometer, **waiting will never succeed**, do not poll;\n  - `unavailable`: there is a thermometer but it gives no reading right now (common: serial port held by another program), you can wait and ask the user to check the port;\n  - `no_source`: MAST's side is not connected, unrelated to the instrument.\n`age_s` is how old the reading is (seconds); **`age_s` null means the age is unknown, not that it was just read**. To judge \"fresh enough\" pass `max_age_s`; `freshness` in the result then gives fresh/stale/unknown.\nWith several temperature channels the default is the sample stage (SPM/stage/sample/tip/cryo); the magnet dewar temperature is **not equal** to the sample stage temperature, name the one you want with `channel` (names in `available_channels`).")
             ),
             parameters=[
                 ParameterSpec(
                     name="channel",
                     type="str",
                     description=(
-                        "指名读哪个温度通道（传感器名，如 'SPM' / 'Magnet'）。"
+                        tr("指名读哪个温度通道（传感器名，如 'SPM' / 'Magnet'）。"
                         "不传 = 自动选样品台优先的那个。名字见结果里的 "
-                        "available_channels。"
+                        "available_channels。", "Which temperature channel to read (sensor name, e.g. 'SPM' / 'Magnet'). Omitted = automatically pick the sample-stage one first. Names are in available_channels in the result.")
                     ),
                     required=False,
                     default=None,
@@ -87,9 +88,9 @@ class GetTemperature(BaseSkill):
                     name="max_age_s",
                     type="float",
                     description=(
-                        "多旧算旧（秒）。传了才会给 freshness 判定；"
+                        tr("多旧算旧（秒）。传了才会给 freshness 判定；"
                         "**不传就不判** —— 这个阈值只有调用方知道，"
-                        "这里不替你拍一个默认值。"
+                        "这里不替你拍一个默认值。", "How old counts as stale (seconds). The freshness verdict is only given if passed; **if omitted, no verdict is made** - only the caller knows this threshold, and no default is imposed here.")
                     ),
                     unit="s",
                     required=False,

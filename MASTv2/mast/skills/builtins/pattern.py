@@ -31,6 +31,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.io.nanonis_files import decode_reply
 from mast.skills.base import BaseSkill
 from mast.skills.composite._base import CompositeSkillGraph
@@ -81,13 +82,14 @@ class RunGridExperiment(CompositeSkillGraph):
             category=SkillCategory.COMPOSITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "用 Nanonis Pattern 模块跑网格谱学。它会处理漂移补偿与自动存盘。"
+                tr("用 Nanonis Pattern 模块跑网格谱学。它会处理漂移补偿与自动存盘。",
+                   "Run grid spectroscopy with the Nanonis Pattern module. It handles drift compensation and automatic saving.")
             ),
             parameters=[
                 ParameterSpec(
                     name="nx",
                     type="int",
-                    description="X 方向的网格点数",
+                    description=tr("X 方向的网格点数", "Number of grid points in X"),
                     required=True,
                     min_value=1,
                     max_value=100,
@@ -95,7 +97,7 @@ class RunGridExperiment(CompositeSkillGraph):
                 ParameterSpec(
                     name="ny",
                     type="int",
-                    description="Y 方向的网格点数",
+                    description=tr("Y 方向的网格点数", "Number of grid points in Y"),
                     required=True,
                     min_value=1,
                     max_value=100,
@@ -103,7 +105,7 @@ class RunGridExperiment(CompositeSkillGraph):
                 ParameterSpec(
                     name="center_x_m",
                     type="float",
-                    description="网格中心 X（m）",
+                    description=tr("网格中心 X（m）", "Grid center X (m)"),
                     unit="m",
                     required=False,
                     default=0.0,
@@ -111,7 +113,7 @@ class RunGridExperiment(CompositeSkillGraph):
                 ParameterSpec(
                     name="center_y_m",
                     type="float",
-                    description="网格中心 Y（m）",
+                    description=tr("网格中心 Y（m）", "Grid center Y (m)"),
                     unit="m",
                     required=False,
                     default=0.0,
@@ -120,8 +122,10 @@ class RunGridExperiment(CompositeSkillGraph):
                     name="width_m",
                     type="float",
                     description=(
-                        "网格宽度，单位**米**（SI），**不是**纳米。换算：100 nm → 100n。默认 100n（=100 nm）"
-                        "。"
+                        tr("网格宽度，单位**米**（SI），**不是**纳米。换算：100 nm → 100n。默认 100n（=100 nm）"
+                        "。",
+                           "Grid width, in **meters** (SI), **not** nanometers. Conversion: 100 nm → 100n. Default 100n (= 100 nm)"
+                           ".")
                     ),
                     unit="m",
                     required=False,
@@ -133,8 +137,10 @@ class RunGridExperiment(CompositeSkillGraph):
                     name="height_m",
                     type="float",
                     description=(
-                        "网格高度，单位**米**（SI），**不是**纳米。换算：100 nm → 100n。默认 100n（=100 nm）"
-                        "。"
+                        tr("网格高度，单位**米**（SI），**不是**纳米。换算：100 nm → 100n。默认 100n（=100 nm）"
+                        "。",
+                           "Grid height, in **meters** (SI), **not** nanometers. Conversion: 100 nm → 100n. Default 100n (= 100 nm)"
+                           ".")
                     ),
                     unit="m",
                     required=False,
@@ -145,7 +151,7 @@ class RunGridExperiment(CompositeSkillGraph):
                 ParameterSpec(
                     name="angle_deg",
                     type="float",
-                    description="网格转角（度）",
+                    description=tr("网格转角（度）", "Grid rotation angle (degrees)"),
                     unit="deg",
                     required=False,
                     default=0.0,
@@ -153,7 +159,7 @@ class RunGridExperiment(CompositeSkillGraph):
                 ParameterSpec(
                     name="wait_timeout_s",
                     type="float",
-                    description="最长等待时间",
+                    description=tr("最长等待时间", "Longest time to wait"),
                     unit="s",
                     required=False,
                     default=3600.0,
@@ -314,7 +320,7 @@ class RunGridExperiment(CompositeSkillGraph):
         if callable(check_abort) and check_abort():
             # STOP the hardware experiment — the old code only set flags, so the
             # grid pattern kept running unmonitored on the controller after the
-            # composite bailed (审查; cf. WaitScanComplete which
+            # composite bailed (cf. WaitScanComplete which
             # stops the scan on abort).
             self._stop_pattern_experiment(real_ctx)
             self._executor.set_partial("exp_done", True)
@@ -448,7 +454,8 @@ class OpenPatternExperiment(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "打开选定的网格实验。配置或启动该实验之前必须先做这一步。"
+                tr("打开选定的网格实验。配置或启动该实验之前必须先做这一步。",
+                   "Open the selected grid experiment. This must be done before configuring or starting the experiment.")
             ),
             estimated_duration_s=1.0,
             composition_level=0,
@@ -481,12 +488,12 @@ class PausePatternExperiment(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="暂停或恢复当前正在跑的网格实验。",
+            description=tr("暂停或恢复当前正在跑的网格实验。", "Pause or resume the grid experiment that is currently running."),
             parameters=[
                 ParameterSpec(
                     name="pause",
                     type="bool",
-                    description="True 为暂停，False 为恢复",
+                    description=tr("True 为暂停，False 为恢复", "True to pause, False to resume"),
                     required=True,
                 ),
             ],
@@ -523,19 +530,20 @@ class SetPatternLine(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设定线图案的参数：点数与两个端点。",
+            description=tr("设定线图案的参数：点数与两个端点。",
+                           "Set the parameters of the line pattern: the number of points and the two end points."),
             parameters=[
                 ParameterSpec(
                     name="set_active",
                     type="bool",
-                    description="True 表示把当前图案切换成 Line",
+                    description=tr("True 表示把当前图案切换成 Line", "True switches the current pattern to Line"),
                     required=False,
                     default=True,
                 ),
                 ParameterSpec(
                     name="num_points",
                     type="int",
-                    description="沿这条线的点数",
+                    description=tr("沿这条线的点数", "Number of points along this line"),
                     required=True,
                     min_value=1,
                     max_value=10000,
@@ -543,35 +551,35 @@ class SetPatternLine(BaseSkill):
                 ParameterSpec(
                     name="use_scan_frame",
                     type="bool",
-                    description="True 表示把这条线设成扫描帧的对角线",
+                    description=tr("True 表示把这条线设成扫描帧的对角线", "True sets this line as the diagonal of the scan frame"),
                     required=False,
                     default=False,
                 ),
                 ParameterSpec(
                     name="p1_x_m",
                     type="float",
-                    description="线上第 1 点的 X 坐标（m）",
+                    description=tr("线上第 1 点的 X 坐标（m）", "X coordinate of point 1 on the line (m)"),
                     unit="m",
                     required=True,
                 ),
                 ParameterSpec(
                     name="p1_y_m",
                     type="float",
-                    description="线上第 1 点的 Y 坐标（m）",
+                    description=tr("线上第 1 点的 Y 坐标（m）", "Y coordinate of point 1 on the line (m)"),
                     unit="m",
                     required=True,
                 ),
                 ParameterSpec(
                     name="p2_x_m",
                     type="float",
-                    description="线上第 2 点的 X 坐标（m）",
+                    description=tr("线上第 2 点的 X 坐标（m）", "X coordinate of point 2 on the line (m)"),
                     unit="m",
                     required=True,
                 ),
                 ParameterSpec(
                     name="p2_y_m",
                     type="float",
-                    description="线上第 2 点的 Y 坐标（m）",
+                    description=tr("线上第 2 点的 Y 坐标（m）", "Y coordinate of point 2 on the line (m)"),
                     unit="m",
                     required=True,
                 ),
@@ -621,25 +629,25 @@ class SetPatternCloud(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="为点云图案谱学设定一组 XY 点。",
+            description=tr("为点云图案谱学设定一组 XY 点。", "Set a group of XY points for cloud-pattern spectroscopy."),
             parameters=[
                 ParameterSpec(
                     name="set_active",
                     type="bool",
-                    description="True 表示把当前图案切换成 Cloud",
+                    description=tr("True 表示把当前图案切换成 Cloud", "True switches the current pattern to Cloud"),
                     required=False,
                     default=True,
                 ),
                 ParameterSpec(
                     name="x_coords",
                     type="str",
-                    description="X 坐标，以 JSON 浮点数列表给出（m）",
+                    description=tr("X 坐标，以 JSON 浮点数列表给出（m）", "X coordinates, given as a JSON list of floats (m)"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="y_coords",
                     type="str",
-                    description="Y 坐标，以 JSON 浮点数列表给出（m）",
+                    description=tr("Y 坐标，以 JSON 浮点数列表给出（m）", "Y coordinates, given as a JSON list of floats (m)"),
                     required=True,
                 ),
             ],
@@ -672,9 +680,12 @@ class SetPatternCloud(BaseSkill):
                 return SkillResult(
                     skill_name="SetPatternCloud",
                     success=False,
-                    error=(f"{label} 必须是 JSON 数组，例如 \"[1e-9, 2e-9]\"；"
+                    error=(tr(f"{label} 必须是 JSON 数组，例如 \"[1e-9, 2e-9]\"；"
                            f"收到的是 {type(seq).__name__}（{params[label]!r}）——"
-                           "单个点也要写成数组：\"[1e-9]\""),
+                           "单个点也要写成数组：\"[1e-9]\"",
+                              f"{label} must be a JSON array, e.g. \"[1e-9, 2e-9]\"; "
+                              f"got {type(seq).__name__} ({params[label]!r}) - "
+                              "a single point must also be written as an array: \"[1e-9]\"")),
                     nanonis_calls=[],
                 )
         if len(x_coords) != len(y_coords):
@@ -711,7 +722,7 @@ class GetPatternCloud(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读为点云图案谱学配置好的那组 XY 点。",
+            description=tr("读为点云图案谱学配置好的那组 XY 点。", "Read the group of XY points configured for cloud-pattern spectroscopy."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["pattern", "cloud", "read"],
@@ -754,7 +765,8 @@ class GetPatternProps(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读网格实验配置：可用的实验、选中的实验、外部 VI、测量前延时、保存通道。"
+                tr("读网格实验配置：可用的实验、选中的实验、外部 VI、测量前延时、保存通道。",
+                   "Read the grid experiment configuration: available experiments, the selected experiment, external VI, pre-measurement delay, saved channels.")
             ),
             estimated_duration_s=0.5,
             composition_level=0,

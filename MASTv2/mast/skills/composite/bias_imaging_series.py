@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 from typing import Iterator
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -60,45 +61,63 @@ class AcquireBiasImagingSeries(CompositeSkillGraph):
             version="1.0.0",
             category=SkillCategory.COMPOSITE,
             safety_level=SafetyLevel.CONFIRM,
-            description=(
+            description=tr(
                 "同一位置变偏压扫一组图并逐帧判定成像质量。正负交错 + 末尾重复"
-                "首条件，让偏压效应与针尖随时间的漂变可以分开。"
+                "首条件，让偏压效应与针尖随时间的漂变可以分开。",
+                "Scan a series of images at the same location with varying bias and "
+                "judge the imaging quality of each frame. Positive/negative "
+                "interleaving plus a repeat of the first condition at the end let the "
+                "bias effect be separated from the tip's drift over time."
             ),
             parameters=[
                 ParameterSpec(
                     name="biases_v", type="str", required=False,
                     default="0.02,-0.02,0.1,-0.1",
-                    description="偏压列表，逗号分隔。会自动按 |V| 升序、正负交错",
+                    description=tr("偏压列表，逗号分隔。会自动按 |V| 升序、正负交错",
+                                   "Bias list, comma-separated. Automatically sorted by "
+                                   "ascending |V| and interleaved positive/negative"),
                 ),
                 ParameterSpec(
                     name="setpoint_a", type="float", unit="A", required=False,
                     default=None, min_value=1e-12, max_value=5e-9,
-                    description="全程固定的电流设定点；不填就用当前值",
+                    description=tr("全程固定的电流设定点；不填就用当前值",
+                                   "Setpoint current held fixed throughout; if empty, "
+                                   "the current value is used"),
                 ),
                 ParameterSpec(
                     name="repeat_first_at_end", type="bool", required=False,
                     default=True,
-                    description=("末尾把第一个偏压再扫一遍。**默认 True** —— "
-                                 "没有它，跨 |V| 的趋势与针尖随时间的劣化分不开"),
+                    description=tr("末尾把第一个偏压再扫一遍。**默认 True** —— "
+                                   "没有它，跨 |V| 的趋势与针尖随时间的劣化分不开",
+                                   "Scan the first bias again at the end. **Default "
+                                   "True** - without it, trends across |V| cannot be "
+                                   "separated from tip degradation over time"),
                 ),
                 ParameterSpec(
                     name="center_x_m", type="float", unit="m", required=False,
-                    default=None, description="扫描中心 X；不填用当前扫描框"),
+                    default=None,
+                    description=tr("扫描中心 X；不填用当前扫描框",
+                                   "Scan centre X; if empty, the current scan frame is used")),
                 ParameterSpec(
                     name="center_y_m", type="float", unit="m", required=False,
-                    default=None, description="扫描中心 Y；不填用当前扫描框"),
+                    default=None,
+                    description=tr("扫描中心 Y；不填用当前扫描框",
+                                   "Scan centre Y; if empty, the current scan frame is used")),
                 ParameterSpec(
                     name="scan_size_m", type="float", unit="m", required=False,
                     default=None, min_value=1e-10, max_value=1e-7,
-                    description="视场边长；不填用当前扫描框"),
+                    description=tr("视场边长；不填用当前扫描框",
+                                   "Field-of-view side length; if empty, the current scan frame is used")),
                 ParameterSpec(
                     name="line_time_s", type="float", unit="s", required=False,
                     default=None, min_value=1e-3, max_value=60.0,
-                    description="每线时间；不填走出厂档位表"),
+                    description=tr("每线时间；不填走出厂档位表",
+                                   "Time per line; if empty, the factory tier table is used")),
                 ParameterSpec(
                     name="settle_s", type="float", unit="s", required=False,
                     default=3.0, min_value=0.0, max_value=120.0,
-                    description="改完偏压等多久再开扫"),
+                    description=tr("改完偏压等多久再开扫",
+                                   "How long to wait after changing bias before scanning")),
             ],
             preconditions=["z_controller_on"],
             estimated_duration_s=3600.0,
@@ -182,16 +201,18 @@ class AcquireBiasImagingSeries(CompositeSkillGraph):
                     got = (getattr(ctx.run("GetBias", {}), "data", None) or {}).get("bias_v")
                     tol = max(1e-3, abs(bv) * 0.05)
                     if got is None or abs(float(got) - float(bv)) > tol:
-                        bad = "偏压没跟上：要 %.4g，读回 %s" % (bv, got)
+                        bad = tr("偏压没跟上：要 %.4g，读回 %s",
+                                 "Bias did not follow: wanted %.4g, read back %s") % (bv, got)
                     elif sp:
                         now = (getattr(ctx.run("GetSetpoint", {}), "data", None)
                                or {}).get("setpoint_a")
                         # setpoint 必须全程不变，否则「只变偏压」这句话不成立
                         if now and abs(abs(float(now)) - abs(float(sp))) / abs(float(sp)) > 0.05:
-                            bad = ("setpoint 被带偏了：%.4g -> %.4g"
+                            bad = (tr("setpoint 被带偏了：%.4g -> %.4g",
+                                      "Setpoint drifted: %.4g -> %.4g")
                                    % (float(sp), float(now)))
             except Exception as exc:  # noqa: BLE001
-                bad = "读回失败: %s" % exc
+                bad = tr("读回失败: %s", "Read-back failed: %s") % exc
             if bad:
                 logger.error("AcquireBiasImagingSeries %s: %s", tag, bad)
                 frames.append({"bias_v": bv, "index": i, "ok": False, "error": bad})
@@ -233,7 +254,7 @@ class AcquireBiasImagingSeries(CompositeSkillGraph):
             path = (getattr(sr, "data", None) or {}).get("saved_path")
             if not path:
                 frames.append({"bias_v": bv, "index": i, "ok": False,
-                               "error": "没拿到文件路径"})
+                               "error": tr("没拿到文件路径", "No file path obtained")})
                 executor.set_partial("frames", list(frames))
                 continue
 
@@ -271,7 +292,8 @@ class AcquireBiasImagingSeries(CompositeSkillGraph):
             "n_ok": len(good),
         }
         if pd.get("refused"):
-            out["advice"] = "被拒：%s —— 一帧都没扫。" % pd["refused"]
+            out["advice"] = tr("被拒：%s —— 一帧都没扫。",
+                                "Refused: %s - no frame was scanned.") % pd["refused"]
             return out
 
         # 首尾同条件的两帧之差 = 这段时间里与偏压无关的漂变，是跨 |V| 比较的刻度
@@ -283,10 +305,15 @@ class AcquireBiasImagingSeries(CompositeSkillGraph):
                 a, b = float(first["concentration"]), float(last["concentration"])
                 ratio = b / a if a else float("nan")
                 out["time_drift_ratio"] = ratio
-                drift_note = (
+                drift_note = tr(
                     "同一偏压 %+.4g V 在开头与结尾的角向集中度：%.0f → %.0f"
                     "（比值 %.2f）。**跨偏压的差异要大于这个比值才算数** —— "
-                    "否则那只是针尖在这段时间里自己变了。" % (order[0], a, b, ratio))
+                    "否则那只是针尖在这段时间里自己变了。",
+                    "Angular concentration at the same bias %+.4g V at the start and "
+                    "end: %.0f -> %.0f (ratio %.2f). **Differences across biases only "
+                    "count if larger than this ratio** - otherwise the tip simply "
+                    "changed by itself over this time."
+                ) % (order[0], a, b, ratio)
                 out["time_drift_note"] = drift_note
 
         if len(good) >= 2:
@@ -294,10 +321,15 @@ class AcquireBiasImagingSeries(CompositeSkillGraph):
             out["best_bias_v"] = best.get("bias_v")
             out["best_concentration"] = best.get("concentration")
             out["advice"] = (
-                "成像最好的偏压是 %+.4g V（角向集中度 %.0f）。%s"
+                tr("成像最好的偏压是 %+.4g V（角向集中度 %.0f）。%s",
+                   "The best-imaging bias is %+.4g V (angular concentration %.0f). %s")
                 % (best.get("bias_v"), float(best.get("concentration") or 0),
-                   drift_note or "没有时间对照帧 —— 跨偏压的比较缺一把刻度，"
-                                 "下次把 repeat_first_at_end 打开。"))
+                   drift_note or tr("没有时间对照帧 —— 跨偏压的比较缺一把刻度，"
+                                    "下次把 repeat_first_at_end 打开。",
+                                    "There is no time-reference frame - comparison "
+                                    "across biases lacks a yardstick; turn "
+                                    "repeat_first_at_end on next time.")))
         else:
-            out["advice"] = "成功的帧不足两张，比不了。"
+            out["advice"] = tr("成功的帧不足两张，比不了。",
+                                "Fewer than two frames succeeded; cannot compare.")
         return out

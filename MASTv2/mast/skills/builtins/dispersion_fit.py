@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -52,64 +53,68 @@ class FitDispersion(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "从一组离台阶或吸附原子不同距离的 dI/dV 谱里,量出各能量的驻波波矢,"
+                tr("从一组离台阶或吸附原子不同距离的 dI/dV 谱里,量出各能量的驻波波矢,"
                 "再拟合抛物线色散,给出表面态带底 E0(eV / meV)与有效质量 m*(以电子"
                 "质量计)。只读文件,不碰硬件。每条谱的位置从它的 .dat 头 X (m)/Y (m) 读。"
                 "verdict 取 'dispersion' / 'no_standing_wave' / 'undecidable'。"
-                "至少要四个能量能量出波矢,距离跨度至少三纳米,否则判不了。"
+                "至少要四个能量能量出波矢,距离跨度至少三纳米,否则判不了。",
+                "From a set of dI/dV spectra at different distances from a step or adatom, measure the standing-wave wavevector at each energy, then fit a parabolic dispersion, giving the surface-state band bottom E0 (eV / meV) and effective mass m* (in electron masses). Reads files only, touches no hardware. The position of each spectrum is read from X (m)/Y (m) in its .dat header. verdict is 'dispersion' / 'no_standing_wave' / 'undecidable'. At least four energies must yield a wavevector, and the distance span must be at least three nanometres, otherwise it cannot judge.")
             ),
             parameters=[
                 ParameterSpec(
                     name="dat_paths", type="str",
-                    description=("谱文件路径列表,JSON 数组,例如 "
-                                 '["a.dat", "b.dat"]。与 dat_dir 至少给一个。'),
+                    description=(tr("谱文件路径列表,JSON 数组,例如 "
+                                 '["a.dat", "b.dat"]。与 dat_dir 至少给一个。',
+                                 "List of spectrum file paths, JSON array, e.g. [\"a.dat\", \"b.dat\"]. Give at least one of this and dat_dir.")),
                     required=False, default=""),
                 ParameterSpec(name="dat_dir", type="str",
-                              description="谱文件所在目录(配合 run_tag 过滤)。",
+                              description=tr("谱文件所在目录(配合 run_tag 过滤)。", "Directory containing the spectrum files (filtered together with run_tag)."),
                               required=False, default=""),
                 ParameterSpec(name="run_tag", type="str",
-                              description="在 dat_dir 里只取 <run_tag>_p*.dat。",
+                              description=tr("在 dat_dir 里只取 <run_tag>_p*.dat。", "Take only <run_tag>_p*.dat in dat_dir."),
                               required=False, default=""),
                 ParameterSpec(name="scatterer_kind", type="str",
-                              description="驻波是台阶(step)还是点散射体(point)造成的。",
+                              description=tr("驻波是台阶(step)还是点散射体(point)造成的。", "Whether the standing wave is caused by a step or by a point scatterer."),
                               required=True, allowed_values=["step", "point"]),
                 ParameterSpec(name="edge_x_m", type="float", unit="m",
-                              description="台阶上任一点的 x,例如 '12n'(SI 前缀必须写)。",
+                              description=tr("台阶上任一点的 x,例如 '12n'(SI 前缀必须写)。", "x of any point on the step, e.g. '12n' (the SI prefix is required)."),
                               required=False, min_value=-1.5e-6, max_value=1.5e-6),
                 ParameterSpec(name="edge_y_m", type="float", unit="m",
-                              description="台阶上任一点的 y,例如 '-3n'。",
+                              description=tr("台阶上任一点的 y,例如 '-3n'。", "y of any point on the step, e.g. '-3n'."),
                               required=False, min_value=-1.5e-6, max_value=1.5e-6),
                 ParameterSpec(name="edge_angle_deg", type="float",
-                              description="台阶走向,单位**度**(普通数字),+x 方向为 0。",
+                              description=tr("台阶走向,单位**度**(普通数字),+x 方向为 0。", "Step direction, in **degrees** (a plain number), with the +x direction at 0."),
                               required=False, min_value=-360.0, max_value=360.0),
                 ParameterSpec(name="distances_nm", type="str",
                               description=(
-                                  "每条谱到散射体的距离,JSON 数字数组,单位**纳米**,顺序与 "
+                                  tr("每条谱到散射体的距离,JSON 数字数组,单位**纳米**,顺序与 "
                                   "dat_paths 一一对应。给了它就不再从散射体几何算距离 —— "
-                                  "长时间序列里样品会漂,自己按批次跟踪几何比用一条固定的边准。"),
+                                  "长时间序列里样品会漂,自己按批次跟踪几何比用一条固定的边准。",
+                                  "Distance of each spectrum to the scatterer, JSON array of numbers, in **nanometres**, in the same order as dat_paths. If given, distances are no longer computed from the scatterer geometry - over a long series the sample drifts, and tracking the geometry yourself per batch is more accurate than using one fixed edge.")),
                               required=False, default=""),
                 ParameterSpec(name="scatterer_x_m", type="float", unit="m",
-                              description="点散射体的 x,例如 '5n'。",
+                              description=tr("点散射体的 x,例如 '5n'。", "x of the point scatterer, e.g. '5n'."),
                               required=False, min_value=-1.5e-6, max_value=1.5e-6),
                 ParameterSpec(name="scatterer_y_m", type="float", unit="m",
-                              description="点散射体的 y,例如 '5n'。",
+                              description=tr("点散射体的 y,例如 '5n'。", "y of the point scatterer, e.g. '5n'."),
                               required=False, min_value=-1.5e-6, max_value=1.5e-6),
                 # 以下刻意没有 default:缺席要能触发衬底查表 / 默认值那一行。
                 ParameterSpec(name="min_distance_nm", type="float",
-                              description=("离散射体多近的谱不要,单位**纳米**(普通数字)。"
-                                           "留空取 1。近场不服从远场模型。"),
+                              description=(tr("离散射体多近的谱不要,单位**纳米**(普通数字)。"
+                                           "留空取 1。近场不服从远场模型。",
+                                           "Spectra closer than this to the scatterer are excluded, in **nanometres** (a plain number). Empty takes 1. The near field does not obey the far-field model.")),
                               required=False, min_value=0.1, max_value=50.0),
                 ParameterSpec(name="energy_min_v", type="float",
-                              description="只用这个偏压以上的能量,单位**伏**。",
+                              description=tr("只用这个偏压以上的能量,单位**伏**。", "Use only energies above this bias, in **volts**."),
                               required=False, min_value=-10.0, max_value=10.0),
                 ParameterSpec(name="energy_max_v", type="float",
-                              description="只用这个偏压以下的能量,单位**伏**。",
+                              description=tr("只用这个偏压以下的能量,单位**伏**。", "Use only energies below this bias, in **volts**."),
                               required=False, min_value=-10.0, max_value=10.0),
                 ParameterSpec(name="normalize", type="bool",
-                              description="先除以最远那条谱,去掉针尖与表面自身的谱形。",
+                              description=tr("先除以最远那条谱,去掉针尖与表面自身的谱形。", "First divide by the farthest spectrum, to remove the spectral shape of the tip and the surface itself."),
                               required=False, default=True),
                 ParameterSpec(name="min_r2", type="float",
-                              description="k² 对 E 这条直线至少要这么好。",
+                              description=tr("k² 对 E 这条直线至少要这么好。", "The straight line of k² against E must be at least this good."),
                               required=False, default=0.80, min_value=0.0, max_value=1.0),
             ],
             estimated_duration_s=10.0,
@@ -127,12 +132,12 @@ class FitDispersion(BaseSkill):
             from mast.vision.standing_wave import (distance_to_line, distance_to_point,
                                                    fit_dispersion)
         except ImportError as exc:
-            return SkillResult(skill_name=_NAME, success=False, error=f"缺依赖: {exc}")
+            return SkillResult(skill_name=_NAME, success=False, error=tr(f"缺依赖: {exc}", f"Missing dependency: {exc}"))
 
         paths = self._paths(params)
         if not paths:
             return SkillResult(skill_name=_NAME, success=False,
-                               error="没有谱文件:给 dat_paths(JSON 数组)或 dat_dir[+run_tag]")
+                               error=tr("没有谱文件:给 dat_paths(JSON 数组)或 dat_dir[+run_tag]", "No spectrum files: give dat_paths (JSON array) or dat_dir[+run_tag]"))
         kind = str(params.get("scatterer_kind"))
         given = params.get("distances_nm")
         given_d = None
@@ -141,18 +146,19 @@ class FitDispersion(BaseSkill):
                 given_d = [float(v) for v in json.loads(given)]
             except (TypeError, ValueError, json.JSONDecodeError) as exc:
                 return SkillResult(skill_name=_NAME, success=False,
-                                   error=f"distances_nm 不是一个数字数组: {exc}")
+                                   error=tr(f"distances_nm 不是一个数字数组: {exc}", f"distances_nm is not an array of numbers: {exc}"))
             if len(given_d) != len(paths):
                 return SkillResult(
                     skill_name=_NAME, success=False,
-                    error=(f"distances_nm 有 {len(given_d)} 个,dat_paths 有 {len(paths)} 个 —— "
-                           "两者按位置一一对应,长度对不上就没法说哪条谱在哪儿"))
+                    error=(tr(f"distances_nm 有 {len(given_d)} 个,dat_paths 有 {len(paths)} 个 —— "
+                           "两者按位置一一对应,长度对不上就没法说哪条谱在哪儿",
+                           f"distances_nm has {len(given_d)} entries and dat_paths has {len(paths)} - they correspond one to one by position, and if the lengths do not match there is no way to say which spectrum is where")))
         if given_d is None:
             need = ("edge_x_m", "edge_y_m", "edge_angle_deg") if kind == "step"                 else ("scatterer_x_m", "scatterer_y_m")
             missing = [k for k in need if params.get(k) is None]
             if missing:
                 return SkillResult(skill_name=_NAME, success=False,
-                                   error=f"{kind} 需要 {', '.join(missing)}(或者直接给 distances_nm)")
+                                   error=tr(f"{kind} 需要 {', '.join(missing)}(或者直接给 distances_nm)", f"{kind} needs {', '.join(missing)} (or give distances_nm directly)"))
 
         rows, warns, skipped = [], [], []
         for i, p in enumerate(paths):
@@ -168,7 +174,7 @@ class FitDispersion(BaseSkill):
                                data={"verdict": "undecidable", "n_spectra": len(rows),
                                      "reasons": ["too_few_readable_spectra"],
                                      "skipped": skipped, "dat_paths_used": []},
-                               summary=f"只有 {len(rows)} 条谱可用,拟合不了色散")
+                               summary=tr(f"只有 {len(rows)} 条谱可用,拟合不了色散", f"Only {len(rows)} spectra are usable, the dispersion cannot be fitted"))
         if skipped:
             warns.append("some_spectra_unreadable")
 
@@ -197,14 +203,14 @@ class FitDispersion(BaseSkill):
             return SkillResult(skill_name=_NAME, success=True,
                                data={"verdict": "undecidable", "n_spectra": len(rows),
                                      "reasons": ["too_few_on_one_side"], "warnings": warns},
-                               summary="同一侧的谱不够,拟合不了色散")
+                               summary=tr("同一侧的谱不够,拟合不了色散", "Not enough spectra on the same side, the dispersion cannot be fitted"))
 
         grid = self._energy_grid(rows, params)
         if grid is None or grid.size < 4:
             return SkillResult(skill_name=_NAME, success=True,
                                data={"verdict": "undecidable", "reasons": ["no_common_energies"],
                                      "n_spectra": len(rows)},
-                               summary="这些谱没有足够的公共能量区间")
+                               summary=tr("这些谱没有足够的公共能量区间", "These spectra do not share a sufficient common energy range"))
         order = np.argsort(d)
         d = d[order]
         rows = [rows[i] for i in order]
@@ -226,11 +232,12 @@ class FitDispersion(BaseSkill):
                 "reasons": list(res.reasons), "warnings": warns + list(res.warnings),
                 "dat_paths_used": [r["path"] for r in rows], "skipped": skipped}
         if res.e0_mev is not None and res.m_eff is not None:
-            summary = (f"E0 = {res.e0_mev:.0f} meV,m* = {res.m_eff:.3f} mₑ"
+            summary = (tr(f"E0 = {res.e0_mev:.0f} meV,m* = {res.m_eff:.3f} mₑ"
                        f"(r² = {res.r2:.3f},{res.n_energies_used} 个能量,"
-                       f"{res.n_spectra} 条谱)")
+                       f"{res.n_spectra} 条谱)",
+                       f"E0 = {res.e0_mev:.0f} meV, m* = {res.m_eff:.3f} mₑ (r² = {res.r2:.3f}, {res.n_energies_used} energies, {res.n_spectra} spectra)"))
         else:
-            summary = f"色散判定 {res.verdict}:{'、'.join(res.reasons) or '无'}"
+            summary = tr(f"色散判定 {res.verdict}:{'、'.join(res.reasons) or '无'}", f"Dispersion verdict {res.verdict}: {', '.join(res.reasons) or 'none'}")
         return SkillResult(skill_name=_NAME, success=True, data=data, summary=summary)
 
     # ── helpers ──

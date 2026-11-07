@@ -14,7 +14,7 @@
 切换必须"顺手关掉上一个"（``start_experiment`` 切走时 supersede 旧的）。这**一个**
 设计缺陷同时造成了三件事：
 
-1. 陈旧的 active 行 —— ``RightPanel.tsx`` 的注释就在抱怨 ``find(status==="active")``
+1. 陈旧的 active 行 —— ``find(status==="active")``（如 ``RightPanel.tsx``）
    会命中过期的行；
 2. 顶栏与右栏各自推断"当前实验"，结果可能显示不同的实验；
 3. v2 库的 ``ended_at`` 只能写一次（append-only 触发器），一旦 end 就复活不了。

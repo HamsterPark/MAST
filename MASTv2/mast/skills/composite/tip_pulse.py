@@ -15,6 +15,7 @@ Migration note (Phase 7):
 
 from __future__ import annotations
 
+from mast.i18n import tr
 from mast.skills.composite._base import CompositeSkillGraph
 from mast.skills.composite.graph_executor import (
     CompositeProgress,
@@ -47,18 +48,25 @@ class TipPulse(CompositeSkillGraph):
             capabilities=frozenset({"bias_pulse"}),
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "施加偏压脉冲修针。先快照当前偏压，打脉冲，再恢复。"
+                tr("施加偏压脉冲修针。先快照当前偏压，打脉冲，再恢复。",
+                   "Condition the tip with a bias pulse. Snapshots the current bias, "
+                   "fires the pulse, then restores it.")
             ),
             parameters=[
                 ParameterSpec(
                     name="pulse_v",
                     type="float",
-                    description=(
+                    description=tr(
                         "脉冲偏压。**没有具体理由就别填** —— 留空时，它按已登记"
                         "针尖（材料 × 制法 × 形态）从针尖策略表里取：钨的电化学"
                         "腐蚀针和 PtIr 剪切针受不住同一个脉冲。你**填了**的值"
-                        "会被采用，但超出该针尖的安全包络时是**拒绝**（不是夹紧）。"
-                    ),
+                        "会被采用，但超出该针尖的安全包络时是**拒绝**（不是夹紧）。",
+                        "Pulse bias. **Leave it empty unless you have a specific reason** - "
+                        "when empty it is taken from the tip policy table for the registered "
+                        "tip (material x preparation x shape): an electrochemically etched "
+                        "W tip and a cut PtIr tip cannot take the same pulse. A value you "
+                        "**do** give is used, but if it is outside that tip's safe envelope "
+                        "it is **refused** (not clamped)."),
                     unit="V",
                     required=False,
                     min_value=-10.0,
@@ -67,7 +75,8 @@ class TipPulse(CompositeSkillGraph):
                 ParameterSpec(
                     name="duration_s",
                     type="float",
-                    description="每次脉冲的时长（留空 → 针尖策略表）",
+                    description=tr("每次脉冲的时长（留空 → 针尖策略表）",
+                                    "Duration of each pulse (empty -> tip policy table)"),
                     unit="s",
                     required=False,
                     default=0.1,
@@ -77,7 +86,8 @@ class TipPulse(CompositeSkillGraph):
                 ParameterSpec(
                     name="count",
                     type="int",
-                    description="打几次脉冲（留空 → 针尖策略表）",
+                    description=tr("打几次脉冲（留空 → 针尖策略表）",
+                                    "Number of pulses (empty -> tip policy table)"),
                     required=False,
                     default=1,
                     min_value=1,

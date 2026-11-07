@@ -38,6 +38,7 @@ PIN 门控
 from __future__ import annotations
 
 import logging
+from mast.i18n import tr
 
 from fastapi import APIRouter, Request
 
@@ -90,7 +91,7 @@ def _check_pin(pin: str) -> tuple[bool, str]:
     except Exception as exc:  # noqa: BLE001
         # 门读不出来**不能**当成放行 —— 那正好把守卫变成摆设。
         logger.warning("admin PIN 校验失败：%s", exc, exc_info=True)
-        return False, "管理员 PIN 校验不可用，本次拒绝（这是保守失败，不是故障）"
+        return False, tr("管理员 PIN 校验不可用，本次拒绝（这是保守失败，不是故障）", "Admin PIN check unavailable, refused this time (a conservative failure, not a fault)")
 
 
 def _fingerprints(registry) -> dict:
@@ -126,7 +127,7 @@ def overlay_status(request: Request) -> OverlayStatusResponse:
     try:
         from mast.skills.overlay import loader, manifest as M, paths as P
     except Exception as exc:  # noqa: BLE001
-        return OverlayStatusResponse(degraded=True, reason=f"覆盖层不可用：{exc}")
+        return OverlayStatusResponse(degraded=True, reason=tr(f"覆盖层不可用：{exc}", f"Overlay unavailable: {exc}"))
 
     try:
         man = M.load()
@@ -192,7 +193,7 @@ def overlay_reload(request: Request,
     if rt is None or not hasattr(rt, "reload_overlay_skills"):
         return OverlayReloadResponse(
             degraded=True,
-            reason="没有活的运行时（独立 API 模式）—— 覆盖层要在主服务里重载。")
+            reason=tr("没有活的运行时（独立 API 模式）—— 覆盖层要在主服务里重载。", "No live runtime (standalone API mode): the overlay must be reloaded in the main service."))
     try:
         res = rt.reload_overlay_skills(reason=body.reason or "ui")
     except Exception as exc:  # noqa: BLE001
@@ -213,7 +214,7 @@ def overlay_reload(request: Request,
         agent_path_pending=(True if refresh.get("queued")
                             else refresh.get("agent_path_pending")),
         refresh=str(refresh.get("described") or
-                    ("已排队：当前任务结束后自动生效" if refresh.get("queued") else "")),
+                    (tr("已排队：当前任务结束后自动生效", "Queued: takes effect automatically when the current task ends") if refresh.get("queued") else "")),
         fingerprint_matches=fp["fingerprint_matches"],
     )
 
@@ -232,7 +233,7 @@ def overlay_set_entry(request: Request,
     try:
         from mast.skills.overlay import manifest as M, paths as P
     except Exception as exc:  # noqa: BLE001
-        return OverlayEntryResponse(degraded=True, reason=f"覆盖层不可用：{exc}")
+        return OverlayEntryResponse(degraded=True, reason=tr(f"覆盖层不可用：{exc}", f"Overlay unavailable: {exc}"))
 
     ok_path, path_why = P.is_valid_rel(body.path)
     if not ok_path:
@@ -242,8 +243,8 @@ def overlay_set_entry(request: Request,
         if man.unreadable:
             return OverlayEntryResponse(
                 ok=False,
-                reason=f"清单读不出来（{man.unreadable}）—— 先修好文件，"
-                       "否则这次写入会把已有条目全抹掉。")
+                reason=tr(f"清单读不出来（{man.unreadable}）—— 先修好文件，"
+                       "否则这次写入会把已有条目全抹掉。", f"The manifest cannot be read ({man.unreadable}); fix the file first, otherwise this write would wipe all existing entries."))
         rel = P.normalise_rel(body.path)
         man.upsert(M.Entry(path=rel, enabled=body.enabled,
                            allow_removals=list(body.allow_removals),
@@ -273,7 +274,7 @@ def overlay_restore_all(request: Request,
 
     registry = _registry(request)
     if registry is None:
-        return OverlayRestoreResponse(degraded=True, reason="没有活的技能注册表")
+        return OverlayRestoreResponse(degraded=True, reason=tr("没有活的技能注册表", "No live skill registry"))
     try:
         from mast.admin import reload_wiring as rw
         from mast.skills.overlay import loader
@@ -282,7 +283,7 @@ def overlay_restore_all(request: Request,
         outcome = rw.refresh_after_skill_change("overlay restore-all")
         return OverlayRestoreResponse(
             ok=True, restored=restored,
-            summary=(f"已恢复 {len(restored)} 个技能到启动基线。"
+            summary=(tr(f"已恢复 {len(restored)} 个技能到启动基线。", f"Restored {len(restored)} skill(s) to the startup baseline.")
                      + outcome.describe()))
     except Exception as exc:  # noqa: BLE001
         logger.warning("覆盖层恢复失败：%s", exc, exc_info=True)
@@ -383,7 +384,7 @@ def overlay_drift(request: Request) -> list[OverlayDriftInfo]:
             d = E.drift(rel)
         except Exception as exc:  # noqa: BLE001
             out.append(OverlayDriftInfo(rel=rel, known=False, drifted=None,
-                                        reason="复核失败：" + str(exc)))
+                                        reason=tr("复核失败：", "Re-check failed: ") + str(exc)))
             continue
         out.append(OverlayDriftInfo(**d.as_dict()))
     return out
@@ -436,7 +437,7 @@ def overlay_pack_fetch(request: Request,
 
     pack_id = str(body.pack_id or "").strip()
     if not pack_id:
-        return SkillPackFetchResponse(reason="要拉哪个包？给一个 pack_id。")
+        return SkillPackFetchResponse(reason=tr("要拉哪个包？给一个 pack_id。", "Which pack to fetch? Give a pack_id."))
 
     try:
         from mast._runtime_paths import project_root
@@ -451,7 +452,7 @@ def overlay_pack_fetch(request: Request,
         return SkillPackFetchResponse(degraded=True, reason=str(exc))
     if not url or not token:
         return SkillPackFetchResponse(
-            reason="未配置推送服务器（server_url / token）—— 在启动器的推送设置里配置后重试")
+            reason=tr("未配置推送服务器（server_url / token）—— 在启动器的推送设置里配置后重试", "Push server not configured (server_url / token): configure it in the launcher push settings and retry"))
 
     try:
         res = SC.fetch_and_install(url, token, pack_id)
@@ -461,7 +462,7 @@ def overlay_pack_fetch(request: Request,
 
     out = SkillPackFetchResponse(
         ok=bool(res.ok),
-        reason="" if res.ok else "；".join(res.reasons or ("原因不明",)),
+        reason="" if res.ok else tr("；", "; ").join(res.reasons or (tr("原因不明", "reason unknown"),)),
         summary=res.describe(),
         needs_reload=bool(res.needs_reload),
         pack_id=res.pack_id or pack_id,
@@ -476,20 +477,20 @@ def overlay_pack_fetch(request: Request,
 
     rt = _runtime(request)
     if rt is None or not hasattr(rt, "reload_overlay_skills"):
-        out.summary += "（没有活的运行时 —— 包已装上，重启后生效）"
+        out.summary += tr("（没有活的运行时 —— 包已装上，重启后生效）", "(no live runtime; the pack is installed and takes effect after a restart)")
         out.agent_path_pending = True
         return out
     try:
         rl = rt.reload_overlay_skills(reason=f"pack fetch {pack_id}")
     except Exception as exc:  # noqa: BLE001
         logger.warning("拉包后重载失败：%s", exc, exc_info=True)
-        out.summary += f"（包已装上，但重载失败：{exc}）"
+        out.summary += tr(f"（包已装上，但重载失败：{exc}）", f"(pack installed, but reload failed: {exc})")
         out.agent_path_pending = True
         return out
     refresh = rl.get("refresh") or {}
     out.reloaded = True
     out.needs_reload = False
-    out.summary += "；" + str(rl.get("summary") or "已重载")
+    out.summary += tr("；", "; ") + str(rl.get("summary") or tr("已重载", "Reloaded"))
     out.agent_path_pending = (True if refresh.get("queued")
                               else refresh.get("agent_path_pending"))
     out.fingerprint_matches = _fingerprints(_registry(request))["fingerprint_matches"]
@@ -536,7 +537,7 @@ def overlay_pack_auto_enable(
         if man.unreadable:
             # 「读不到」当成「空的」写回去，会抹掉用户已启用的全部条目。
             return SkillPackActionResponse(
-                reason=f"覆盖层清单读不出来（{man.unreadable}）—— 本次不写入。")
+                reason=tr(f"覆盖层清单读不出来（{man.unreadable}）—— 本次不写入。", f"The overlay manifest cannot be read ({man.unreadable}); nothing written this time."))
         man.auto_enable_packs = bool(body.enabled)
         M.save(man)
     except Exception as exc:  # noqa: BLE001
@@ -544,6 +545,6 @@ def overlay_pack_auto_enable(
         return SkillPackActionResponse(degraded=True, reason=str(exc))
     return SkillPackActionResponse(
         ok=True,
-        summary=("签名包装进来会自动启用（仍需一次重载才生效）"
+        summary=(tr("签名包装进来会自动启用（仍需一次重载才生效）", "Signed packs will be enabled automatically when installed (a reload is still needed to take effect)")
                  if body.enabled else
-                 "签名包装进来「不会」自动启用 —— 要手工在上面的条目表里启用"))
+                 tr("签名包装进来「不会」自动启用 —— 要手工在上面的条目表里启用", "Signed packs will NOT be enabled automatically when installed; enable them by hand in the entries table above")))

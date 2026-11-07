@@ -32,14 +32,17 @@ from pathlib import Path
 
 import numpy as np
 
+from mast.i18n import tr
 from mast.gallery import paths as _paths
 from mast.gallery import render as _render
 from mast.gallery.inventory import dir_label, dir_short
 
 #: 类别：目录名 → 标题。顺序就是列表页的顺序（D16）。
 CATEGORIES: tuple[tuple[str, str], ...] = (
-    ("frames", "标记帧"), ("grids", "网格谱"), ("sts_lines", "拉线谱"),
-    ("sts_stitch", "单根谱拼接"), ("series", "旋转系列"),
+    ("frames", tr("标记帧", "Marked frames")), ("grids", tr("网格谱", "Grid spectra")),
+    ("sts_lines", tr("拉线谱", "Line spectra")),
+    ("sts_stitch", tr("单根谱拼接", "Single-spectrum stitching")),
+    ("series", tr("旋转系列", "Rotation series")),
 )
 CATEGORY_TITLE = dict(CATEGORIES)
 
@@ -56,12 +59,12 @@ PREVIEW_DIR = ".previews"
 #: 与本体构建共用的那一把 matplotlib 锁。
 MPL_LOCK = _render._MPL_LOCK
 
-# Pillow 版式的颜色（绘图实现 draw_sheets.py）
+# Pillow 版式的颜色
 BG, INK, DIM = (22, 20, 24), (238, 234, 226), (165, 160, 152)
-#: 雅黑里没有 ★ ✓ 字形，用字（绘图实现 draw_sheets.py:48）。
-RWORD = {2: "重点", 1: "可用", -1: "排除"}
+#: 雅黑里没有 ★ ✓ 字形，用字。
+RWORD = {2: tr("重点", "Key"), 1: tr("可用", "Usable"), -1: tr("排除", "Excluded")}
 
-# matplotlib 版式的颜色（绘图实现 draw_sts.py）
+# matplotlib 版式的颜色
 PAPER, INK_HEX, EDGE = "#faf7f2", "#241f1b", "#cfc5b6"
 TEAL, AMBER, WARN, ROSE, DIM_HEX = "#0f6b62", "#96650b", "#a8362a", "#b8375f", "#6b6357"
 BLUE, GREEN, PURPLE = "#3d7fb5", "#4a7c35", "#6b4c9a"
@@ -275,7 +278,9 @@ def stem(fn: str) -> str:
 
 def dur(s) -> str:
     s = abs(float(s))
-    return "%.0f 秒" % s if s < 90 else ("%.0f 分" % (s / 60) if s < 5400 else "%.1f 小时" % (s / 3600))
+    return (tr("%.0f 秒", "%.0f s") % s if s < 90 else
+            (tr("%.0f 分", "%.0f min") % (s / 60) if s < 5400 else
+             tr("%.1f 小时", "%.1f h") % (s / 3600)))
 
 
 def local(t, fmt: str) -> str:
@@ -383,7 +388,7 @@ def load_z(path: str) -> tuple[np.ndarray, bool]:
     fr = sxm_oriented_frames(scan, "Z")
     z = fr.get("forward")
     if z is None:
-        raise JobError("文件里没有 Z 通道")
+        raise JobError(tr("文件里没有 Z 通道", "The file has no Z channel"))
     bwd_only = bool(zc) and zc.get("forward") is None and zc.get("backward") is not None
     return np.asarray(z, dtype=np.float64), bwd_only
 
@@ -392,7 +397,7 @@ def valid_rows(z: np.ndarray) -> tuple[int, int, int]:
     """``(i0, i1, 整行有限的行数)``：第一个到最后一个整行有限的行（绘图实现同一定义）。"""
     ok = np.isfinite(z).all(axis=1)
     if not ok.any():
-        raise JobError("一整行都没扫到")
+        raise JobError(tr("一整行都没扫到", "Not a single full row was scanned"))
     i0 = int(np.argmax(ok))
     i1 = int(len(ok) - np.argmax(ok[::-1]))
     return i0, i1, int(ok.sum())

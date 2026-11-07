@@ -25,11 +25,12 @@ import threading
 import time
 
 from mast.agents._shared.call_limits import derive_recursion_limit
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
 #: 可委托 agent 白名单 —— instrument_control 被刻意排除（最小能动性）。
-#: research_director 2026-08-21 加入：判据与排除 IC 的那条一样（工作流节点里
+#: research_director 后加入：判据与排除 IC 的那条一样（工作流节点里
 #: 由模型决定下一步，所以不给会驱动仪器的那一个），而不是「它是新来的所以先别给」。
 DELEGATABLE_AGENTS = ("research_director",
                       "literature", "data_processing", "experiment_design",
@@ -111,7 +112,7 @@ def _run_via_loop(agent_id: str, task_text: str, *, max_model_calls: int,
     elif result.stop_reason:
         note = f"{result.outcome}: {result.stop_reason}"
     else:
-        note = f"{result.outcome}: agent 无文本输出"
+        note = tr(f"{result.outcome}: agent 无文本输出", f"{result.outcome}: agent produced no text output")
     return {"ok": ok, "text": text, "note": note}
 
 
@@ -144,7 +145,13 @@ def run_agent_task(node: dict, task_text: str) -> dict:
                 "duration_ms": int((time.perf_counter() - t0) * 1000)}
 
     if agent_id not in DELEGATABLE_AGENTS:
-        return _out(False, "", f"agent {agent_id!r} 不可委托")
+        return _out(False, "", tr(f"agent {agent_id!r} 不可委托", f"agent {agent_id!r} cannot be delegated to"))
+    # A delegation runs a built-in agent on the internal LLM. While legacy
+    # features are off that is disabled: refuse here, with a note the on_error
+    # slot can show, instead of failing inside a graph build.
+    from mast.legacy_gate import internal_llm_enabled, refusal_message
+    if not internal_llm_enabled():
+        return _out(False, "", refusal_message(f"workflow agent node → {agent_id}"))
     mmc = min(int(node.get("max_model_calls") or 8), MAX_MODEL_CALLS_CAP)
     mtc = min(int(node.get("max_tool_calls") or 24), MAX_TOOL_CALLS_CAP)
     timeout_s = min(float(node.get("timeout_s") or DEFAULT_TIMEOUT_S), 3600.0)
@@ -178,8 +185,7 @@ def run_agent_task(node: dict, task_text: str) -> dict:
             # a ``before_model`` / ``after_model`` hook is its own node, so the
             # real price is ``len(nodes) - 2`` — five for these five agents today,
             # ELEVEN on the instrument_control chat graph. The old formula is not
-            # currently starving anyone (74 budget vs 39 needed at mmc=8, measured
-            # 2026-08-04), but it is the same premise that silently cut the
+            # currently starving anyone (74 budget vs 39 needed at mmc=8), but it is the same premise that silently cut the
             # private chat down to three tool calls per turn when middleware grew
             # under a literal 50. So: derive from the graph, and keep the old
             # formula as a FLOOR — this can only ever grow the budget.
@@ -193,7 +199,7 @@ def run_agent_task(node: dict, task_text: str) -> dict:
                                    "content": task_text + _NO_HANDOFF}]}, cfg)
                 result["text"] = _extract_final_text(out.get("messages"))
                 result["ok"] = bool(result["text"])
-                result["note"] = "" if result["ok"] else "agent 无文本输出"
+                result["note"] = "" if result["ok"] else tr("agent 无文本输出", "agent produced no text output")
             except Exception as exc:  # noqa: BLE001 — handoff/预算等中途异常
                 # 从 checkpointer 状态抢救最后的实质回答（容错且如实标注）
                 text = ""
@@ -205,12 +211,12 @@ def run_agent_task(node: dict, task_text: str) -> dict:
                     pass
                 if text:
                     result.update(ok=True, text=text,
-                                  note=f"中途异常后抢救输出：{type(exc).__name__}")
+                                  note=tr(f"中途异常后抢救输出：{type(exc).__name__}", f"output salvaged after a mid-run exception: {type(exc).__name__}"))
                 else:
                     result.update(ok=False, text="",
                                   note=f"{type(exc).__name__}: {exc}")
         except Exception as exc:  # noqa: BLE001 — 构建失败
-            result.update(ok=False, text="", note=f"构建 agent 失败：{exc}")
+            result.update(ok=False, text="", note=tr(f"构建 agent 失败：{exc}", f"failed to build agent: {exc}"))
 
     th = threading.Thread(target=_work, name=f"wf-agent-{agent_id}",
                           daemon=True)
@@ -218,10 +224,10 @@ def run_agent_task(node: dict, task_text: str) -> dict:
     th.join(timeout=timeout_s)
     if th.is_alive():
         # 线程无法强杀（daemon 化放弃）；预算上限保证它终将自止。
-        return _out(False, "", f"超时 {timeout_s:.0f}s（已放弃等待）")
+        return _out(False, "", tr(f"超时 {timeout_s:.0f}s（已放弃等待）", f"timed out after {timeout_s:.0f}s (stopped waiting)"))
     note = result.get("note", "")
     if fell_back:
-        marker = f"（v2 引擎失败已回退：{fell_back[0]}）"
+        marker = tr(f"（v2 引擎失败已回退：{fell_back[0]}）", f"(v2 engine failed, fell back: {fell_back[0]})")
         note = f"{note} {marker}".strip() if note else marker
     return _out(bool(result.get("ok")), result.get("text", ""), note)
 

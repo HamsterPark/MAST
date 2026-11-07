@@ -39,6 +39,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.skills.base import BaseSkill
 
 logger = logging.getLogger(__name__)
@@ -74,17 +75,22 @@ def _resolve_expected(explicit_value, substrate_param, *, want: str):
     if explicit_value is not None:
         return float(explicit_value), facts, ""
     if not facts.available:
-        return None, facts, (
-            f"没给期望值，也推断不出衬底：{facts.reason}")
+        return None, facts, tr(
+            f"没给期望值，也推断不出衬底：{facts.reason}",
+            f"No expected value given and the substrate cannot be inferred: {facts.reason}")
     if want == "onset":
         if facts.surface_state_onset_v is None:
-            return None, facts, (
+            return None, facts, tr(
                 f"{facts.material} 没有肖克利表面态 —— {facts.reason}"
                 f"用别的判据（例如台阶锐度 AssessTipSharpness），"
-                f"或换一块有表面态的衬底再验金属性。")
+                f"或换一块有表面态的衬底再验金属性。",
+                f"{facts.material} has no Shockley surface state -- {facts.reason} "
+                f"Use another criterion (e.g. step sharpness, AssessTipSharpness), "
+                f"or switch to a substrate with a surface state to verify metallicity.")
         return float(facts.surface_state_onset_v), facts, ""
     if facts.row_spacing_nm is None:
-        return None, facts, f"知识库里没有 {facts.material} 的晶格常数。"
+        return None, facts, tr(f"知识库里没有 {facts.material} 的晶格常数。",
+                               f"The knowledge base has no lattice constant for {facts.material}.")
     return float(facts.row_spacing_nm), facts, ""
 
 
@@ -106,41 +112,53 @@ class AssessShockleyOnset(BaseSkill):
             version="1.0.0",
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
-            description=(
+            description=tr(
                 "在一条已保存的 dI/dV 谱（.dat）里拟合 Shockley 表面态的 STEP，"
                 "并把它的起始能量与本衬底的取值对照 —— 这是用户判定 METALLIC 针尖的检验。只读。"
                 "expected_onset_v 留空则从已登记的样品取（Au(111) −0.49 V，Cu(111) −0.44 V，"
                 "Ag(111) −0.065 V）。passed=false 表示台阶没有出现在它该在的位置；这和「针尖坏了」"
                 "不是一回事 —— 要看 reasons/warnings（扫描窗口设错、或 lock-in phase 倒置，"
-                "也会落到这里）。"
+                "也会落到这里）。",
+                "Fit the STEP of the Shockley surface state in a saved dI/dV spectrum (.dat) and "
+                "compare its onset energy with the value for this substrate -- the user's test for a "
+                "METALLIC tip. Read-only. Leave expected_onset_v empty to take it from the registered "
+                "sample (Au(111) -0.49 V, Cu(111) -0.44 V, Ag(111) -0.065 V). passed=false means the "
+                "step did not appear where it should; that is not the same as \"the tip is bad\" -- "
+                "check reasons/warnings (a wrong scan window or an inverted lock-in phase also "
+                "end up here).",
             ),
             parameters=[
                 ParameterSpec(name="dat_path", type="str",
-                              description="已保存的 .dat 谱文件路径。",
+                              description=tr("已保存的 .dat 谱文件路径。", "Path of the saved .dat spectrum file."),
                               required=True),
                 ParameterSpec(
                     name="expected_onset_v", type="float", unit="V",
-                    description=("期望的起始能量。留空则从衬底取。"),
+                    description=tr("期望的起始能量。留空则从衬底取。",
+                                   "Expected onset energy. Leave empty to take it from the substrate."),
                     required=False, min_value=-10.0, max_value=10.0),
                 ParameterSpec(
                     name="substrate", type="str",
-                    description=("衬底名（例如 'Au(111)'）。留空则从当前样品记录推断。"),
+                    description=tr("衬底名（例如 'Au(111)'）。留空则从当前样品记录推断。",
+                                   "Substrate name (e.g. 'Au(111)'). Leave empty to infer it from the current sample record."),
                     required=False, default=""),
                 ParameterSpec(
                     name="tol_v", type="float", unit="V",
-                    description="起始位置的容差（知识库：±20 mV）。",
+                    description=tr("起始位置的容差（知识库：±20 mV）。",
+                                   "Tolerance on the onset position (knowledge base: ±20 mV)."),
                     required=False, default=0.020, min_value=0.001, max_value=0.5),
                 ParameterSpec(
                     name="lockin_mod_vrms", type="float", unit="V",
-                    description=("这条谱所用的 lock-in 调制幅度（rms）—— 它定下展宽的下限。"),
+                    description=tr("这条谱所用的 lock-in 调制幅度（rms）—— 它定下展宽的下限。",
+                                   "Lock-in modulation amplitude (rms) used for this spectrum -- it sets the broadening floor."),
                     required=False, default=0.005, min_value=0.0, max_value=1.0),
                 ParameterSpec(
                     name="temperature_k", type="float", unit="K",
-                    description="样品温度 —— 它定下热展宽。",
+                    description=tr("样品温度 —— 它定下热展宽。", "Sample temperature -- it sets the thermal broadening."),
                     required=False, default=4.2, min_value=0.01, max_value=400.0),
                 ParameterSpec(
                     name="width_max_v", type="float", unit="V",
-                    description="仍然算作一个 onset 的最大 10-90 台阶宽度。",
+                    description=tr("仍然算作一个 onset 的最大 10-90 台阶宽度。",
+                                   "Largest 10-90 step width that still counts as an onset."),
                     required=False, default=0.040, min_value=0.001, max_value=1.0),
             ],
             estimated_duration_s=2.0,
@@ -154,7 +172,7 @@ class AssessShockleyOnset(BaseSkill):
         path = str(params["dat_path"])
         if not Path(path).exists():
             return SkillResult(skill_name="AssessShockleyOnset", success=False,
-                               error=f"文件不存在: {path}")
+                               error=tr(f"文件不存在: {path}", f"File does not exist: {path}"))
 
         expected, facts, why = _resolve_expected(
             params.get("expected_onset_v"), params.get("substrate"),
@@ -170,24 +188,26 @@ class AssessShockleyOnset(BaseSkill):
             from mast.vision.spectroscopy import assess_shockley_onset
         except ImportError as exc:
             return SkillResult(skill_name="AssessShockleyOnset", success=False,
-                               error=f"缺依赖: {exc}")
+                               error=tr(f"缺依赖: {exc}", f"Missing dependency: {exc}"))
 
         try:
             dat = read_dat(path)
         except Exception as exc:  # noqa: BLE001
             return SkillResult(skill_name="AssessShockleyOnset", success=False,
-                               error=f".dat 读取失败: {exc}")
+                               error=tr(f".dat 读取失败: {exc}", f"Failed to read .dat: {exc}"))
 
         columns = dat.get("columns") or {}
         if not columns:
             return SkillResult(skill_name="AssessShockleyOnset", success=False,
-                               error=f"{path} 里没有数据列（[DATA] 段是空的）")
+                               error=tr(f"{path} 里没有数据列（[DATA] 段是空的）",
+                                        f"No data columns in {path} (the [DATA] section is empty)"))
 
         bias_col = _pick_column(columns, (("bias",), ("voltage",), ("v (v)",)))
         if bias_col is None:
             return SkillResult(
                 skill_name="AssessShockleyOnset", success=False,
-                error=f"谱里找不到偏压列。现有列: {sorted(columns)}")
+                error=tr(f"谱里找不到偏压列。现有列: {sorted(columns)}",
+                         f"No bias column found in the spectrum. Available columns: {sorted(columns)}"))
 
         didv_col = _pick_column(columns, _DIDV_PATTERNS)
         didv_source = "lockin"
@@ -201,8 +221,11 @@ class AssessShockleyOnset(BaseSkill):
             if cur_col is None:
                 return SkillResult(
                     skill_name="AssessShockleyOnset", success=False,
-                    error=(f"谱里既没有 lock-in 解调通道也没有电流列，"
-                           f"算不出 dI/dV。现有列: {sorted(columns)}"))
+                    error=tr(f"谱里既没有 lock-in 解调通道也没有电流列，"
+                             f"算不出 dI/dV。现有列: {sorted(columns)}",
+                             f"The spectrum has neither a lock-in demodulation channel nor a "
+                             f"current column, so dI/dV cannot be computed. "
+                             f"Available columns: {sorted(columns)}"))
             order = np.argsort(bias)
             didv = np.gradient(np.asarray(columns[cur_col], dtype=float)[order],
                                bias[order])
@@ -241,15 +264,21 @@ class AssessShockleyOnset(BaseSkill):
             **_substrate_fields(facts),
         }
         if res.passed:
-            summary = (f"肖克利 onset {res.onset_v * 1000:.0f} mV"
-                       f"（期望 {res.expected_onset_v * 1000:.0f}±"
-                       f"{res.tol_v * 1000:.0f} mV）—— 金属性针尖合格。")
+            summary = tr(f"肖克利 onset {res.onset_v * 1000:.0f} mV"
+                         f"（期望 {res.expected_onset_v * 1000:.0f}±"
+                         f"{res.tol_v * 1000:.0f} mV）—— 金属性针尖合格。",
+                         f"Shockley onset {res.onset_v * 1000:.0f} mV "
+                         f"(expected {res.expected_onset_v * 1000:.0f}±"
+                         f"{res.tol_v * 1000:.0f} mV) -- metallic tip passes.")
         else:
-            summary = (f"未通过（{', '.join(res.reasons)}）"
-                       + (f"；注意: {', '.join(res.warnings)}" if res.warnings
+            summary = (tr(f"未通过（{', '.join(res.reasons)}）",
+                          f"Not passed ({', '.join(res.reasons)})")
+                       + (tr(f"；注意: {', '.join(res.warnings)}",
+                             f"; note: {', '.join(res.warnings)}") if res.warnings
                           else ""))
         if didv_source == "numeric":
-            summary += "（无 lock-in 通道，用电流数值微分，噪声偏大）"
+            summary += tr("（无 lock-in 通道，用电流数值微分，噪声偏大）",
+                          " (no lock-in channel; numerical derivative of the current, noisier)")
         return SkillResult(skill_name="AssessShockleyOnset", success=True,
                            data=data, summary=summary)
 
@@ -267,45 +296,59 @@ class AssessAtomicPhase(BaseSkill):
             version="1.0.0",
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
-            description=(
+            description=tr(
                 "判断一张已保存的 .sxm 帧有没有 ATOMIC 分辨。三条互相独立的判据必须一致："
                 "原子周期带内有一个强峰、是离散的 Bragg "
                 "斑点而不是弥散的环（把真实晶格与针尖振铃分开的就是这一条）、以及 FFT 峰的锐度。只读。"
                 "比 0.05 nm/px 更粗的帧会 REFUSE 判读（reasons=['scale_gate']），而不是报「没有」"
                 "—— 在那个尺度上晶格本来就分不开，所以「没有原子」会是一句假话。晶格常数只对 FAST "
-                "扫描方向报（慢轴漂移让另一个方向不可信）。"
+                "扫描方向报（慢轴漂移让另一个方向不可信）。",
+                "Judge whether a saved .sxm frame has ATOMIC resolution. Three independent criteria "
+                "must agree: a strong peak inside the atomic-period band, a discrete Bragg "
+                "spot rather than a diffuse ring (this is what separates a real lattice from tip "
+                "ringing), and the sharpness of the FFT peak. Read-only. "
+                "Frames coarser than 0.05 nm/px are REFUSED (reasons=['scale_gate']) instead of "
+                "reported as \"none\" -- at that scale the lattice cannot be resolved anyway, so "
+                "\"no atoms\" would be a false statement. The lattice constant is only reported "
+                "along the FAST scan direction (slow-axis drift makes the other direction untrustworthy).",
             ),
             parameters=[
                 ParameterSpec(name="scan_path", type="str",
-                              description=".sxm 帧的文件路径。",
+                              description=tr(".sxm 帧的文件路径。", "Path of the .sxm frame file."),
                               required=True),
                 ParameterSpec(name="channel", type="str",
-                              description="形貌通道（标准是 'Z'）。",
+                              description=tr("形貌通道（标准是 'Z'）。", "Topography channel (normally 'Z')."),
                               required=False, default="Z"),
                 ParameterSpec(
                     name="expected_a_nm", type="float", unit="nm",
-                    description=("期望的原子行间距。留空则从衬底取；填 0 则关掉这项比较。"),
+                    description=tr("期望的原子行间距。留空则从衬底取；填 0 则关掉这项比较。",
+                                   "Expected atomic row spacing. Leave empty to take it from the substrate; 0 disables this comparison."),
                     required=False, min_value=0.0, max_value=10.0),
                 ParameterSpec(
                     name="substrate", type="str",
-                    description=("衬底名。留空则从当前样品推断。"),
+                    description=tr("衬底名。留空则从当前样品推断。",
+                                   "Substrate name. Leave empty to infer it from the current sample."),
                     required=False, default=""),
                 ParameterSpec(
                     name="snr_min", type="float",
-                    description="带内峰信噪比的下限。",
+                    description=tr("带内峰信噪比的下限。", "Lower bound on the in-band peak signal-to-noise ratio."),
                     required=False, default=4.0, min_value=1.0, max_value=1e6),
                 ParameterSpec(
                     name="concentration_min", type="float",
-                    description=("角向集中度的下限（离散 Bragg 斑点 vs 弥散环）。实测的分离度："
-                                 "真实晶格 97-7645，针尖振铃 1.8-3.3。"),
+                    description=tr("角向集中度的下限（离散 Bragg 斑点 vs 弥散环）。实测的分离度："
+                                   "真实晶格远高于针尖振铃。",
+                                   "Lower bound on angular concentration (discrete Bragg spots vs a "
+                                   "diffuse ring). Real lattice is far above "
+                                   "tip ringing."),
                     required=False, default=20.0, min_value=1.0, max_value=1e9),
                 ParameterSpec(
                     name="sharpness_min", type="float",
-                    description="FFT 峰凸显度的下限。",
+                    description=tr("FFT 峰凸显度的下限。", "Lower bound on FFT peak prominence."),
                     required=False, default=8.0, min_value=1.0, max_value=1e6),
                 ParameterSpec(
                     name="allow_reduced_scale", type="bool",
-                    description=("在 0.02-0.05 nm/px 的过渡带里也接受肯定结论。"),
+                    description=tr("在 0.02-0.05 nm/px 的过渡带里也接受肯定结论。",
+                                   "Also accept a positive verdict in the 0.02-0.05 nm/px transition band."),
                     required=False, default=False),
             ],
             estimated_duration_s=3.0,
@@ -320,7 +363,7 @@ class AssessAtomicPhase(BaseSkill):
         channel_name = params.get("channel") or "Z"
         if not Path(path).exists():
             return SkillResult(skill_name="AssessAtomicPhase", success=False,
-                               error=f"文件不存在: {path}")
+                               error=tr(f"文件不存在: {path}", f"File does not exist: {path}"))
 
         try:
             import numpy as np
@@ -330,7 +373,7 @@ class AssessAtomicPhase(BaseSkill):
             from mast.vision.atomic_phase import assess_atomic_phase
         except ImportError as exc:
             return SkillResult(skill_name="AssessAtomicPhase", success=False,
-                               error=f"缺依赖: {exc}")
+                               error=tr(f"缺依赖: {exc}", f"Missing dependency: {exc}"))
 
         # 期望晶格常数是可选的:0 或推断不出来时只是不做这一项比对,不算失败。
         expected_raw = params.get("expected_a_nm")
@@ -351,20 +394,21 @@ class AssessAtomicPhase(BaseSkill):
             scan = read_sxm(path)
         except Exception as exc:  # noqa: BLE001
             return SkillResult(skill_name="AssessAtomicPhase", success=False,
-                               error=f".sxm 读取失败: {exc}")
+                               error=tr(f".sxm 读取失败: {exc}", f"Failed to read .sxm: {exc}"))
 
         channels = scan.get("channels", {}) or {}
         ch = channels.get(channel_name) or next(iter(channels.values()), None)
         if ch is None:
             return SkillResult(
                 skill_name="AssessAtomicPhase", success=False,
-                error=f"文件里没有可用通道(要的是 {channel_name!r})")
+                error=tr(f"文件里没有可用通道(要的是 {channel_name!r})",
+                         f"No usable channel in the file (wanted {channel_name!r})"))
         arr = ch.get("forward")
         if arr is None:
             arr = ch.get("backward")
         if arr is None:
             return SkillResult(skill_name="AssessAtomicPhase", success=False,
-                               error="通道里没有正扫/反扫数据")
+                               error=tr("通道里没有正扫/反扫数据", "No forward/backward scan data in the channel"))
         arr = np.asarray(arr, dtype=np.float64)
 
         nm_per_px = None
@@ -393,9 +437,13 @@ class AssessAtomicPhase(BaseSkill):
         passed = bool(res.passed) and not incomplete
         extra_reasons = ["incomplete_frame"] if incomplete else []
         extra_warnings = ([
-            "只有 %.0f%% 的像素有数据 —— 这一帧**判不了**原子分辨。缺的部分在做谱"
-            "之前会被当成常数，谱上因此多出与扫描无关的结构。"
-            "**不要把这个结果读成「针尖不好」**，它说的是这一帧没扫完。"
+            tr("只有 %.0f%% 的像素有数据 —— 这一帧**判不了**原子分辨。缺的部分在做谱"
+               "之前会被当成常数，谱上因此多出与扫描无关的结构。"
+               "**不要把这个结果读成「针尖不好」**，它说的是这一帧没扫完。",
+               "Only %.0f%% of the pixels have data -- this frame **cannot be judged** for atomic "
+               "resolution. The missing part is treated as a constant before the spectrum is taken, "
+               "which adds structure unrelated to the scan. "
+               "**Do not read this result as \"the tip is bad\"**; it says the frame was not finished.")
             % (coverage * 100)] if incomplete else [])
 
         data = {
@@ -426,15 +474,23 @@ class AssessAtomicPhase(BaseSkill):
 
         if res.passed:
             per = res.period_fast_axis_nm
-            summary = (f"有原子相：快扫方向周期 "
-                       f"{per:.3f} nm" if per else "有原子相")
-            summary += (f"，角向集中度 {res.angular_concentration:.0f}"
-                        f"（阈值 {params.get('concentration_min', 20.0):g}）。")
+            summary = (tr(f"有原子相：快扫方向周期 "
+                          f"{per:.3f} nm",
+                          f"Atomic phase present: fast-scan period "
+                          f"{per:.3f} nm") if per else tr("有原子相", "Atomic phase present"))
+            summary += tr(f"，角向集中度 {res.angular_concentration:.0f}"
+                          f"（阈值 {params.get('concentration_min', 20.0):g}）。",
+                          f", angular concentration {res.angular_concentration:.0f} "
+                          f"(threshold {params.get('concentration_min', 20.0):g}).")
         elif "scale_gate" in res.reasons:
-            summary = (f"这一帧 {res.nm_per_px:.4f} nm/px 太粗，判不了原子相 —— "
-                       f"这不等于「没有原子相」。换更小的视野或更多像素再看。")
+            summary = tr(f"这一帧 {res.nm_per_px:.4f} nm/px 太粗，判不了原子相 —— "
+                         f"这不等于「没有原子相」。换更小的视野或更多像素再看。",
+                         f"This frame at {res.nm_per_px:.4f} nm/px is too coarse to judge the atomic "
+                         f"phase -- that does not mean \"no atomic phase\". Look again with a smaller "
+                         f"field of view or more pixels.")
         else:
-            summary = f"没有原子相（{', '.join(res.reasons)}）"
+            summary = tr(f"没有原子相（{', '.join(res.reasons)}）",
+                         f"No atomic phase ({', '.join(res.reasons)})")
         return SkillResult(skill_name="AssessAtomicPhase", success=True,
                            data=data, summary=summary)
 

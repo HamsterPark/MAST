@@ -10,6 +10,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
+import { tr } from "../lib/i18n.ts";
 
 export const TIP_KEY = ["tips", "current"] as const;
 
@@ -178,11 +179,11 @@ export function useRemoveCurrentTip() {
 
 /** 「W · 电化学腐蚀 · 普通针尖」这样的一行摘要。 */
 export function tipSummary(tip: Tip | null | undefined): string {
-  if (!tip) return "未登记";
+  if (!tip) return tr("未登记", "Not registered");
   const bits = [tip.material, tip.fabrication, tip.form].filter(
     (x) => x && x !== "unknown",
   );
-  return bits.join(" · ") || "未记录属性";
+  return bits.join(" · ") || tr("未记录属性", "No properties recorded");
 }
 
 /** 已服役天数；装入日期解析不出返回 null。 */

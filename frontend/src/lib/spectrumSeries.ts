@@ -1,4 +1,4 @@
-// STS 曲线的数据整形 —— GET /api/scans/spectrum → uPlot。
+// Data shaping for STS curves — GET /api/scans/spectrum → uPlot.
 //
 // A point spectrum used to reach this app as a small PNG of the file's first two
 // columns: no axes, no units, no zoom, and every other channel (the backward
@@ -9,6 +9,8 @@
 // measured lock-in channel, a numeric derivative of I(V), and nothing. The
 // middle one is a different measurement from the first — a derivative of a noisy
 // current is not a lock-in trace — so it is labelled wherever it is drawn.
+
+import { tr } from "./i18n.ts";
 
 export interface SpectrumSeriesLike {
   id: string;
@@ -42,14 +44,14 @@ export function availableModes(resp: SpectrumResponseLike | null | undefined): S
   if (series.some((s) => s.id.startsWith("current"))) {
     // I(z) sweeps Z, not bias, so calling that tab "I-V" would mislabel the
     // physics. `kind` comes from which column is actually sweeping, not from the
-    // file header — 字段标签会说谎.
+    // file header — a header label can be wrong.
     out.push({ id: "current", label: resp?.kind === "iz" ? "I-z" : "I-V" });
   }
   if (series.some((s) => s.id.startsWith("didv"))) {
     out.push({ id: "didv", label: "dI/dV" });
   }
   if (series.some((s) => s.id.startsWith("col"))) {
-    out.push({ id: "other", label: "全部通道" });
+    out.push({ id: "other", label: tr("全部通道", "All channels") });
   }
   return out;
 }
@@ -81,7 +83,7 @@ export interface PreparedSpectrum {
  * Every series is emitted at the sweep's length. A series of a different length
  * would silently pair the wrong x with the wrong y — uPlot does not check, it
  * just draws — so a mismatch is padded with nulls, which BREAK the line rather
- * than inventing points. (图上空档不能连线: a gap in a spectrum is missing data,
+ * than inventing points. (a gap must not be bridged by a line: a gap in a spectrum is missing data,
  * and drawing a straight segment across it asserts a measurement nobody made.)
  */
 export function buildSpectrumData(
@@ -124,8 +126,11 @@ function yLabelFor(mode: SpectrumMode, picked: SpectrumSeriesLike[]): string {
   return picked.map((s) => s.name).join(" · ");
 }
 
-/** 数值微分的说明。null when the dI/dV on screen was actually measured. */
+/** Note for a numeric derivative. null when the dI/dV on screen was actually measured. */
 export function numericDidvNote(resp: SpectrumResponseLike | null | undefined): string | null {
   if (resp?.didv_source !== "numeric") return null;
-  return "dI/dV 由 I(V) 数值微分得到（文件里没有 lock-in 通道），不是实测调制信号";
+  return tr(
+    "dI/dV 由 I(V) 数值微分得到（文件里没有 lock-in 通道），不是实测调制信号",
+    "dI/dV is a numeric derivative of I(V) (the file has no lock-in channel), not a measured modulation signal",
+  );
 }

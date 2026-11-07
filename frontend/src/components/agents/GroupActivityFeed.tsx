@@ -3,17 +3,18 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Badge, Card, DegradedNote, EmptyNote, ErrorNote, Spinner } from "@/components/ui";
 import { useWsEvent } from "@/hooks/useWsEvents";
+import { langTag, tr } from "@/lib/i18n";
 import { transcriptCursorFor, type TranscriptEventData } from "@/lib/transcriptRefresh";
 import { Avatar, agentLabel } from "./registry";
 import { parseRowMeta, useRunTaskStore } from "./runTaskStore";
 
 // ════════════════════════════════════════════════════════════════════════════
-// GroupActivityFeed — an agent's messages from 群聊 (multi-agent orchestrator)
+// GroupActivityFeed — an agent's messages from group-chat (multi-agent orchestrator)
 // runs, surfaced READ-ONLY in its own view. Two sources, merged:
 //   • LIVE: the in-progress run's messages straight from the module-scoped
 //     run-task store (real-time — no 5s poll lag and no waiting for the
-//     agent-boundary persist flush, which is why tool calls used to appear only
-//     once the agent "spoke");
+//     agent-boundary persist flush, which would show tool calls only once the
+//     agent "spoke");
 //   • DURABLE: the persisted transcript across all past runs
 //     (GET /api/agents/{id}/group-activity, polled).
 // Deduped by a content signature so a resume-replayed row (same text, new seq)
@@ -27,15 +28,15 @@ type Row = {
   t: number;
   title?: string;
   live?: boolean;
-  // Tool rows show a one-line summary; the detail it drops expands on click
-  //. Absent for rows written before the sidecar existed.
+  // Tool rows show a one-line summary; the detail it drops expands on click.
+  // Absent for rows written before the sidecar existed.
   tool?: string;
   args?: string;
   argsClipped?: boolean;
   detail?: string;
 };
 
-/** Collapsed 参数 / 完整返回 for one tool row. Renders nothing when the row has
+/** Collapsed arguments / full result for one tool row. Renders nothing when the row has
  *  no sidecar — an old transcript row keeps its raw text and no toggle. */
 function RowDetail({ row }: { row: Row }) {
   const [open, setOpen] = useState(false);
@@ -48,9 +49,9 @@ function RowDetail({ row }: { row: Row }) {
         onClick={() => setOpen((s) => !s)}
         className="font-mono text-[11px] text-mast-muted hover:text-mast-text"
       >
-        {open ? "▾" : "▸"} {row.args ? "参数" : "完整返回"}
+        {open ? "▾" : "▸"} {row.args ? tr("参数", "Arguments") : tr("完整返回", "Full result")}
         {row.tool ? ` · ${row.tool}` : ""}
-        {row.argsClipped ? " · 已截断" : ""}
+        {row.argsClipped ? tr(" · 已截断", " · truncated") : ""}
       </button>
       {open && (
         <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded border border-mast-border/60 bg-mast-bg/60 p-2 font-mono text-[11px]">
@@ -70,7 +71,7 @@ function sig(role: string, text: string, t: number): string {
 function fmtTime(t?: number): string {
   if (!t) return "";
   try {
-    return new Date(t * 1000).toLocaleString();
+    return new Date(t * 1000).toLocaleString(langTag());
   } catch {
     return "";
   }
@@ -87,25 +88,28 @@ export function GroupActivityFeed({ agentId }: { agentId: string }) {
       if (error) throw error;
       return data;
     },
-    // 保活轮询照留：WS 断了（隧道抖动、服务重启）这一页也不能就此定格。
-    // 有推送的时候它只是兜底，所以慢一点没关系。
+    // Keep-alive polling stays: if the WS drops (tunnel hiccup, service restart)
+    // the page must not freeze. With push it is only a fallback, so slow is fine.
     refetchInterval: 5000,
   });
 
-  // 5 s 一跳对「盯着 agent 干活」来说太钝了。
+  // A 5 s poll is too sluggish for watching an agent work.
   //
-  // 转录落库时后端**已经**在推一条只带游标的事件（`chat/store.py`
-  // `_publish_transcript_append`），而且 payload 里就带着 `agent_id` ——
-  // 这里零后端改动就能把它接上。事件不带正文，仍然走正常的读端点取。
+  // When a transcript row is persisted the backend already pushes a cursor-only
+  // event (`chat/store.py` `_publish_transcript_append`) whose payload carries
+  // `agent_id`, so this hooks in with no backend change. The event has no body;
+  // the content is still fetched from the normal read endpoint.
   const seenTs = useRef(0);
   useWsEvent("experiment", (event) => {
-    // 「是不是我这个 agent 说的话」+ 游标，判断在 lib/transcriptRefresh.ts 里，
-    // 因为那几条全是「什么时候**不**刷」，漏一条的症状是「偶尔跳一下」——
-    // 不会崩、截图看不出、类型检查管不着，只有测试守得住。
+    // "Is it this agent's message" plus the cursor check live in
+    // lib/transcriptRefresh.ts: those rules are all about when NOT to refresh, and
+    // missing one only shows as an occasional jump (no crash, not visible in a
+    // screenshot, not caught by the type checker), so tests guard it.
     const { ok, t } = transcriptCursorFor(event.data as TranscriptEventData, agentId);
     if (!ok) return;
-    // 一串事件（一次群聊回合会连着落好几行）合并成一次重读，不是一行一个请求。
-    // t === 0 = 事件没带游标 ⇒ 照刷，别让「没有游标」被当成「游标很旧」。
+    // A burst of events (one group-chat turn persists several rows) collapses into
+    // one re-read instead of one request per row. t === 0 means the event carried
+    // no cursor, so refresh anyway rather than treating "no cursor" as "old cursor".
     if (t && t <= seenTs.current) return;
     if (t) seenTs.current = t;
     void qc.invalidateQueries({ queryKey: ["agent-group-activity", agentId] });
@@ -116,7 +120,7 @@ export function GroupActivityFeed({ agentId }: { agentId: string }) {
   // (it changes only when a frame arrives), then derive in a useMemo. A
   // `useShallow` selector that `.map`s into NEW object literals returns a fresh
   // array on every call → unstable getSnapshot → React #185 infinite render
-  // (the bug that crashed 代理对话). Never build objects inside a store selector.
+  // (a crash in the agent conversation view). Never build objects inside a store selector.
   const entries = useRunTaskStore((s) => s.entries);
   const running = useRunTaskStore((s) => s.running);
   type Live = {
@@ -194,29 +198,29 @@ export function GroupActivityFeed({ agentId }: { agentId: string }) {
       <div className="flex items-center gap-2">
         <Avatar id={agentId} size={18} />
         <h4 className="text-sm font-medium">
-          群聊中的活动
+          {tr("群聊中的活动", "Group chat activity")}
           <span className="ml-2 text-xs font-normal text-mast-muted">
-            · {agentLabel(agentId)} 在多智能体编排（群聊）中的发言
+            {tr(`· ${agentLabel(agentId)} 在多智能体编排（群聊）中的发言`, `· Messages from ${agentLabel(agentId)} in multi-agent orchestration (group chat)`)}
           </span>
         </h4>
         {running && (
           <Badge tone="AUTO">
             <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current align-middle" />
-            实时
+            {tr("实时", "Live")}
           </Badge>
         )}
         {rows.length > 0 && (
-          <span className="ml-auto font-mono text-[10px] text-mast-muted">{rows.length} 条</span>
+          <span className="ml-auto font-mono text-[10px] text-mast-muted">{tr(`${rows.length} 条`, `${rows.length} items`)}</span>
         )}
       </div>
 
       {q.isPending && rows.length === 0 && <Spinner />}
       {q.isError && rows.length === 0 && <ErrorNote error={q.error} />}
       {q.data && degraded && rows.length === 0 && (
-        <DegradedNote what="群聊活动（需可内省的会话存储）" />
+        <DegradedNote what={tr("群聊活动（需可内省的会话存储）", "Group chat activity (requires introspectable session storage)")} />
       )}
       {!q.isPending && rows.length === 0 && !degraded && (
-        <EmptyNote label="该代理尚未在任何群聊中发言（或群聊未运行）。" />
+        <EmptyNote label={tr("该代理尚未在任何群聊中发言（或群聊未运行）。", "This agent has not spoken in any group chat (or group chat is not running).")} />
       )}
 
       {rows.length > 0 && (
@@ -231,14 +235,14 @@ export function GroupActivityFeed({ agentId }: { agentId: string }) {
             >
               <div className="mb-1 flex items-center gap-2 text-xs text-mast-muted">
                 {e.role === "tool" ? (
-                  <span className="rounded bg-mast-bg px-1.5 py-0.5 font-mono">工具</span>
+                  <span className="rounded bg-mast-bg px-1.5 py-0.5 font-mono">{tr("工具", "Tool")}</span>
                 ) : (
-                  <span className="rounded bg-mast-accent/10 px-1.5 py-0.5 text-mast-accent">发言</span>
+                  <span className="rounded bg-mast-accent/10 px-1.5 py-0.5 text-mast-accent">{tr("发言", "Message")}</span>
                 )}
-                {e.live && <span className="text-mast-accent">· 实时</span>}
+                {e.live && <span className="text-mast-accent">{tr("· 实时", "· live")}</span>}
                 {e.title && (
                   <span className="truncate" title={e.title}>
-                    群聊 · {e.title}
+                    {tr(`群聊 · ${e.title}`, `Group chat · ${e.title}`)}
                   </span>
                 )}
                 <span className="ml-auto font-mono">{fmtTime(e.t)}</span>
@@ -246,8 +250,8 @@ export function GroupActivityFeed({ agentId }: { agentId: string }) {
               <div
                 className={
                   "whitespace-pre-wrap break-words " +
-                  // Tool rows are sentences now, not code fragments , so
-                  // they stop being rendered as monospace payload.
+                  // Tool rows are sentences, not code fragments, so they are not
+                  // rendered as monospace payload.
                   (e.role === "tool" ? "text-xs text-mast-muted" : "text-mast-text")
                 }
               >

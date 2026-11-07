@@ -1,6 +1,6 @@
 """Cross-check what an agent SAID it did against what the records say it did.
 
- the instrument_control agent reported
+Failure mode: the instrument_control agent reported
 
     [HANDOFF → data_processing] 5-point STS grid acquired (40 nm spacing, …).
     Per-point summary JSON: D:\\MAST-data\\artifacts\\tool_returns\\GridSTS_a0a17a99.txt
@@ -8,7 +8,8 @@
 …and the run finished as 「完成」. In the 25 seconds that message covers, the
 service log contains three HTTP calls to the model provider and nothing else:
 no skill ran, no action row was written, no marker was placed, and the file it
-named was never created. Nothing in the UI distinguishes "IC did it" from "IC said it did it".
+named was never created. The operator read the message, believed the
+measurement had happened. Nothing in the UI distinguishes "IC did it" from "IC said it did it".
 
 This module is the comparison itself, kept pure so it can be tested and so it
 can be called from wherever a run's final text is available:
@@ -31,6 +32,8 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
+
+from mast.i18n import tr
 
 # Absolute paths with a file extension: Windows (D:\a\b.txt, \\host\share\x.sxm)
 # and POSIX (/a/b.dat). Bare filenames are NOT matched — too many false hits
@@ -80,7 +83,8 @@ class ClaimAudit:
         """One operator-facing line, or '' when there is nothing to say."""
         if self.ok:
             return ""
-        return "⚠️ 本次运行的记录与该消息不符：" + "；".join(self.problems)
+        return (tr("⚠️ 本次运行的记录与该消息不符：", "Warning: this run's record does not match that message: ")
+                + tr("；", "; ").join(self.problems))
 
 
 def extract_claimed_paths(text: str) -> list[str]:
@@ -146,12 +150,14 @@ def audit_claim(
         a.fabricated_paths.append(p)
     if a.fabricated_paths:
         a.problems.append(
-            "消息里引用的文件本次运行没有产生、磁盘上也不存在：" +
-            "、".join(a.fabricated_paths))
+            tr("消息里引用的文件本次运行没有产生、磁盘上也不存在：",
+               "The message cites files that this run did not produce and that do not exist on disk: ") +
+            tr("、", ", ").join(a.fabricated_paths))
 
     if skills is not None and not skills and claims_completed_work(text):
         a.unsupported_completion = True
-        a.problems.append("消息声称已完成测量，但本次运行没有任何技能被调用")
+        a.problems.append(tr("消息声称已完成测量，但本次运行没有任何技能被调用",
+                             "The message claims a measurement was completed, but no skill was called in this run"))
 
     a.ok = not a.problems
     return a

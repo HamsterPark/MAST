@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from mast.i18n import tr
+
 # ⚠️ ``time`` 这个模块属性在测试里会被换成假时钟(见 tests 的 ``readback_clock``
 # 夹具:``monkeypatch.setattr(_readback_stream, "time", FakeClock())``),而那个
 # 替身**只有** ``perf_counter`` / ``sleep`` / ``advance``。所以采集循环之外的任何
@@ -298,6 +300,6 @@ def trace_ref(saved: dict) -> str:
     """
     p = (saved or {}).get("trace_path")
     if p:
-        return f" | 原始曲线: {p}"
+        return tr(f" | 原始曲线: {p}", f" | Raw trace: {p}")
     err = (saved or {}).get("trace_error")
-    return f" | ⚠️ 原始曲线未落盘: {err}" if err else ""
+    return tr(f" | ⚠️ 原始曲线未落盘: {err}", f" | ⚠️ Raw trace not saved: {err}") if err else ""

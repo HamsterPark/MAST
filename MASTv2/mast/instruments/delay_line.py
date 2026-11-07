@@ -88,17 +88,20 @@ class DelayLine:
     # -- motion ----------------------------------------------------------------
 
     def move_to_delay_ps(
-        self, delay_ps: float, *, wait: bool = True, timeout: float | None = None
+        self, delay_ps: float, *, wait: bool = True, timeout: float | None = None,
+        check_abort=None,
     ) -> AxisStatus:
         return self._axis.move_abs(
-            self.delay_to_position(delay_ps), wait=wait, timeout=timeout
+            self.delay_to_position(delay_ps), wait=wait, timeout=timeout,
+            check_abort=check_abort,
         )
 
     def get_delay_ps(self) -> float:
         return self.position_to_delay(self._axis.get_position())
 
-    def home(self, *, wait: bool = True, timeout: float | None = None) -> AxisStatus:
-        return self._axis.home(wait=wait, timeout=timeout)
+    def home(self, *, wait: bool = True, timeout: float | None = None,
+             check_abort=None) -> AxisStatus:
+        return self._axis.home(wait=wait, timeout=timeout, check_abort=check_abort)
 
     def stop(self) -> None:
         self._axis.stop()

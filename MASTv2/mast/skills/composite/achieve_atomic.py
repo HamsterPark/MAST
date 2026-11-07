@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import time
 from typing import Iterator
+from mast.i18n import tr
 
 from mast.core.types import (
     ParameterSpec,
@@ -98,17 +99,23 @@ def _coarse_suggestion() -> "tuple[dict | None, str]":
 
         rows, ok = marker_rows()
         if not ok:
-            return None, "读不到实验记录 —— 不知道去过哪些片，不能凭空换区"
+            return None, tr("读不到实验记录 —— 不知道去过哪些片，不能凭空换区",
+                         "Cannot read the experiment records -- do not know which areas were"
+                         " visited, so no area change without evidence")
         d = build_coarse_map(rows, CoarseMapConfig()).as_dict()
         sug = d.get("suggestion")
         note = str(d.get("note") or "")
         if not sug:
-            return None, note or "粗动地图说这一带已经用完（通常意味着要换样品）"
+            return None, note or tr("粗动地图说这一带已经用完（通常意味着要换样品）",
+                                 "The coarse map says this region is used up (usually means changing"
+                                 " the sample)")
         if any(sug.get(k) is None for k in ("axis", "direction", "steps")):
-            return None, "粗动地图给的 suggestion 缺 axis/direction/steps —— 不动"
+            return None, tr("粗动地图给的 suggestion 缺 axis/direction/steps —— 不动",
+                         "The coarse map's suggestion lacks axis/direction/steps -- not "
+                         "moving")
         return dict(sug), (str(sug.get("reason") or "") or note)
     except Exception as exc:  # noqa: BLE001
-        return None, "粗动地图读不出来: %s" % exc
+        return None, tr("粗动地图读不出来: %s", "Cannot read the coarse map: %s") % exc
 
 
 def _remember_frame(executor: GraphExecutor, data: dict) -> None:
@@ -123,9 +130,8 @@ def _remember_frame(executor: GraphExecutor, data: dict) -> None:
     后果是它会拿一个**取不到文件**的路径去覆盖前面那个能画图的:
     R1 交出一张真帧、随后 R3a/R3b 的复评各交出一条 history(路径指向一张
     被清掉/没落盘/技能只是回了个名字的帧)⇒ ``last_frame_path`` 被换成后者 ⇒
-    ``_render_report`` 提前回 ⇒ **整跑一张分析图都没有**,而这恰恰是要求
-    要图的那一支(2026-08-24 由 test_achieve_atomic_narration 当场判红)。
-    「注释描述了一道并不存在的检查」是本仓的常客,这里把它做出来:
+    ``_render_report`` 提前回 ⇒ **整跑一张分析图都没有**,而这恰恰是需要出图的那一支
+    因此这里实际执行该检查:
     **落不到磁盘的候选一律跳过,而且宁可留着上一档那张好的,也不清空。**
     """
     from pathlib import Path as _P
@@ -148,8 +154,8 @@ def _concentrations(history) -> list:
     """一段 ``ScanUntilAtomicResolution`` 历史里**每一帧**的角向集中度。
 
     只收真的判过的帧(``relocated`` 那种记账行没有读数),而且只收有限数 ——
-    一个渲染成 ``None`` 的读数比不说更糟。给旁白用的是
-    「每帧的角向集中度」,而在此之前这几个数只存在于回包的 ``history`` 里。
+    一个渲染成 ``None`` 的读数比不说更糟。给旁白用(旁白需要
+    每帧的角向集中度,这几个数只存在于回包的 ``history`` 里)。
     """
     out: list = []
     for h in list(history or []):
@@ -208,8 +214,8 @@ def _report_or_nothing(path: str) -> "tuple[dict | None, dict]":
     调用点在两条旁白里都写在 ``try`` **外面**,于是只要这条路上任何一环炸了
     (matplotlib 装坏、``project_root()`` 抛、这个函数被替换),异常就直接顺着
     ``aggregate`` 冒到实验线程上 —— 一次八小时的跑被一张配图带走。
-    2026-08-24 由 ``test_a_broken_narration_channel_never_breaks_the_run``
-    当场判红:``_render_report`` 一抛,整条编排就停了。
+    ``test_a_broken_narration_channel_never_breaks_the_run`` 钉住这一点:
+    ``_render_report`` 一抛,整条编排就停了。
 
     「函数自己保证不抛」和「调用点保证不抛」是**两件事**:前者对不了替身、
     对不了 import 期的错。这里两道都上。
@@ -303,7 +309,7 @@ def _narrate_atomic_result(path: str, verify: dict, rungs: list) -> None:
         # ``["angular_concentration_backward"]`` —— 六个键里三个 VerifyAtomicResolution
         # 根本不产出，于是那三个数**永远是 None**，句子**若无其事地少说三样**。
         # 与 ``auto_tilt_result`` 读四个幽灵键、26/26 走兜底是同一个形状，
-        # 只是这次少的是数不是整句话（2026-08-23 由旁白那侧的测试查出来）。
+        # 只是这次少的是数不是整句话。
         #
         # 现在：能从验证方拿的就从验证方拿（它是权威），拿不到的退到三联图
         # **本来就量过**的那一份 —— 反扫的角向集中度全仓只有那里有生产方。
@@ -341,13 +347,25 @@ class AchieveAtomicResolution(CompositeSkillGraph):
             # / ForgeAuTip(L4) / RelocateCoarseXY，默认预算 8 小时，外面还套站点循环。
             composition_level=5,
             description=(
-                "**用户只说「我想要原子分辨」时就调这一个。**"
+                tr("**用户只说「我想要原子分辨」时就调这一个。**"
                 "从当前状态出发：先自己量出针尖和表面的现状，再按读数决定从"
                 "哪一档起步，逐档升级（重扫 → 偏压抖动 → 浅扎 → 脉冲 → 扎针稳定 → 锻造），"
                 "每一档之后都复评，最后做正反扫验证并交出图与数字。"
                 "**零必填参数 —— 调用方不需要、也不应该替它填任何数**："
                 "它自己会读扫描框、扫描速度、反馈状态。"
-                "判据说「判不了」时它改成像条件而**不动针尖**。"
+                "判据说「判不了」时它改成像条件而**不动针尖**。",
+                "**Call this one when the user just says \"I want atomic "
+                "resolution\".** Starting from the current state: it first measures "
+                "the present state of the tip and surface itself, then decides from"
+                " the readings which rung to start at and escalates rung by rung "
+                "(rescan -> bias wobble -> shallow poke -> pulse -> poke to "
+                "stabilise -> forge), re-evaluates after every rung, and finally "
+                "runs a forward/backward verification and hands back the image and "
+                "the numbers. **No required parameters -- the caller does not need "
+                "to, and should not, fill in any number for it**: it reads the scan"
+                " frame, scan speed and feedback state itself. When the criterion "
+                "says \"cannot tell\" it changes the imaging conditions and **does "
+                "not touch the tip**.")
             ),
             parameters=[
                 ParameterSpec(
@@ -355,41 +373,68 @@ class AchieveAtomicResolution(CompositeSkillGraph):
                     default=DEFAULT_BUDGET_MIN, unit="min",
                     min_value=5.0, max_value=2880.0,
                     description=(
-                        "总预算（分钟）。只用来决定「还要不要开下一档」，"
+                        tr("总预算（分钟）。只用来决定「还要不要开下一档」，"
                         "**绝不会在一档中途因为超时把它判失败**。"
-                        "整夜 = 480（默认），一整天 = 1440。"),
+                        "整夜 = 480（默认），一整天 = 1440。",
+                        "Total budget (minutes). Used only to decide whether to open the "
+                        "next rung, and **never fails a rung midway because of a timeout**."
+                        " Overnight = 480 (default), a whole day = 1440.")),
                 ),
                 ParameterSpec(
                     name="allow_tip_conditioning", type="bool", required=False,
                     default=True,
-                    description="允许动针尖（脉冲 / 扎针）。关掉就只做前两档。",
+                    description=tr("允许动针尖（脉冲 / 扎针）。关掉就只做前两档。",
+                                "Allow touching the tip (pulse / poke). If off, only the first two "
+                                "rungs are run."),
                 ),
                 ParameterSpec(
                     name="allow_forge", type="bool", required=False, default=False,
                     description=(
-                        "允许 ForgeAuTip，默认关闭。仅用于明确需要重塑针尖的严重形貌问题；"
-                        "常规处理失败本身不是启用理由。表面区域问题使用 RelocateCoarseXY。"),
+                        tr("允许 ForgeAuTip。默认**关**，而且它的适应症是"
+                        "「**针尖已经变得极其糟糕**（顶端毁掉，要重新锻造）」，"
+                        "**不是**「前面几档都失败了」—— 后者更该做的是再给便宜那档"
+                        "一次机会（forge 耗时很长也可能毫无改善，而便宜那档很快就能出结果）。"
+                        "表面本身用完了则是 RelocateCoarseXY 的活，不是它。",
+                        "Allow ForgeAuTip. Default **off**, and its indication is \"**the "
+                        "tip has become extremely bad** (apex destroyed, needs "
+                        "re-forging)\", **not** \"the earlier rungs all failed\" -- in that "
+                        "case the better move is to give the cheap rung another chance "
+                        "(forge can take hours with no improvement, while the cheap rung "
+                        "gives a result quickly). A used-up surface is the job of RelocateCoarseXY, not"
+                        " of this.")),
                 ),
                 ParameterSpec(
                     name="allow_on_qplus", type="bool", required=False, default=False,
-                    description="qPlus 传感器上放行扎针（护栏默认拒绝）。",
+                    description=tr("qPlus 传感器上放行扎针（护栏默认拒绝）。", "Allow poking on a qPlus sensor (the guard refuses by default)."),
                 ),
                 ParameterSpec(
                     name="allow_relocate", type="bool", required=False, default=True,
                     description=(
-                        "表面用完了（判据说 no_usable_region）时**自己粗动换一片新表面**"
+                        tr("表面用完了（判据说 no_usable_region）时**自己粗动换一片新表面**"
                         "并从最便宜那档重来。默认**开** —— 该给的权限"
                         "就应该给它。往哪走、走多少步由粗动大地图的"
                         "suggestion 给，不由这个技能拍；地图说这一带用完了就如实停下"
                         "（通常意味着要换样品）。"
-                        "⚠️ 换区会让扫描地图进入**新的坐标代次**，旧坐标全部作废。"),
+                        "⚠️ 换区会让扫描地图进入**新的坐标代次**，旧坐标全部作废。",
+                        "When the surface is used up (criterion says no_usable_region), "
+                        "**coarse-move to a new surface by itself** and restart from the "
+                        "cheapest rung. Default **on**, "
+                        "so the run has the permissions it needs. Where to go and how many"
+                        " steps come from the suggestion of the coarse map, not decided by "
+                        "this skill; if the map says this area is used up, it stops "
+                        "honestly (usually means changing the sample). WARNING: relocating "
+                        "puts the scan map into a **new coordinate epoch**, and all old "
+                        "coordinates become void.")),
                 ),
                 ParameterSpec(
                     name="max_relocations", type="int", required=False, default=3,
                     min_value=0, max_value=20,
                     description=(
-                        "最多换几次区。这是**防跑飞的护栏，不是策略** —— 真正的停点是"
-                        "粗动地图说没有下一站了，或者总预算用完。"),
+                        tr("最多换几次区。这是**防跑飞的护栏，不是策略** —— 真正的停点是"
+                        "粗动地图说没有下一站了，或者总预算用完。",
+                        "Maximum number of relocations. This is a **runaway guard, not a "
+                        "strategy** -- the real stopping points are the coarse map having "
+                        "no next stop, or the total budget running out.")),
                 ),
             ],
             tags=["atomic", "resolution", "autonomous", "top-level", "composite"],
@@ -419,7 +464,7 @@ class AchieveAtomicResolution(CompositeSkillGraph):
             return budget_s - (time.monotonic() - t0)
 
         def _note(rung: str, outcome: str, *, record: bool = True, **kw) -> None:
-            """记一笔账,**并且当场把它念给用户听**(2026-08-24)。
+            """记一笔账,**并且当场把它念给用户听**。
 
             旁白接在这里而不是在每一档各写一句:这是 ``plan_dynamic`` 里唯一的
             记账口,每一档、每一次分诊、每一个停下的理由都从这儿过。于是
@@ -504,7 +549,9 @@ class AchieveAtomicResolution(CompositeSkillGraph):
             # 分诊需要的事实全在里面。所以这里不另外扫一帧去「先量一下」——
             # 那会是同一个动作的第二份实现，而两份迟早只有一份对。
             _note(T("r1"), "begin", record=False,
-                  note="不动针尖、不改参数,先看它自己会不会出来")
+                  note=tr("不动针尖、不改参数,先看它自己会不会出来",
+                       "Not touching the tip or the parameters; first see whether it comes"
+                       " out by itself"))
             yield CompositeStep(
                 step_id=T("r1"), skill_name="ScanUntilAtomicResolution",
                 params=dict(_RECHECK), optional=True, checkpoint_after=True,
@@ -527,7 +574,7 @@ class AchieveAtomicResolution(CompositeSkillGraph):
             # **不许动针尖**，也不许换区（换区同样是拿判不了当证据在行动）。
             #
             # ⚠️ 「判过的帧」这三个词从 ``scan_until_atomic`` **import**,不在这里
-            # 抄第二份。那边 2026-08-24 加了 ``no_scan`` / ``no_new_frame``
+            # 抄第二份。那边加了 ``no_scan`` / ``no_new_frame``
             # 两种记账行(「这一次根本没采到」/「交回来的还是判过的那张」)——
             # 抄一份在这里的话,新出现的记账行会被这道分诊当成一帧真判定,
             # 于是「没采到」被当成关于针尖的证据,而这正是这道分诊要挡的那件事。
@@ -563,7 +610,7 @@ class AchieveAtomicResolution(CompositeSkillGraph):
             if allow_reloc and site < int(max_reloc) and not last_path:
                 # 缺少表面评估时明确报告未知，不能暗示已经确定是针尖问题。
                 _note(T("surface"), "no_frame_to_ask",
-                      hint="R1 没交出存盘路径（save_every_frame 关了？）")
+                      hint=tr("R1 没交出存盘路径（save_every_frame 关了？）", "R1 returned no saved path (is save_every_frame off?)"))
             if allow_reloc and last_path and site < int(max_reloc):
                 yield CompositeStep(
                     step_id=T("surface"), skill_name="FindFlatRegion",
@@ -631,13 +678,16 @@ class AchieveAtomicResolution(CompositeSkillGraph):
                 _note("triage", "tip_conditioning_disabled")
                 return
 
-            # ── R2：偏压抖动 + 阈值浅扎（用户亲手教的手法）──────────────
+            # ── R2：偏压抖动 + 阈值浅扎（人工修针常用手法）──────────────
             if _budget_left() <= 0:
                 _note(T("r2"), "skipped_budget")
                 return
             _note(T("r2"), "begin", record=False,
-                  note="重扫不出来而表面还有台面 ⇒ 升级:偏压抖动 + 阈值浅扎"
-                       "(用户亲手教的手法)")
+                  note=tr("重扫不出来而表面还有台面 ⇒ 升级:偏压抖动 + 阈值浅扎"
+                       "(人工修针常用手法)",
+                       "Rescanning does not get it out and the surface still has terraces "
+                       "=> escalate: bias wobble + threshold shallow poke (a method commonly "
+                       "done by hand)"))
             yield CompositeStep(
                 step_id=T("r2"), skill_name="MakeAtomicResolutionTip",
                 params={"allow_on_qplus": allow_qplus},
@@ -667,11 +717,17 @@ class AchieveAtomicResolution(CompositeSkillGraph):
                 pp = ({"allow_on_qplus": allow_qplus}
                       if skill == "PokeConditionTip" else {})
                 _note(T(base), "begin", record=False, skill_outcome=skill,
-                      note=("浅扎先来:2 nm 以内的扎针比脉冲温和(判据),"
-                            "而且它治不了的情况(多针尖)会自己要求让位给脉冲"
+                      note=(tr("浅扎先来:2 nm 以内的扎针比脉冲温和(经验判据),"
+                            "而且它治不了的情况(多针尖)会自己要求让位给脉冲",
+                            "Shallow poke first: a poke within 2 nm is gentler than a pulse "
+                            "(empirical rule), and the case it cannot cure "
+                            "(multiple tips) will itself ask to yield to the pulse")
                             if base == "r3a" else
-                            "浅扎之后复评仍不达标 ⇒ 才轮到脉冲:它更粗暴,"
-                            "但被压垮/分叉的顶端只有它治得了"))
+                            tr("浅扎之后复评仍不达标 ⇒ 才轮到脉冲:它更粗暴,"
+                            "但被压垮/分叉的顶端只有它治得了",
+                            "If the re-evaluation after the shallow poke is still not up to the"
+                            " mark => only then the pulse: it is rougher, but a crushed/forked "
+                            "apex can only be cured by it")))
                 yield CompositeStep(
                     step_id=T(base), skill_name=skill, params=pp,
                     optional=True, checkpoint_after=True,
@@ -682,11 +738,25 @@ class AchieveAtomicResolution(CompositeSkillGraph):
                 _note(T(base), "done",
                       skill_outcome=_data(executor, T(base)).get("outcome"))
 
-                # 脉冲后通过扎针稳定阶段，再进入复评；主流程和独立修针流程应保持此顺序。
+                # ── 脉冲之后必须扎针稳定 ────────────────────────────────
+                #
+                # 脉冲之后应使用扎针稳定针尖。
+                #
+                # 这一步只存在于 ``PrepareNobleTip`` 的 A→B→C→D 序列里（D 就是
+                # 扎针），所以这条主路上要显式补一步「脉冲之后」的稳定。
+                #
+                # 缺了它的症状：脉冲把 apex 重塑了，但留在一个不稳的状态，针尖
+                # 在随后的扫描里自己在好坏之间跳。扎针稳定后，三方向幅值平衡
+                # 明显更好；幅值平衡就是「原子圆不圆」——一个方向强其余弱，
+                # 原子就是拉长的。
                 if skill == "PulseConditionTip" and _budget_left() > 0:
                     _note(T(base + ":stabilise"), "begin", record=False,
                           skill_outcome="PokeConditionTip",
-                          note="脉冲之后进入扎针稳定步骤，再重新评估针尖状态。")
+                          note=tr("脉冲之后扎针稳定:脉冲重塑了 apex 但留在不稳状态,"
+                               "不扎一下它会在随后的扫描里自己跳",
+                               "Poke to stabilise after the pulse: the pulse reshaped the apex but"
+                               " left it unstable, and without a poke it will jump by itself in "
+                               "the following scans"))
                     yield CompositeStep(
                         step_id=T(base + ":stabilise"),
                         skill_name="PokeConditionTip",
@@ -730,7 +800,9 @@ class AchieveAtomicResolution(CompositeSkillGraph):
                 _note(T("r4"), "skipped_budget")
                 return
             _note(T("r4"), "begin", record=False,
-                  note="用户显式打开了 allow_forge —— 最贵、最不可逆的一档")
+                  note=tr("用户显式打开了 allow_forge —— 最贵、最不可逆的一档",
+                       "The user explicitly enabled allow_forge -- the most expensive, "
+                       "least reversible rung"))
             yield CompositeStep(
                 step_id=T("r4"), skill_name="ForgeAuTip", params={},
                 optional=True, checkpoint_after=True,
@@ -762,7 +834,7 @@ class AchieveAtomicResolution(CompositeSkillGraph):
     def _verify(self, executor: GraphExecutor, path) -> Iterator[CompositeStep]:
         """拿到图之后再验一道。
 
-        为什么不能省：2026-08-23 独立复核那张成功帧时，是**三重确认**才让人放心
+        为什么不能省：独立复核一张成功帧时，是**三重确认**才让人放心
         —— 正反扫都有晶格（只在一个方向出现就是针尖产物）、整帧采满（不是半张帧
         的运气）、帧内两半没突变（认证期间针尖是稳的）。这三条
         ``VerifyAtomicResolution`` 都做，而它 ``AUTO`` 级、只读文件、不碰硬件 ——
@@ -770,7 +842,7 @@ class AchieveAtomicResolution(CompositeSkillGraph):
         """
         if not path:
             executor.set_partial("verified", None)
-            executor.set_partial("verify_note", "拿到了图但没拿到路径，没法验证")
+            executor.set_partial("verify_note", tr("拿到了图但没拿到路径，没法验证", "Got an image but no path, so it cannot be verified"))
             return
         yield CompositeStep(
             step_id="verify", skill_name="VerifyAtomicResolution",
@@ -818,41 +890,87 @@ class AchieveAtomicResolution(CompositeSkillGraph):
         reason = pd.get("aborted_reason")
         if reason == "z_controller_off":
             out["advice"] = (
-                "**反馈没开、针不在隧道结上** —— 这不是针尖的问题，是我们根本"
+                tr("**反馈没开、针不在隧道结上** —— 这不是针尖的问题，是我们根本"
                 "不在成像状态。本技能不替你进针（进针需要知道样品换没换、粗动在哪、"
-                "是不是 4 K，猜错的代价是撞针）。先把针进上，再叫我。")
+                "是不是 4 K，猜错的代价是撞针）。先把针进上，再叫我。",
+                "**Feedback is off, the tip is not in tunneling range** -- this is "
+                "not a tip problem, we are simply not in an imaging state. This "
+                "skill does not approach the tip for you (approaching requires "
+                "knowing whether the sample was changed, where the coarse motion "
+                "is, whether it is 4 K; a wrong guess costs a tip crash). Approach "
+                "first, then call me again."))
         elif reason == "coarse_map_exhausted":
             out["advice"] = (
-                "**这一片表面用完了**（判据说没有可用台面），而粗动大地图说"
+                tr("**这一片表面用完了**（判据说没有可用台面），而粗动大地图说"
                 "**没有下一站**了：%s。"
                 "所以我停在这儿，没有接着去修针 —— 表面没有台面时修针是治错的病，"
-                "只会白白扎针。通常这意味着**要换样品**。"
-                % (pd.get("coarse_note") or "地图没给理由"))
+                "只会白白扎针。通常这意味着**要换样品**。",
+                "**This surface is used up** (the criterion says there is no usable"
+                " terrace) and the coarse map says there is **no next stop**: %s. "
+                "So I stopped here and did not go on to condition the tip -- "
+                "conditioning a tip when the surface has no terrace treats the "
+                "wrong disease and just pokes the tip for nothing. This usually "
+                "means **the sample has to be changed**.")
+                % (pd.get("coarse_note") or tr("地图没给理由", "the map gave no reason")))
         elif reason == "undecidable_frames":
             out["advice"] = (
-                "扫到的每一帧判据都说**判不了**（这不是「没有原子分辨」）—— "
+                tr("扫到的每一帧判据都说**判不了**（这不是「没有原子分辨」）—— "
                 "所以我**没有动针尖**：在判不了的证据上修针，是在自己造出来的"
                 "空白上判读，会把一根本来就好的针磨掉。"
                 "先按判据给的 remedy 改成像条件（视野太小就扩、像素太粗就缩、"
-                "残帧就重扫、死平区就换点），再跑一次。")
+                "残帧就重扫、死平区就换点），再跑一次。",
+                "Every scanned frame was judged **undecidable** by the criterion "
+                "(this is not \"no atomic resolution\") -- so I **did not touch the "
+                "tip**: conditioning on undecidable evidence means reading a blank "
+                "we made ourselves, and it would wear down a tip that was good to "
+                "begin with. First change the imaging conditions as the criterion's"
+                " remedy says (field of view too small: enlarge; pixels too coarse:"
+                " reduce; residual frame: rescan; dead flat area: move to another "
+                "spot), then run again."))
         elif got and verified and verified != "atomic_resolved":
             out["advice"] = (
-                "拿到了看起来像原子分辨的一帧，但**验证没过**（%s）。"
+                tr("拿到了看起来像原子分辨的一帧，但**验证没过**（%s）。"
                 "验证比初判严：它要求正反扫都有晶格、整帧采满、帧内两半不突变。"
-                "这一帧多半是针尖产物，或者只是半张帧的运气。" % verified)
+                "这一帧多半是针尖产物，或者只是半张帧的运气。",
+                "Got a frame that looks like atomic resolution, but **verification "
+                "did not pass** (%s). Verification is stricter than the first "
+                "judgement: it requires a lattice in both forward and backward "
+                "scans, a fully sampled frame, and no jump between the two halves "
+                "of the frame. This frame is most likely a tip artifact, or just "
+                "the luck of half a frame.") % verified)
         elif not got:
             tail = ""
             if any(r.get("outcome") == "skipped_budget" for r in rungs):
-                tail = ("**预算用完了，还有没开的档** —— 时间不是问题的话，"
-                        "把 total_budget_min 调大（整夜 = 480，一整天 = 1440）再跑。")
+                tail = (tr("**预算用完了，还有没开的档** —— 时间不是问题的话，"
+                        "把 total_budget_min 调大（整夜 = 480，一整天 = 1440）再跑。",
+                        "**The budget ran out and there are rungs that were never opened** "
+                        "-- if time is not the issue, increase total_budget_min (overnight "
+                        "= 480, a whole day = 1440) and run again."))
             # ⚠️ 看 **outcome**，不是「有没有 r4 这一条记录」—— ``not_allowed``
             # 本身就会记一条 ``rung="r4"``，用 rung 名判会把这句话判没。
             elif any(r.get("outcome") == "not_allowed" for r in rungs):
                 # ⚠️ **不要**把这句写成「下一档是 forge」。ForgeAuTip 的适应症是
                 # 「针尖已经变得极其糟糕」，不是「前面几档都失败了」。
-                tail = ("ForgeAuTip 默认关闭。仅在明确需要重塑针尖时考虑启用；"
-                        "表面区域不足可使用 RelocateCoarseXY，其他情况可重新评估常规处理。")
-            out["advice"] = "走完了允许的档位仍没拿到原子分辨。" + tail
+                tail = (tr("ForgeAuTip 没开（allow_forge 默认 False），"
+                        "而且**「前面几档都失败了」不是开它的理由** —— "
+                        "它治的是「针尖顶端已经毁掉、要重新锻造」。"
+                        "先想清楚是哪一种失效：**针尖极其糟糕**才轮到它；"
+                        "**这片表面用完了**（扎满坑 / 脏 / 没有可用台面）"
+                        "该用 RelocateCoarseXY 换一片新表面；"
+                        "都不是的话，再给便宜那档一次机会往往更划算"
+                        "（forge 耗时很长也可能毫无改善，而便宜那档很快就能出结果）。",
+                        "ForgeAuTip is not enabled (allow_forge defaults to False), and "
+                        "**\"the earlier rungs all failed\" is not a reason to enable it** --"
+                        " it treats \"the tip apex is already destroyed and must be "
+                        "re-forged\". First work out which kind of failure this is: only a "
+                        "**tip that is extremely bad** calls for it; **a used-up surface** "
+                        "(full of pits / dirty / no usable terrace) calls for "
+                        "RelocateCoarseXY to a new surface; if neither, giving the cheap "
+                        "rung another chance is often more worthwhile (forge can take "
+                        "hours with no improvement, while the cheap rung gives a result quickly)."))
+            out["advice"] = tr("走完了允许的档位仍没拿到原子分辨。",
+                            "Went through all the allowed rungs and still did not get atomic "
+                            "resolution.") + tail
 
         # 跑完了就把结局念出来 —— **成或不成都念,而且都挂分析图**。
         # 放在 aggregate 而不是 plan_dynamic 里,是因为「停下来的理由」有六种

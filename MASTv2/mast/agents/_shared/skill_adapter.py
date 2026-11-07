@@ -14,7 +14,7 @@ Pattern (Phase 4):
         ...
     ]
 
-Design note (Phase 4 revision; corrected 2026-05-30 — ):
+Design note (Phase 4 revision):
   We tried two return types and learned:
     (1) Plain string (or str subclass) return: this is what we shipped, and it
         is BROKEN for state persistence. langgraph 1.1.9 ToolNode calls
@@ -165,7 +165,7 @@ class _SkillToolReturn(Command):
     Returning a real ``Command`` (not a plain string) is what makes langgraph's
     ToolNode apply ``executed_skills`` / ``scan_paths`` / ``composite_progress``
     / ``error_log`` / the ToolMessage into MASTState so the checkpointer
-    persists them (审查 — the previous str-subclass silently
+    persists them (the previous str-subclass silently
     lost every update through ``tool.invoke``).
 
     Backward-compat shims for the ~175 direct-call unit tests (which call
@@ -370,7 +370,7 @@ def _schema_from_metadata(meta: Any) -> type[BaseModel]:
     an injected arg, not a model-facing one). ``_run`` reads it back from
     ``kwargs`` so the returned ``Command``'s ToolMessage can carry the matching
     id (required by ToolNode's command validation) — this is what makes the
-    state side-effects in ``Command.update`` actually persist ().
+    state side-effects in ``Command.update`` actually persist.
     """
     fields: dict[str, Any] = {}
     for spec in meta.parameters:
@@ -649,7 +649,7 @@ def wrap_skill(
         Agent-path semantics: because the return is a real ``langgraph.Command``,
         ToolNode applies ``command.update`` (executed_skills / scan_paths /
         composite_progress / error_log / the ToolMessage) into MASTState, so the
-        checkpointer actually persists the side-effects (). The
+        checkpointer actually persists the side-effects. The
         ToolMessage carries the injected ``tool_call_id`` so ToolNode's command
         validation accepts it.
 
@@ -788,7 +788,7 @@ def wrap_skill(
                 # LLM tool-call path, which is what wrap_skill IS — the caller is
                 # the model. The v1 column used to be filled with the skill's
                 # DANGER LEVEL ("CONFIRM"/"AUTO"), which answers a different
-                # question ().
+                # question.
                 _appr = str(getattr(ctx, "_approval_source", "") or "")
                 return recorder({
                     "skill": meta.name,
@@ -804,9 +804,12 @@ def wrap_skill(
                                       or _d.get("sxm_path")),
                     "rolled_back": bool(rolled_back),
                     "state_before": current_state,
-                    # Preserve returned data, calls and state in the payload;
-                    # read-only skills may carry their entire result here.
-                    # The records layer decides which fields it can persist.
+                    # Without this, every action row could read
+                    # `"data": {}, "nanonis_calls": [],
+                    # "state_before": null, "summary": null` — including reads
+                    # like GetCurrent whose ONLY value is the returned number.
+                    # This payload is the last place those still exist, so pass
+                    # them on; the records layer decides what it can hold.
                     "data": _d,
                     "state_after": getattr(result, "state_after", None),
                     "nanonis_calls": list(getattr(result, "nanonis_calls", None) or []),
@@ -896,7 +899,7 @@ def wrap_skill(
         try:
             _owner = getattr(ctx, "owner", "") or "agent"
             with hold_for_skill(meta, meta.name, _owner):
-                # LOCK-IN 卫生(2026-08-05 定案「用完必须及时关」)。
+                # LOCK-IN 卫生:用完必须及时关。
                 #
                 # 这里,而不是每个技能里抄一遍:这是 agent 侧唯一的入口,而且已经
                 # 在令牌里 —— 一次工具调用检查一次,composite 的子步骤走
@@ -917,6 +920,23 @@ def wrap_skill(
                     logger.debug("modulation preflight failed (swallowed)",
                                  exc_info=True)
                 result = skill.execute(ctx, kwargs)
+            # SKILL_STEP once the instrument token is released, as the legacy SkillExecutor
+            # publishes it: the current monitor's afterglow (a finished engage / withdraw /
+            # STS leaves a few seconds in which its transient is not an alert) listens to
+            # nothing else, and this entry never sent it (same fix in
+            # ``mast.api.direct_exec._publish_skill_step``, the external path).
+            # The category rides along so the monitor leaves pure reads
+            # alone — a status poll whose NAME happens to contain "autoapproach"
+            # must not pin monitor segments or mute the next few seconds of alerts.
+            try:
+                from mast.core.events import EventBus
+
+                _cat = getattr(getattr(meta, "category", None), "value", None)
+                EventBus.get().publish_skill_step(
+                    skill=meta.name, step=0, success=bool(getattr(result, "success", True)),
+                    category=(str(_cat).lower() if _cat else None))
+            except Exception:  # noqa: BLE001 — a notification never takes the skill down
+                logger.debug("SKILL_STEP for %s not published", meta.name, exc_info=True)
             data = getattr(result, "data", {}) or {}
             if _mod_note:
                 # 进 data 而不是只进日志:结果里看不到的动作,用户事后查不到。
@@ -1026,9 +1046,17 @@ def wrap_skill(
             prog_snapshot = data.pop("_progress", None)
             if isinstance(prog_snapshot, dict):
                 update_dict["composite_progress"] = {meta.name: prog_snapshot}
-            # Record both successful and failed outcomes before the success-only
-            # rendering hook. The hook can then attach its figure to the existing
-            # action instead of creating a duplicate row.
+            # Records FIRST, hook second. The records write
+            # must not live INSIDE the post_hook, which
+            # this line only calls on success — otherwise a whole session could be
+            # audited as perfect while the store held failures,
+            # such as an approach refused because the tip is not engaged.
+            # Recording is now unconditional (both branches of the
+            # try/except below record too); the hook is left success-gated
+            # because all it does now is render a figure for a completed
+            # measurement. Recording before the hook also means the hook can
+            # attach its PNG to the REAL action row instead of opening a second
+            # one for the same skill call.
             _action_id = _emit_record(success=success, summary=summary,
                                       error=error_msg, data=data, result=result)
             # Producer-side post-skill hook (glue, NOT the model tool body):

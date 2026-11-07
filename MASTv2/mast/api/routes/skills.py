@@ -12,6 +12,7 @@ import logging
 from fastapi import APIRouter, Request
 
 from mast.api.schemas import SkillCatalogResponse, SkillIndexEntry
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ def get_skill_catalog(request: Request) -> SkillCatalogResponse:
         index = [
             SkillIndexEntry(
                 name=row.get("name", ""),
-                domain=row.get("domain", "其他"),
+                domain=row.get("domain", tr("其他", "Other")),
                 source=row.get("source", "other"),
                 # builder_api.build_catalog 写入的键名是 safety，值为小写
                 # auto / confirm / dangerous。读取其他键会丢失真实分级。

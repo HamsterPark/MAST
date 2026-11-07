@@ -5,7 +5,7 @@
 //   • exact substring  → highest, earlier match ranks higher;
 //   • subsequence      → every query char appears in order, fewer gaps = better;
 //   • no match         → 0.
-// CJK is matched per-character (each 汉字 is its own char), so 中文 search works
+// CJK is matched per-character (each Chinese character is its own char), so Chinese search works
 // without tokenisation, and English fuzzy ("cndtip" → "ConditionTip") works too.
 
 export function fuzzyScore(query: string, text: string): number {

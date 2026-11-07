@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import time
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -35,19 +36,21 @@ class MonitorCurrent(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "在一个固定时间窗内高速采样隧道电流。"
+                tr("在一个固定时间窗内高速采样隧道电流。"
                 "返回 min/max/mean/std，外加一个 `contact_detected` 标志 —— "
                 "当 |I| 连续 min_contact_samples 次轮询都高于 "
-                "contact_threshold_a 时置位。"
+                "contact_threshold_a 时置位。",
+                "Sample the tunnelling current at a high rate within a fixed time window. Returns min/max/mean/std, plus a `contact_detected` flag - set when |I| is above contact_threshold_a for min_contact_samples consecutive polls.")
             ),
             parameters=[
                 ParameterSpec(
                     name="duration_s",
                     type="float",
                     description=(
-                        "持续轮询多久，单位**秒**。常用 0.1–5。"
+                        tr("持续轮询多久，单位**秒**。常用 0.1–5。"
                         "示例：0.5（= 500 ms）✓；60（= 1 分钟）只用于"
-                        "长时间观察。"
+                        "长时间观察。",
+                        "How long to poll, in **seconds**. Commonly 0.1-5. Examples: 0.5 (= 500 ms) correct; 60 (= 1 minute) only for long observations.")
                     ),
                     unit="s",
                     required=False,
@@ -59,8 +62,9 @@ class MonitorCurrent(BaseSkill):
                     name="poll_hz",
                     type="float",
                     description=(
-                        "轮询速率，单位 Hz。Nanonis TCP 大致有 ~kHz 的能力，"
-                        "但往返抖动使得 ≤200 Hz 才现实。"
+                        tr("轮询速率，单位 Hz。Nanonis TCP 大致有 ~kHz 的能力，"
+                        "但往返抖动使得 ≤200 Hz 才现实。",
+                        "Polling rate, in Hz. Nanonis TCP is capable of roughly ~kHz, but round-trip jitter makes only <=200 Hz realistic.")
                     ),
                     unit="Hz",
                     required=False,
@@ -72,10 +76,11 @@ class MonitorCurrent(BaseSkill):
                     name="contact_threshold_a",
                     type="float",
                     description=(
-                        "判定接触的电流绝对值阈值，单位**安培**。"
+                        tr("判定接触的电流绝对值阈值，单位**安培**。"
                         "STM 的 setpoint 在 pA–nA 量级；接触起始通常是 "
                         "10–100 nA。示例：50n（= 50 nA）✓；1"
-                        "（= 1 安培 —— STM 上绝不会出现）✗。"
+                        "（= 1 安培 —— STM 上绝不会出现）✗。",
+                        "Absolute-current threshold for judging contact, in **amperes**. The STM setpoint is on the pA-nA scale; contact onset is usually 10-100 nA. Examples: 50n (= 50 nA) correct; 1 (= 1 ampere - never occurs on an STM) wrong.")
                     ),
                     unit="A",
                     required=False,
@@ -87,8 +92,9 @@ class MonitorCurrent(BaseSkill):
                     name="min_contact_samples",
                     type="int",
                     description=(
-                        "判定接触所需的连续超阈轮询次数。"
-                        "用来滤掉尖峰。"
+                        tr("判定接触所需的连续超阈轮询次数。"
+                        "用来滤掉尖峰。",
+                        "Number of consecutive over-threshold polls required to judge contact. Used to filter out spikes.")
                     ),
                     required=False,
                     default=3,

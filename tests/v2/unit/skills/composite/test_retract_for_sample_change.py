@@ -56,12 +56,26 @@ def _clean_profile():
 # ── FakeCtx ───────────────────────────────────────────────────────────────
 @dataclass
 class FakeCtx:
-    """Synthetic coarse-retract model with a Z loop that ramps over successive polls.
+    """Models a coarse retract + recede self-check — with a Z that takes TIME.
 
-The mode independently specifies receding, approaching or ambiguous motion.
-The configuration does not determine that response. A bounded travel per poll
-prevents a fixed sleep from passing merely because the fake teleports to its
-final reading. verify_current can inject a separate current spike."""
+    ``mode`` is the rig's PHYSICS: what a coarse retract step actually does to
+    the tip–sample distance, regardless of what the config believes.
+      * "receding"    → each rung puts the surface ``z_delta`` further out
+      * "approaching" → each rung brings it ``z_delta`` closer (backwards wiring)
+      * "ambiguous"   → the step changes nothing measurable
+
+    The Z piezo RAMPS toward where the loop will come to rest, a bounded amount
+    per poll, instead of teleporting there on the first read. That distinction is
+    not cosmetic: a fake that answers the first read with
+    the baseline and every later read with the final answer, which is a rig on
+    which "wait a fixed 1.5 s, then read" is always correct. It is not correct on
+    the rig — the loop needs seconds — and because such a fake cannot express
+    that, a self-check reading mid-ramp values would pass.
+    See ``mast/skills/composite/_z_settle.py``.
+
+    ``verify_current`` is served on top of the physics current (raise it to model
+    an approach-detected current spike).
+    """
     baseline_z: float = 0.0
     setpoint_a: float = 1e-10
     mode: str = "receding"
@@ -244,7 +258,13 @@ def test_backwards_direction_caught_on_first_step():
 
 
 def test_reversing_the_physical_direction_reverses_the_verdict():
-    """With configuration and ladder unchanged, reversing the synthetic physical response must reverse the direction verdict."""
+    """The same acceptance criterion RelocateCoarseXY has, for the same reason.
+
+    Same skill, same config, same ladder — only the rig's actual response to a
+    retract step is reversed. If the verdict does not follow, the check is not
+    measuring the direction, and "approaching" carries no information. On
+    an earlier version it did not follow: both settings returned approaching
+    because both Z readings were taken while the loop was still travelling."""
     verdicts = {}
     for mode in ("receding", "approaching"):
         skill = _mk(retract_total_steps=11, retract_motor_dir="z+")
@@ -348,6 +368,83 @@ def test_registered_via_discover():
     assert r.has("RetractForSampleChange")
     meta = r.get("RetractForSampleChange")().metadata()
     assert meta.safety_level == SafetyLevel.CONFIRM
+
+
+# ── Motor group (the Group argument was a literal 0) ────────────
+
+def _motor_groups(tmp_path, monkeypatch, body):
+    from mast.instruments import motor_groups as mg
+
+    p = tmp_path / mg.CONFIG_FILENAME
+    if body is not None:
+        p.write_text(body, encoding="utf-8")
+    monkeypatch.setattr(mg, "config_path", lambda: p)
+    mg.reset_for_tests()
+    return mg
+
+
+def test_retract_uses_group_0_without_a_motor_group_file(tmp_path, monkeypatch):
+    _motor_groups(tmp_path, monkeypatch, None)
+    ctx = FakeCtx(mode="receding")
+    assert _mk(retract_total_steps=11).execute(ctx, {}).success
+    moves = [c for c in ctx.calls if c[0] == "Motor_StartMove"]
+    assert moves and {m[1][2] for m in moves} == {0}
+
+
+def test_retract_uses_the_configured_stm_group(tmp_path, monkeypatch):
+    _motor_groups(tmp_path, monkeypatch, '{"stm_coarse_group": 3}')
+    ctx = FakeCtx(mode="receding")
+    assert _mk(retract_total_steps=11).execute(ctx, {}).success
+    moves = [c for c in ctx.calls if c[0] == "Motor_StartMove"]
+    assert moves and {m[1][2] for m in moves} == {3}
+
+
+def test_retract_refuses_on_an_unreadable_motor_group_file(tmp_path, monkeypatch):
+    _motor_groups(tmp_path, monkeypatch, '{"stm_coarse_group": 9}')
+    ctx = FakeCtx(mode="receding")
+    res = _mk(retract_total_steps=11).execute(ctx, {})
+    assert not res.success
+    assert not [c for c in ctx.calls if c[0] == "Motor_StartMove"]
+
+
+def test_a_latched_drive_does_not_stop_the_retract(tmp_path, monkeypatch):
+    """Contract §10.3: away from the sample always passes — the latch is
+    logged and reported, not a refusal; the per-rung Z check still judges. "Away"
+    is the declared retract direction (declared here)."""
+    mg = _motor_groups(tmp_path, monkeypatch, None)
+    mg.latch_drive_not_restored(expected=(300.0, 50.0), last_read=None, reason="test")
+    try:
+        ctx = FakeCtx(mode="receding")
+        res = _mk(retract_total_steps=11, retract_motor_dir="z+").execute(ctx, {})
+        assert res.success, res.error
+        latch = res.data["drive_latch"]           # reason + expected + current drive
+        assert "没能还原" in latch["message"] and latch["reason"] == "test"
+        assert (latch["expected_freq_hz"], latch["expected_amp_v"]) == (300.0, 50.0)
+        assert "drive_now" in latch
+        assert [c for c in ctx.calls if c[0] == "Motor_StartMove"]
+    finally:
+        mg.reset_for_tests()
+
+
+def test_a_latched_drive_stops_the_retract_on_an_undeclared_rig(tmp_path, monkeypatch):
+    """Under the latch, a rig that never declared its coarse retract
+    direction gets no "away" exemption — the factory z+ is the approach on a rig
+    whose retract is Z−. Refused before any coarse step, saying how to declare."""
+    mg = _motor_groups(tmp_path, monkeypatch, None)
+    mg.latch_drive_not_restored(expected=(300.0, 50.0), last_read=None, reason="test")
+    try:
+        ctx = FakeCtx(mode="receding")
+        res = _mk(retract_total_steps=11).execute(ctx, {})      # retract_motor_dir unset
+        assert not res.success
+        assert "没声明粗动退针方向" in res.error and "设置 → 退针 → 退针方向" in res.error
+        assert not [c for c in ctx.calls if c[0] == "Motor_StartMove"]
+        # declared z- ⇒ the ladder steps Z- (5) under the latch
+        ctx = FakeCtx(mode="receding")
+        res = _mk(retract_total_steps=11, retract_motor_dir="z-").execute(ctx, {})
+        moves = [c for c in ctx.calls if c[0] == "Motor_StartMove"]
+        assert moves and {m[1][0] for m in moves} == {5}
+    finally:
+        mg.reset_for_tests()
 
 
 if __name__ == "__main__":

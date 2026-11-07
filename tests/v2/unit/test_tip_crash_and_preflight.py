@@ -292,9 +292,24 @@ def test_tipshape_error_gets_actionable_hint():
 
 
 def test_tipshape_refuses_hardcoded_3v_when_bias_unreadable():
-    """当前偏压不可读且调用方未提供替代值时应拒绝执行，不能静默使用固定默认偏压。
-    测试固定这一拒绝路径，防止为了省略参数而引入未知工作点的硬件写入。"""
+    """读不到当前偏压且调用方没给 `bias_v` ⇒ 拒绝执行，**不许**退回写死的 3 V。
+
+    这条钉的是**被否掉的那个方案**:`bias_lift_v` 的 3.0 V
+    默认值无条件施加、不出现在回包里、安全门放行 —— 而 qPlus 音叉在 3 V 下起振，
+    于是每一次扎针都会毁针。修法是「读不到就拒绝」。
+
+    没有这条测试，将来任何人为了让调用方少传一个参数而把默认值加回去，
+    测试仍然全绿 —— 那正是这类问题的成因。
+    """
+    from mast.core import tip_state
     from mast.skills.builtins.tip_shaper import TipShape
-    r = TipShape().execute(_ProbeCtx(), {})
+    # 前提是「没有登记针尖」：登记了钨针，方案表会正当地给出 4.0 V，测不到「读不到就
+    # 拒绝」这条路。holder 是进程级的，同一进程里先跑的测试可能留下针尖。
+    prev = tip_state.get_current_tip()
+    tip_state.set_current_tip(None)
+    try:
+        r = TipShape().execute(_ProbeCtx(), {})
+    finally:
+        tip_state.set_current_tip(prev)
     assert not r.success
     assert "3 V" in r.error

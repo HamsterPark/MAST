@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -44,8 +45,8 @@ _PURPOSE_RADIUS = {
 # 配置与仪器量程需要核对。仪器端读不到时必须保留 unknown，
 # 不能把缺少读数当成配置已通过验证，否则选点器可能提出不可到达的目标。
 PIEZO_SRC_CONFIG = "config"
-PIEZO_SRC_INSTRUMENT_TIGHTER = "instrument(比配置小,已收紧)"
-PIEZO_SRC_INSTRUMENT_LOOSER = "instrument(配置更保守,沿用配置)"
+PIEZO_SRC_INSTRUMENT_TIGHTER = tr("instrument(比配置小,已收紧)", "instrument (smaller than configured, tightened)")
+PIEZO_SRC_INSTRUMENT_LOOSER = tr("instrument(配置更保守,沿用配置)", "instrument (configuration is more conservative, configuration kept)")
 
 
 def parse_spots(raw: str) -> list[tuple[float, float]]:
@@ -76,42 +77,45 @@ class FindCleanSpot(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "离针尖最近、而且**没有**被破坏过的那个落点，供下一次脉冲或扎针用。"
+                tr("离针尖最近、而且**没有**被破坏过的那个落点，供下一次脉冲或扎针用。"
                 "它读的是已记录的地图 marker，**外加**本进程自己的撞针记忆 —— "
                 "绝不从一张图上猜。没有实验记录可查时返回 map_known=false，"
                 "那句话的意思是「不知道」，不是「干净」；crash_memory_unlocated>0 "
                 "表示**确实**知道发生过一次撞针、但那个位置谁也读不出来，"
-                "于是它躲不开，返回的落点带着这份风险。"
+                "于是它躲不开，返回的落点带着这份风险。",
+                "The nearest site to the tip that has **not** been damaged, for the next pulse or poke. It reads the recorded map markers **plus** this process's own tip-crash memory - never guesses from an image. When there is no experiment record to consult it returns map_known=false, which means 'unknown', not 'clean'; crash_memory_unlocated>0 means a tip crash is **known** to have happened but nobody can read its position, so it cannot be avoided, and the returned site carries that risk.")
             ),
             parameters=[
                 ParameterSpec(
                     name="purpose", type="str",
-                    description="这个落点拿来做什么：'pulse'（偏压脉冲，"
+                    description=tr("这个落点拿来做什么：'pulse'（偏压脉冲，"
                                 "污染半径更大）或 'tip_shape'"
                                 "（扎针，半径小一些）。",
+                                "What this site is for: 'pulse' (bias pulse, larger contamination radius) or 'tip_shape' (poke, smaller radius)."),
                     required=False, default="pulse",
                     allowed_values=["pulse", "tip_shape"]),
                 ParameterSpec(
                     name="exclude_spots", type="str",
-                    description="**这一轮**已经用掉的落点，'x1,y1;x2,y2'，"
+                    description=tr("**这一轮**已经用掉的落点，'x1,y1;x2,y2'，"
                                 "单位米。刚刚写下的 marker 可能还没落到库里，"
                                 "所以这份清单由调用方自己拿着。",
+                                "Sites already used **in this round**, 'x1,y1;x2,y2', in metres. A marker just written may not have reached the database yet, so the caller holds this list itself."),
                     required=False, default=""),
                 ParameterSpec(
                     name="from_x_m", type="float", unit="m",
-                    description="搜索的起点。不给就取针尖的实时位置。",
+                    description=tr("搜索的起点。不给就取针尖的实时位置。", "Starting point of the search. If not given, the live tip position is used."),
                     required=False, min_value=-1.5e-6, max_value=1.5e-6),
                 ParameterSpec(
                     name="from_y_m", type="float", unit="m",
-                    description="搜索的起点。不给就取针尖的实时位置。",
+                    description=tr("搜索的起点。不给就取针尖的实时位置。", "Starting point of the search. If not given, the live tip position is used."),
                     required=False, min_value=-1.5e-6, max_value=1.5e-6),
                 ParameterSpec(
                     name="max_distance_m", type="float", unit="m",
-                    description="离起点比这个还远的落点一律忽略。",
+                    description=tr("离起点比这个还远的落点一律忽略。", "Sites farther than this from the starting point are ignored."),
                     required=False, min_value=1e-9, max_value=3e-6),
                 ParameterSpec(
                     name="count", type="int",
-                    description="返回几个候选（由近到远排）。",
+                    description=tr("返回几个候选（由近到远排）。", "How many candidates to return (nearest first)."),
                     required=False, default=8, min_value=1, max_value=64),
             ],
             estimated_duration_s=1.0,
@@ -252,17 +256,19 @@ class FindCleanSpot(BaseSkill):
                     key=lambda t: t[1])[:3]
                 if near:
                     bits = [
-                        f"{c.kind} 在 ({c.x_m * 1e9:.0f}, {c.y_m * 1e9:.0f}) nm"
+                        tr(f"{c.kind} 在 ({c.x_m * 1e9:.0f}, {c.y_m * 1e9:.0f}) nm"
                         f"(盘半径 {c.radius_m * 1e9:.0f} nm,距区心 {d * 1e9:.0f} nm,"
-                        f"要 {(c.radius_m + spot_r) * 1e9:.0f} nm 才让得开)"
+                        f"要 {(c.radius_m + spot_r) * 1e9:.0f} nm 才让得开)",
+                        f"{c.kind} at ({c.x_m * 1e9:.0f}, {c.y_m * 1e9:.0f}) nm (disc radius {c.radius_m * 1e9:.0f} nm, {d * 1e9:.0f} nm from the zone centre, needs {(c.radius_m + spot_r) * 1e9:.0f} nm to clear)")
                         for c, d in near]
-                    blockers = ";挡路的:" + "、".join(bits)
+                    blockers = tr(";挡路的:", "; blocking:") + "、".join(bits)
                 elif r_eff < spot_r:
-                    blockers = (f";⚠️ 可用区半程 {r_eff * 1e9:.0f} nm **比落点净空 "
+                    blockers = (tr(f";⚠️ 可用区半程 {r_eff * 1e9:.0f} nm **比落点净空 "
                                 f"{spot_r * 1e9:.0f} nm 还小** —— 这个区放不下一个点,"
-                                f"粗动换区解决不了")
+                                f"粗动换区解决不了",
+                                f"; WARNING: the usable zone half-range {r_eff * 1e9:.0f} nm is **smaller than the site clearance {spot_r * 1e9:.0f} nm** - this zone cannot fit a single site, and moving to another zone by coarse motion will not fix it"))
                 else:
-                    blockers = ";地图和撞针记忆里都没有挡路的东西 —— 看几何/配置"
+                    blockers = tr(";地图和撞针记忆里都没有挡路的东西 —— 看几何/配置", "; nothing in the map or the tip-crash memory is blocking - look at the geometry / configuration")
             except Exception:  # noqa: BLE001 — 报错的修饰不许把报错本身弄坏
                 pass
 
@@ -270,10 +276,11 @@ class FindCleanSpot(BaseSkill):
                 skill_name="FindCleanSpot", success=False,
                 error=(f"No undamaged spot within reach for '{purpose}' "
                        f"(avoidance radius {spot_r * 1e9:.0f} nm)"
-                       + (f",连从可用区中心重搜也没有"
+                       + (tr(f",连从可用区中心重搜也没有"
                           f"(针尖当时在 ({recentred_from[0] * 1e9:.0f}, "
                           f"{recentred_from[1] * 1e9:.0f}) nm,已在可用区 "
-                          f"±{cfg.effective_half_range_m * 1e9:.0f} nm 之外)"
+                          f"±{cfg.effective_half_range_m * 1e9:.0f} nm 之外)",
+                          f", and re-searching from the zone centre found none either (the tip was at ({recentred_from[0] * 1e9:.0f}, {recentred_from[1] * 1e9:.0f}) nm, outside the usable zone ±{cfg.effective_half_range_m * 1e9:.0f} nm)")
                           if recentred_from else "")
                        + blockers
                        + ". This patch of surface is spent — relocate with "
@@ -282,19 +289,20 @@ class FindCleanSpot(BaseSkill):
                 nanonis_calls=calls)
 
         first = spots[0]
-        note = (f"距当前位置 {first.distance_m * 1e9:.0f} nm"
+        note = (tr(f"距当前位置 {first.distance_m * 1e9:.0f} nm", f"{first.distance_m * 1e9:.0f} nm from the current position")
                 if origin_src == "live_tip" else
-                f"距给定原点 {first.distance_m * 1e9:.0f} nm")
+                tr(f"距给定原点 {first.distance_m * 1e9:.0f} nm", f"{first.distance_m * 1e9:.0f} nm from the given origin"))
         if not map_known:
             # 读不到地图**不是**「干净」。区别在于:此刻还有没有别人知道。
-            note += ("；**读不到实验记录**" + (
-                f",但本进程记着的 {len(crash_mem)} 个撞针点已经避开"
+            note += (tr("；**读不到实验记录**", "; **experiment records unreadable**") + (
+                tr(f",但本进程记着的 {len(crash_mem)} 个撞针点已经避开", f", but the {len(crash_mem)} tip-crash points remembered by this process were avoided")
                 if crash_mem else
-                ",本进程也没有撞针记忆 —— **无法确认此处是否干净**"))
+                tr(",本进程也没有撞针记忆 —— **无法确认此处是否干净**", ", and this process has no tip-crash memory either - **cannot confirm this site is clean**")))
         if crash_unlocated:
             # 记到了、坐标不知道 ⇒ 画不出圈 ⇒ 返回的这个点有可能就在上面。
-            note += (f"；⚠️ 另有 {crash_unlocated} 次撞针**读不到坐标**,"
-                     f"避让圈画不出来,这个落点无法保证不在其上")
+            note += (tr(f"；⚠️ 另有 {crash_unlocated} 次撞针**读不到坐标**,"
+                     f"避让圈画不出来,这个落点无法保证不在其上",
+                     f"; WARNING: another {crash_unlocated} tip crashes **have no readable coordinates**, so the avoidance circle cannot be drawn and this site cannot be guaranteed to be clear of them"))
         return SkillResult(
             skill_name="FindCleanSpot", success=True,
             data={
@@ -312,7 +320,7 @@ class FindCleanSpot(BaseSkill):
                 "reason": note,
             },
             nanonis_calls=calls,
-            summary=f"下一个落点 ({first.x_m * 1e9:.1f}, {first.y_m * 1e9:.1f}) nm — {note}")
+            summary=tr(f"下一个落点 ({first.x_m * 1e9:.1f}, {first.y_m * 1e9:.1f}) nm — {note}", f"Next site ({first.x_m * 1e9:.1f}, {first.y_m * 1e9:.1f}) nm - {note}"))
 
 
 def make_tool(context_provider):

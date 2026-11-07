@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS env_spectra (
 CREATE INDEX IF NOT EXISTS idx_spectra_chan_ts ON env_spectra(channel, ts);
 """
 
-#: 2 = ``env_spectra.ctx_stable``（新增需求：噪声谱需要记录当时的
+#: 2 = ``env_spectra.ctx_stable``（噪声谱需要记录当时的
 #:     状态）。**必须配 ALTER**：``CREATE TABLE IF NOT EXISTS`` 对已存在的表
 #:     一个字都不改，而这个类的写方法全部吞异常 —— 真机上老库会变成
 #:     「INSERT 报没有这一列 → 吞掉 → 谱记录悄悄停了」，而页面上看起来只是

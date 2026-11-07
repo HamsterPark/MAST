@@ -23,6 +23,7 @@ passthrough is integrated later at integration.
 from __future__ import annotations
 
 import logging
+from mast.i18n import tr
 
 from fastapi import APIRouter, Query, Request
 
@@ -68,9 +69,8 @@ _ACTION_DATA_MAX_CHARS = 4000
 def _action_payload(action) -> dict:
     """Surface what the skill returned: `data`, `artifact_path`, call count.
 
-    These were empty for the whole 2026-07-27 session () and are
-    populated now — but this route flattened them away, so the fix was invisible
-    to the operator, who is the person the record exists for.
+    These must be populated, and this route must not flatten them away, or
+    the operator never sees them.
 
     Never raises: a malformed payload must degrade to an empty dict, not take
     the whole timeline down with it.
@@ -102,7 +102,7 @@ def _action_payload(action) -> dict:
                 out["data"] = safe if isinstance(safe, dict) else {}
             else:
                 out["data"] = {
-                    "_summary": f"{len(raw)} 个字段，约 {size} 字符（超出内联上限）",
+                    "_summary": tr(f"{len(raw)} 个字段，约 {size} 字符（超出内联上限）", f"{len(raw)} fields, about {size} characters (over the inline limit)"),
                     "_keys": sorted(str(k) for k in raw)[:40],
                 }
                 out["data_truncated"] = True
@@ -625,7 +625,7 @@ def post_feedback(body: FeedbackRequest, request: Request) -> FeedbackResult:
     # floating feedback widget sends no experiment_id, which left every row
     # orphaned (experiment_id=None) and invisible in the per-experiment Records
     # drill-down (it filters by experiment_id) even while an experiment was
-    # running (2026-07-06 feedback: saved feedback couldn't be found anywhere).
+    # running (saved feedback was otherwise not findable).
     exp_id = body.experiment_id
     sample_id = body.sample_id
     conv_id = body.conversation_id
@@ -638,8 +638,8 @@ def post_feedback(body: FeedbackRequest, request: Request) -> FeedbackResult:
                 exp_id = exp_id or getattr(log, "current_experiment_id", None)
                 # Same reasoning as experiment_id above, and the same evidence:
                 # the floating widget sends no sample_id either, so EVERY row was
-                # unscoped — 2026-07-27 forensics found sample_id empty on 36 of
-                # 36 feedback rows. A comment about a bad scan that cannot be
+                # unscoped, so sample_id would be empty on every feedback row.
+                # A comment about a bad scan that cannot be
                 # traced to the sample it was about is much less useful later.
                 sample_id = sample_id or getattr(log, "current_sample_id", None)
         except Exception:
@@ -682,7 +682,7 @@ def list_feedback(request: Request, limit: int = 200) -> FeedbackList:
     """Global operator-feedback list (newest first) across ALL experiments —
     INCLUDING rows with no experiment_id. The per-experiment drill-down
     (get_experiment_detail) filters by experiment_id and so never surfaced the
-    floating-widget feedback (which is unscoped — 2026-07-06: 31 saved rows were
+    floating-widget feedback (which is unscoped, so saved rows were
     invisible in the UI). This is the single place the UI can list everything.
     Degrades to empty with no storage wired."""
     ctx = request.app.state.ctx
@@ -704,7 +704,7 @@ def list_feedback(request: Request, limit: int = 200) -> FeedbackList:
                 # The page the operator was on when they filed it. The frontend
                 # sends it and the DB stores it, but this listing dropped it on
                 # the floor — so the one endpoint that shows ALL feedback was the
-                # one that could not say where any of it came from . The
+                # one that could not say where any of it came from. The
                 # per-experiment route already passes it through.
                 meta=f.get("meta") or {},
                 timestamp=f.get("timestamp"),

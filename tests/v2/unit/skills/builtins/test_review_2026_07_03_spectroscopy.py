@@ -84,6 +84,132 @@ def test_configure_sts_sets_advprops_hold_and_reset():
     assert adv[0][0] == 1 and adv[0][1] == 1
 
 
+# ── num_sweeps: 保持操作员的值，别写死成 1────────────────────
+# PropsSet 的第 2 个实参是「扫掠数」。BiasSpectr_PropsGet.Variables =
+# [Save all, Number of sweeps, Backward sweep, Number of points, …]。
+def _props_get_with_sweeps(n):
+    return {"BiasSpectr_PropsGet": {"return_value": ("", b"", [1, n, 1, 100])}}
+
+
+def test_configure_sts_preserves_operator_sweeps_when_not_given():
+    # 操作员在 GUI 里设了 4 次平均；没显式传 num_sweeps ⇒ 必须原样保持 4，
+    # 不能像以前那样打回 1。
+    ctx = FakeCtx(canned=_props_get_with_sweeps(4))
+    res = ConfigureSTS().execute(ctx, {"start_v": -1.0, "end_v": 1.0,
+                                       "num_points": 100})
+    props = [args for m, args in ctx.calls if m == "BiasSpectr_PropsSet"]
+    assert props, "ConfigureSTS must set props"
+    assert props[0][1] == 4, "sweep count must be PRESERVED, not forced to 1"
+    assert res.data["num_sweeps"] == 4
+    assert res.data["num_sweeps_source"] == "preserved"
+
+
+def test_configure_sts_num_sweeps_override():
+    # 显式传 ⇒ 用它；此时不需要去读当前值。
+    ctx = FakeCtx(canned=_props_get_with_sweeps(4))
+    res = ConfigureSTS().execute(ctx, {"start_v": -1.0, "end_v": 1.0,
+                                       "num_points": 100, "num_sweeps": 8})
+    props = [args for m, args in ctx.calls if m == "BiasSpectr_PropsSet"]
+    assert props[0][1] == 8
+    assert res.data["num_sweeps_source"] == "override"
+    assert not any(m == "BiasSpectr_PropsGet" for m, _ in ctx.calls)
+
+
+def test_configure_sts_sweeps_fallback_when_unreadable():
+    # 读不到当前扫掠数 ⇒ 退回 1，并如实说「没确认保持住」。
+    ctx = FakeCtx()  # BiasSpectr_PropsGet 回 None
+    res = ConfigureSTS().execute(ctx, {"start_v": -1.0, "end_v": 1.0,
+                                       "num_points": 100})
+    props = [args for m, args in ctx.calls if m == "BiasSpectr_PropsSet"]
+    assert props[0][1] == 1
+    assert res.data["num_sweeps_source"] == "fallback_unreadable"
+
+
+# ── 测谱前把偏压/setpoint 从成像值分步 ramp 到测谱值、测谱后恢复 ────────
+# BiasSpectr.Start 的可解析 Variables（2 通道 × 3 点），让这条谱「成功」。
+_STS_VARS = [16, 2, ["Bias (V)", "Current (A)"], 2, 3,
+             [0.0, 0.5, 1.0, 1e-9, 2e-9, 3e-9], 0, []]
+
+
+def _ramp_ctx(v0=0.5, i0=1e-9, start_v=-0.5):
+    # 成像偏压 v0 / setpoint i0；ConfigureSTS 配的起始偏压 start_v。
+    return FakeCtx(canned={
+        "Bias_Get": {"return_value": ("", b"", [v0])},
+        "ZCtrl_SetpntGet": {"return_value": ("", b"", [i0])},
+        "BiasSpectr_LimitsGet": {"return_value": ("", b"", [start_v, 0.5])},
+        "BiasSpectr_Start": {"return_value": ("", b"", _STS_VARS)},
+    })
+
+
+def test_acquire_sts_no_ramp_by_default():
+    # 默认不碰偏压/setpoint（回归：现有行为完全不变）。
+    ctx = _ramp_ctx()
+    res = AcquireSTS().execute(ctx, {})
+    assert res.success
+    assert not any(m in ("Bias_Get", "Bias_Set", "ZCtrl_SetpntSet")
+                   for m, _ in ctx.calls)
+    assert res.data["working_point_ramped"] is False
+
+
+def test_acquire_sts_ramp_before_steps_bias_to_sweep_start():
+    # ramp_before + slew ⇒ 偏压分步（不是一步）走到 ConfigureSTS 的起始偏压。
+    ctx = _ramp_ctx(v0=0.5, start_v=-0.5)
+    res = AcquireSTS().execute(ctx, {"ramp_before": True,
+                                     "ramp_slew_rate_v_per_s": 2.0})
+    assert res.success
+    sets = [a[0] for m, a in ctx.calls if m == "Bias_Set"]
+    assert len(sets) >= 2, "应分步，不是一步到位"
+    assert abs(sets[-1] - (-0.5)) < 1e-9, "最后一步应到测谱起始偏压"
+    assert res.data["working_point_ramped"] is True
+    assert abs(res.data["imaging_bias_v"] - 0.5) < 1e-9, "应快照到成像偏压供还原"
+
+
+def test_acquire_sts_ramp_before_refuses_when_bias_unreadable():
+    # 读不到当前偏压 ⇒ 拒绝 ramp、拒绝起扫（不从臆断的 0 V 起步）。
+    ctx = _ramp_ctx()
+    ctx.canned["Bias_Get"] = {"return_value": None}
+    res = AcquireSTS().execute(ctx, {"ramp_before": True,
+                                     "ramp_slew_rate_v_per_s": 2.0})
+    assert not res.success
+    assert not any(m == "BiasSpectr_Start" for m, _ in ctx.calls), \
+        "ramp 失败绝不该起扫"
+
+
+def test_acquire_sts_slew_none_is_instant():
+    # 不给 slew ⇒ 与 SetBias 默认一致：瞬时一步到位。
+    ctx = _ramp_ctx(v0=0.5, start_v=-0.5)
+    res = AcquireSTS().execute(ctx, {"ramp_before": True})
+    assert res.success
+    sets = [a[0] for m, a in ctx.calls if m == "Bias_Set"]
+    assert sets == [-0.5], "无 slew 应一步到位"
+
+
+def test_acquire_sts_ramps_setpoint_when_given_and_restores_both():
+    # 给了 spectro_setpoint_a ⇒ setpoint 一起 ramp；restore_after ⇒ 偏压+setpoint
+    # 都还原到成像快照值。
+    ctx = _ramp_ctx(v0=0.5, i0=1e-9, start_v=-0.5)
+    res = AcquireSTS().execute(ctx, {"ramp_before": True, "restore_after": True,
+                                     "spectro_setpoint_a": 5e-10,
+                                     "ramp_slew_rate_v_per_s": 2.0})
+    assert res.success
+    setp = [a[0] for m, a in ctx.calls if m == "ZCtrl_SetpntSet"]
+    assert setp, "给了 spectro_setpoint_a 就该动 setpoint"
+    assert abs(setp[-1] - 1e-9) < 1e-18, "最后应恢复到成像 setpoint"
+    biassets = [a[0] for m, a in ctx.calls if m == "Bias_Set"]
+    assert abs(biassets[-1] - 0.5) < 1e-9, "偏压最后应恢复到成像值"
+    assert res.data["working_point_restored"] is True
+
+
+def test_acquire_sts_leaves_setpoint_alone_when_not_given():
+    # 没给 spectro_setpoint_a ⇒ 全程不碰 setpoint（连 restore 也不碰）。
+    ctx = _ramp_ctx(v0=0.5, start_v=-0.5)
+    res = AcquireSTS().execute(ctx, {"ramp_before": True, "restore_after": True,
+                                     "ramp_slew_rate_v_per_s": 2.0})
+    assert res.success
+    assert not any(m == "ZCtrl_SetpntSet" for m, _ in ctx.calls), \
+        "没给 setpoint 就不该动它"
+
+
 # ── sweep feedback + reset ───────────────────────────────────────────────────
 def test_acquire_bias_sweep_holds_feedback_and_resets():
     ctx = FakeCtx()

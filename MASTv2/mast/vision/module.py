@@ -389,6 +389,57 @@ def _safe_override_active() -> bool:
 # Singleton
 # ─────────────────────────────────────────────────────────────────────
 
+class VisionDisabledError(RuntimeError):
+    """Raised when a learned-model entry point is used while vision models are
+    disabled (``legacy_features_enabled`` off). Deliberately an error rather than
+    a MockBackend fallback: the mock backend answers "bad", which would surface
+    as a tip-quality verdict that no model produced."""
+
+
+_GATE_LOCK = threading.Lock()
+_GATE_CACHE: bool | None = None
+
+
+def vision_models_enabled() -> bool:
+    """Whether learned vision models may be loaded in this process.
+
+    Evaluated once per process (service start) and then latched, so every load
+    point sees the same answer; changing ``legacy_features_enabled`` needs a
+    restart. Resolution: ``MAST_VISION_MODELS=1|0`` overrides; an explicit
+    ``MAST_VISION_BACKEND=mock`` is allowed (it loads no model); otherwise the
+    ``legacy_features_enabled`` setting decides (default off). Classical,
+    network-free functions in ``mast.vision`` do not depend on this gate.
+    """
+    global _GATE_CACHE
+    with _GATE_LOCK:
+        if _GATE_CACHE is None:
+            env = os.environ.get("MAST_VISION_MODELS", "").strip()
+            if env in ("0", "1"):
+                _GATE_CACHE = env == "1"
+            elif os.environ.get("MAST_VISION_BACKEND", "").strip().lower() == "mock":
+                _GATE_CACHE = True
+            else:
+                from mast.webui.settings_store import legacy_features_enabled
+                _GATE_CACHE = legacy_features_enabled()
+        return _GATE_CACHE
+
+
+def reset_vision_gate() -> None:
+    """Forget the latched gate answer (tests)."""
+    global _GATE_CACHE
+    with _GATE_LOCK:
+        _GATE_CACHE = None
+
+
+def require_vision_models() -> None:
+    """Raise :class:`VisionDisabledError` unless learned models are enabled."""
+    if not vision_models_enabled():
+        raise VisionDisabledError(
+            "vision models are disabled (enable 'legacy_features_enabled' in "
+            "settings and restart the service)"
+        )
+
+
 class VisionModule:
     """GPU-resident vision singleton. Loaded once per process, thread-safe.
 
@@ -514,7 +565,10 @@ class VisionModule:
 
     @classmethod
     def get(cls, **kw) -> "VisionModule":
-        """Get-or-create the singleton. Thread-safe."""
+        """Get-or-create the singleton. Thread-safe.
+
+        Raises :class:`VisionDisabledError` while vision models are disabled."""
+        require_vision_models()
         with cls._instance_lock:
             if cls._instance is None:
                 cls._instance = cls(**kw)

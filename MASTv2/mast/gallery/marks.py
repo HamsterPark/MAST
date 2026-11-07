@@ -33,13 +33,14 @@ from pathlib import Path
 
 from mast.gallery import paths as _paths
 from mast.gallery.inventory import dir_key, dir_label
+from mast.i18n import tr as _tr_lang
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_TAGS = ["原子分辨佳", "超结构", "空位/缺陷", "台阶/边界", "偏压系列", "针尖变化",
                 "dI/dV", "作图候选", "漂移"]
-RATING = {2: "★ 重点", 1: "✓ 可用", -1: "✗ 排除", 0: ""}
-KIND = {"f": "帧", "s": "谱", "g": "网格", "mix": "混合"}
+RATING = {2: _tr_lang("★ 重点", "★ Key"), 1: _tr_lang("✓ 可用", "✓ Usable"), -1: _tr_lang("✗ 排除", "✗ Excluded"), 0: ""}
+KIND = {"f": _tr_lang("帧", "frame"), "s": _tr_lang("谱", "spectrum"), "g": _tr_lang("网格", "grid"), "mix": _tr_lang("混合", "mixed")}
 BACKUP_EVERY_S = 1800
 
 _LOCK = threading.RLock()
@@ -71,7 +72,7 @@ def load_marks(lay: _paths.Layout | None = None) -> dict:
     except FileNotFoundError:
         doc = {}
     if not isinstance(doc, dict):
-        raise ValueError(f"{lay.marks} 不是一个 JSON 对象 —— 拒绝当成空标记（否则下一次存盘会覆盖它）")
+        raise ValueError(_tr_lang(f"{lay.marks} 不是一个 JSON 对象 —— 拒绝当成空标记（否则下一次存盘会覆盖它）", f"{lay.marks} is not a JSON object - refusing to treat it as empty marks (the next save would overwrite it)"))
     for key, default in (("version", 1), ("rev", 0), ("updated", ""), ("tags", list(DEFAULT_TAGS)),
                          ("items", {}), ("series", {}), ("days", {}), ("tomb", {}), ("stomb", {})):
         doc.setdefault(key, default)
@@ -216,10 +217,12 @@ def meta_of(it: dict) -> str:
         return "%s · %g nm · %+.2f V · %.0f pA" % (fmt_t(it.get("t")), it.get("w") or 0,
                                                   it.get("b") or 0, it.get("sp") or 0)
     if k == "s":
-        return "%s · %d 点 %.2f…%.2f V · (%.2f, %.2f) nm" % (
+        return _tr_lang("%s · %d 点 %.2f…%.2f V · (%.2f, %.2f) nm",
+                        "%s · %d points %.2f…%.2f V · (%.2f, %.2f) nm") % (
             fmt_t(it.get("t")), it.get("n") or 0, it.get("v0") or 0, it.get("v1") or 0,
             it.get("x") or 0, it.get("y") or 0)
-    return "%s · 网格 %s×%s · %g nm" % (fmt_t(it.get("t")), it.get("gx"), it.get("gy"), it.get("w") or 0)
+    return _tr_lang("%s · 网格 %s×%s · %g nm", "%s · grid %s×%s · %g nm") % (
+        fmt_t(it.get("t")), it.get("gx"), it.get("gy"), it.get("w") or 0)
 
 
 def short(fn: str) -> str:
@@ -255,18 +258,19 @@ def _series_sorted(doc: dict, by: dict):
 def _anchor_text(a: dict | None) -> str:
     if not a:
         return ""
-    return "%s（%s）" % (short(a.get("fn", "")), a.get("desc", ""))
+    return _tr_lang("%s（%s）", "%s (%s)") % (short(a.get("fn", "")), a.get("desc", ""))
 
 
 def render_md(doc: dict, by: dict, roots: dict) -> str:
     rs = _rows(doc)
     mem = _series_of(doc)
     n = {r: sum(1 for _d, _k, m in rs if m.get("r") == r) for r in (2, 1, -1)}
-    L = ["# 数据标记清单", "",
-         "更新于 %s · 单条 %d（★ 重点 %d · ✓ 可用 %d · ✗ 排除 %d）· 系列 %d。由数据图库自动生成，别手改。"
+    L = [_tr_lang("# 数据标记清单", "# Data marks list"), "",
+         _tr_lang("更新于 %s · 单条 %d（★ 重点 %d · ✓ 可用 %d · ✗ 排除 %d）· 系列 %d。由数据图库自动生成，别手改。",
+                  "Updated %s · %d single items (★ key %d · ✓ usable %d · ✗ excluded %d) · %d series. Generated automatically by the data gallery; do not edit by hand.")
          % (doc.get("updated") or "", len(rs), n[2], n[1], n[-1], len(doc.get("series") or {})), ""]
     if doc.get("series"):
-        L += ["## 系列", ""]
+        L += [_tr_lang("## 系列", "## Series"), ""]
         for sid, s in _series_sorted(doc, by):
             ids = s.get("ids", [])
             its = sorted((by[k] for k in ids if k in by), key=lambda it: it.get("t") or 0)
@@ -274,19 +278,20 @@ def render_md(doc: dict, by: dict, roots: dict) -> str:
             tr = ("%s → %s" % (fmt_t(its[0].get("t")), fmt_t(its[-1].get("mt") or its[-1].get("t")))
                   if its else "")
             L.append("### %s %s" % (RATING.get(s.get("r", 0), "") or "·", s.get("name") or sid))
-            L.append("- %d 个%s · %s · %s · 系列号 `%s`" % (len(ids), KIND.get(s.get("k"), ""), rng, tr, sid))
+            L.append(_tr_lang("- %d 个%s · %s · %s · 系列号 `%s`", "- %d %s · %s · %s · series id `%s`") % (len(ids), KIND.get(s.get("k"), ""), rng, tr, sid))
             if s.get("tags"):
-                L.append("- 标签：" + " ".join("`%s`" % t for t in s["tags"]))
+                L.append(_tr_lang("- 标签：", "- Tags: ") + " ".join("`%s`" % t for t in s["tags"]))
             if s.get("anchor"):
-                L.append("- 位置系于 " + _anchor_text(s["anchor"]))
+                L.append(_tr_lang("- 位置系于 ", "- Anchored at ") + _anchor_text(s["anchor"]))
             if (s.get("note") or "").strip():
-                L.append("- 备注：" + s["note"].strip().replace("\n", "\n  "))
-            L.append("- 成员：")
+                L.append(_tr_lang("- 备注：", "- Note: ") + s["note"].strip().replace("\n", "\n  "))
+            L.append(_tr_lang("- 成员：", "- Members:"))
             for it in its:
-                L.append("  - %s　%s　`%s`" % (it["fn"], meta_of(it), full_path(it["id"], by, roots) or it["id"]))
+                L.append(_tr_lang("  - %s　%s　`%s`", "  - %s  %s  `%s`")
+                         % (it["fn"], meta_of(it), full_path(it["id"], by, roots) or it["id"]))
             for k in ids:
                 if k not in by:
-                    L.append("  - `%s`（图库里没有）" % (full_path(k, by, roots) or k))
+                    L.append(_tr_lang("  - `%s`（图库里没有）", "  - `%s` (not in the gallery)") % (full_path(k, by, roots) or k))
             L.append("")
     days = doc.get("days") or {}
     dirs = sorted({d for d, _k, _m in rs}
@@ -294,24 +299,24 @@ def render_md(doc: dict, by: dict, roots: dict) -> str:
     for d in dirs:
         dv = days.get(d) or {}
         label = dir_label(d)
-        head = label if label == d else f"{label}　`{d}`"
-        L.append("## %s%s" % (head, "　（已过完）" if dv.get("done") else ""))
+        head = label if label == d else _tr_lang(f"{label}　`{d}`", f"{label}  `{d}`")
+        L.append("## %s%s" % (head, _tr_lang("　（已过完）", "  (finished)") if dv.get("done") else ""))
         if (dv.get("note") or "").strip():
             L += ["", "> " + dv["note"].strip().replace("\n", "\n> ")]
         L.append("")
         for dd, k, m in rs:
             if dd != d:
                 continue
-            extra = "".join("　▤ %s" % nm for nm in mem.get(k, []))
+            extra = "".join(_tr_lang("　▤ %s", "  ▤ %s") % nm for nm in mem.get(k, []))
             if m.get("anchor"):
-                extra += "　⌖ 位置系于 " + _anchor_text(m["anchor"])
+                extra += _tr_lang("　⌖ 位置系于 ", "  ⌖ anchored at ") + _anchor_text(m["anchor"])
             tags = " ".join("`%s`" % t for t in m.get("tags", []))
-            L.append("- **%s** %s　%s　%s%s" % (RATING.get(m.get("r", 0), "") or "·", k.split("/")[-1],
-                                             m.get("meta", ""), tags, extra))
+            L.append(_tr_lang("- **%s** %s　%s　%s%s", "- **%s** %s  %s  %s%s")
+                     % (RATING.get(m.get("r", 0), "") or "·", k.split("/")[-1], m.get("meta", ""), tags, extra))
             if (m.get("note") or "").strip():
                 L.append("  - " + m["note"].strip().replace("\n", "\n    "))
             fp = full_path(k, by, roots)
-            L.append("  - `%s`" % fp if fp else "  - `%s`（图库里没有）" % k)
+            L.append("  - `%s`" % fp if fp else _tr_lang("  - `%s`（图库里没有）", "  - `%s` (not in the gallery)") % k)
         L.append("")
     return "\n".join(L)
 
@@ -321,24 +326,26 @@ def render_csv(doc: dict, by: dict, roots: dict) -> tuple[bytes, bytes]:
     mem = _series_of(doc)
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["目录", "文件", "评级", "标签", "备注", "系列", "位置系于", "参数", "标记时间", "路径"])
+    w.writerow(_tr_lang(["目录", "文件", "评级", "标签", "备注", "系列", "位置系于", "参数", "标记时间", "路径"],
+                         ["Directory", "File", "Rating", "Tags", "Note", "Series", "Anchored at", "Parameters", "Marked at", "Path"]))
     for d, k, m in _rows(doc):
         w.writerow([d, k.split("/")[-1], RATING.get(m.get("r", 0), ""), ";".join(m.get("tags", [])),
                     m.get("note", ""), ";".join(mem.get(k, [])),
-                    ("%s（%s）" % ((m.get("anchor") or {}).get("fn", ""), (m.get("anchor") or {}).get("desc", "")))
+                    (_tr_lang("%s（%s）", "%s (%s)") % ((m.get("anchor") or {}).get("fn", ""), (m.get("anchor") or {}).get("desc", "")))
                     if m.get("anchor") else "",
                     m.get("meta", ""), m.get("t", ""), full_path(k, by, roots) or k])
     items_csv = buf.getvalue().encode("utf-8-sig")
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["系列", "评级", "标签", "备注", "类型", "成员数", "首", "末", "位置系于", "系列号", "成员路径"])
+    w.writerow(_tr_lang(["系列", "评级", "标签", "备注", "类型", "成员数", "首", "末", "位置系于", "系列号", "成员路径"],
+                         ["Series", "Rating", "Tags", "Note", "Kind", "Members", "First", "Last", "Anchored at", "Series id", "Member paths"]))
     for sid, s in _series_sorted(doc, by):
         its = sorted((by[k] for k in s.get("ids", []) if k in by), key=lambda it: it.get("t") or 0)
         a = s.get("anchor") or {}
         w.writerow([s.get("name", ""), RATING.get(s.get("r", 0), ""), ";".join(s.get("tags", [])),
                     s.get("note", ""), KIND.get(s.get("k"), ""), len(s.get("ids", [])),
                     its[0]["fn"] if its else "", its[-1]["fn"] if its else "",
-                    ("%s（%s）" % (a.get("fn", ""), a.get("desc", ""))) if a else "", sid,
+                    (_tr_lang("%s（%s）", "%s (%s)") % (a.get("fn", ""), a.get("desc", ""))) if a else "", sid,
                     ";".join(full_path(k, by, roots) or k for k in s.get("ids", []))])
     return items_csv, buf.getvalue().encode("utf-8-sig")
 
@@ -368,7 +375,7 @@ def import_marks(doc_in: dict, key_prefix: str = "", lay: _paths.Layout | None =
     目录：本地没有时写入；标签：并集。``key_prefix`` 作用于单条键、系列成员与系定帧 id。
     在当前索引里找不到的键**照样导入**，只计数。"""
     if not isinstance(doc_in, dict):
-        raise ValueError("导入的不是一个 marks.json 对象")
+        raise ValueError(_tr_lang("导入的不是一个 marks.json 对象", "The imported data is not a marks.json object"))
     lay = lay or _paths.layout()
     pre = _prefix(key_prefix)
     with _LOCK:
@@ -448,4 +455,4 @@ def export_file(fmt: str, lay: _paths.Layout | None = None) -> tuple[bytes, str,
         if fmt == "csv":
             return items_csv, "text/csv; charset=utf-8", "marks.csv"
         return series_csv, "text/csv; charset=utf-8", "marks_series.csv"
-    raise ValueError(f"不认识的导出格式：{fmt}")
+    raise ValueError(_tr_lang(f"不认识的导出格式：{fmt}", f"Unknown export format: {fmt}"))

@@ -1,4 +1,4 @@
-// 目录总览（旧版兼容格式 app.js 的 renderDays）：每个目录一张卡片 + 「最新一批」。
+// Directory overview: one card per directory plus a "latest batch" card.
 
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
@@ -11,6 +11,7 @@ import type { GalleryModel } from "./useGalleryData";
 import { useMarksStore } from "./marksStore";
 import { Chip } from "./bits";
 import { H1, Sub } from "./ListHeads";
+import { tr } from "@/lib/i18n";
 
 const N = "font-mono text-xs leading-[1.45] text-mast-muted";
 
@@ -25,15 +26,17 @@ export function DirsView({ model }: { model: GalleryModel }) {
   );
   const nser = useMemo(() => seriesCountByDir(series, model.byId), [series, model]);
   const nNew = useMemo(() => newBatch(model.items, model.lastBatch).length, [model]);
-  const rootText = model.roots.map((r) => `${r.name}（${r.path}）`).join("、") || "—";
+  const rootText = model.roots.map((r) => `${r.name} (${r.path})`).join(tr("、", ", ")) || "—";
 
   return (
     <div>
-      <H1>数据图库</H1>
+      <H1>{tr("数据图库", "Data gallery")}</H1>
       <Sub>
-        {rootText}：{model.counts.f} 帧（其中 {model.counts.dup} 张是同一次扫描的重复保存，默认隐藏）·{" "}
-        {model.counts.s} 条谱 · {model.counts.g} 个网格谱（缩略图更新于 {model.generated || "—"}）。
-        进某个目录逐张看、打标记、圈系列；标记写进 marks.json / marks.md / marks.csv。
+        {rootText}{tr("：", ": ")}
+        {tr(
+          `${model.counts.f} 帧（其中 ${model.counts.dup} 张是同一次扫描的重复保存，默认隐藏）· ${model.counts.s} 条谱 · ${model.counts.g} 个网格谱（缩略图更新于 ${model.generated || "—"}）。进某个目录逐张看、打标记、圈系列；标记写进 marks.json / marks.md / marks.csv。`,
+          `${model.counts.f} frames (${model.counts.dup} of them are duplicate saves of the same scan, hidden by default) · ${model.counts.s} spectra · ${model.counts.g} grid spectra (thumbnails updated ${model.generated || "—"}). Open a directory to browse frame by frame, mark items and group series; marks are written to marks.json / marks.md / marks.csv.`,
+        )}
       </Sub>
       <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))" }}>
         {nNew > 0 && (
@@ -41,9 +44,9 @@ export function DirsView({ model }: { model: GalleryModel }) {
             to={{ search: `?${viewSearch({ v: "new" })}` }}
             className="block rounded-[3px] border border-mast-border bg-mast-panel px-3 py-[9px] text-mast-text hover:border-mast-accent hover:no-underline"
           >
-            <b className="text-[1.02rem]">最新一批 · {nNew} 个文件</b>
-            <div className={N}>加入于 {model.lastBatch}</div>
-            <div className={N}>跨目录集中看这次新到的数据</div>
+            <b className="text-[1.02rem]">{tr(`最新一批 · ${nNew} 个文件`, `Latest batch · ${nNew} files`)}</b>
+            <div className={N}>{tr("加入于", "Added")} {model.lastBatch}</div>
+            <div className={N}>{tr("跨目录集中看这次新到的数据", "Review the newly arrived data across directories")}</div>
           </Link>
         )}
         {dirs.map((s) => {
@@ -59,26 +62,30 @@ export function DirsView({ model }: { model: GalleryModel }) {
               )}
             >
               <b className="text-[1.02rem]">{dirLabel(s.d)}</b>{" "}
-              {s.nw > 0 && <Chip kind="new">+{s.nw} 新</Chip>}
+              {s.nw > 0 && <Chip kind="new">{tr(`+${s.nw} 新`, `+${s.nw} new`)}</Chip>}
               {s.prefixes.slice(0, 3).map((p) => (
                 <Chip key={p} kind="copies">
                   {p}
                 </Chip>
               ))}
               <div className={N}>
-                {s.f} 帧{s.dup ? `（重复 ${s.dup}）` : ""} · 原子分辨 {s.atom} · 超结构 {s.half}
-                {s.s ? ` · 谱 ${s.s}` : ""}
-                {s.g ? ` · 网格 ${s.g}` : ""}
+                {tr(`${s.f} 帧`, `${s.f} frames`)}
+                {s.dup ? tr(`（重复 ${s.dup}）`, ` (${s.dup} duplicates)`) : ""} · {tr("原子分辨", "atomic res.")} {s.atom} ·{" "}
+                {tr("超结构", "superstructure")} {s.half}
+                {s.s ? tr(` · 谱 ${s.s}`, ` · spectra ${s.s}`) : ""}
+                {s.g ? tr(` · 网格 ${s.g}`, ` · grids ${s.g}`) : ""}
               </div>
               <div className={N}>
-                {s.t1 ? `${fmtT(s.t0)} → ${fmtT(s.t1)}` : "没有时刻"}
+                {s.t1 ? `${fmtT(s.t0)} → ${fmtT(s.t1)}` : tr("没有时刻", "No timestamps")}
               </div>
-              {s.biases.length > 0 && <div className={N}>偏压 {shortList(s.biases, fmtBShort)} V</div>}
-              {s.widths.length > 0 && <div className={N}>帧宽 {shortList(s.widths, (w) => String(+w.toFixed(1)))} nm</div>}
+              {s.biases.length > 0 && <div className={N}>{tr("偏压", "Bias")} {shortList(s.biases, fmtBShort)} V</div>}
+              {s.widths.length > 0 && <div className={N}>{tr("帧宽", "Frame width")} {shortList(s.widths, (w) => String(+w.toFixed(1)))} nm</div>}
               <div className={N}>
-                {s.mk ? `已标记 ${s.mk}${s.star ? ` · ★ ${s.star}` : ""}` : "未标记"}
-                {nser[s.d] ? ` · 系列 ${nser[s.d]}` : ""}
-                {dv?.done && <b className="text-mast-auto"> · 已过完</b>}
+                {s.mk
+                  ? tr(`已标记 ${s.mk}${s.star ? ` · ★ ${s.star}` : ""}`, `Marked ${s.mk}${s.star ? ` · ★ ${s.star}` : ""}`)
+                  : tr("未标记", "Unmarked")}
+                {nser[s.d] ? tr(` · 系列 ${nser[s.d]}`, ` · series ${nser[s.d]}`) : ""}
+                {dv?.done && <b className="text-mast-auto"> · {tr("已过完", "Reviewed")}</b>}
               </div>
             </Link>
           );

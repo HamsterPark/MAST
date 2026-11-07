@@ -6,8 +6,8 @@ stack per compass §4.6. The build() signature mirrors instrument_control:
     build(buf, *, model=None, checkpointer=None, registry=None) -> CompiledStateGraph
 
 `model` defaults to make_chat_model("experiment_design") →
-AGENT_MODEL["experiment_design"], which per operator request (2026-07-18) is
-Kimi K3, NOT a Claude model. Override per call
+AGENT_MODEL["experiment_design"], which is Kimi K3 (not a Claude model).
+Override per call
 with model_id= if you want Anthropic. Pass a GenericFakeChatModel in tests.
 
 `registry` defaults to auto-discovered from `mast.skills.builtins` (XD reads
@@ -85,8 +85,8 @@ def build(
                          None disables buffer tools (useful in offline tests).
         model:           A chat model instance OR a fake chat model for tests.
                          Default: make_chat_model("experiment_design") →
-                         AGENT_MODEL["experiment_design"] (Kimi K3 per
-                         operator request; not a Claude model).
+                         AGENT_MODEL["experiment_design"] (Kimi K3; not a
+                         Claude model).
         checkpointer:    LangGraph checkpointer (SqliteSaver / InMemorySaver).
         registry:        SkillRegistry pre-populated with skills. Default is
                          auto-discovered from mast.skills.builtins + composite.
@@ -121,7 +121,7 @@ def build(
         # the only thing crossing a handoff is one free-text sentence.
         UpstreamArtifactMiddleware("experiment_design"),
         # ExperimentPrefsMiddleware — inject the operator's default-parameter
-        # preferences (设置 → 实验默认参数, #147) so the plan starts from the
+        # preferences (设置 → 实验默认参数) so the plan starts from the
         # scan size / speed / setpoint / bias the operator actually prefers. A
         # no-op when nothing is set; live-read (no rebuild on a settings change).
         ExperimentPrefsMiddleware(),

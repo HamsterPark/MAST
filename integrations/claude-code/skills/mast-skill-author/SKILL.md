@@ -6,17 +6,14 @@ when_to_use: "Use when MAST has no single skill for what you need, when the same
 
 # Authoring MAST skills
 
-Extend MAST by reusing its skill contracts, execution checks and composition tools.
-Choose the first option below that expresses the required behavior. Source-only authoring and
-tests need no instrument session; MCP draft/save calls require a configured MAST service.
+Work down this ladder and stop at the first rung that does the job.
 
 ## 1. An official skill already does it
 
 Search by action first: `mast_find_skills` with the verb or Nanonis command ("withdraw",
 "z controller", "bias spectroscopy"), then read the card with `mast_skill_card`. Official
-skills expose their parameters, safety metadata and hardware footprint through this contract;
-check the feature's documented verification status. A thin rename is not a new capability,
-and MAST rejects it.
+skills are field-tested and carry the right safety metadata. A thin rename of one is not a new
+skill, and MAST rejects it.
 
 ## 2. A composite skill (the normal case)
 
@@ -34,8 +31,7 @@ skills and inherits their safety levels, so it cannot open anything its steps ca
    name.
 
 Worth building when: the same steps repeat within a task, a plan step has no single skill, or a
-sequence needs an explicit cleanup path. A `try/finally` path can attempt cleanup;
-abort state, communication failures and physical conditions can still prevent an action from completing.
+sequence needs a guaranteed cleanup ("whatever happens, withdraw at the end").
 
 ## 3. A Python skill proposal (last resort)
 

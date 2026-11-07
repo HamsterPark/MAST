@@ -1,17 +1,135 @@
-"""辅助通道：Z、qPlus 振幅、频率偏移与 lock-in 的低速只读采样。
+"""辅助通道：Z 位置 与 qPlus 振幅（外加只记不判的频率偏移）。
 
-采样通过 Signals_ValsGet 在电流泵的空闲预算内完成，复用监控 worker，
-不重配示波器、不另起常驻线程。角色锁与急停通道保持独立。
-采样间隔是节流上限；实际节奏由可用机会决定，必须从时间戳统计。
-锁等待不超过调用方预算，读数失败应降级，maybe_sample 不向外抛错。
+设计文档：``docs/v2/design/monitoring_aux_channels.md``
 
-共振子的振幅弛豫时间为 Q/(π f0)，信息带宽约 f0/(2Q)；采样率应结合
-目标仪器的读数与实际时间间隔解释。Z 高频噪声由独立 burst 通道处理。
+需求是「Z 通道监控」与「qPlus 振幅通道监控」。这个模块给的是**低速旁路**：
+每 ``cm_aux_interval_s``（出厂 0.2 s = 5 Hz）一次 ``Signals_ValsGet``，一次调用取回
+全部三路，**一个字节都不写示波器**。
 
-Z 的量程与方向均来自目标仪器配置或读回。振幅只在确认进针、持续归零、
-未处于动作屏蔽期且确认激励有效时参与告警；未驱动解调器的噪声底
-不能当作自由振荡基线。缺失状态必须保留为未知。Δf 与 lock-in 只记录
-不判级，原始值、统计量、判据与降级原因分别保存。公开快照不含现场数据。
+为什么不是「照抄电流那一路做三遍」
+--------------------------------
+
+**qPlus 振幅根本变不快。** ``OC D1 Amplitude (m)`` 是 Oscillation Control 模块
+解调出来的振幅包络。高 Q 共振子的振幅不可能比自身的能量弛豫更快地改变::
+
+    τ = Q / (π f₀)          振幅 1/e 弛豫时间
+    BW ≈ f₀ / (2 Q)         振幅的信息带宽
+
+f₀ = 32.8 kHz 的音叉：Q=1e3 → 16 Hz；Q=1e4 → 1.6 Hz；Q=3e4 → 0.55 Hz。
+用 2 kHz 采它，采到的几乎全是解调器自己的噪声 —— 上限在这里，而 5 Hz 离它还很远。
+
+**Z 的漂移与台阶是分钟/秒尺度。** Z 的**噪声谱**确实要 kHz —— 但那条路已经存在：
+``mast/envhistory/zburst.py``，Osci2T 双通道 burst，30 min 一次。本模块不重复它。
+
+**而走示波器会削弱电流那一路。** Osci1T 是单通道模块，三路轮换会把电流的墙钟覆盖
+从 76.8% 砍到 ~25%，每次换道还要整屏丢弃；更要命的是**会废掉
+``pump.channel_is_ours()`` 这道保护** —— 它存在的全部意义就是分辨「示波器被别人改走了」，
+而我们自己不停换道之后它就再也分不出来了。那道保护挡的是「Bias 被当成隧道电流存下来、
+三段之后 halt 掉正在跑的复合技能」。
+
+采样点在哪：泵的空闲里搭车
+-------------------------------------------
+
+仍然寄生在 ``CurrentMonitorService`` 的 worker 线程上，但**机会**从段边界搬到了
+泵等待缓冲刷新的那段空闲里（``pump.pump_segments(on_idle=…)`` → ``service._pump_idle``）。
+
+**为什么必须搬**：段边界一秒只来 0.75 次（段预算 1.024 s 采集 + 0.31 s 特征提取
+≈ 1.33 s）。也就是说**把 ``cm_aux_interval_s`` 调小根本变不出
+更高的采样率** —— 那个设置是节流的**上限**，不是驱动采样的**时钟**，调到比段周期
+还短只等于「每段都采」。要提速，必须先有更多的采样机会。
+泵每次刷新窗口（20 kHz / 1024 点 → 51 ms）睡一觉，机会因此约 20 Hz，5 Hz 是设得到的。
+
+搬家之后，让 1 Hz 当初站得住的两条性质**一条都没变**：
+
+* **零新增常驻线程。** 「孤儿后台线程撞正在拆的 Nanonis 端口」是已知的危险
+  （``ExperimentalMonitor`` 没挂 reconnect）。监控服务的 worker 已经有完整的
+  start/stop/reconnect 生命周期，而我们仍然在它上面。
+* **与监控主环、急停看门狗零争锁。** 与泵**同线程** —— 一条线程不会阻塞在自己
+  持有的锁上，「aux 和电流泵抢 data role」在物理上不成立。看门狗跑在
+  ``role="monitor"``（0.5 s 一次 ``Current_Get``），E-STOP 走 ``role="emergency"``；
+  锁按 role 分，我们从头到尾只碰 ``data``。三者互不相干，有测试钉住。
+
+变的是一条，如实记下来：``segment_id`` 现在指**上一段已落库的**段落，不再是紧接着
+要落库的那一段。方向反了，用途没变 —— 每个 aux 样本仍然贴着它旁边的那段电流，
+「电流变噪的那一刻 Z 在做什么」照样问得出来（这正是把这两路放在
+**这个面板**上的原因）。
+
+代价（口径说准，因为这是对电流那一路唯一的实际影响）：一次
+``Signals_ValsGet(..., wait=0)`` = TCP 往返（毫秒量级）**加上**最多一个 Tap
+（协议规定：wait=0 时函数在被调用后 0 到 Tap 秒返回；实机 Tap 通常 20 ms）。
+这段时间是从泵**本来就要睡掉**的那一觉里扣的，而那一觉对齐的是**绝对时刻**
+（``pump`` 循环尾部的 ``target``），所以只要读数落在 budget 里，泵的相位一个采样点
+都不差；超了也只是立刻去轮询，重复帧那条路径下一拍就把相位拉回来。
+
+落盘的代价则是线性的：出厂 168 h × 5 Hz ≈ 302 万行 ≈ 1.0 GB（每行数百字节）。
+见 ``store.sweep_aux``。
+
+三条硬约束（每一条都对应一个具体的失败）
+--------------------------------------
+
+1. ``lock_timeout_s`` 最多 0.25 s，**且不超过调用方给的 budget**。角色锁被占
+   （扫描在抓帧）就**立刻放弃这一次采样**。默认的 30 s 锁等待会把一次采样变成
+   半分钟的采集停摆；而在搭车的几十毫秒里，0.25 s 足够让泵错过五次缓冲刷新 ——
+   所以 ``on_idle(budget_s)`` 那个参数是承重的，不是装饰。
+2. 段边界那条调用路径必须在段落**已经落库之后**才调本模块（见 ``service._on_segment``）。
+3. ``maybe_sample()`` 永不抛。
+
+判据
+----
+
+全部是 WARN，**默认关**（``cm_aux_alerts_enabled`` 出厂 0）。阈值一个都不与电流复用 ——
+电流按安培标定，Z 与振幅是米，Δf 是赫兹。Δf **只记录不判级**，与 envhistory
+「Z 谱只记录不判级」同一条纪律。
+
+振幅那条判据的设计依据
+--------------------------------------------------------------
+
+若把 ``OC D1 Amplitude`` 当成「被驱动的健康振幅」，**全程**判「跌到基线的 10%」，
+就会出错：STM 模式下传感器通常**没有被驱动**（``amp_ctrl_on=False``、
+``excitation_on=0``、``excitation_v=0 V``），那几 pm 是未驱动解调器
+的本底噪声，不是被驱动的健康振幅。所以判据是：该信号在 STM 模式下只是噪声，
+扎针或电脉冲会让它大起振；它唯一的用处是——针尖不导电时 approach 扎进去还没有
+电流信号时该振幅会归零，可借此判断已接触样品，这是没有 qPlus 的针尖上拿不到的信息。
+
+于是这条判据的四个要素全换掉：
+
+============ =========================== ==================================
+ 　           曾经的判据                 现在
+============ =========================== ==================================
+何时判        全程                        **只在进针期间**
+判什么        振幅 < 健康基线的 10%        **振幅归零**
+基线是什么    「健康的被驱动振幅」          **未接触本底**（用来知道「不为零」长什么样）
+它值多少      「针尖状态变差」             **电流判据瞎掉时唯一的撞针证据**
+============ =========================== ==================================
+
+支撑这个形状的三组观察：
+
+1. **隧穿不阻尼它** —— 未接触与隧穿中的振幅、相对SD 几乎相同。
+   隧道结那 ~1 nm 没有机械接触，所以只有**真扎进去**才阻尼得掉。这让它成为一个干净的
+   二值指示：≈8 pm = 没撞，→0 = 撞上了。
+2. **起振取决于脉冲宽度（带宽），不取决于电压，也不取决于对针尖有没有影响** ——
+   四发实测（用地图 pulse 标记的时间戳锚定）::
+
+       脉冲          对针尖的影响               +0~+30s 的 SD/均值
+       +2V/100µs     无（电流与 Z 都没动）        大   ← 起振
+       +4V/1ms       无                          大   ← 起振
+       +4V/10ms      电流有峰值，针尖没变       小   ← 不起振
+       +6V/10ms      电流贴轨，Z 大幅阶跃   小   ← 不起振
+       脉冲前基线                                 小
+
+   **真正改变了针尖的那一发完全没有起振。** 短脉冲是宽带冲激，在音叉
+   共振处有能量；10 ms 的慢台阶带宽 ~100 Hz，共振处几乎没有能量。
+   ⚠️ **证据只有两个脉宽，<100 µs 未测。** 别读成「脉冲会让振幅起振」——
+   那是过度泛化（这几行本身就是在纠正先前写下的那一句）。
+
+   而且**那不是「振铃」，是一个采样点**：只有紧随脉冲的那一个采样点偏高，其前后各点
+   都在正常范围，之后全部正常。1 Hz 采样下最多只有一个被污染的点。
+3. 本底可写回 ``instrument_profile.qplus_amplitude_baseline``。
+
+同时**删掉了 ``amp_unstable``**（振幅相对起伏 > 5%）。它靠的是同一个错前提（存在一个
+被调节的振幅，它的纹波有意义）；而**安静的未接触本底相对SD 就远超**
+出厂阈值 5% —— 打开告警即 100% 误报，而它报的东西在 STM 模式下没有意义。
+``amp_rel_sd`` 仍然**记录**（它正是上面第 2 条被量出来的方式），只是不再判级。
 """
 from __future__ import annotations
 
@@ -21,6 +139,8 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Optional, Sequence
+
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -166,19 +286,30 @@ class AuxChannelSpec:
 
 CHANNEL_SPECS: tuple[AuxChannelSpec, ...] = (
     AuxChannelSpec(
-        kind="z", label_zh="Z 位置", unit="m", judged=True,
+        kind="z", label_zh=tr("Z 位置", "Z position"), unit="m", judged=True,
         hints=("z (m)", "z(m)", "z position", "z_pos"),
     ),
     AuxChannelSpec(
-        kind="amplitude", label_zh="qPlus 振幅", unit="m", judged=True,
+        kind="amplitude", label_zh=tr("qPlus 振幅", "qPlus amplitude"), unit="m", judged=True,
         hints=_AMP_HINTS, co_hints=_OSC_HINTS,
         override_key="qplus_amplitude_signal_index",
     ),
     AuxChannelSpec(
-        kind="df", label_zh="频率偏移", unit="Hz", judged=False,
+        kind="df", label_zh=tr("频率偏移", "Frequency shift"), unit="Hz", judged=False,
         hints=("freq. shift", "freq shift", "frequency shift"),
     ),
-
+    # lock-in 通道。
+    #
+    # ``judged=False``，而且这一条**不是**「暂时没标定」那种保留意见 —— 它是这路
+    # 信号的性质决定的。有些配置里的 `LI Demod` 只有 X/Y，没有 R；用户填的
+    # 是 `LI Demod 1 X (A)`，一个**带符号的投影**。相位一转它就穿零，所以任何
+    # 「掉到某个比例以下 = 出事」的判据都会在相位漂移时报假警，而在真出事时
+    # （X 恰好过零）保持沉默。见 instrument_profile 的 ``lockin_readout_form``。
+    #
+    # 索引一律从 ``lockin_signal_index`` 取，**绝不写死 86**：那是这一台机器上的
+    # 值，写死到共用代码里就是把一台机器的配置伪装成物理常数。该键默认 None，
+    # 取不到就回落到名字匹配，再匹配不到就如实报 unavailable（本机没有 lock-in
+    # 是完全正常的配置）。
     AuxChannelSpec(
         kind="lockin", label_zh="dI/dV (lock-in)", unit="A", judged=False,
         hints=("li demod", "lockin", "lock-in", "demod"),
@@ -186,7 +317,7 @@ CHANNEL_SPECS: tuple[AuxChannelSpec, ...] = (
     ),
     # 偏压与辅助通道同次读取并共享时间戳及 segment_id，保留变化过程。偏压为用户设置量，仅记录，不用告警阈值评价实验选择。
     AuxChannelSpec(
-        kind="bias", label_zh="偏压", unit="V", judged=False,
+        kind="bias", label_zh=tr("偏压", "Bias"), unit="V", judged=False,
         hints=("bias (v)", "bias(v)", "bias"),
         override_key="bias_signal_index",
     ),
@@ -244,8 +375,7 @@ AUX_METRIC_COLUMNS: tuple[str, ...] = (
     # 线性趋势。后缀必须是 ``_a``：commission._fmt 先判 ``_a``（→ pA），
     # 一个 ``lockin_drift_a_per_s`` 会落进「没人认领」的分支按裸数字回显。
     "lockin_a", "lockin_mean_a", "lockin_span_a",
-    # 调制**开没开**。需求是：辅助通道 didv 应该以某种方式标出 lockin
-    # 开没开 —— 而这不是个显示问题，是**这条曲线是什么**的问题：调制关着的时候
+    # 调制**开没开**。这不是个显示问题，是**这条曲线是什么**的问题：调制关着的时候
     # 解调器输出的是噪声与串扰底，不是 dI/dV。同一条曲线、同一个量纲、同一个数量级，
     # 而两种读法之间隔着「这是测量」和「这不是测量」。
     #
@@ -445,7 +575,7 @@ def z_window_features(ts, vals, *, jump_k: float = 8.0,
       也就是把想抓的正例整个漏掉；实测发现（probe E）。
     * 正常 —— 统计阈值，``z_step_robust=1``。
 
-    ── 余量：一个双侧量 + 两个**有向**量（2026-08-10） ──────────────────────
+    ── 余量：一个双侧量 + 两个**有向**量 ──────────────────────
 
     ``limits`` 必须是 :func:`mast.core.envelope_reconcile.resolve_z_travel` 解析出来
     的行程区间，**不是** ``ZCtrl_LimitsGet`` 的原始回包。软限值在
@@ -789,7 +919,37 @@ class _ApproachGate:
             self._last_approach = now
 
         blank_s = max(0.0, float(getattr(th, "cm_amp_blank_s", 0.0)))
-
+        # **起振不再触发屏蔽**（实测逼出来的）。理由两条：
+        #
+        # 1. **它挡不住任何误报。** 起振是**向上**的，而 `amp_zero` 要的是**向下**
+        #    且连续 5 s —— 一个高尖峰在结构上不可能造成假撞针。而 5 s 的持续要求
+        #    本身已经免疫掉任何短于四五拍的瞬态，不论高低。
+        # 2. **它却卖掉了唯一的应用场景。** 粗动马达一步就把这条通道打到 75-212×
+        #    本底，而进针本来就是一路踢过去的（auto approach: 压电伸出找电流 →
+        #    退回 → 粗动走几步 → 再伸出）。踢一次屏蔽 30 s，步频远高于此 ⇒
+        #    **撞针发生之前那一路全程被屏蔽**。代价按「接触后还踢不踢得动」分两支：
+        #    若接触后踢不动（接触让 Q 掉几个量级）⇒ 撞针后起振停止，屏蔽在 30 s 后
+        #    自行解除 ⇒ **告警晚 30 s**；若该假设只是近似成立、仍踢得动
+        #    ⇒ **恒不触发**。轻的那一支也不可接受：这条判据的用处是让人**尽快**停下。
+        #
+        # `amp_ring_age_s` **仍然照记**：它是「用户在面板上手动打了脉冲」唯一
+        # 会留下的痕迹，只是不再当闸门用。
+        #
+        # ⚠️ **看到这里想把它加回来的人，先读完这一段。**
+        # 「删掉了一道屏蔽」听起来永远像是削弱了防护，所以这里把安全性说全：
+        #
+        #   **免疫机制不是屏蔽，是 `_AMP_ZERO_HOLD_S` 那个连续 5 s 的要求本身。**
+        #   要触发假撞针，需要连续四五拍**全部**低于本底的 30%；起振是**向上**的，
+        #   它非但不制造这种样本，反而会打断连续段。屏蔽在这里防的是一件
+        #   **结构上不可能发生**的事。
+        #
+        # 换句话说：**这道屏蔽被删掉之后，防护并没有变薄** —— 它本来就是叠在一个
+        # 已经足够的机制上的一层空转，而那层空转的代价是把判据在它唯一的应用场合
+        # 关掉。要加回来，得先说明「连续 5 s 全低」是怎么被一个向上的尖峰造出来的。
+        #
+        # ⚠️ 唯一会让这个结论翻盘的观测：一次大过载之后出现**持续数秒的下冲**。
+        # 多次实测里都没有（大过载之后的下一拍都已回到正常带）。
+        # 真看到了，那时该改的是这里，而且要连同 `_AMP_ZERO_HOLD_S` 一起重新想。
         blanked = bool(self._last_disturb is not None
                        and now - self._last_disturb < blank_s)
 
@@ -864,7 +1024,40 @@ def evaluate_aux(metrics: dict, ctx: dict, th) -> tuple[list[str], dict]:
         if ret is not None and ext is not None:
             detail["z_rail_side"] = "retract" if ret <= ext else "extend"
 
-
+    # ── 振幅：**只在进针期间**判「归零」，而且只判这一件事 ──────────────
+    #
+    # 五个条件全部要满足，缺一不可（每一条都对应一个具体的失败）：
+    #
+    #   amp_zero   振幅连续 5 s 待在本底的 30% 以下 —— 判持续状态,不判一次抖动
+    #   gate_open  60 s 内出现过进针证据          —— 不在进针时这个量没有意义
+    #   not blanked 没有刚被扎/被脉冲             —— 一发脉冲能让它散布成倍上涨
+    #   not amp_off 窗口里读到过非零振幅          —— 否则分不出「通道关着」
+    #   excited    音叉确实在被驱动               —— 没被驱动时这个通道没有判据能力
+    #
+    # 少掉「只在进针期间」这一条的后果不是理论上的：扎针尖与打电脉冲是修针流程里
+    # 最常做的两件事，全程判会让每一次修针都喷一串告警。
+    #
+    # ── 「激励开」这一条 ──────────────────────────
+    #
+    # 本机 STM 模式下音叉**根本没被驱动**（``excitation_on=0``、``excitation_v=0 V``），
+    # 那几 pm 是未驱动解调器的**噪声底**。拿它跟自由振荡基线比永远比出「塌了」——
+    # 激励关着时出现的 crash advisory 全部是误报，**零真阳性**。
+    # 技能侧 ``CheckTipCrashByAmplitude`` 曾加过同一条前置，口径逐条一致。
+    #
+    # ⚠️ 现在两边**不再一致**：技能侧改成了同态比较（基线记着取于激励开还是关，
+    # 激励关时用残余基线照常判「归零」—— 那批误报的根子是拿未驱动读数比驱动基线，
+    # 见 ``skills/builtins/qplus_amplitude.py`` 的「Two baselines」），AutoApproach 也在
+    # 等待相里自己盯振幅。这里仍是「激励关就不判」：方向是保守的（只会少报），但
+    # 这条规则在本机唯一的进针模式（STM、激励关）下因此一直是哑的。
+    #
+    # **三态，而且「不知道」与「关着」一样不判**：``amp_excited`` 缺席 = 没问过或
+    # 读不到。不知道音叉有没有被驱动的时候，振幅这个数不代表任何东西 —— 拿一个
+    # 不代表任何东西的数去判撞针，比不判更坏。代价是「PLL 读不回来的机器上这条
+    # 判据不可用」，收益是它不再在一台 STM 模式的机器上永远误报：
+    # **后者是实测发生的，前者是假设的。**
+    #
+    # 这条前置**只挡这一条规则**。振幅的原始值、窗口统计量、``amp_zero`` 本身照记
+    # 不误 —— 判不了不等于不记录，那正是标定要用的语料。
     zero = _num(metrics.get("amp_zero"))
     gate = _num(metrics.get("amp_gate_open"))
     blanked = _num(metrics.get("amp_blanked"))
@@ -892,43 +1085,76 @@ def summarize_aux_zh(rule: str, metrics: dict, detail: dict | None = None) -> st
 
     if rule == "z_drift_high":
         v = g("z_drift_m_per_s")
-        return (f"Z 位置持续漂移({v * 1e12:.1f} pm/s,约 {v * 1e9 * 60:.2f} nm/min)"
-                "**且没有在衰减**——刚落针的热弛豫会自己衰减下去,这个不会。"
-                "检查温度稳定性、样品/针尖是否夹紧;长时间扫描会拉花。")
+        return tr(
+            f"Z 位置持续漂移({v * 1e12:.1f} pm/s,约 {v * 1e9 * 60:.2f} nm/min)"
+            "**且没有在衰减**——刚落针的热弛豫会自己衰减下去,这个不会。"
+            "检查温度稳定性、样品/针尖是否夹紧;长时间扫描会拉花。",
+            f"Z position is drifting steadily ({v * 1e12:.1f} pm/s, about "
+            f"{v * 1e9 * 60:.2f} nm/min) **and is not decaying**: thermal relaxation "
+            "after landing the tip decays on its own, this does not. "
+            "Check temperature stability and that the sample/tip are clamped; "
+            "long scans will be smeared.")
     if rule == "z_step":
         v = g("z_step_m")
         n = int(g("z_step_count"))
-        return (f"Z 出现突跳(最大 {v * 1e12:.0f} pm,窗口内 {n} 次)"
-                "——针尖状态突变、原子台阶或反馈回路被扰动。")
+        return tr(
+            f"Z 出现突跳(最大 {v * 1e12:.0f} pm,窗口内 {n} 次)"
+            "——针尖状态突变、原子台阶或反馈回路被扰动。",
+            f"Z jumped (max {v * 1e12:.0f} pm, {n} times in the window): "
+            "a tip change, an atomic step or a disturbed feedback loop.")
     if rule == "z_rail":
         # **方向不走 g()**：``g`` 取不到就给 0.0,那对一个「往哪边」的问题
         # 是个能读、看着正常、而且指向某一端的假答案。
         v = g("z_headroom_frac")
         side = d.get("z_rail_side") or metrics.get("z_rail_side")
-        head = f"Z 已逼近压电量程边缘(余量仅 {v * 100:.1f}%)"
+        head = tr(f"Z 已逼近压电量程边缘(余量仅 {v * 100:.1f}%)",
+                  f"Z is near the edge of the piezo range (only {v * 100:.1f}% headroom left)")
         if side == "retract":
-            return (f"{head},正压向**退针端**——样品在变近,"
-                    "继续下去反馈顶死。处置:粗动**退**(远离样品)。")
+            return tr(
+                f"{head},正压向**退针端**——样品在变近,"
+                "继续下去反馈顶死。处置:粗动**退**(远离样品)。",
+                f"{head}, pressed against the **retract end**: the sample is getting "
+                "closer and the feedback will saturate if this continues. "
+                "Action: coarse **retract** (away from the sample).")
         if side == "extend":
-            return (f"{head},正压向**进针端**——样品在变远,"
-                    "继续下去反馈顶死。处置:粗动**进**(趋向样品)。")
+            return tr(
+                f"{head},正压向**进针端**——样品在变远,"
+                "继续下去反馈顶死。处置:粗动**进**(趋向样品)。",
+                f"{head}, pressed against the **extend end**: the sample is getting "
+                "farther away and the feedback will saturate if this continues. "
+                "Action: coarse **approach** (toward the sample).")
         # 三态的第三态。**一条方向盲的告警比没有告警更坏**:它读起来像
         # 「快顶死了,粗动一下」,而两个方向的处置正好相反,猜错就是往样品里送。
         # 所以这里不给处置,只说清楚缺什么、去哪儿补(缺口就在感觉到它的地方说)。
-        return (f"{head}——继续漂下去反馈就顶死了。**但往哪一端未知**:"
-                "本机没有声明「压电伸长(趋向样品)对应 Z 读数符号」"
-                "(设置 → 退针 → `z_extend_sign`)。而「该退」与「该进」"
-                "的处置正好相反,**填上之前不要凭猜粗动**。")
+        return tr(
+            f"{head}——继续漂下去反馈就顶死了。**但往哪一端未知**:"
+            "本机没有声明「压电伸长(趋向样品)对应 Z 读数符号」"
+            "(设置 → 退针 → `z_extend_sign`)。而「该退」与「该进」"
+            "的处置正好相反,**填上之前不要凭猜粗动**。",
+            f"{head}: the feedback will saturate if the drift continues. **Which end is "
+            "unknown**: this machine has not declared which Z reading sign corresponds "
+            "to piezo extension (toward the sample) (Settings -> Retract -> "
+            "`z_extend_sign`). The actions for \"retract\" and \"approach\" are "
+            "opposite, so **do not guess a coarse move until it is filled in**.")
     if rule == "amp_zero_on_approach":
         frac = g("amp_frac_of_baseline")
         held = g("amp_zero_hold_s")
-        return (f"进针期间 qPlus 振幅归零(只有未接触本底的 {frac:.1%},已持续 "
-                f"{held:.0f} s,且已确认 PLL 激励开着)——**针尖很可能已经扎进表面**。"
-                "这条判据存在的理由就是它:针尖不导电时,扎进去也不会有电流信号,"
-                "电流类判据全瞎,只有振幅会掉下去。"
-                "立即停止进针并退针;退针后振幅应恢复,若不恢复那不是撞针而是"
-                "振荡回路本身的问题。")
-    return f"辅助通道规则 {rule} 触发。"
+        return tr(
+            f"进针期间 qPlus 振幅归零(只有未接触本底的 {frac:.1%},已持续 "
+            f"{held:.0f} s,且已确认 PLL 激励开着)——**针尖很可能已经扎进表面**。"
+            "这条判据存在的理由就是它:针尖不导电时,扎进去也不会有电流信号,"
+            "电流类判据全瞎,只有振幅会掉下去。"
+            "立即停止进针并退针;退针后振幅应恢复,若不恢复那不是撞针而是"
+            "振荡回路本身的问题。",
+            f"qPlus amplitude dropped to zero during approach (only {frac:.1%} of the "
+            f"non-contact baseline, for {held:.0f} s, and the PLL excitation is confirmed "
+            "on): **the tip has probably crashed into the surface**. This rule exists "
+            "for exactly this case: with a non-conducting tip there is no current "
+            "signal even after a crash, so every current-based rule is blind and only "
+            "the amplitude drops. Stop the approach and withdraw now; the amplitude "
+            "should recover after withdrawing, and if it does not, the problem is the "
+            "oscillator circuit itself rather than a crash.")
+    return tr(f"辅助通道规则 {rule} 触发。", f"Auxiliary channel rule {rule} fired.")
 
 
 class _WarnDebounce:
@@ -1031,7 +1257,7 @@ class AuxSampler:
         self._debounce = _WarnDebounce(thresholds_getter)
         #: 「在不在进针 / 刚才有没有人扰动过针尖」。振幅那条判据的全部闸门都在它里面。
         self._gate = _ApproachGate()
-        self.detail = "尚未探测"
+        self.detail = tr("尚未探测", "Not probed yet")
         self.stats = {"sampled": 0, "busy": 0, "bad_reply": 0, "probe_fail": 0}
         self._last: AuxSample | None = None
 
@@ -1040,7 +1266,7 @@ class AuxSampler:
     def _pool(self):
         pool = self._pool_getter()
         if pool is None:
-            raise _Skip("尚未连接 Nanonis")
+            raise _Skip(tr("尚未连接 Nanonis", "Nanonis not connected yet"))
         return pool
 
     @property
@@ -1079,7 +1305,7 @@ class AuxSampler:
             rec = pool.safe_call("ZCtrl_LimitsGet", role=DATA_ROLE,
                                  lock_timeout_s=lock_to, count_health=False)
         elif verb == "ZCtrl_LimitsEnabledGet":
-            # 没有它，上面那对数字**不知道算不算数** —— 手册原话是未启用时
+            # 没有它，上面那对数字**不知道算不算数** —— 手册写明未启用时
             # "has no effect"。以前不问，于是余量对着一对可能惰性的数字算。
             rec = pool.safe_call("ZCtrl_LimitsEnabledGet", role=DATA_ROLE,
                                  lock_timeout_s=lock_to, count_health=False)
@@ -1099,14 +1325,14 @@ class AuxSampler:
             rec = pool.safe_call("PLL_ExcitationGet", int(args[0]), role=DATA_ROLE,
                                  lock_timeout_s=lock_to, count_health=False)
         else:  # pragma: no cover — 防止有人加了动词却忘了分支
-            raise _Skip(f"未知动词 {verb}")
+            raise _Skip(tr(f"未知动词 {verb}", f"Unknown verb {verb}"))
         err = getattr(rec, "error", "") or ""
         if err:
             from mast.core.connection import is_lock_busy
             if is_lock_busy(rec):
                 raise _Busy(err)
             if "comms_circuit_open" in err:
-                raise _Skip("TCP 已熔断")
+                raise _Skip(tr("TCP 已熔断", "TCP circuit breaker open"))
             raise _Skip(f"{verb}: {err}")
         return rec
 
@@ -1121,7 +1347,7 @@ class AuxSampler:
                          for x in field_val]
                 break
         if not names:
-            raise _Skip("读不到信号名表")
+            raise _Skip(tr("读不到信号名表", "Cannot read the signal name table"))
 
         found: list[_Resolved] = []
         for spec in CHANNEL_SPECS:
@@ -1138,7 +1364,8 @@ class AuxSampler:
                 found.append(_Resolved(spec=spec, index=idx, name=nm))
         if not found:
             wanted = " / ".join(s.label_zh for s in CHANNEL_SPECS)
-            raise _Skip(f"{len(names)} 路信号里没有找到 {wanted}")
+            raise _Skip(tr(f"{len(names)} 路信号里没有找到 {wanted}",
+                         f"None of {wanted} found among {len(names)} signals"))
 
         self._channels = found
         self._series = {r.spec.kind: deque(maxlen=_MAX_WINDOW_POINTS) for r in found}
@@ -1332,7 +1559,8 @@ class AuxSampler:
                 # 不一样。重新探测一次（受 60 s 节流），而不是每段白试到天荒地老。
                 self._bad_replies = 0
                 self._configured = False
-                self.detail = "回包结构读不懂，将重新探测"
+                self.detail = tr("回包结构读不懂，将重新探测",
+                                 "Reply structure not understood, will probe again")
             return None
         self._bad_replies = 0
         if math.isfinite(self._last_sample) and now > self._last_sample:
@@ -1546,7 +1774,7 @@ class AuxSampler:
         # 进针闩也要忘掉：它记的是「那一条连接上什么时候有过进针证据」。
         # 带进新连接就是拿旧会话的证据给这一次的振幅读数开闸。
         self._gate.reset()
-        self.detail = "尚未探测"
+        self.detail = tr("尚未探测", "Not probed yet")
 
     # ── 对外快照（零 TCP） ──────────────────────────────────────────────
 
@@ -1568,11 +1796,14 @@ class AuxSampler:
                 # 「本机没有 qPlus」，是在没有证据的时候下一个结论 —— 而这条结论
                 # 恰好会让人放弃排查。所以分开说。
                 verdict = "unknown"
-                note = f"信号表还没读到（{self.detail}）——尚未判定这台机器有没有这一路。"
+                note = tr(f"信号表还没读到（{self.detail}）——尚未判定这台机器有没有这一路。",
+                          f"Signal table not read yet ({self.detail}): not yet determined "
+                          "whether this machine has this channel.")
             elif r is None:
                 verdict = "unavailable"
                 note = _UNAVAILABLE_NOTE.get(
-                    spec.kind, "信号表里没有找到这一路。")
+                    spec.kind, tr("信号表里没有找到这一路。",
+                                  "This channel was not found in the signal table."))
             elif spec.kind == "lockin":
                 # lock-in 的第一句话不是「判不判」，是**「这条曲线是不是测量值」**。
                 # 调制关着的时候它是噪声与串扰底，判级与否根本轮不上。
@@ -1584,15 +1815,24 @@ class AuxSampler:
                 # （将来可以判），lock-in 是「这个量的形状不支持那类判据」（将来也
                 # 不该判）。看到前者的人会去标定，看到后者的人不该去。
                 note = _UNJUDGED_NOTE.get(
-                    spec.kind, "只记录不判级——没有本机基线就不编阈值。")
+                    spec.kind, tr("只记录不判级——没有本机基线就不编阈值。",
+                                  "Recorded only, not graded: no threshold is invented "
+                                  "without a baseline from this machine."))
             elif not th.aux_alerts_enabled:
                 verdict = "unjudged"
-                note = "告警未启用：阈值尚未在本机标定，先跑 commission 报告。"
+                note = tr("告警未启用：阈值尚未在本机标定，先跑 commission 报告。",
+                         "Alerts not enabled: thresholds are not calibrated on this "
+                         "machine yet, run the commission report first.")
             elif spec.kind == "amplitude" and base is None:
                 verdict = "unjudged"
-                note = ("没有未接触本底，判不了「振幅归零」——没有本底就不知道"
-                        "「不为零」长什么样。针尖确认未接触时调用 "
-                        "ReadTipOscillationAmplitude(set_baseline=True)。")
+                note = tr("没有未接触本底，判不了「振幅归零」——没有本底就不知道"
+                          "「不为零」长什么样。针尖确认未接触时调用 "
+                          "ReadTipOscillationAmplitude(set_baseline=True)。",
+                          "No non-contact baseline, so \"amplitude dropped to zero\" "
+                          "cannot be judged: without it there is no reference for "
+                          "\"not zero\". Call "
+                          "ReadTipOscillationAmplitude(set_baseline=True) while the tip "
+                          "is confirmed not in contact.")
             elif spec.kind == "amplitude":
                 verdict, note = _amplitude_verdict(last, metrics)
             else:
@@ -1651,12 +1891,20 @@ _PREFIX = {"z": "z_", "amplitude": "amp_", "df": "df_", "lockin": "lockin_",
 #: 「这台机器没有这一路」要说清是**哪一路**、以及那正不正常。
 #: 一句通用的「没找到」会让用户去查一个根本不存在的故障。
 _UNAVAILABLE_NOTE: dict[str, str] = {
-    "z": "信号表里没有找到 Z 通道。",
-    "amplitude": "信号表里没有这一路——这台机器很可能没有 qPlus 传感器，不是故障。",
-    "df": "信号表里没有这一路——这台机器很可能没有 qPlus 传感器，不是故障。",
-    "lockin": ("信号表里没有找到 lock-in 解调通道——没有 lock-in 是完全正常的配置。"
-               "本机有而没认出来的话，在「设置 → 仪器标定」填 "
-               "lockin_signal_index。"),
+    "z": tr("信号表里没有找到 Z 通道。", "No Z channel found in the signal table."),
+    "amplitude": tr("信号表里没有这一路——这台机器很可能没有 qPlus 传感器，不是故障。",
+                    "This channel is not in the signal table: this machine probably has "
+                    "no qPlus sensor, which is not a fault."),
+    "df": tr("信号表里没有这一路——这台机器很可能没有 qPlus 传感器，不是故障。",
+             "This channel is not in the signal table: this machine probably has "
+             "no qPlus sensor, which is not a fault."),
+    "lockin": tr("信号表里没有找到 lock-in 解调通道——没有 lock-in 是完全正常的配置。"
+                 "本机有而没认出来的话，在「设置 → 仪器标定」填 "
+                 "lockin_signal_index。",
+                 "No lock-in demodulation channel found in the signal table: having no "
+                 "lock-in is a perfectly normal configuration. If this machine has one "
+                 "that was not recognised, fill in lockin_signal_index under "
+                 "Settings -> Instrument calibration."),
 }
 
 #: 「记录但不判级」的两种理由，见调用点的注释。lock-in 走 :func:`_lockin_note`
@@ -1666,14 +1914,17 @@ _UNJUDGED_NOTE: dict[str, str] = {}
 #: lock-in 「不打算判」的理由。**与调制状态无关**，所以单独放着：调制开着的时候
 #: 这句话仍然成立（X 分量穿零），它回答的是「将来会不会加判据」，不是「现在这条
 #: 曲线是不是测量值」。两个问题混成一段的话，看到调制关闭的人会以为只是没标定。
-_LOCKIN_UNJUDGED_WHY = ("不判级也不打算判：本机读的是解调器 X 分量"
-                        "（带符号，会穿零），比例类判据会在相位转动时报假警。")
+_LOCKIN_UNJUDGED_WHY = tr("不判级也不打算判：本机读的是解调器 X 分量"
+                          "（带符号，会穿零），比例类判据会在相位转动时报假警。",
+                          "Not graded and not meant to be: this machine reads the "
+                          "demodulator X component (signed, crosses zero), and ratio "
+                          "rules would raise false alarms as the phase rotates.")
 
 
 def _lockin_note(metrics: dict) -> str:
     """dI/dV 通道的一句话。**先说调制开没开。**
 
-    需求是辅助通道 didv 应该以某种方式标出 lockin 开没开。这不是显示偏好：
+    这不是显示偏好：
     调制关着的时候解调器输出的是噪声与串扰底，量纲、数量级、曲线形状都和真 dI/dV
     一样，只有「它是不是测量值」这一件事不一样 —— 而那件事在数字里看不出来。
 
@@ -1684,12 +1935,20 @@ def _lockin_note(metrics: dict) -> str:
     if mod is None:
         # 措辞里刻意不出现「dI/dV」三个字：这一支要说的正是「说不出它是不是」，
         # 而任何含着那个词的句子读起来都像在给一个答案。
-        return ("调制状态**没读到**（不等于关闭）——现在判断不了这条曲线是测量值"
-                "还是噪声底。" + _LOCKIN_UNJUDGED_WHY)
+        return (tr("调制状态**没读到**（不等于关闭）——现在判断不了这条曲线是测量值"
+                   "还是噪声底。",
+                   "Modulation state **could not be read** (this does not mean it is "
+                   "off): cannot tell whether this curve is a measurement or the noise "
+                   "floor. ") + _LOCKIN_UNJUDGED_WHY)
     if mod >= 1:
-        return "调制**开着**，这条曲线是 dI/dV 信号。" + _LOCKIN_UNJUDGED_WHY
-    return ("调制**关闭**——这条曲线**不是 dI/dV**，是解调器的噪声与串扰底。"
-            "数值照记，但别按 dI/dV 读。")
+        return (tr("调制**开着**，这条曲线是 dI/dV 信号。",
+                   "Modulation is **on**, this curve is a dI/dV signal. ")
+                + _LOCKIN_UNJUDGED_WHY)
+    return tr("调制**关闭**——这条曲线**不是 dI/dV**，是解调器的噪声与串扰底。"
+              "数值照记，但别按 dI/dV 读。",
+              "Modulation is **off**: this curve is **not dI/dV**, it is the "
+              "demodulator noise and crosstalk floor. Values are still recorded, "
+              "but do not read them as dI/dV.")
 
 
 def _amplitude_verdict(last: "AuxSample | None", metrics: dict) -> tuple[str, str]:
@@ -1701,7 +1960,7 @@ def _amplitude_verdict(last: "AuxSample | None", metrics: dict) -> tuple[str, st
     一个读数在最需要它说话的时候，长得像「没问题」。
     """
     if last is None:
-        return "unknown", "还没有采到样本。"
+        return "unknown", tr("还没有采到样本。", "No samples collected yet.")
     if any(r.startswith("amp_") for r in last.rules):
         return "warn", ""
     if (_num(metrics.get("amp_blanked")) or 0.0) >= 1:
@@ -1711,8 +1970,11 @@ def _amplitude_verdict(last: "AuxSample | None", metrics: dict) -> tuple[str, st
         # 那正是本仓「状态字段说的话和实际不符、而下游全都信它」的形状，
         # 只不过这一次的下游是人。
         return ("unjudged",
-                "有扎针 / 电脉冲类技能正在占用仪器，振幅在这期间不判 —— "
-                "那时的接触是**故意的**，不该报成事故。")
+                tr("有扎针 / 电脉冲类技能正在占用仪器，振幅在这期间不判 —— "
+                   "那时的接触是**故意的**，不该报成事故。",
+                   "A tip-poke / electrical-pulse skill is using the instrument, so "
+                   "the amplitude is not judged meanwhile: contact then is "
+                   "**intentional** and must not be reported as an accident."))
     # 音叉没被驱动 / 不知道有没有被驱动（缺陷⑰）。排在 amp_off 之前：这是**更根本**
     # 的一条 —— 通道读得到数、数也不为零，只是那个数不代表任何东西。
     #
@@ -1726,38 +1988,67 @@ def _amplitude_verdict(last: "AuxSample | None", metrics: dict) -> tuple[str, st
     excited = _num(metrics.get("amp_excited"))
     if excited is not None and excited < 1:
         return ("unjudged",
-                "PLL 激励关着，音叉没有被驱动——**这一路现在没有判据能力**。"
-                "读到的是未驱动解调器的噪声底，拿它跟自由振荡"
-                "基线比永远比出「塌了」。要让撞针判据工作，先把 PLL 输出与激励打开。")
+                tr("PLL 激励关着，音叉没有被驱动——**这一路现在没有判据能力**。"
+                   "读到的是未驱动解调器的噪声底，拿它跟自由振荡"
+                   "基线比永远比出「塌了」。要让撞针判据工作，先把 PLL 输出与激励打开。",
+                   "PLL excitation is off and the tuning fork is not driven: **this "
+                   "channel currently has no judging ability**. What is read is the "
+                   "noise floor of an undriven demodulator (a few pm) "
+                   "and comparing it with the free-oscillation baseline "
+                   "always looks like a collapse. To make the tip-crash rule work, "
+                   "turn on the PLL output and excitation first."))
     if excited is None and ((_num(metrics.get("amp_zero")) or 0.0) >= 1
                             or (_num(metrics.get("amp_gate_open")) or 0.0) >= 1):
         # 只在**问过而没问出来**的时候说这句（问的条件见 _excitation_metrics）。
         # 平时不问，那时候沉默是对的 —— 一条「读不到 PLL」的提示天天挂着，
         # 一周之内就会被无视，而那正好毁掉它在真的读不到时的作用。
         return ("unjudged",
-                "**读不到 PLL 激励状态**，所以判不了是不是撞针——不知道音叉有没有"
-                "被驱动的时候，振幅这个数不代表任何东西。"
-                "检查 PLL 模块是否加载、TCP 是否正常。")
+                tr("**读不到 PLL 激励状态**，所以判不了是不是撞针——不知道音叉有没有"
+                   "被驱动的时候，振幅这个数不代表任何东西。"
+                   "检查 PLL 模块是否加载、TCP 是否正常。",
+                   "**Cannot read the PLL excitation state**, so a tip crash cannot be "
+                   "judged: when it is unknown whether the tuning fork is driven, the "
+                   "amplitude value means nothing. Check that the PLL module is loaded "
+                   "and TCP is healthy."))
     if (_num(metrics.get("amp_off")) or 0.0) >= 1:
         return ("unjudged",
-                "窗口内从来没有读到过非零振幅——最可能是这条通道关着/没接。"
-                "**这不是「没撞针」**：针尖整个窗口都还扎着也长这样。")
+                tr("窗口内从来没有读到过非零振幅——最可能是这条通道关着/没接。"
+                   "**这不是「没撞针」**：针尖整个窗口都还扎着也长这样。",
+                   "No non-zero amplitude was ever read in the window: most likely this "
+                   "channel is off or not connected. **This does not mean \"no tip "
+                   "crash\"**: a tip that stayed crashed through the whole window looks "
+                   "the same."))
     if (_num(metrics.get("amp_gate_open")) or 0.0) >= 1:
         # 只有**确认过音叉在振**才敢说这句。``amp_excited`` 缺席时我们没问过
         # （振幅没归零，不值得问）—— 那时说「针尖还能自由振动」就是替一个没做过的
         # 观测打包票，而这一路在 STM 模式下平时读的本来就是噪声底。
         if excited is not None and excited >= 1:
-            return ("ok", "正在进针，音叉在被驱动，且振幅没有归零——针尖还能自由振动。")
+            return ("ok", tr("正在进针，音叉在被驱动，且振幅没有归零——针尖还能自由振动。",
+                             "Approaching, the tuning fork is driven and the amplitude "
+                             "has not dropped to zero: the tip can still oscillate freely."))
         return ("unjudged",
-                "正在进针，振幅也没有归零。但**没有确认音叉在不在被驱动**"
-                "(只有振幅真的掉下去时才会去问 PLL)，所以这不构成「针尖还能自由"
-                "振动」的证据——STM 模式下这一路平时读的就是噪声底。")
+                tr("正在进针，振幅也没有归零。但**没有确认音叉在不在被驱动**"
+                   "(只有振幅真的掉下去时才会去问 PLL)，所以这不构成「针尖还能自由"
+                   "振动」的证据——STM 模式下这一路平时读的就是噪声底。",
+                   "Approaching and the amplitude has not dropped to zero, but **it is "
+                   "not confirmed that the tuning fork is driven** (the PLL is only "
+                   "queried when the amplitude really drops), so this is not evidence "
+                   "that the tip can still oscillate freely: in STM mode this channel "
+                   "normally reads the noise floor."))
     return ("unjudged",
-            "只在**进针期间**判「振幅归零」，现在没有进针证据，所以不判——"
-            "这不是「振幅正常」。STM 模式下这一路平时是噪声：隧穿不阻尼它"
-            "；扎针与电脉冲可能使振幅发生瞬态变化。"
-            "它唯一不可替代的用处是：针尖不导电时扎进去也没有电流信号，"
-            "那时只有振幅会掉下去。")
+            tr("只在**进针期间**判「振幅归零」，现在没有进针证据，所以不判——"
+               "这不是「振幅正常」。STM 模式下这一路平时是噪声：隧穿不阻尼它"
+               "；扎针与电脉冲可能使振幅发生瞬态变化。"
+               "它唯一不可替代的用处是：针尖不导电时扎进去也没有电流信号，"
+               "那时只有振幅会掉下去。",
+               "\"Amplitude dropped to zero\" is only judged **during approach**, and "
+               "there is no approach evidence now, so it is not judged: this does not "
+               "mean \"amplitude normal\". In STM mode this channel is normally noise: "
+               "tunnelling does not damp it (out-of-contact and tunnelling readings are "
+               "about the same), and tip pokes and electrical pulses "
+               "actually make it ring up. Its one irreplaceable use: when the tip is "
+               "non-conducting there is no current signal after a crash, and only the "
+               "amplitude drops."))
 
 
 class _Skip(Exception):

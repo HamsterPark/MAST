@@ -1,0 +1,191 @@
+{
+  "name": "two_mirror_dogleg",
+  "description": "Two-mirror beam walk seen from above (the usual periscope / dog-leg): +x -> +y at M1 (135), +y -> +x at M2 (315), then a detector. Both folds are 45 degrees; the beam ends up displaced.",
+  "layout": {
+    "schema": 1,
+    "id": "dogleg",
+    "title": "Two-mirror walk",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 50.0,
+        "y_mm": 62.5,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "m1",
+        "type": "mirror",
+        "label": "M1",
+        "x_mm": 112.5,
+        "y_mm": 62.5,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.4,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "m2",
+        "type": "mirror",
+        "label": "M2",
+        "x_mm": 112.5,
+        "y_mm": 187.5,
+        "angle_deg": 315.0,
+        "aperture_mm": 25.4,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det1",
+        "type": "detector",
+        "label": "D1",
+        "x_mm": 300.0,
+        "y_mm": 187.5,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 62.5,
+              "x1": 112.5,
+              "y1": 62.5
+            },
+            {
+              "x0": 112.5,
+              "y0": 62.5,
+              "x1": 112.5,
+              "y1": 187.5
+            },
+            {
+              "x0": 112.5,
+              "y0": 187.5,
+              "x1": 300.0,
+              "y1": 187.5
+            }
+          ],
+          "events": [
+            {
+              "component": "m1",
+              "action": "reflect",
+              "x": 112.5,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 62.5
+            },
+            {
+              "component": "m2",
+              "action": "reflect",
+              "x": 112.5,
+              "y": 187.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 187.5
+            },
+            {
+              "component": "det1",
+              "action": "stop",
+              "x": 300.0,
+              "y": 187.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 375.0
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ]
+}

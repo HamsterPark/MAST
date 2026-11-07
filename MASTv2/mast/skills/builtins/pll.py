@@ -28,6 +28,7 @@ from mast.core.types import (
 )
 from mast.io.nanonis_files import decode_reply
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +42,12 @@ class ConfigurePLL(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="配置 PLL 的中心频率、频移与控制器增益。",
+            description=tr("配置 PLL 的中心频率、频移与控制器增益。", "Configure the PLL center frequency, frequency shift and controller gains."),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -54,40 +55,40 @@ class ConfigurePLL(BaseSkill):
                 ParameterSpec(
                     name="center_freq_hz",
                     type="float",
-                    description="中心频率，单位 Hz",
+                    description=tr("中心频率，单位 Hz", "Center frequency, in Hz"),
                     unit="Hz",
                     required=False,
                 ),
                 ParameterSpec(
                     name="freq_shift_hz",
                     type="float",
-                    description="频移，单位 Hz",
+                    description=tr("频移，单位 Hz", "Frequency shift, in Hz"),
                     unit="Hz",
                     required=False,
                 ),
                 ParameterSpec(
                     name="amp_p_gain",
                     type="float",
-                    description="幅度控制器的 P 增益（V/m）",
+                    description=tr("幅度控制器的 P 增益（V/m）", "P gain of the amplitude controller (V/m)"),
                     required=False,
                 ),
                 ParameterSpec(
                     name="amp_time_constant_s",
                     type="float",
-                    description="幅度控制器的时间常数",
+                    description=tr("幅度控制器的时间常数", "Time constant of the amplitude controller"),
                     unit="s",
                     required=False,
                 ),
                 ParameterSpec(
                     name="phas_p_gain",
                     type="float",
-                    description="相位控制器的 P 增益（Hz/deg）",
+                    description=tr("相位控制器的 P 增益（Hz/deg）", "P gain of the phase controller (Hz/deg)"),
                     required=False,
                 ),
                 ParameterSpec(
                     name="phas_time_constant_s",
                     type="float",
-                    description="相位控制器的时间常数",
+                    description=tr("相位控制器的时间常数", "Time constant of the phase controller"),
                     unit="s",
                     required=False,
                 ),
@@ -158,12 +159,12 @@ class GetPLLStatus(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读 PLL 当前状态：频率、增益、excitation。",
+            description=tr("读 PLL 当前状态：频率、增益、excitation。", "Read the current PLL state: frequency, gains, excitation."),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -231,12 +232,12 @@ class PLLOnOff(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="开或关 PLL 输出、相位控制器与幅度控制器。",
+            description=tr("开或关 PLL 输出、相位控制器与幅度控制器。", "Switch the PLL output, phase controller and amplitude controller on or off."),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -244,20 +245,20 @@ class PLLOnOff(BaseSkill):
                 ParameterSpec(
                     name="output_on",
                     type="bool",
-                    description="启用 PLL 输出",
+                    description=tr("启用 PLL 输出", "Enable the PLL output"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="phase_ctrl_on",
                     type="bool",
-                    description="启用相位控制器",
+                    description=tr("启用相位控制器", "Enable the phase controller"),
                     required=False,
                     default=True,
                 ),
                 ParameterSpec(
                     name="amp_ctrl_on",
                     type="bool",
-                    description="启用幅度控制器",
+                    description=tr("启用幅度控制器", "Enable the amplitude controller"),
                     required=False,
                     default=True,
                 ),
@@ -306,12 +307,12 @@ class ConfigurePLLExcitation(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置 PLL 的 excitation 幅度与输出量程。",
+            description=tr("设置 PLL 的 excitation 幅度与输出量程。", "Set the PLL excitation amplitude and output range."),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -319,7 +320,7 @@ class ConfigurePLLExcitation(BaseSkill):
                 ParameterSpec(
                     name="excitation_v",
                     type="float",
-                    description="excitation 幅度，单位伏特",
+                    description=tr("excitation 幅度，单位伏特", "Excitation amplitude, in volts"),
                     unit="V",
                     required=True,
                     min_value=0.0,
@@ -327,7 +328,7 @@ class ConfigurePLLExcitation(BaseSkill):
                 ParameterSpec(
                     name="output_range",
                     type="float",
-                    description="excitation 输出量程",
+                    description=tr("excitation 输出量程", "Excitation output range"),
                     required=False,
                 ),
             ],
@@ -371,12 +372,12 @@ class AcquirePLLFreqSweep(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="跑一次 PLL 扫频，找出共振峰。",
+            description=tr("跑一次 PLL 扫频，找出共振峰。", "Run a PLL frequency sweep to find the resonance peak."),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -384,7 +385,7 @@ class AcquirePLLFreqSweep(BaseSkill):
                 ParameterSpec(
                     name="num_points",
                     type="int",
-                    description="频率点数",
+                    description=tr("频率点数", "Number of frequency points"),
                     required=True,
                     min_value=2,
                     max_value=10000,
@@ -392,7 +393,7 @@ class AcquirePLLFreqSweep(BaseSkill):
                 ParameterSpec(
                     name="period_s",
                     type="float",
-                    description="每个频率点上的测量时间",
+                    description=tr("每个频率点上的测量时间", "Measurement time at each frequency point"),
                     unit="s",
                     required=True,
                     min_value=0.001,
@@ -400,7 +401,7 @@ class AcquirePLLFreqSweep(BaseSkill):
                 ParameterSpec(
                     name="settling_time_s",
                     type="float",
-                    description="设定起始频率之后的等待时间",
+                    description=tr("设定起始频率之后的等待时间", "Wait time after setting the start frequency"),
                     unit="s",
                     required=False,
                     default=0.1,
@@ -409,7 +410,7 @@ class AcquirePLLFreqSweep(BaseSkill):
                 ParameterSpec(
                     name="sweep_up",
                     type="bool",
-                    description="从下限扫到上限",
+                    description=tr("从下限扫到上限", "Sweep from the lower limit to the upper limit"),
                     required=False,
                     default=True,
                 ),
@@ -480,19 +481,19 @@ class PLLSignalAnalyzer(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="打开 PLL 信号分析仪，并采集示波器/FFT 数据。",
+            description=tr("打开 PLL 信号分析仪，并采集示波器/FFT 数据。", "Open the PLL signal analyzer and acquire oscilloscope/FFT data."),
             parameters=[
                 ParameterSpec(
                     name="channel_index",
                     type="int",
-                    description="要分析的信号通道索引",
+                    description=tr("要分析的信号通道索引", "Signal channel index to analyse"),
                     required=True,
                     min_value=0,
                 ),
                 ParameterSpec(
                     name="get_fft",
                     type="bool",
-                    description="同时采集 FFT 数据",
+                    description=tr("同时采集 FFT 数据", "Also acquire FFT data"),
                     required=False,
                     default=False,
                 ),
@@ -546,12 +547,12 @@ class GetPLLAddOnOff(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="返回 Add external signal to output 是开还是关。",
+            description=tr("返回 Add external signal to output 是开还是关。", "Return whether Add external signal to output is on or off."),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -587,14 +588,14 @@ class SetPLLAmpCtrlBandwidth(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "设置幅度控制器的带宽。使用当前的 Q factor 与幅度对 excitation "
-                "之比（取自之前的一次扫频）。"
+                tr("设置幅度控制器的带宽。使用当前的 Q factor 与幅度对 excitation "
+                "之比（取自之前的一次扫频）。", "Set the bandwidth of the amplitude controller. Uses the current Q factor and amplitude-to-excitation ratio (taken from an earlier frequency sweep).")
             ),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -602,7 +603,7 @@ class SetPLLAmpCtrlBandwidth(BaseSkill):
                 ParameterSpec(
                     name="bandwidth_hz",
                     type="float",
-                    description="带宽，单位 Hz",
+                    description=tr("带宽，单位 Hz", "Bandwidth, in Hz"),
                     unit="Hz",
                     required=True,
                     min_value=0.0,
@@ -635,12 +636,12 @@ class GetPLLAmpCtrlOnOff(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="返回幅度控制器是开还是关。",
+            description=tr("返回幅度控制器是开还是关。", "Return whether the amplitude controller is on or off."),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -675,12 +676,12 @@ class SetPLLAmpCtrlSetpnt(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置幅度控制器的 setpoint，单位米。",
+            description=tr("设置幅度控制器的 setpoint，单位米。", "Set the setpoint of the amplitude controller, in metres."),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -688,7 +689,7 @@ class SetPLLAmpCtrlSetpnt(BaseSkill):
                 ParameterSpec(
                     name="setpoint_m",
                     type="float",
-                    description="幅度 setpoint，单位米",
+                    description=tr("幅度 setpoint，单位米", "Amplitude setpoint, in metres"),
                     unit="m",
                     required=True,
                 ),
@@ -720,12 +721,12 @@ class GetPLLDemodFilter(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="返回 PLL lock-in 之后那个低通滤波器的阶数。",
+            description=tr("返回 PLL lock-in 之后那个低通滤波器的阶数。", "Return the order of the low-pass filter after the PLL lock-in."),
             parameters=[
                 ParameterSpec(
                     name="demodulator_index",
                     type="int",
-                    description="解调器索引（从 1 开始）",
+                    description=tr("解调器索引（从 1 开始）", "Demodulator index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -760,12 +761,12 @@ class SetPLLDemodFilter(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置 PLL lock-in 之后那个低通滤波器的阶数。",
+            description=tr("设置 PLL lock-in 之后那个低通滤波器的阶数。", "Set the order of the low-pass filter after the PLL lock-in."),
             parameters=[
                 ParameterSpec(
                     name="demodulator_index",
                     type="int",
-                    description="解调器索引（从 1 开始）",
+                    description=tr("解调器索引（从 1 开始）", "Demodulator index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -773,7 +774,7 @@ class SetPLLDemodFilter(BaseSkill):
                 ParameterSpec(
                     name="filter_order",
                     type="int",
-                    description="滤波器阶数（unsigned int16）",
+                    description=tr("滤波器阶数（unsigned int16）", "Filter order (unsigned int16)"),
                     required=True,
                     min_value=0,
                 ),
@@ -805,12 +806,12 @@ class GetPLLDemodHarmonic(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="返回 PLL lock-in 解调器中选中的谐波。",
+            description=tr("返回 PLL lock-in 解调器中选中的谐波。", "Return the harmonic selected in the PLL lock-in demodulator."),
             parameters=[
                 ParameterSpec(
                     name="demodulator_index",
                     type="int",
-                    description="解调器索引（从 1 开始）",
+                    description=tr("解调器索引（从 1 开始）", "Demodulator index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -845,12 +846,12 @@ class GetPLLDemodInput(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="返回选中解调器的输入与频率发生器。",
+            description=tr("返回选中解调器的输入与频率发生器。", "Return the input and frequency generator of the selected demodulator."),
             parameters=[
                 ParameterSpec(
                     name="demodulator_index",
                     type="int",
-                    description="解调器索引（从 1 开始）",
+                    description=tr("解调器索引（从 1 开始）", "Demodulator index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -887,12 +888,12 @@ class SetPLLDemodInput(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置选中解调器的输入与频率发生器。",
+            description=tr("设置选中解调器的输入与频率发生器。", "Set the input and frequency generator of the selected demodulator."),
             parameters=[
                 ParameterSpec(
                     name="demodulator_index",
                     type="int",
-                    description="解调器索引（从 1 开始）",
+                    description=tr("解调器索引（从 1 开始）", "Demodulator index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -900,13 +901,13 @@ class SetPLLDemodInput(BaseSkill):
                 ParameterSpec(
                     name="input",
                     type="int",
-                    description="输入索引（0 = 不改）",
+                    description=tr("输入索引（0 = 不改）", "Input index (0 = no change)"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="frequency_generator",
                     type="int",
-                    description="频率发生器索引（0 = 不改）",
+                    description=tr("频率发生器索引（0 = 不改）", "Frequency generator index (0 = no change)"),
                     required=True,
                 ),
             ],
@@ -942,12 +943,12 @@ class SetPLLDemodPhasRef(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置选中解调器的参考相位。",
+            description=tr("设置选中解调器的参考相位。", "Set the reference phase of the selected demodulator."),
             parameters=[
                 ParameterSpec(
                     name="demodulator_index",
                     type="int",
-                    description="解调器索引（从 1 开始）",
+                    description=tr("解调器索引（从 1 开始）", "Demodulator index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -955,7 +956,7 @@ class SetPLLDemodPhasRef(BaseSkill):
                 ParameterSpec(
                     name="phase_reference_deg",
                     type="float",
-                    description="参考相位，单位度",
+                    description=tr("参考相位，单位度", "Reference phase, in degrees"),
                     unit="deg",
                     required=True,
                 ),
@@ -992,13 +993,13 @@ class GetPLLExcRange(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "返回 excitation 输出量程的索引（0=10V, 1=1V, 2=0.1V, 3=0.01V, 4=0.001V）。"
+                tr("返回 excitation 输出量程的索引（0=10V, 1=1V, 2=0.1V, 3=0.01V, 4=0.001V）。", "Return the index of the excitation output range (0=10V, 1=1V, 2=0.1V, 3=0.01V, 4=0.001V).")
             ),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -1037,14 +1038,14 @@ class SetPLLFreqExcOverwrite(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "设置用于覆写 Frequency Shift 和/或 Excitation 的信号。仅在对应控制器未激活时有效。"
-                "不改则填 -2。"
+                tr("设置用于覆写 Frequency Shift 和/或 Excitation 的信号。仅在对应控制器未激活时有效。"
+                "不改则填 -2。", "Set the signals used to override the Frequency Shift and/or the Excitation. Only effective when the corresponding controller is not active. Use -2 for no change.")
             ),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -1052,13 +1053,13 @@ class SetPLLFreqExcOverwrite(BaseSkill):
                 ParameterSpec(
                     name="excitation_overwrite_index",
                     type="int",
-                    description="excitation 覆写信号的索引（-2 = 不改）",
+                    description=tr("excitation 覆写信号的索引（-2 = 不改）", "Index of the excitation override signal (-2 = no change)"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="frequency_overwrite_index",
                     type="int",
-                    description="频率覆写信号的索引（-2 = 不改）",
+                    description=tr("频率覆写信号的索引（-2 = 不改）", "Index of the frequency override signal (-2 = no change)"),
                     required=True,
                 ),
             ],
@@ -1095,12 +1096,12 @@ class GetPLLFreqRange(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="返回振荡控制模块的频率量程。",
+            description=tr("返回振荡控制模块的频率量程。", "Return the frequency range of the oscillation control module."),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -1135,12 +1136,12 @@ class SetPLLFreqRange(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置振荡控制模块的频率量程。",
+            description=tr("设置振荡控制模块的频率量程。", "Set the frequency range of the oscillation control module."),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -1148,7 +1149,7 @@ class SetPLLFreqRange(BaseSkill):
                 ParameterSpec(
                     name="frequency_range_hz",
                     type="float",
-                    description="频率量程，单位 Hz",
+                    description=tr("频率量程，单位 Hz", "Frequency range, in Hz"),
                     unit="Hz",
                     required=True,
                     min_value=0.0,
@@ -1182,13 +1183,13 @@ class PLLFreqShiftAutoCenter(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "频移自动归中：把当前频移加到中心频率上，并把频移复位为零。"
+                tr("频移自动归中：把当前频移加到中心频率上，并把频移复位为零。", "Frequency shift auto-centering: add the current frequency shift to the center frequency and reset the frequency shift to zero.")
             ),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -1221,12 +1222,12 @@ class GetPLLInpCalibr(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="返回振荡控制模块的输入标定（m/V）。",
+            description=tr("返回振荡控制模块的输入标定（m/V）。", "Return the input calibration of the oscillation control module (m/V)."),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -1261,12 +1262,12 @@ class SetPLLInpCalibr(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置振荡控制模块的输入标定（m/V）。",
+            description=tr("设置振荡控制模块的输入标定（m/V）。", "Set the input calibration of the oscillation control module (m/V)."),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -1274,7 +1275,7 @@ class SetPLLInpCalibr(BaseSkill):
                 ParameterSpec(
                     name="calibration_m_per_v",
                     type="float",
-                    description="输入标定，单位 m/V",
+                    description=tr("输入标定，单位 m/V", "Input calibration, in m/V"),
                     unit="m/V",
                     required=True,
                 ),
@@ -1306,12 +1307,12 @@ class GetPLLInpProps(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="返回 PLL 的输入属性（差分输入、1/10 分压器）。",
+            description=tr("返回 PLL 的输入属性（差分输入、1/10 分压器）。", "Return the PLL input properties (differential input, 1/10 divider)."),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -1348,12 +1349,12 @@ class SetPLLInpProps(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置 PLL 的输入属性（差分输入、1/10 分压器）。",
+            description=tr("设置 PLL 的输入属性（差分输入、1/10 分压器）。", "Set the PLL input properties (differential input, 1/10 divider)."),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -1361,13 +1362,13 @@ class SetPLLInpProps(BaseSkill):
                 ParameterSpec(
                     name="differential_input",
                     type="bool",
-                    description="启用差分输入",
+                    description=tr("启用差分输入", "Enable differential input"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="divider_1_10",
                     type="bool",
-                    description="启用 1/10 分压器",
+                    description=tr("启用 1/10 分压器", "Enable the 1/10 divider"),
                     required=True,
                 ),
             ],
@@ -1404,12 +1405,12 @@ class SetPLLInpRange(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置振荡控制模块的输入量程（m）。",
+            description=tr("设置振荡控制模块的输入量程（m）。", "Set the input range of the oscillation control module (m)."),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -1417,7 +1418,7 @@ class SetPLLInpRange(BaseSkill):
                 ParameterSpec(
                     name="input_range_m",
                     type="float",
-                    description="输入量程，单位米",
+                    description=tr("输入量程，单位米", "Input range, in metres"),
                     unit="m",
                     required=True,
                     min_value=0.0,
@@ -1450,12 +1451,12 @@ class PLLPerfectPLLUpdtZTC(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="用 PerfectPLL 算法更新 Z 控制器的时间常数。",
+            description=tr("用 PerfectPLL 算法更新 Z 控制器的时间常数。", "Update the Z controller time constant with the PerfectPLL algorithm."),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -1489,13 +1490,13 @@ class SetPLLPhasCtrlBandwidth(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "设置相位控制器的带宽。使用当前的 Q factor（取自之前的一次扫频）。"
+                tr("设置相位控制器的带宽。使用当前的 Q factor（取自之前的一次扫频）。", "Set the bandwidth of the phase controller. Uses the current Q factor (taken from an earlier frequency sweep).")
             ),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -1503,7 +1504,7 @@ class SetPLLPhasCtrlBandwidth(BaseSkill):
                 ParameterSpec(
                     name="bandwidth_hz",
                     type="float",
-                    description="带宽，单位 Hz",
+                    description=tr("带宽，单位 Hz", "Bandwidth, in Hz"),
                     unit="Hz",
                     required=True,
                     min_value=0.0,
@@ -1536,12 +1537,12 @@ class GetPLLPhasCtrlOnOff(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="返回相位控制器是开还是关。",
+            description=tr("返回相位控制器是开还是关。", "Return whether the phase controller is on or off."),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -1576,7 +1577,7 @@ class GetPLLSignalAnlzrCh(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="返回 PLL Signal Analyzer 当前的通道索引。",
+            description=tr("返回 PLL Signal Analyzer 当前的通道索引。", "Return the current channel index of the PLL Signal Analyzer."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["pll", "analyzer", "channel", "read"],
@@ -1606,7 +1607,7 @@ class GetPLLSignalAnlzrFFTProps(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "返回 FFT 配置：窗函数、平均模式、加权模式与次数。"
+                tr("返回 FFT 配置：窗函数、平均模式、加权模式与次数。", "Return the FFT configuration: window function, averaging mode, weighting mode and count.")
             ),
             estimated_duration_s=0.5,
             composition_level=0,
@@ -1653,7 +1654,7 @@ class GetPLLSignalAnlzrTimebase(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="返回 PLL Signal Analyzer 的时基索引与刷新率。",
+            description=tr("返回 PLL Signal Analyzer 的时基索引与刷新率。", "Return the time base index and refresh rate of the PLL Signal Analyzer."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["pll", "analyzer", "timebase", "read"],
@@ -1684,7 +1685,7 @@ class PLLSignalAnlzrTrigAuto(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="把 PLL Signal Analyzer 的触发参数设为预定义值。",
+            description=tr("把 PLL Signal Analyzer 的触发参数设为预定义值。", "Set the trigger parameters of the PLL Signal Analyzer to predefined values."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["pll", "analyzer", "trigger", "write"],
@@ -1708,12 +1709,12 @@ class SetPLLSignalAnlzrTrig(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置 PLL Signal Analyzer 中的触发配置。",
+            description=tr("设置 PLL Signal Analyzer 中的触发配置。", "Set the trigger configuration in the PLL Signal Analyzer."),
             parameters=[
                 ParameterSpec(
                     name="trigger_mode",
                     type="int",
-                    description="触发模式（0=不改，1=Immediate，2=Level）",
+                    description=tr("触发模式（0=不改，1=Immediate，2=Level）", "Trigger mode (0=no change, 1=Immediate, 2=Level)"),
                     required=True,
                     min_value=0,
                     max_value=2,
@@ -1721,13 +1722,13 @@ class SetPLLSignalAnlzrTrig(BaseSkill):
                 ParameterSpec(
                     name="trigger_source",
                     type="int",
-                    description="触发源的信号索引",
+                    description=tr("触发源的信号索引", "Signal index of the trigger source"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="trigger_slope",
                     type="int",
-                    description="触发沿（0=不改，1=Rising，2=Falling）",
+                    description=tr("触发沿（0=不改，1=Rising，2=Falling）", "Trigger edge (0=no change, 1=Rising, 2=Falling)"),
                     required=True,
                     min_value=0,
                     max_value=2,
@@ -1735,20 +1736,20 @@ class SetPLLSignalAnlzrTrig(BaseSkill):
                 ParameterSpec(
                     name="trigger_level",
                     type="float",
-                    description="触发电平",
+                    description=tr("触发电平", "Trigger level"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="trigger_position_s",
                     type="float",
-                    description="触发位置，单位秒",
+                    description=tr("触发位置，单位秒", "Trigger position, in seconds"),
                     unit="s",
                     required=True,
                 ),
                 ParameterSpec(
                     name="arming_mode",
                     type="int",
-                    description="布防模式（0=不改，1=Manual，2=Automatic）",
+                    description=tr("布防模式（0=不改，1=Manual，2=Automatic）", "Arming mode (0=no change, 1=Manual, 2=Automatic)"),
                     required=True,
                     min_value=0,
                     max_value=2,
@@ -1795,12 +1796,12 @@ class GetPLLFreqSwpParams(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="返回扫频参数：点数、周期、建立时间。",
+            description=tr("返回扫频参数：点数、周期、建立时间。", "Return the sweep parameters: number of points, periods, settling time."),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -1838,12 +1839,12 @@ class StopPLLFreqSwp(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="停止 PLL Frequency Sweep 模块中正在进行的扫描。",
+            description=tr("停止 PLL Frequency Sweep 模块中正在进行的扫描。", "Stop the sweep currently running in the PLL Frequency Sweep module."),
             parameters=[
                 ParameterSpec(
                     name="modulator_index",
                     type="int",
-                    description="调制器/PLL 索引（从 1 开始）",
+                    description=tr("调制器/PLL 索引（从 1 开始）", "Modulator/PLL index (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,

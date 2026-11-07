@@ -21,6 +21,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Callable
 
+from mast.i18n import tr
 from mast.envhistory.spectra import SpectrumAccumulator
 
 logger = logging.getLogger(__name__)
@@ -231,16 +232,16 @@ class EnvHistoryRecorder:
             return
         from mast.envhistory.quiet import admits
         if not admits(quietness):
-            self._last_z_result = {"at": now, "skipped": "仪器不空闲"}
+            self._last_z_result = {"at": now, "skipped": tr("仪器不空闲", "instrument not idle")}
             return
         pool = self._pool()
         if pool is None:
-            self._last_z_result = {"at": now, "skipped": "未连接 Nanonis"}
+            self._last_z_result = {"at": now, "skipped": tr("未连接 Nanonis", "Nanonis not connected")}
             return
         try:
             if not pool.comms_healthy():
                 # 熔断开路时任何新调用都是喂毒 —— 零 TCP 跳过这一轮。
-                self._last_z_result = {"at": now, "skipped": "TCP 已熔断"}
+                self._last_z_result = {"at": now, "skipped": tr("TCP 已熔断", "TCP circuit breaker open")}
                 return
         except Exception:  # noqa: BLE001
             return
@@ -274,7 +275,7 @@ class EnvHistoryRecorder:
                                                                 self._burst_abort),
                                burst_s=burst_s, bins=bins, ctx=ctx)
             if snap is None:
-                self._last_z_result = {"at": time.time(), "skipped": "本轮未取到数据"}
+                self._last_z_result = {"at": time.time(), "skipped": tr("本轮未取到数据", "no data this round")}
                 return
             self._persist_spectrum(snap)
             self._last_z_result = {"at": time.time(), "n_segments": snap.n_segments,

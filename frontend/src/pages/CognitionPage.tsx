@@ -13,17 +13,18 @@ import {
 } from "@/components/ui";
 import { Accordion } from "@/components/controls";
 import { PhaseSummaries } from "@/components/cognition/PhaseSummaries";
+import { tr } from "@/lib/i18n";
 
-// CognitionPage — Domain F (记忆 / 认知). Full-parity port of the old Gradio
-// 记忆 tab (mast.gui.cognition_panel) over the typed FastAPI seam.
+// CognitionPage — Domain F (memory / cognition). Full-parity port of the old Gradio
+// memory tab (mast.gui.cognition_panel) over the typed FastAPI seam.
 //
 // The old tab was ONE single-column stack (NOT sub-tabs, NOT 2-column):
 //   header markdown
-//   filter row: 命名空间 + 类型 + 搜索 + ↻ 刷新
+//   filter row: namespace + kind + search + refresh
 //   memory list (full width)
-//   Accordion「查看 / 编辑一条记忆」(折叠) — path + 载入 + detail + editor
-//   Accordion「🌙 做梦整合 / 🧠 头脑风暴」(折叠)
-//   Accordion「对话阶段摘要(分片)」(折叠)
+//   Accordion "View / edit a memory" (collapsed) — path + load + detail + editor
+//   Accordion "Dreaming / Brainstorm" (collapsed)
+//   Accordion "Conversation phase summaries (sharding)" (collapsed)
 // Reproduced here with plain React state (no nested gr.Tabs → no freeze).
 
 import type { components } from "@/api/schema";
@@ -119,15 +120,18 @@ export default function CognitionPage() {
 
   return (
     <div>
-      <Section title="持久化记忆">
+      <Section title={tr("持久化记忆", "Persistent memory")}>
         <p className="mb-4 text-sm text-mast-muted">
-          <strong>持久化记忆</strong> — agent 跨 session 读写的结构化记忆（依附实验记录）。📌
-          置顶优先注入上下文。🌙 做梦 / 🧠 头脑风暴产物均标注「非实测」。
+          <strong>{tr("持久化记忆", "Persistent memory")}</strong>{" "}
+          {tr(
+            "— agent 跨 session 读写的结构化记忆（依附实验记录）。📌 置顶优先注入上下文。🌙 做梦 / 🧠 头脑风暴产物均标注「非实测」。",
+            "— structured memory the agent reads and writes across sessions (attached to experiment records). 📌 Pinned entries are injected into the context first. 🌙 Dreaming / 🧠 brainstorm outputs are marked \"not measured\".",
+          )}
         </p>
 
         {namespaces.isPending && <Spinner />}
         {namespaces.isError && <ErrorNote error={namespaces.error} />}
-        {namespaces.data?.degraded && <DegradedNote what="记忆存储" />}
+        {namespaces.data?.degraded && <DegradedNote what={tr("记忆存储", "Memory store")} />}
 
         {namespaces.data && !namespaces.data.degraded && (
           <>
@@ -146,7 +150,7 @@ export default function CognitionPage() {
               onSelect={setSelected}
             />
 
-            <Accordion title="查看 / 编辑一条记忆" defaultOpen={false}>
+            <Accordion title={tr("查看 / 编辑一条记忆", "View / edit a memory")} defaultOpen={false}>
               <MemoryEditorPanel
                 ns={effectiveNs}
                 path={selected}
@@ -154,14 +158,14 @@ export default function CognitionPage() {
               />
             </Accordion>
 
-            <Accordion title="🌙 做梦整合 / 🧠 头脑风暴" defaultOpen={false}>
+            <Accordion title={tr("🌙 做梦整合 / 🧠 头脑风暴", "🌙 Dreaming / 🧠 Brainstorm")} defaultOpen={false}>
               <DreamCard ns={effectiveNs} />
               <div className="mt-4 border-t border-mast-border pt-4">
                 <BrainstormCard />
               </div>
             </Accordion>
 
-            <Accordion title="对话阶段摘要(分片)" defaultOpen={false}>
+            <Accordion title={tr("对话阶段摘要(分片)", "Conversation phase summaries (sharding)")} defaultOpen={false}>
               <PhaseSummaries />
             </Accordion>
           </>
@@ -199,10 +203,10 @@ function MemoryBrowser({
 
   return (
     <Card className="mb-3">
-      {/* Old single filter row: 命名空间 | 类型 | 搜索 | ↻ 刷新 */}
+      {/* Old single filter row: namespace | kind | search | refresh */}
       <div className="mb-3 flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-xs text-mast-muted">
-          命名空间
+          {tr("命名空间", "Namespace")}
           <select
             value={ns}
             onChange={(e) => onNs(e.target.value)}
@@ -216,13 +220,13 @@ function MemoryBrowser({
           </select>
         </label>
         <label className="flex flex-col gap-1 text-xs text-mast-muted">
-          类型
+          {tr("类型", "Kind")}
           <select
             value={kind}
             onChange={(e) => onKind(e.target.value)}
             className="rounded border border-mast-border bg-mast-bg px-2 py-1 text-sm text-mast-text"
           >
-            <option value="">(全部)</option>
+            <option value="">{tr("(全部)", "(all)")}</option>
             {KINDS.map((k) => (
               <option key={k} value={k}>
                 {k}
@@ -231,11 +235,11 @@ function MemoryBrowser({
           </select>
         </label>
         <label className="flex flex-1 flex-col gap-1 text-xs text-mast-muted">
-          搜索
+          {tr("搜索", "Search")}
           <input
             value={query}
             onChange={(e) => onQuery(e.target.value)}
-            placeholder="标题/正文/标签"
+            placeholder={tr("标题/正文/标签", "Title / body / tags")}
             className="rounded border border-mast-border bg-mast-bg px-2 py-1 text-sm text-mast-text"
           />
         </label>
@@ -243,20 +247,20 @@ function MemoryBrowser({
           onClick={() => list.refetch()}
           className="rounded border border-mast-border px-3 py-1.5 text-sm text-mast-text hover:bg-mast-bg/60"
         >
-          ↻ 刷新
+          {tr("↻ 刷新", "↻ Refresh")}
         </button>
       </div>
 
       {list.isPending && <Spinner />}
       {list.isError && <ErrorNote error={list.error} />}
-      {list.data?.degraded && <DegradedNote what="记忆存储" />}
+      {list.data?.degraded && <DegradedNote what={tr("记忆存储", "Memory store")} />}
       {list.data && !list.data.degraded && entries.length === 0 && (
-        <EmptyNote label={`命名空间 ${ns} 暂无记忆。`} />
+        <EmptyNote label={tr(`命名空间 ${ns} 暂无记忆。`, `No memories in namespace ${ns}.`)} />
       )}
       {list.data && !list.data.degraded && entries.length > 0 && (
         <div className="space-y-1">
           <p className="px-1 text-xs text-mast-muted">
-            {list.data.count} 条 · 命名空间 <code>{ns}</code>
+            {tr(`${list.data.count} 条`, `${list.data.count} ${list.data.count === 1 ? "entry" : "entries"}`)} · {tr("命名空间", "namespace")} <code>{ns}</code>
           </p>
           <div className="divide-y divide-mast-border overflow-hidden rounded border border-mast-border">
             {entries.map((e) => {
@@ -274,7 +278,7 @@ function MemoryBrowser({
                   }
                 >
                   <div className="flex items-center gap-1.5">
-                    {e.pinned && <span title="已置顶">📌</span>}
+                    {e.pinned && <span title={tr("已置顶", "Pinned")}>📌</span>}
                     <span>{KIND_ICON[e.kind] ?? "📄"}</span>
                     <code className="text-mast-accent">{path}</code>
                     <span className="text-xs text-mast-muted">
@@ -313,7 +317,7 @@ function MemoryEditorPanel({
     <div>
       {path && detail.isPending && <Spinner />}
       {path && detail.isError && <ErrorNote error={detail.error} />}
-      {path && detail.data?.degraded && <DegradedNote what="记忆存储" />}
+      {path && detail.data?.degraded && <DegradedNote what={tr("记忆存储", "Memory store")} />}
 
       {/* editor — also used to create a new entry when nothing is selected */}
       {(!path || (detail.data && !detail.data.degraded)) && (
@@ -375,7 +379,7 @@ function MemoryEditor({
   const save = useMutation({
     mutationFn: async () => {
       const p = form.path.trim();
-      if (!p) throw new Error("需要 path（如 insights/tip.md）");
+      if (!p) throw new Error(tr("需要 path（如 insights/tip.md）", "A path is required (e.g. insights/tip.md)"));
       const { data, error } = await api.POST("/api/memory/{ns}/{path}", {
         params: { path: { ns, path: p } },
         body: {
@@ -393,19 +397,23 @@ function MemoryEditor({
       return data;
     },
     onSuccess: (data) => {
-      if (data?.degraded) setStatus("⚠ 记忆存储未连接（写入已延后）");
+      if (data?.degraded) setStatus(tr("⚠ 记忆存储未连接（写入已延后）", "⚠ Memory store not connected (write deferred)"));
       else
         setStatus(
-          `✅ 已保存 ${data?.namespace ?? ns}/${data?.path ?? form.path.trim()}`,
+          tr(
+            `✅ 已保存 ${data?.namespace ?? ns}/${data?.path ?? form.path.trim()}`,
+            `✅ Saved ${data?.namespace ?? ns}/${data?.path ?? form.path.trim()}`,
+          ),
         );
       invalidate(form.path.trim());
     },
-    onError: (e) => setStatus(`❌ 保存失败: ${String((e as Error).message ?? e)}`),
+    onError: (e) =>
+      setStatus(tr(`❌ 保存失败: ${String((e as Error).message ?? e)}`, `❌ Save failed: ${String((e as Error).message ?? e)}`)),
   });
 
   const del = useMutation({
     mutationFn: async () => {
-      if (!path) throw new Error("无选中记忆");
+      if (!path) throw new Error(tr("无选中记忆", "No memory selected"));
       const { data, error } = await api.DELETE("/api/memory/{ns}/{path}", {
         params: { path: { ns, path } },
       });
@@ -413,19 +421,20 @@ function MemoryEditor({
       return data;
     },
     onSuccess: (data) => {
-      setStatus(data?.degraded ? "⚠ 记忆存储未连接" : "🗑 已删除");
+      setStatus(data?.degraded ? tr("⚠ 记忆存储未连接", "⚠ Memory store not connected") : tr("🗑 已删除", "🗑 Deleted"));
       invalidate(path ?? "");
       onDeleted();
     },
-    onError: (e) => setStatus(`❌ 删除失败: ${String((e as Error).message ?? e)}`),
+    onError: (e) =>
+      setStatus(tr(`❌ 删除失败: ${String((e as Error).message ?? e)}`, `❌ Delete failed: ${String((e as Error).message ?? e)}`)),
   });
 
   const busy = save.isPending || del.isPending;
 
   return (
     <div className="space-y-3">
-      {/* Old row: path dropdown + 载入. Here path is the selected entry or a
-          new-entry input; "＋ 新建" clears the selection. */}
+      {/* Old row: path dropdown + load. Here path is the selected entry or a
+          new-entry input; "New" clears the selection. */}
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-1 flex-col gap-1 text-xs text-mast-muted">
           path
@@ -442,13 +451,13 @@ function MemoryEditor({
             onClick={onDeleted}
             className="rounded border border-mast-border px-3 py-1.5 text-sm text-mast-text hover:bg-mast-bg/60"
           >
-            ＋ 新建
+            {tr("＋ 新建", "+ New")}
           </button>
         )}
       </div>
 
       <label className="flex flex-col gap-1 text-xs text-mast-muted">
-        正文(markdown)
+        {tr("正文(markdown)", "Body (markdown)")}
         <textarea
           value={form.content}
           onChange={(e) => setForm({ ...form, content: e.target.value })}
@@ -457,7 +466,7 @@ function MemoryEditor({
         />
       </label>
 
-      {/* Old row: kind + 置顶 + 保存 + 删除 */}
+      {/* Old row: kind + pin + save + delete */}
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-xs text-mast-muted">
           kind
@@ -480,14 +489,14 @@ function MemoryEditor({
             onChange={(e) => setForm({ ...form, pin: e.target.checked })}
             className="h-4 w-4 accent-mast-accent"
           />
-          置顶
+          {tr("置顶", "Pin")}
         </label>
         <button
           onClick={() => save.mutate()}
           disabled={busy}
           className="rounded bg-mast-accent/20 px-3 py-1.5 text-sm text-mast-accent hover:bg-mast-accent/30 disabled:opacity-50"
         >
-          {save.isPending ? "保存中…" : "保存"}
+          {save.isPending ? tr("保存中…", "Saving…") : tr("保存", "Save")}
         </button>
         {isExisting && (
           <button
@@ -495,7 +504,7 @@ function MemoryEditor({
             disabled={busy}
             className="rounded border border-mast-danger-border px-3 py-1.5 text-sm text-mast-danger hover:bg-mast-danger-bg disabled:opacity-50"
           >
-            {del.isPending ? "删除中…" : "删除"}
+            {del.isPending ? tr("删除中…", "Deleting…") : tr("删除", "Delete")}
           </button>
         )}
       </div>
@@ -530,22 +539,30 @@ function DreamCard({ ns }: { ns: string }) {
         disabled={dream.isPending}
         className="rounded bg-mast-accent/20 px-3 py-1.5 text-sm text-mast-accent hover:bg-mast-accent/30 disabled:opacity-50"
       >
-        {dream.isPending ? "⏳ 做梦中…" : "🌙 立即做梦整合（后台读历史实验 → 固化记忆，非实测）"}
+        {dream.isPending
+          ? tr("⏳ 做梦中…", "⏳ Dreaming…")
+          : tr(
+              "🌙 立即做梦整合（后台读历史实验 → 固化记忆，非实测）",
+              "🌙 Run dreaming now (reads past experiments in the background → consolidates memory; not measured)",
+            )}
       </button>
 
       {dream.isError && (
         <p className="mt-3 text-sm text-mast-danger">
-          ❌ 做梦失败: {String((dream.error as Error)?.message ?? dream.error)}
+          {tr("❌ 做梦失败: ", "❌ Dreaming failed: ")}{String((dream.error as Error)?.message ?? dream.error)}
         </p>
       )}
       {result && (
         <div className="mt-3 space-y-2">
-          {result.degraded && <DegradedNote what="认知后端" />}
+          {result.degraded && <DegradedNote what={tr("认知后端", "Cognition backend")} />}
           {!result.degraded && (
             <p className="text-sm text-mast-muted">
               {entries.length === 0
-                ? "🌙 做梦完成：无新的可固化内容（或已固化、被去重）。"
-                : `🌙 做梦完成：写入 ${result.count} 条记忆。标注「非实测，仅供参考」。`}
+                ? tr("🌙 做梦完成：无新的可固化内容（或已固化、被去重）。", "🌙 Dreaming finished: nothing new to consolidate (or already consolidated / deduplicated).")
+                : tr(
+                    `🌙 做梦完成：写入 ${result.count} 条记忆。标注「非实测，仅供参考」。`,
+                    `🌙 Dreaming finished: ${result.count} ${result.count === 1 ? "memory" : "memories"} written. Marked "not measured, for reference only".`,
+                  )}
             </p>
           )}
           {!result.degraded && entries.length > 0 && (
@@ -680,9 +697,9 @@ function BrainstormCard() {
         } else if (frame.kind === "error") {
           if (frame.degraded) {
             setDegraded(true);
-            setNote(frame.message ?? "认知后端未连接");
+            setNote(frame.message ?? tr("认知后端未连接", "Cognition backend not connected"));
           } else {
-            setErr(frame.message ?? "头脑风暴出错");
+            setErr(frame.message ?? tr("头脑风暴出错", "Brainstorm error"));
           }
         } else if (frame.kind === "done") {
           if (frame.degraded) setDegraded(true);
@@ -737,23 +754,24 @@ function BrainstormCard() {
   return (
     <div>
       <p className="mb-3 text-sm text-mast-text">
-        <strong>🧠 头脑风暴</strong> — 多 agent 就当前实验与进度讨论；你也可加观点。
+        <strong>{tr("🧠 头脑风暴", "🧠 Brainstorm")}</strong>{" "}
+        {tr("— 多 agent 就当前实验与进度讨论；你也可加观点。", "— multiple agents discuss the current experiment and its progress; you can add your own viewpoints.")}
       </p>
       <div className="space-y-3">
-        {/* Old row: 议题 + 实验ID(可空=global) */}
+        {/* Old row: topic + experiment ID (empty = global) */}
         <div className="flex flex-wrap gap-3">
           <label className="flex flex-[2] flex-col gap-1 text-xs text-mast-muted">
-            议题
+            {tr("议题", "Topic")}
             <input
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
-              placeholder="如：下一步如何提升分辨率"
+              placeholder={tr("如：下一步如何提升分辨率", "e.g. how to improve resolution next")}
               disabled={streaming}
               className="rounded border border-mast-border bg-mast-bg px-2 py-1 text-sm text-mast-text disabled:opacity-60"
             />
           </label>
           <label className="flex flex-1 flex-col gap-1 text-xs text-mast-muted">
-            实验ID(可空=global)
+            {tr("实验ID(可空=global)", "Experiment ID (empty = global)")}
             <input
               value={experimentId}
               onChange={(e) => setExperimentId(e.target.value)}
@@ -763,7 +781,7 @@ function BrainstormCard() {
           </label>
         </div>
         <label className="flex flex-col gap-1 text-xs text-mast-muted">
-          你的观点(每行一条)
+          {tr("你的观点(每行一条)", "Your viewpoints (one per line)")}
           <textarea
             value={viewpoints}
             onChange={(e) => setViewpoints(e.target.value)}
@@ -778,20 +796,20 @@ function BrainstormCard() {
             disabled={streaming}
             className="rounded bg-mast-accent/20 px-3 py-1.5 text-sm text-mast-accent hover:bg-mast-accent/30 disabled:opacity-50"
           >
-            {streaming ? "⏳ 讨论进行中…" : "发起讨论"}
+            {streaming ? tr("⏳ 讨论进行中…", "⏳ Discussion in progress…") : tr("发起讨论", "Start discussion")}
           </button>
           {streaming && (
             <button
               onClick={stop}
               className="rounded border border-mast-border px-3 py-1.5 text-sm text-mast-text hover:bg-mast-bg/60"
             >
-              停止
+              {tr("停止", "Stop")}
             </button>
           )}
         </div>
 
-        {err && <p className="text-sm text-mast-danger">失败：{err}</p>}
-        {degraded && <DegradedNote what="认知后端" />}
+        {err && <p className="text-sm text-mast-danger">{tr("失败：", "Failed: ")}{err}</p>}
+        {degraded && <DegradedNote what={tr("认知后端", "Cognition backend")} />}
         {note && !degraded && <p className="text-xs text-mast-muted">{note}</p>}
 
         {ran && !degraded && (
@@ -822,16 +840,16 @@ function BrainstormTranscript({
 }) {
   if (rounds.length === 0 && !summary) {
     return streaming ? (
-      <p className="mt-2 text-xs text-mast-muted">讨论进行中…</p>
+      <p className="mt-2 text-xs text-mast-muted">{tr("讨论进行中…", "Discussion in progress…")}</p>
     ) : (
-      <EmptyNote label="（空）" />
+      <EmptyNote label={tr("（空）", "(empty)")} />
     );
   }
   return (
     <div className="mt-2 space-y-3">
       {rounds.map(([round, turns]) => (
         <div key={round}>
-          <p className="mb-1 text-xs font-semibold text-mast-muted">第 {round} 轮</p>
+          <p className="mb-1 text-xs font-semibold text-mast-muted">{tr(`第 ${round} 轮`, `Round ${round}`)}</p>
           <ul className="space-y-2">
             {turns.map((t, i) => (
               <li
@@ -840,7 +858,7 @@ function BrainstormTranscript({
               >
                 <div className="mb-1 flex items-center gap-1.5 text-xs">
                   <span className="font-semibold text-mast-text">
-                    {t.speaker || t.role || "发言"}
+                    {t.speaker || t.role || tr("发言", "Speaker")}
                   </span>
                   {t.viewpoint && <Badge tone="INFO">{t.viewpoint}</Badge>}
                 </div>
@@ -853,14 +871,14 @@ function BrainstormTranscript({
 
       {summary && (
         <div className="rounded border border-mast-accent/40 bg-mast-accent/5 p-2">
-          <p className="mb-1 text-xs font-semibold text-mast-accent">综合摘要</p>
+          <p className="mb-1 text-xs font-semibold text-mast-accent">{tr("综合摘要", "Combined summary")}</p>
           <Markdownish text={summary} />
         </div>
       )}
 
       {writtenIds.length > 0 && (
         <div className="text-xs text-mast-muted">
-          <span className="font-semibold">已写入记忆：</span>
+          <span className="font-semibold">{tr("已写入记忆：", "Written to memory:")}</span>
           <ul className="ml-4 list-disc">
             {writtenIds.map((p) => (
               <li key={p}>

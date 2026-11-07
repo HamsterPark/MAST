@@ -35,6 +35,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from mast.i18n import tr
+
 logger = logging.getLogger(__name__)
 
 #: Fraction of the free-oscillation baseline above which the tip counts as
@@ -113,16 +115,25 @@ def capture_qplus_baseline(context, *, note: str = "") -> dict[str, Any]:
 
         res = ReadTipOscillationAmplitude().execute(context, {"set_baseline": True})
         data = getattr(res, "data", None) or {}
-        if data.get("status") != "ok":
+        # 基线可以被**拒绝**(读不到激励状态 / 散布像噪声底):那时读数照样
+        # ``status == "ok"``,但 ``baseline_set`` 是 False、技能 success=False。只看
+        # status 会把一次被拒的记录报成「已记录」—— 正是本函数要防的那种假装成功。
+        if data.get("status") != "ok" or not data.get("baseline_set"):
             return {"qplus_baseline_captured": False,
-                    "qplus_baseline_note": data.get("note", "振幅通道不可用")}
+                    "qplus_baseline_note": (data.get("note")
+                                            or getattr(res, "error", None)
+                                            or tr("振幅通道不可用",
+                                                  "Amplitude channel unavailable"))}
         return {"qplus_baseline_captured": True,
                 "qplus_baseline": data.get("amplitude"),
-                "qplus_baseline_note": note or "已在确认脱离后记录自由振荡基线"}
+                "qplus_baseline_excited": data.get("baseline_excited"),
+                "qplus_baseline_note": note or tr("已在确认脱离后记录自由振荡基线",
+                                                  "Free-oscillation baseline recorded after "
+                                                  "confirmed disengagement")}
     except Exception as exc:  # noqa: BLE001
         logger.debug("qplus baseline capture failed: %s", exc)
         return {"qplus_baseline_captured": False,
-                "qplus_baseline_note": f"基线记录失败:{exc}"}
+                "qplus_baseline_note": tr(f"基线记录失败:{exc}", f"Baseline capture failed: {exc}")}
 
 
 def qplus_recovered(context) -> tuple[bool | None, str]:
@@ -137,30 +148,52 @@ def qplus_recovered(context) -> tuple[bool | None, str]:
     lean on the current check, not as agreement."""
     try:
         from mast.skills.builtins.qplus_amplitude import (
-            ReadTipOscillationAmplitude, _get_baseline,
+            ReadTipOscillationAmplitude, _excitation_state, _get_baseline,
+            baseline_excitation, crash_fraction_for,
         )
 
         res = ReadTipOscillationAmplitude().execute(context, {})
         data = getattr(res, "data", None) or {}
         if data.get("status") != "ok":
-            return None, str(data.get("note") or "振幅通道不可用 —— 这条判据用不上")
+            return None, str(data.get("note") or tr("振幅通道不可用 —— 这条判据用不上",
+                                                    "Amplitude channel unavailable -- "
+                                                    "this criterion cannot be used"))
         base = _get_baseline(context)
         if not base or base <= 0:
-            return None, "没有自由振荡基线,无法判断振幅是否已恢复"
+            return None, tr("没有自由振荡基线,无法判断振幅是否已恢复",
+                            "No free-oscillation baseline, so it cannot be judged whether "
+                            "the amplitude has recovered")
+        # 同态比较:基线取于激励开、现在激励关(或反过来)时,两边不是同一个
+        # 量 —— 未驱动读数 / 驱动基线 ≈ 0.1,会被读成「仍在接触」而挡住换位。读不到激励
+        # 状态时保持旧行为(这条检查只做加法,不让一个读不到的 PLL 把证人整个撤掉)。
+        base_exc, _legacy = baseline_excitation()
+        exc_now, _ = _excitation_state(context)
+        if exc_now is not None and exc_now != base_exc:
+            return None, tr(f"基线取于激励{'开' if base_exc else '关'},现在激励"
+                            f"{'开' if exc_now else '关'} —— 两种状态下的振幅不能相比,"
+                            "本证人弃权,请依据电流判据。",
+                            f"The baseline was taken with the excitation "
+                            f"{'on' if base_exc else 'off'} and it is now "
+                            f"{'on' if exc_now else 'off'} - the amplitudes in the two "
+                            "states cannot be compared; this witness abstains, rely on the "
+                            "current criterion.")
+        crash_frac = crash_fraction_for(base_exc)
         amp = float(data.get("amplitude") or 0.0)
         frac = amp / float(base)
         if frac >= RECOVERED_FRACTION:
-            return True, (f"qPlus 振幅已恢复到自由振荡基线的 {frac:.0%}"
-                          f"(≥{RECOVERED_FRACTION:.0%}),针尖机械上是自由的。")
+            return True, tr(f"qPlus 振幅已恢复到自由振荡基线的 {frac:.0%}"
+                            f"(≥{RECOVERED_FRACTION:.0%}),针尖机械上是自由的。",
+                            f"qPlus amplitude has recovered to {frac:.0%} of the free-oscillation "
+                            f"baseline (>={RECOVERED_FRACTION:.0%}); the tip is mechanically free.")
 
         # ── 三态,不是两态 ────────────────────────────────────────────────
         #
-        # `_phase_clear` 曾在 **79%** 上判「针尖可能仍在接触,不要横向移动」,
-        # 把整条换位挡死。**这个判定不对**:接触时应表现为**完全不起振**,
-        # 基本上意味着**恒为 0**,理由是物理的 —— **接触会把音叉压死**,振幅塌到
-        # 基线的百分之几,不是塌到 79%。79% 离「死」差着一个数量级。
+        # 曾有一版 `_phase_clear` 在 **79%** 上判「针尖可能仍在接触,不要横向
+        # 移动」,把整条换位挡死。但接触指的是**完全不起振**(振幅恒为 0 附近):
+        # **接触会把音叉压死** —— 振幅塌到基线的百分之几,不是塌到 79%。
+        # 79% 离「死」差着一个数量级。
         #
-        # 更根本的一条(本机已记):**STM 模式下 qPlus 振幅通道基本是噪声**,
+        # 更根本的一条:**STM 模式下 qPlus 振幅通道基本是噪声**,
         # 它唯一可靠的用处就是「振幅归零 = 撞上了」。拿一个噪声通道去卡 80% 这条线,
         # 量的是噪声不是接触。
         #
@@ -173,19 +206,25 @@ def qplus_recovered(context) -> tuple[bool | None, str]:
         #
         # 代价方向也对:判 False 会**挡住换位**(而针尖其实是自由的);判 None 只是
         # 少一个证人,电流那条判据照样要过。**「答不了」不该有「不合格」的权力。**
-        from mast.skills.builtins.qplus_amplitude import _CRASH_FRACTION
-
-        if frac < _CRASH_FRACTION:
-            return False, (f"qPlus 振幅只有自由振荡基线的 {frac:.0%}"
-                           f"(< {_CRASH_FRACTION:.0%} = 音叉被压死)—— "
-                           "针尖**仍在接触**,不要横向移动。")
-        return None, (f"qPlus 振幅是自由振荡基线的 {frac:.0%},落在"
-                      f"{_CRASH_FRACTION:.0%}(压死)与 {RECOVERED_FRACTION:.0%}"
-                      "(确认自由)之间 —— **这个通道在这一段答不了**"
-                      "(STM 下振幅通道基本是噪声,它只在归零时说得准)。"
-                      "本证人弃权,请依据电流判据。")
+        if frac < crash_frac:
+            return False, tr(f"qPlus 振幅只有自由振荡基线的 {frac:.0%}"
+                             f"(< {crash_frac:.0%} = 音叉被压死)—— "
+                             "针尖**仍在接触**,不要横向移动。",
+                             f"qPlus amplitude is only {frac:.0%} of the free-oscillation baseline "
+                             f"(< {crash_frac:.0%} = tuning fork crushed) -- "
+                             "the tip is **still in contact**; do not move laterally.")
+        return None, tr(f"qPlus 振幅是自由振荡基线的 {frac:.0%},落在"
+                        f"{crash_frac:.0%}(压死)与 {RECOVERED_FRACTION:.0%}"
+                        "(确认自由)之间 —— **这个通道在这一段答不了**"
+                        "(STM 下振幅通道基本是噪声,它只在归零时说得准)。"
+                        "本证人弃权,请依据电流判据。",
+                        f"qPlus amplitude is {frac:.0%} of the free-oscillation baseline, between "
+                        f"{crash_frac:.0%} (crushed) and {RECOVERED_FRACTION:.0%} "
+                        "(confirmed free) -- **this channel cannot answer in this range** "
+                        "(under STM the amplitude channel is mostly noise; it is reliable only when "
+                        "it drops to zero). This witness abstains; rely on the current criterion.")
     except Exception as exc:  # noqa: BLE001
-        return None, f"振幅判据不可用:{exc}"
+        return None, tr(f"振幅判据不可用:{exc}", f"Amplitude criterion unavailable: {exc}")
 
 
 def didv_trend_fields(context) -> dict[str, Any]:
@@ -221,36 +260,53 @@ def didv_trend_fields(context) -> dict[str, Any]:
         # 不能直接解释为针尖远离。未知形式必须保持通用读数名称。
         form = str(ip.get_config("lockin_readout_form", "unknown") or "unknown")
         form = form.strip().lower()
-        sym = {"xy": "|X|", "r_phi": "R"}.get(form, "|读数|")
+        sym = {"xy": "|X|", "r_phi": "R"}.get(form, tr("|读数|", "|reading|"))
         out: dict[str, Any] = {"didv_v": didv, "didv_readout_form": form}
 
         cal = ip.get_calibration() or {}
         contact = cal.get("didv_at_contact_v")
         if not isinstance(contact, (int, float)) or not contact:
-            out["didv_note"] = ("尚无「到样品 dI/dV 标定值」(首次成功进针后自动记录);"
-                                "当前只报绝对值,不作距离判断。")
+            out["didv_note"] = tr("尚无「到样品 dI/dV 标定值」(首次成功进针后自动记录);"
+                                  "当前只报绝对值,不作距离判断。",
+                                  "There is no \"at-sample dI/dV calibration value\" yet (recorded "
+                                  "automatically after the first successful approach); only the "
+                                  "absolute value is reported for now, with no distance judgement.")
             return out
         frac = didv / float(contact)
         thresh = float(ip.get_config("approach_didv_engage_frac", 0.7) or 0.7)
         out["didv_frac_of_contact"] = round(frac, 3)
         out["didv_engage_frac_threshold"] = thresh
         if frac >= 1.0:
-            trend = "已达到或超过标定值 —— 按 dI/dV 看已经到样品"
+            trend = tr("已达到或超过标定值 —— 按 dI/dV 看已经到样品",
+                       "reached or exceeded the calibration value -- by dI/dV the tip is at the sample")
         elif frac >= thresh:
-            trend = f"已达标定值的 {frac:.0%}(阈值 {thresh:.0%})—— 接触在望"
+            trend = tr(f"已达标定值的 {frac:.0%}(阈值 {thresh:.0%})—— 接触在望",
+                       f"at {frac:.0%} of the calibration value (threshold {thresh:.0%}) -- contact is near")
         elif frac >= 0.1:
-            trend = f"为标定值的 {frac:.0%} —— 还有距离,继续接近时应指数上升"
+            trend = tr(f"为标定值的 {frac:.0%} —— 还有距离,继续接近时应指数上升",
+                       f"{frac:.0%} of the calibration value -- still some distance away; "
+                       "it should rise exponentially as the approach continues")
         else:
-            trend = f"仅为标定值的 {frac:.1%} —— 离样品还远"
+            trend = tr(f"仅为标定值的 {frac:.1%} —— 离样品还远",
+                       f"only {frac:.1%} of the calibration value -- still far from the sample")
         phase_note = (
-            "（本机以 X/Y 解调:X 是带符号投影,相位在接近途中转动时 |X| 会**穿零**——"
-            "看到非单调下降先怀疑相位,不要读成针尖退开了。）" if form == "xy"
+            tr("（本机以 X/Y 解调:X 是带符号投影,相位在接近途中转动时 |X| 会**穿零**——"
+               "看到非单调下降先怀疑相位,不要读成针尖退开了。）",
+               "(This machine demodulates as X/Y: X is a signed projection, and |X| **crosses zero** "
+               "when the phase rotates during the approach -- if you see a non-monotonic decrease, "
+               "suspect the phase first and do not read it as the tip retreating.) ") if form == "xy"
             else "" if form == "r_phi"
-            else "（本机解调形式未登记:这只是读数绝对值,不保证它是幅度。）")
-        out["didv_note"] = (
+            else tr("（本机解调形式未登记:这只是读数绝对值,不保证它是幅度。）",
+                    "(The demodulation form of this machine is not registered: this is only the "
+                    "absolute value of the reading, not guaranteed to be the amplitude.) "))
+        out["didv_note"] = tr(
             f"dI/dV {sym} = {didv:.4g},{trend}。{phase_note}"
             "（这是**趋势播报**,不是闸门:标定本身靠首次成功进针 bootstrap,"
-            "在它可信之前设硬阈值会误拦真实进针。）")
+            "在它可信之前设硬阈值会误拦真实进针。）",
+            f"dI/dV {sym} = {didv:.4g}, {trend}. {phase_note}"
+            "(This is a **trend report**, not a gate: the calibration itself is bootstrapped from "
+            "the first successful approach, and a hard threshold before it can be trusted would "
+            "wrongly block real approaches.)")
         return out
     except Exception as exc:  # noqa: BLE001 — evidence is a bonus, never a blocker
         logger.debug("didv trend unavailable: %s", exc)

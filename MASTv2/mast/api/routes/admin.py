@@ -22,6 +22,7 @@ integration step.
 
 from __future__ import annotations
 
+from mast.i18n import tr
 import logging
 from typing import Any, Optional
 
@@ -732,8 +733,7 @@ def rescan_sensors(request: Request) -> SensorRescanResponse:
         # ACTUALLY rescan: rebuild the sensor set (enumerate COM ports + re-open
         # devices from the persisted config/autodetect) and swap it into the live
         # monitor. The old code only echoed the current names and returned ok=True
-        # without touching serial, so the "Rescan" button was a no-op (review
-        # 2026-07-03). Falls back to reporting the current set if the rebuild or
+        # without touching serial, so the "Rescan" button was a no-op. Falls back to reporting the current set if the rebuild or
         # replace_sensors API isn't available.
         rebuilt = False
         # Free the bus BEFORE re-probing: a sensor that is already connected
@@ -781,8 +781,9 @@ def rescan_sensors(request: Request) -> SensorRescanResponse:
 
 @router.post("/admin/shutdown")
 def admin_shutdown(request: Request) -> dict:
-    """Graceful service shutdown: close the Nanonis pool + stop daemons, then
-    ask uvicorn to exit. Loopback-only + a one-time token (MAST2_SHUTDOWN_TOKEN)
+    """Graceful service shutdown: send ``safe`` to every connected satellite and
+    wait for the answers (before uvicorn closes the websockets), close the Nanonis
+    pool + stop daemons, then ask uvicorn to exit. Loopback-only + a one-time token (MAST2_SHUTDOWN_TOKEN)
     so it can't be triggered remotely. The launcher calls this BEFORE its
     taskkill fallback so a windowless frozen service stops gracefully instead of
     being TerminateProcess'd mid-TCP (which corrupts the port; review
@@ -799,6 +800,9 @@ def admin_shutdown(request: Request) -> dict:
         token = request.headers.get("x-mast-shutdown-token", "")
         if not secrets.compare_digest(token, expected):
             return {"ok": False, "error": "bad shutdown token"}
+    # 卫星排在最前面：置 should_exit 之后 uvicorn 第一件事就是关掉所有 websocket，那时再发
+    # safe 就送不到了，卫星只能等自己的死人开关。runtime 的关停钩子兜底再调同一个入口，不重发。
+    satellites = _satellites_safe_before_exit()
     ctx = request.app.state.ctx
     app_handle = getattr(ctx, "live_app", None) or getattr(ctx, "app", None)
     closed = False
@@ -816,7 +820,29 @@ def admin_shutdown(request: Request) -> dict:
         except Exception:  # pragma: no cover
             pass
     _arm_exit_backstop()
-    return {"ok": True, "pool_closed": closed, "exiting": server is not None}
+    return {"ok": True, "pool_closed": closed, "exiting": server is not None,
+            "satellites": satellites}
+
+
+def _satellites_safe_before_exit() -> dict:
+    """对每颗已连接的卫星的每个设备发 safe，并等回话（最多
+    ``mast.satellite.hub.SHUTDOWN_SAFE_WAIT_S``）；超时只记日志、照常关停。永不抛。
+
+    返回给调用方看的摘要：``{"confirmed": {卫星: [设备]}, "unconfirmed": …, "unreachable": [卫星]}``。
+    没有卫星枢纽（从没有卫星连过）就什么都不做 —— 不为关停去造一个。"""
+    try:
+        from mast.satellite.hub import peek_satellite_hub
+
+        hub = peek_satellite_hub()
+        if hub is None:
+            return {}
+        out = hub.safe_for_shutdown("MAST 关停")
+        return {"confirmed": out.get("confirmed") or {},
+                "unconfirmed": out.get("unconfirmed") or {},
+                "unreachable": [u.get("id") for u in out.get("unreachable") or []]}
+    except Exception as exc:  # noqa: BLE001 — 关停不能被卫星这一步挡住
+        logger.warning("admin_shutdown: 卫星 safe 没做成（照常关停）：%s", exc)
+        return {"error": f"{type(exc).__name__}: {exc}"}
 
 
 #: How long the process may take to exit on its own after a graceful shutdown
@@ -872,7 +898,8 @@ def _arm_exit_backstop() -> None:
             from mast.core.diagnostics import record as _diag
 
             _diag("shutdown_backstop", "admin",
-                  "graceful shutdown 后进程未退出,已强制结束",
+                  tr("graceful shutdown 后进程未退出,已强制结束",
+                     "Process did not exit after graceful shutdown; forced exit"),
                   threads=[t.name for t in alive])
         except Exception:  # noqa: BLE001
             pass
@@ -1141,7 +1168,7 @@ def get_prompt(request: Request, prompt_id: str, response: Response) -> PromptDe
     if entry is None:
         response.status_code = status.HTTP_404_NOT_FOUND
         return PromptDetail(id=prompt_id, label=prompt_id,
-                            unavailable_reason="未知的注入话术 ID")
+                            unavailable_reason=tr("未知的注入话术 ID", "Unknown injection prompt ID"))
     kw, (default_text, override_text, effective) = _prompt_summary_kwargs(entry)
     return PromptDetail(**kw, default_text=default_text,
                         override_text=override_text, effective_text=effective)
@@ -1164,16 +1191,17 @@ def write_prompt_override(
     except Exception as exc:  # noqa: BLE001
         logger.warning("prompt registry unavailable: %s", exc)
         return PromptOverrideResponse(prompt_id=prompt_id, degraded=True,
-                                      message="内核未接入，写入未生效。")
+                                      message=tr("内核未接入，写入未生效。", "Kernel not attached; the write did not take effect."))
     entry = reg.get_entry(prompt_id)
     if entry is None:
         response.status_code = status.HTTP_404_NOT_FOUND
-        return PromptOverrideResponse(prompt_id=prompt_id, message="未知的注入话术 ID")
+        return PromptOverrideResponse(prompt_id=prompt_id, message=tr("未知的注入话术 ID", "Unknown injection prompt ID"))
     if not entry.overridable:
         response.status_code = status.HTTP_400_BAD_REQUEST
         return PromptOverrideResponse(
             prompt_id=prompt_id,
-            message="该注入块的内容由运行时状态计算，没有可替换的固定文本。",
+            message=tr("该注入块的内容由运行时状态计算，没有可替换的固定文本。",
+                       "The content of this injection block is computed from runtime state; there is no fixed text to replace."),
         )
     text = body.text or ""
     try:
@@ -1184,16 +1212,17 @@ def write_prompt_override(
     except Exception as exc:  # noqa: BLE001
         logger.warning("prompt override write failed for %s: %s", prompt_id, exc)
         return PromptOverrideResponse(prompt_id=prompt_id, degraded=True,
-                                      message="写入失败。")
+                                      message=tr("写入失败。", "Write failed."))
     _, override_text, effective, _ = _prompt_bodies(entry)
     return PromptOverrideResponse(
         ok=ok, prompt_id=prompt_id,
         overridden=bool((override_text or "").strip()),
         effective_chars=len(effective),
-        message=(("已保存；" if text.strip() else "已恢复默认；")
-                 + ("下一次编排器重建（或重启）后生效。"
+        message=((tr("已保存；", "Saved; ") if text.strip() else tr("已恢复默认；", "Restored the default; "))
+                 + (tr("下一次编排器重建（或重启）后生效。",
+                       "takes effect after the next orchestrator rebuild (or restart).")
                     if entry.category == "agent_system"
-                    else "下一次模型调用即生效。")),
+                    else tr("下一次模型调用即生效。", "takes effect on the next model call."))),
         degraded=not ok,
     )
 
@@ -1241,10 +1270,12 @@ def list_prompt_capture(request: Request) -> PromptCaptureListResponse:
     if items:
         note = ""
     elif not ring.enabled:
-        note = "快照记录已关闭，因此这里是空的 —— 不是没有发生过模型调用。"
+        note = tr("快照记录已关闭，因此这里是空的 —— 不是没有发生过模型调用。", "Snapshot recording is off, so this is empty - not because no model calls happened.")
     else:
-        note = ("本进程还没有发生过模型调用，所以没有可展示的真实注入。"
-                "这里只记录真实请求，不做离线模拟渲染。")
+        note = tr("本进程还没有发生过模型调用，所以没有可展示的真实注入。"
+                  "这里只记录真实请求，不做离线模拟渲染。",
+                  "No model call has happened in this process yet, so there is no real injection to show. "
+                  "Only real requests are recorded here; nothing is rendered offline.")
     return PromptCaptureListResponse(
         items=items, count=len(items), enabled=ring.enabled,
         total_seen=ring.total_seen, capacity=cap.MAX_SNAPSHOTS, note=note,

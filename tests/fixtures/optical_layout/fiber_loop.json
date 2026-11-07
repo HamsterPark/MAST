@@ -1,0 +1,251 @@
+{
+  "name": "fiber_loop",
+  "description": "A fibre link whose output beam is folded back onto its own input: the second arrival at FO1's wavelength does not start another tree (one tree per fibre output and wavelength).",
+  "layout": {
+    "schema": 1,
+    "id": "fiberloop",
+    "title": "Fibre loop",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 150.0,
+        "y_mm": 150.0,
+        "angle_deg": 270.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "fi1",
+        "type": "fiber_in",
+        "label": "FI1",
+        "x_mm": 150.0,
+        "y_mm": 62.5,
+        "angle_deg": 90.0,
+        "aperture_mm": 5.0,
+        "props": {
+          "continues_at": "fo1"
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "fo1",
+        "type": "fiber_out",
+        "label": "FO1",
+        "x_mm": 300.0,
+        "y_mm": 62.5,
+        "angle_deg": 90.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "m1",
+        "type": "mirror",
+        "label": "M1",
+        "x_mm": 300.0,
+        "y_mm": 300.0,
+        "angle_deg": 225.0,
+        "aperture_mm": 25.4,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "m2",
+        "type": "mirror",
+        "label": "M2",
+        "x_mm": 150.0,
+        "y_mm": 300.0,
+        "angle_deg": 315.0,
+        "aperture_mm": 25.4,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 150.0,
+              "y0": 150.0,
+              "x1": 150.0,
+              "y1": 62.5
+            }
+          ],
+          "events": [
+            {
+              "component": "fi1",
+              "action": "stop",
+              "x": 150.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 87.5
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "fo1",
+      "wavelength_nm": 532.0,
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 300.0,
+              "y0": 62.5,
+              "x1": 300.0,
+              "y1": 300.0
+            },
+            {
+              "x0": 300.0,
+              "y0": 300.0,
+              "x1": 150.0,
+              "y1": 300.0
+            },
+            {
+              "x0": 150.0,
+              "y0": 300.0,
+              "x1": 150.0,
+              "y1": 62.5
+            }
+          ],
+          "events": [
+            {
+              "component": "m1",
+              "action": "reflect",
+              "x": 300.0,
+              "y": 300.0,
+              "offset_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 237.5
+            },
+            {
+              "component": "m2",
+              "action": "reflect",
+              "x": 150.0,
+              "y": 300.0,
+              "offset_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 387.5
+            },
+            {
+              "component": "fi1",
+              "action": "stop",
+              "x": 150.0,
+              "y": 62.5,
+              "offset_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 625.0
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ]
+}

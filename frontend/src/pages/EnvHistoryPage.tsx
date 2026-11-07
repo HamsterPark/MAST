@@ -21,12 +21,13 @@ import {
 } from "@/lib/envHistory";
 import { ENV_HISTORY_SERIES_POLL_MS, ENV_HISTORY_STATUS_POLL_MS } from "@/lib/pollRates";
 import { useStickyTab } from "@/hooks/useStickyTab";
+import { tr } from "@/lib/i18n";
 
 type Status = components["schemas"]["EnvHistoryStatus"];
 type Series = components["schemas"]["EnvSeriesResponse"];
 type SpectraList = components["schemas"]["SpectraListResponse"];
 
-// 环境历史 — the long-term record of the things that are true of the machine
+// Environment history — the long-term record of the things that are true of the machine
 // rather than of the measurement: temperature, vacuum, helium, field, the
 // current the tip sits at while nobody is driving it, and the noise spectra.
 //
@@ -43,7 +44,7 @@ type SpectraList = components["schemas"]["SpectraListResponse"];
 // the extremes and the worst status survive the merge, so zooming out can never
 // hide an excursion that really happened.
 //
-// 隧道电流 is gated: only readings taken while nothing was driving the
+// Tunnelling current is gated: only readings taken while nothing was driving the
 // instrument are counted, because during a scan that signal is topography, not
 // environment. The gaps are real and `instrument_quiet` explains them.
 
@@ -67,25 +68,26 @@ const PREFERRED = ["temperature", "vacuum", "helium_level", "tunnel_current"];
 type View = "series" | "spectra";
 
 const VIEWS: { value: View; label: string }[] = [
-  { value: "series", label: "趋势" },
-  { value: "spectra", label: "噪声谱" },
+  { value: "series", label: tr("趋势", "Trends") },
+  { value: "spectra", label: tr("噪声谱", "Noise spectra") },
 ];
 
 export default function EnvHistoryPage() {
-  // 噪声谱是「看一眼别处再回来接着看」的典型,每次回来弹回「趋势」
-  // 等于每次重选。这一页的切换器是 RadioGroup 不是 SubTabs,记忆机制无关。
+  // The noise-spectrum view is one operators look at, leave, and come back to, so
+  // the selected view is remembered. This page's switcher is a RadioGroup, not
+  // SubTabs, so the SubTabs memory mechanism does not apply.
   const [view, setView] = useStickyTab<View>(
     "env-history.view", VIEWS.map((v) => v.value), "series");
   const [sensor, setSensor] = useState<string>("");
-  // 对比序列。SPM 和 Magnet 不是同时保存——
-  // 后端一直是**一个 tick 读全部传感器、一个时间基准落库**，两条曲线本来就该
-  // 落在同一个桶格上。但这一页一次只画一条，用户只能来回切换看，
-  // 而来回切换看到的正是「两段互不重叠的数据」——那是 COM13 句柄争用的表征，
-  // 不是排程。叠起来才看得见它们同不同时。
+  // Comparison series. The backend reads all sensors in one tick and stores them
+  // on one time base, so two curves should land on the same bucket grid. Showing
+  // one curve at a time and flipping between them would instead look like two
+  // non-overlapping data sets (a symptom of serial-port handle contention, not of
+  // scheduling); overlaying them makes simultaneity visible.
   const [compareSensor, setCompareSensor] = useState<string>("");
-  // 存的是**跨度本身**，不是 RANGES 里的下标。加 48 小时那一档时这里原本写的是
-  // `useState(1) // 24 小时` —— 一个由数组行序承重的默认值，往中间插一项就会静默
-  // 改掉默认档，而注释仍然理直气壮地写着旧标签。`null` 是「全部」，是合法取值。
+  // Stores the span itself, not an index into RANGES: an index-based default
+  // silently changes meaning when an entry is inserted. `null` means "all" and
+  // is a valid value.
   const [rangeS, setRangeS] = useState<number | null>(86400);
   const [channel, setChannel] = useState<string>("current");
   const [primaryId, setPrimaryId] = useState<number | null>(null);
@@ -139,7 +141,7 @@ export default function EnvHistoryPage() {
     refetchInterval: ENV_HISTORY_SERIES_POLL_MS,
   });
 
-  // 同一个窗口、同一套参数取第二条 —— 只有这样两条曲线才可比。
+  // Fetch the second series with the same window and parameters; only then are the two curves comparable.
   const compareSeries = useQuery({
     queryKey: ["env-history", "series", compareSensor, window.since ?? "all"],
     enabled: !!compareSensor && compareSensor !== sensor,
@@ -187,9 +189,10 @@ export default function EnvHistoryPage() {
   const worst = worstOf(points);
   const cover = coverageOf(points);
   const unit = series.data?.unit ?? "";
-  // 只提供**同单位**的对比项。开尔文对开尔文可比，开尔文对帕斯卡不可比，
-  // 而后者要么得配第二根 Y 轴（相对高低由画图人定，会诱导出没人测过的相关性），
-  // 要么就得把两个量硬塞进一根轴。所以在选项里就不给。
+  // Only offer comparison series with the same unit. Kelvin against kelvin is
+  // comparable; kelvin against pascal would need a second Y axis (whose relative
+  // height is the plotter's choice and suggests correlations nobody measured) or
+  // forcing two quantities onto one axis, so such options are not offered.
   const comparePoints =
     compareSensor && compareSensor !== sensor ? (compareSeries.data?.points ?? []) : [];
   const compareCover = coverageOf(comparePoints);
@@ -197,33 +200,36 @@ export default function EnvHistoryPage() {
   return (
     <div className="p-5">
       <Section
-        title="环境历史"
-        subtitle="温度 / 真空 / 液氦 / 磁场 / 隧道电流的长期记录，以及噪声谱快照。全部读本地库，不占用仪器通信。"
+        title={tr("环境历史", "Environment history")}
+        subtitle={tr(
+          "温度 / 真空 / 液氦 / 磁场 / 隧道电流的长期记录，以及噪声谱快照。全部读本地库，不占用仪器通信。",
+          "Long-term record of temperature / vacuum / liquid helium / field / tunnelling current, plus noise-spectrum snapshots. Everything is read from the local store and uses no instrument communication.",
+        )}
         actions={
           <RadioGroup value={view} onChange={setView} options={VIEWS} />
         }
       >
-        {degraded && <DegradedNote what="环境历史" />}
+        {degraded && <DegradedNote what={tr("环境历史", "Environment history")} />}
         <RecorderStatusCard status={st} loading={status.isLoading} />
       </Section>
 
       {view === "series" ? (
-        <Section title="趋势">
+        <Section title={tr("趋势", "Trends")}>
           <Card>
             <div className="mb-3 flex flex-wrap items-end gap-3">
-              <Field label="序列">
+              <Field label={tr("序列", "Series")}>
                 <SelectField
                   value={sensor}
                   onChange={setSensor}
                   options={names.map((n) => ({ value: n, label: n }))}
                 />
               </Field>
-              <Field label="叠加对比">
+              <Field label={tr("叠加对比", "Overlay comparison")}>
                 <SelectField
                   value={compareSensor}
                   onChange={setCompareSensor}
                   options={[
-                    { value: "", label: "（不对比）" },
+                    { value: "", label: tr("（不对比）", "(no comparison)") },
                     ...names
                       .filter((n) => n !== sensor && unitOf(sensors.data, n) === unit)
                       .map((n) => ({ value: n, label: n })),
@@ -231,7 +237,7 @@ export default function EnvHistoryPage() {
                 />
               </Field>
               <div>
-                <div className="mb-1 text-xs text-mast-faint">时间范围</div>
+                <div className="mb-1 text-xs text-mast-faint">{tr("时间范围", "Time range")}</div>
                 <div className="flex flex-wrap gap-1">
                   {RANGES.map((r) => (
                     <Button
@@ -245,44 +251,58 @@ export default function EnvHistoryPage() {
                 </div>
               </div>
               <div className="ml-auto flex items-center gap-2 text-xs">
-                {/* 色调按严重度给，不再把 unavailable（最轻的非 ok）画成和 alarm
-                    一样的红。 */}
+                {/* Tone follows severity: "unavailable" (the mildest non-ok) is not drawn as red as "alarm". */}
                 {worst !== "ok" && <Badge tone={statusTone(worst)}>{statusLabel(worst)}</Badge>}
                 {cover.excluded > 0 && (
                   <span
                     className="text-mast-faint"
-                    title={
+                    title={tr(
                       "被排除的读数：传感器当时没给出有效值（多个通道共用一个串口时，" +
-                      "同一时刻只有一个拿得到句柄，另一个就是空的），" +
-                      "或者（隧道电流）仪器当时正在被驱动 —— 那种情况下这个信号是形貌不是环境。" +
-                      "它们不进统计。"
-                    }
+                        "同一时刻只有一个拿得到句柄，另一个就是空的），" +
+                        "或者（隧道电流）仪器当时正在被驱动 —— 那种情况下这个信号是形貌不是环境。" +
+                        "它们不进统计。",
+                      "Excluded readings: the sensor returned no valid value at the time " +
+                        "(when several channels share one serial port only one can hold the handle " +
+                        "at a time and the other reads empty), or (tunnelling current) the instrument " +
+                        "was being driven, in which case the signal is topography, not environment. " +
+                        "They are not counted in the statistics.",
+                    )}
                   >
-                    已计入 {cover.counted} 条 · 未计入 {cover.excluded} 条
+                    {tr(
+                      `已计入 ${cover.counted} 条 · 未计入 ${cover.excluded} 条`,
+                      `${cover.counted} counted · ${cover.excluded} excluded`,
+                    )}
                   </span>
                 )}
               </div>
             </div>
 
-            {/* 两条序列的计入/未计入并排 —— 这就是「同不同时保存」的可查答案。
-                共用一个串口时，同一时刻只有一个拿得到句柄，于是两边的
-                已计入/未计入会**恰好互补**；都在涨才说明两路都在记。 */}
+            {/* Counted / excluded for both series side by side answer "are they saved
+                at the same time?". With a shared serial port only one channel holds the
+                handle at a time, so the two sides come out exactly complementary; both
+                counts growing means both channels are recording. */}
             {compareSensor && compareSensor !== sensor && (
               <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-mast-muted">
                 <span>
-                  {sensor}：已计入 <span className="tabular-nums">{cover.counted}</span> · 未计入{" "}
+                  {sensor}{tr("：已计入 ", ": counted ")}
+                  <span className="tabular-nums">{cover.counted}</span>
+                  {tr(" · 未计入 ", " · excluded ")}
                   <span className="tabular-nums">{cover.excluded}</span>
                 </span>
                 <span>
-                  {compareSensor}：已计入{" "}
-                  <span className="tabular-nums">{compareCover.counted}</span> · 未计入{" "}
+                  {compareSensor}{tr("：已计入 ", ": counted ")}
+                  <span className="tabular-nums">{compareCover.counted}</span>
+                  {tr(" · 未计入 ", " · excluded ")}
                   <span className="tabular-nums">{compareCover.excluded}</span>
                 </span>
                 {cover.counted > 0 && compareCover.counted > 0 ? (
-                  <span className="text-mast-auto">两路都在记录</span>
+                  <span className="text-mast-auto">{tr("两路都在记录", "Both channels are recording")}</span>
                 ) : (
                   <span className="text-mast-warn">
-                    只有一路有读数——多为共用串口时另一路拿不到句柄
+                    {tr(
+                      "只有一路有读数——多为共用串口时另一路拿不到句柄",
+                      "Only one channel has readings, usually because the other could not get the shared serial port handle",
+                    )}
                   </span>
                 )}
               </div>
@@ -291,17 +311,24 @@ export default function EnvHistoryPage() {
             {series.isLoading && <Spinner />}
             {series.error != null && <ErrorNote error={series.error} />}
             {!series.isLoading && !series.error && !names.length && (
-              <EmptyNote label="还没有任何历史。记录器需要跑够一个统计桶（默认一分钟）才会出现第一个点。" />
+              <EmptyNote
+                label={tr(
+                  "还没有任何历史。记录器需要跑够一个统计桶（默认一分钟）才会出现第一个点。",
+                  "No history yet. The recorder needs to fill one statistics bucket (one minute by default) before the first point appears.",
+                )}
+              />
             )}
-            {/* 有桶但一个值都画不出来 —— 从前这里渲染一张空白图表，不说任何话。
-                「这个传感器这段时间没给出过有效读数」是一个事实，不是空状态。 */}
+            {/* Buckets exist but nothing is drawable: "this sensor gave no valid reading in
+                this period" is a fact to state, not an empty state. */}
             {!series.isLoading && !series.error && !!names.length && !!sensor &&
               cover.buckets > 0 && cover.drawable === 0 && (
                 <EmptyNote
-                  label={
+                  label={tr(
                     `${sensor} 在这个时间范围内没有任何有效读数（${cover.buckets} 个统计桶，` +
-                    `${cover.excluded} 条读数全部被排除）。记录器一直在跑 —— 是这个传感器没读到值。`
-                  }
+                      `${cover.excluded} 条读数全部被排除）。记录器一直在跑 —— 是这个传感器没读到值。`,
+                    `${sensor} has no valid readings in this time range (${cover.buckets} statistics buckets, ` +
+                      `all ${cover.excluded} readings excluded). The recorder is running; the sensor simply returned no values.`,
+                  )}
                 />
               )}
             {!series.isLoading && !series.error && !!names.length && (
@@ -321,10 +348,10 @@ export default function EnvHistoryPage() {
           </Card>
         </Section>
       ) : (
-        <Section title="噪声谱">
+        <Section title={tr("噪声谱", "Noise spectra")}>
           <Card>
             <div className="mb-3 flex flex-wrap items-end gap-3">
-              <Field label="通道">
+              <Field label={tr("通道", "Channel")}>
                 <SelectField
                   value={channel}
                   onChange={setChannel}
@@ -334,7 +361,7 @@ export default function EnvHistoryPage() {
                   ]}
                 />
               </Field>
-              <Field label="快照">
+              <Field label={tr("快照", "Snapshot")}>
                 <SelectField
                   value={primaryId == null ? "" : String(primaryId)}
                   onChange={(v) => setPrimaryId(v ? Number(v) : null)}
@@ -344,12 +371,12 @@ export default function EnvHistoryPage() {
                   }))}
                 />
               </Field>
-              <Field label="对比">
+              <Field label={tr("对比", "Compare")}>
                 <SelectField
                   value={compareId == null ? "" : String(compareId)}
                   onChange={(v) => setCompareId(v ? Number(v) : null)}
                   options={[
-                    { value: "", label: "（不对比）" },
+                    { value: "", label: tr("（不对比）", "(no comparison)") },
                     ...metas
                       .filter((m) => m.id !== primaryId)
                       .map((m) => ({
@@ -368,8 +395,10 @@ export default function EnvHistoryPage() {
             )}
             {channel === "z" && !metas.length && (
               <p className="mt-2 text-xs text-mast-faint">
-                Z 噪声谱默认关闭（设置 → 环境历史 → 记录 Z 噪声谱）。它是这套记录里唯一会主动
-                占用仪器通信的部分，需要 Osci2T 双通道模块。
+                {tr(
+                  "Z 噪声谱默认关闭（设置 → 环境历史 → 记录 Z 噪声谱）。它是这套记录里唯一会主动占用仪器通信的部分，需要 Osci2T 双通道模块。",
+                  "The Z noise spectrum is off by default (Settings → Environment history → Record Z noise spectrum). It is the only part of this recording that actively uses instrument communication, and it needs the Osci2T dual-channel module.",
+                )}
               </p>
             )}
           </Card>
@@ -424,41 +453,70 @@ function RecorderStatusCard({ status, loading }: { status?: Status; loading: boo
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
         <span className="flex items-center gap-2">
           <Badge tone={status.recording ? "AUTO" : "INFO"}>
-            {status.recording ? "记录中" : status.enabled ? "已暂停" : "已关闭"}
+            {status.recording
+              ? tr("记录中", "Recording")
+              : status.enabled
+                ? tr("已暂停", "Paused")
+                : tr("已关闭", "Off")}
           </Badge>
           {disabled && (
-            <span className="text-mast-warn" title="写入失败后自动静默 60 秒，随后自行恢复。实时监控与 CSV 不受影响。">
-              写入暂时禁用
+            <span
+              className="text-mast-warn"
+              title={tr(
+                "写入失败后自动静默 60 秒，随后自行恢复。实时监控与 CSV 不受影响。",
+                "After a write failure, writing is silenced for 60 s and then resumes by itself. Live monitoring and CSV are unaffected.",
+              )}
+            >
+              {tr("写入暂时禁用", "Writing temporarily disabled")}
             </span>
           )}
         </span>
-        <Stat label="聚合粒度" value={fmtSpan(status.bucket_s ?? 0)} />
-        <Stat label="统计桶" value={`${num(store.bucket_rows)} 条`} />
-        <Stat label="噪声谱" value={`${num(store.spectra_rows)} 条`} />
-        <Stat label="库大小" value={fmtBytes(num(store.db_bytes))} />
+        <Stat label={tr("聚合粒度", "Aggregation")} value={fmtSpan(status.bucket_s ?? 0)} />
+        <Stat label={tr("统计桶", "Buckets")} value={tr(`${num(store.bucket_rows)} 条`, `${num(store.bucket_rows)} rows`)} />
+        <Stat label={tr("噪声谱", "Noise spectra")} value={tr(`${num(store.spectra_rows)} 条`, `${num(store.spectra_rows)} rows`)} />
+        <Stat label={tr("库大小", "Store size")} value={fmtBytes(num(store.db_bytes))} />
         {cur && (
           <Stat
-            label="电流谱"
+            label={tr("电流谱", "Current spectrum")}
             value={
               cur.last_ts
-                ? `${fmtTs(cur.last_ts)}（攒 ${cur.n_accum ?? 0} 段）`
-                : `攒 ${cur.n_accum ?? 0} 段`
+                ? tr(
+                    `${fmtTs(cur.last_ts)}（攒 ${cur.n_accum ?? 0} 段）`,
+                    `${fmtTs(cur.last_ts)} (${cur.n_accum ?? 0} segments accumulated)`,
+                  )
+                : tr(`攒 ${cur.n_accum ?? 0} 段`, `${cur.n_accum ?? 0} segments accumulated`)
             }
             hint={
               cur.insufficient_quiet
-                ? "窗口早已到点但安静段一直不够——仪器长时间在忙。窗口会自动延长。"
+                ? tr(
+                    "窗口早已到点但安静段一直不够——仪器长时间在忙。窗口会自动延长。",
+                    "The window is overdue but there have not been enough quiet segments because the instrument has been busy. The window extends automatically.",
+                  )
                 : undefined
             }
           />
         )}
         {status.z_enabled && z && (
-          <Stat label="Z 谱" value={z.last_ts ? fmtTs(z.last_ts) : String((z.last_result as Record<string, unknown> | undefined)?.skipped ?? "等待安静窗口")} />
+          <Stat
+            label={tr("Z 谱", "Z spectrum")}
+            value={
+              z.last_ts
+                ? fmtTs(z.last_ts)
+                : String(
+                    (z.last_result as Record<string, unknown> | undefined)?.skipped ??
+                      tr("等待安静窗口", "waiting for a quiet window"),
+                  )
+            }
+          />
         )}
         {sweep.cutoff != null && (
           <Stat
-            label="上次清扫"
-            value={`删 ${num(sweep.rows_pruned)} 条`}
-            hint={`早于 ${String(sweep.cutoff).slice(0, 19)} 的逐条读数已清理（告警行永久保留）`}
+            label={tr("上次清扫", "Last sweep")}
+            value={tr(`删 ${num(sweep.rows_pruned)} 条`, `${num(sweep.rows_pruned)} rows removed`)}
+            hint={tr(
+              `早于 ${String(sweep.cutoff).slice(0, 19)} 的逐条读数已清理（告警行永久保留）`,
+              `Per-reading rows older than ${String(sweep.cutoff).slice(0, 19)} were removed (alert rows are kept permanently)`,
+            )}
           />
         )}
       </div>

@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from mast.i18n import tr
+
 logger = logging.getLogger(__name__)
 
 _HLC_RE = re.compile(r"^(\d{13})-(\d{4})-(.+)$")
@@ -113,7 +115,7 @@ def _goal_progress_of(row: dict) -> dict:
 
         return _goal_progress(row)
     except Exception:  # noqa: BLE001
-        return {"verdict": "unknown", "reason": "判据模块不可用"}
+        return {"verdict": "unknown", "reason": tr("判据模块不可用", "Criterion module unavailable")}
 
 
 def _campaigns(repos) -> list[dict]:

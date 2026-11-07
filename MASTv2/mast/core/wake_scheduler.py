@@ -51,6 +51,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -155,18 +156,24 @@ class WakeScheduler:
 
       * ``should_wake()`` — idle predicate. Wired to "no foreground run active", so
         the scheduler and the mainline supervisor never decide at the same time.
+      * ``enabled()`` — master switch, wired to the
+        ``legacy_features_enabled`` setting (DEFAULT OFF) through
+        ``mast.legacy_gate.internal_llm_enabled``. While it answers False
+        the scheduler only sweeps deadlines: no goal check, no question, no spawn.
+        ``None`` (the default here) = always on, i.e. the behaviour before the
+        switch existed.
       * ``ask()`` — the wake question. ``(park, arrived, versions) -> {action, ...}``.
       * ``spawn()`` — start the detached run. ``(park) -> run_id``.
       * ``escalate()`` — tell the operator. ``(kind, park|None, detail)``.
       * ``goal_check()`` — 这份 park 服务的目标达成了没有（2026-08-27）。
         ``(park) -> GoalVerdict``。**``None``（缺省）⇒ 这段逻辑整个不存在**，
-        代码路径逐字节等于它出现之前。注入而不是直接 import，是为了让本模块
+        代码路径与它出现之前完全一致。注入而不是直接 import，是为了让本模块
         （``mast.core``）不依赖 ``mast.goals`` / ``mast.conduct`` —— 有一条
         AST 结构测试钉着这句话。
     """
 
     def __init__(self, *, interval_s: float = DEFAULT_INTERVAL_S,
-                 board=None, should_wake=None, ask=None, spawn=None,
+                 board=None, should_wake=None, enabled=None, ask=None, spawn=None,
                  escalate=None, goal_check=None,
                  max_wakes_per_day: int = DEFAULT_MAX_WAKES_PER_DAY,
                  daily_budget_usd: float = DEFAULT_DAILY_BUDGET_USD,
@@ -174,6 +181,7 @@ class WakeScheduler:
         self._interval = max(5.0, float(interval_s))
         self._board = board
         self._should_wake = should_wake or (lambda: True)
+        self._enabled = enabled or (lambda: True)
         self._ask = ask
         self._spawn = spawn
         self._escalate = escalate or (lambda *a, **k: None)
@@ -234,8 +242,10 @@ class WakeScheduler:
         if spent is None:
             return None
         if spent >= self._daily_budget:
-            return (f"今日全部 run 的花销已达 ${spent:.2f}(上限 ${self._daily_budget:.2f}),"
-                    "本日不再自动唤醒")
+            return tr(f"今日全部 run 的花销已达 ${spent:.2f}(上限 ${self._daily_budget:.2f}),"
+                      "本日不再自动唤醒",
+                      f"Spend across all runs today has reached ${spent:.2f} (limit "
+                      f"${self._daily_budget:.2f}); no more automatic wakes today")
         return None
 
     def wake_quota_blocked(self, experiment_id: str) -> "str | None":
@@ -253,9 +263,14 @@ class WakeScheduler:
         used = int(self._wakes.get(experiment_id or "", 0))
         if used >= self._max_wakes:
             if self._max_wakes == 0:
-                return "自动唤醒已被设置为 0 次/天(关闭),本实验不会被自动唤醒"
-            return (f"本实验今天已自动唤醒 {used} 次(上限 {self._max_wakes}),"
-                    "为避免 A→B→A 反复唤醒的死循环,本日不再自动唤醒")
+                return tr("自动唤醒已被设置为 0 次/天(关闭),本实验不会被自动唤醒",
+                          "Automatic wake is set to 0 per day (off); this experiment will "
+                          "not be woken automatically")
+            return tr(f"本实验今天已自动唤醒 {used} 次(上限 {self._max_wakes}),"
+                      "为避免 A→B→A 反复唤醒的死循环,本日不再自动唤醒",
+                      f"This experiment has already been woken automatically {used} times "
+                      f"today (limit {self._max_wakes}); to avoid an A->B->A wake loop, no "
+                      "more automatic wakes today")
         return None
 
     def _note_wake(self, experiment_id: str) -> None:
@@ -339,8 +354,12 @@ class WakeScheduler:
 
         Order matters and is not arbitrary:
           1. expire overdue parks FIRST — a park past its deadline must escalate even
-             if a product arrived in the same tick, because the operator asked to be
-             told, and quietly waking it instead would discard that;
+             if a product arrived in the same tick, because the operator is
+             meant to be told, and quietly waking it instead would discard that;
+          1.5 bail out if the master switch (``legacy_features_enabled``) is off —
+             AFTER the deadlines, which cost no model call and are how the
+             operator learns a wait went stale; BEFORE everything else, which is
+             unattended internal-LLM work the operator has not turned on;
           2. bail out if the foreground is busy — two decision streams deciding the
              same thing is how they contradict each other;
           2.5. 关掉「目标已经达成」的 park（2026-08-27）。放在熔断**之前**：
@@ -365,11 +384,23 @@ class WakeScheduler:
             for rec in b.sweep_expired():
                 summary["expired"] += 1
                 try:
-                    self._escalate("expired", rec, "等待已超时,需要用户处理")
+                    self._escalate("expired", rec,
+                                    tr("等待已超时,需要用户处理", "The wait timed out and needs the user's attention"))
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("wake: expiry escalation failed (%s)", exc)
         except Exception as exc:  # noqa: BLE001
             logger.debug("wake: sweep failed (%s)", exc)
+
+        # 1.5 Master switch. An unreadable switch counts as OFF: the failure mode
+        #     of "off" is a park that waits for its deadline; the failure mode of
+        #     "on" is a model call and a spawned run nobody asked for.
+        try:
+            if not self._enabled():
+                summary["skipped"] = "legacy features disabled"
+                return summary
+        except Exception as exc:  # noqa: BLE001
+            summary["skipped"] = f"enable switch unreadable: {exc}"
+            return summary
 
         # 2. Never decide while the mainline is deciding.
         try:
@@ -426,7 +457,9 @@ class WakeScheduler:
                 # wake unasked (the agent chose to wait and is owed the question) and
                 # NOT to stay silent (its input is here).
                 self._escalate("ready", park,
-                               f"等的资料({'、'.join(arrived)})已到位,但询问引擎不可用")
+                               tr(f"等的资料({'、'.join(arrived)})已到位,但询问引擎不可用",
+                                  f"The awaited material ({', '.join(arrived)}) has arrived, "
+                                  "but the question engine is unavailable"))
                 continue
             try:
                 decision = self._ask(park, arrived, versions)
@@ -455,16 +488,18 @@ class WakeScheduler:
                         logger.debug("wake: cannot update wait for %s (%s)", pid, exc)
                 continue
             if self._spawn is None:
-                self._escalate("ready", park, "该醒了,但后台运行不可用")
+                self._escalate("ready", park,
+                                tr("该醒了,但后台运行不可用", "Time to wake, but background runs are unavailable"))
                 continue
             try:
                 run_id = self._spawn(park)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("wake: spawn failed for %s: %s", pid, exc)
-                self._escalate("spawn_failed", park, f"唤醒失败:{exc}")
+                self._escalate("spawn_failed", park, tr(f"唤醒失败:{exc}", f"Wake failed: {exc}"))
                 continue
             if not run_id:
-                self._escalate("spawn_failed", park, "唤醒失败(未拿到 run_id)")
+                self._escalate("spawn_failed", park,
+                                tr("唤醒失败(未拿到 run_id)", "Wake failed (no run_id returned)"))
                 continue
             try:
                 b.mark_woken(pid, str(run_id))

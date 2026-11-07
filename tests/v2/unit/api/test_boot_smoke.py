@@ -70,6 +70,7 @@ _PARAM_SAMPLES = {
     "artifact_id": "draft",
     "key": "nope",
     "path": "nope",
+    "page_id": "nope",
     "lib_id": "nope",
     "library_id": "nope",
     "work_id": "W123456789",
@@ -101,6 +102,20 @@ _PARAM_SAMPLES = {
     # 格式，理由同上面的 ``agent``：假值会被 Literal 校验在 422 早退，测不到
     # 「一条标记都还没存过时，现场生成导出、且不写盘」的那条降级路径。
     "fmt": "md",
+    # /api/live/streams/{stream_id:path}（LiveHub，2026-10-19）。形状合法、带斜杠、但从没声明过的流：
+    # 要走的是「没有这个流 → 404」那条路，不是 id 格式校验。
+    "stream_id": "nope/live/never-declared",
+    # /api/satellites/{sat_id}（及 /devices、/events；TERS 卫星，2026-10-19）。形状合法、
+    # 但 satellites.json 里没有、也从没连上过的卫星 id：要走「没有这颗卫星 → 404」那条路。
+    "sat_id": "nope",
+    # /api/camera/{camera_id}/frame.jpg|stats（对光相机，2026-10-20）。cameras.json 里没有的相机：
+    # 要走「没有这台相机 → 404」那条路；端点从不打开相机，所以这里也碰不到硬件。
+    "camera_id": "nope",
+    # /api/optical-layouts/{layout_id}[/history|/comments|/render.png|/revisions/{revision}]（光路图，
+    # 2026-11-03）。形状合法、但从没存过的图：要走「没有这张图 → 404」那条路，不是 id 格式校验；
+    # 读不碰设备。
+    "layout_id": "nope",
+    "revision": "1",
     # enum-ish selectors: a bogus value must degrade (or 4xx), never 500
     "kind": "nope",
     "ktype": "nope",

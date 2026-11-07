@@ -1,8 +1,11 @@
-// 已标记页（旧版兼容格式 app.js 的 renderMarked / renderTable，与 series.js 的 seriesSectionHtml）。
+// Marked page.
 //
-// 计数、导出（服务端现场生成 md/csv）、导入 marks.json（服务端合并，可加前缀）、标签表
-// 编辑、系列表、单条标记表（同一套筛选条；按目录分组，分组行带目录备注；点缩略图开大图）。
-// 表格在这一页里**不随每次改动重算**：刚清掉的条目留一行，重进本页或关大图时才消失（原版如此）。
+// Counts, export (md/csv generated on the server on demand), marks.json import (merged on the
+// server, optional key prefix), tag-table editor, series table, and the per-item mark table
+// (same filter bar; grouped by directory, group rows carry the directory note; click a
+// thumbnail to open the lightbox).
+// The tables on this page are *not* recomputed on every edit: an item that was just cleared
+// keeps its row until the page is re-entered or the lightbox is closed.
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -24,8 +27,9 @@ import { toast } from "./toast";
 import { Chip, SMALL_BTN, SMALL_SELECT, chipClass } from "./bits";
 import { H1, Sub } from "./ListHeads";
 import { SingleSpectraStitch } from "./figures/SingleSpectraStitch";
+import { tr } from "@/lib/i18n";
 
-/** 导入一份 marks.json（例如旧版兼容格式那份）。已标记页与数据根页共用。 */
+/** Import a marks.json (e.g. one from the earlier gallery). Shared by the Marked page and the data-roots page. */
 export function ImportMarksForm({ defaultPrefix }: { defaultPrefix: string }) {
   const [prefix, setPrefix] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -37,19 +41,23 @@ export function ImportMarksForm({ defaultPrefix }: { defaultPrefix: string }) {
     setBusy(true);
     try {
       const doc: unknown = JSON.parse(await file.text());
-      if (!doc || typeof doc !== "object") throw new Error("不是一个 JSON 对象");
+      if (!doc || typeof doc !== "object") throw new Error(tr("不是一个 JSON 对象", "Not a JSON object"));
       const { data, error } = await api.POST("/api/gallery/marks/import", {
         body: { doc: doc as Record<string, unknown>, key_prefix: value },
       });
-      if (error || !data || !data.ok) throw new Error(data?.detail || "导入失败");
+      if (error || !data || !data.ok) throw new Error(data?.detail || tr("导入失败", "Import failed"));
       toast(
-        `导入：单条 ${data.items} · 系列 ${data.series} · 目录 ${data.days} · 新标签 ${data.tags_added}` +
-          (data.unmatched ? ` · 其中 ${data.unmatched} 条在当前索引里找不到（照样导入了）` : ""),
+        tr(
+          `导入：单条 ${data.items} · 系列 ${data.series} · 目录 ${data.days} · 新标签 ${data.tags_added}` +
+            (data.unmatched ? ` · 其中 ${data.unmatched} 条在当前索引里找不到（照样导入了）` : ""),
+          `Imported: ${data.items} items · ${data.series} series · ${data.days} directories · ${data.tags_added} new tags` +
+            (data.unmatched ? ` · ${data.unmatched} not found in the current index (imported anyway)` : ""),
+        ),
       );
       await useMarksStore.getState().reload();
       void qc.invalidateQueries({ queryKey: GALLERY_KEYS.index });
     } catch (e) {
-      toast(`导入失败：${(e as Error).message}`, "err");
+      toast(tr(`导入失败：${(e as Error).message}`, `Import failed: ${(e as Error).message}`), "err");
     } finally {
       setBusy(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -58,12 +66,12 @@ export function ImportMarksForm({ defaultPrefix }: { defaultPrefix: string }) {
 
   return (
     <span className="inline-flex flex-wrap items-center gap-1.5">
-      <label className="flex items-center gap-1 text-[13px]" title="旧版兼容格式 marks.json 的键是相对它的数据根的；导进来要加上这里的根名">
-        键前缀
+      <label className="flex items-center gap-1 text-[13px]" title={tr("原图库 marks.json 的键是相对它的数据根的；导进来要加上这里的根名", "Keys in the original marks.json are relative to its data root; the root name here is prepended on import")}>
+        {tr("键前缀", "Key prefix")}
         <input className={`${SMALL_SELECT} w-24 font-mono`} value={value} onChange={(e) => setPrefix(e.target.value)} />
       </label>
       <button type="button" className={SMALL_BTN} disabled={busy} onClick={() => fileRef.current?.click()}>
-        {busy ? "导入中…" : "导入 marks.json…"}
+        {busy ? tr("导入中…", "Importing…") : tr("导入 marks.json…", "Import marks.json…")}
       </button>
       <input
         ref={fileRef}
@@ -85,7 +93,9 @@ function TagTableEditor() {
   const [text, setText] = useState<string | null>(null);
   return (
     <span className="inline-flex flex-wrap items-center gap-1.5">
-      <span className="text-xs text-mast-muted">标签表（逗号分隔，前 9 个有快捷键 Q–O）：</span>
+      <span className="text-xs text-mast-muted">
+        {tr("标签表（逗号分隔，前 9 个有快捷键 Q–O）：", "Tag table (comma-separated; the first 9 have hotkeys Q–O):")}
+      </span>
       <input
         className={`${SMALL_SELECT} w-[32rem] max-w-full`}
         value={text ?? tags.join("，")}
@@ -97,10 +107,10 @@ function TagTableEditor() {
         onClick={() => {
           setTags(parseTagList(text ?? tags.join("，")));
           setText(null);
-          toast("标签表已保存");
+          toast(tr("标签表已保存", "Tag table saved"));
         }}
       >
-        保存标签表
+        {tr("保存标签表", "Save tag table")}
       </button>
     </span>
   );
@@ -112,19 +122,34 @@ function SeriesTable({ model }: { model: GalleryModel }) {
   if (!entries.length) {
     return (
       <>
-        <h2 className="mb-1.5 mt-[18px] text-[1.05rem] font-semibold">系列</h2>
-        <Sub>还没有系列：在某个目录里勾选卡片（Shift 连选一段），再点底部「存为系列…」。</Sub>
+        <h2 className="mb-1.5 mt-[18px] text-[1.05rem] font-semibold">{tr("系列", "Series")}</h2>
+        <Sub>
+          {tr(
+            "还没有系列：在某个目录里勾选卡片（Shift 连选一段），再点底部「存为系列…」。",
+            "No series yet: tick cards in a directory (Shift for a range), then click \"Save as series…\" at the bottom.",
+          )}
+        </Sub>
       </>
     );
   }
   return (
     <>
-      <h2 className="mb-1.5 mt-[18px] text-[1.05rem] font-semibold">系列 · {entries.length}</h2>
+      <h2 className="mb-1.5 mt-[18px] text-[1.05rem] font-semibold">
+        {tr("系列", "Series")} · {entries.length}
+      </h2>
       <div className="overflow-x-auto">
         <table className="mt-2.5 w-full border-collapse text-[13px]">
           <thead>
             <tr className="text-left">
-              {["预览", "系列", "评级", "标签", "备注", "成员", "位置系于"].map((h) => (
+              {[
+                tr("预览", "Preview"),
+                tr("系列", "Series"),
+                tr("评级", "Rating"),
+                tr("标签", "Tags"),
+                tr("备注", "Note"),
+                tr("成员", "Members"),
+                tr("位置系于", "Anchored to"),
+              ].map((h) => (
                 <th key={h} className="border-b border-mast-border bg-mast-bg px-1.5 py-[5px] font-semibold">
                   {h}
                 </th>
@@ -157,7 +182,7 @@ function SeriesTable({ model }: { model: GalleryModel }) {
                   </td>
                   <td className="max-w-[420px] whitespace-pre-wrap border-b border-mast-border px-1.5 py-[5px]">{s.note}</td>
                   <td className="border-b border-mast-border px-1.5 py-[5px] font-mono text-mast-muted">
-                    {mem.length} 个
+                    {tr(`${mem.length} 个`, `${mem.length} items`)}
                     {a && b && (
                       <>
                         <br />
@@ -193,7 +218,7 @@ export function MarkedView({ model }: { model: GalleryModel }) {
   const nSeries = useMarksStore((s) => Object.keys(s.doc.series).length);
   const [version, setVersion] = useState(0);
 
-  // 本页的底：进页面（或关大图、导入之后）那一刻有标记的条目。
+  // The base of this page: items carrying a mark at the moment the page was entered (or after closing the lightbox / importing).
   const base = useMemo(() => {
     const items = useMarksStore.getState().doc.items;
     return model.items.filter((it) => items[it.id]);
@@ -224,16 +249,22 @@ export function MarkedView({ model }: { model: GalleryModel }) {
   return (
     <div>
       <H1>
-        已标记 · {base.length} 个 · 系列 {nSeries} 个
+        {tr(`已标记 · ${base.length} 个 · 系列 ${nSeries} 个`, `Marked · ${base.length} items · ${nSeries} series`)}
       </H1>
       <Sub>
-        ★ 重点 {count(2)} · ✓ 可用 {count(1)} · ✗ 排除 {count(-1)} · 只有标签/备注/系定 {count(0)}。 导出：
+        {tr(
+          `★ 重点 ${count(2)} · ✓ 可用 ${count(1)} · ✗ 排除 ${count(-1)} · 只有标签/备注/系定 ${count(0)}。 导出：`,
+          `★ key ${count(2)} · ✓ usable ${count(1)} · ✗ excluded ${count(-1)} · tag/note/anchor only ${count(0)}. Export:`,
+        )}
         {(["md", "csv", "series_csv", "json"] as const).map((fmt) => (
           <a key={fmt} href={`/api/gallery/marks/export/${fmt}`} download className="ml-2 text-mast-accent hover:underline">
             {fmt === "series_csv" ? "marks_series.csv" : `marks.${fmt}`}
           </a>
         ))}
-        （服务端的图库状态目录里也有同名文件，每次改动都会重写）
+        {tr(
+          "（服务端的图库状态目录里也有同名文件，每次改动都会重写）",
+          " (files with the same names also live in the server's gallery state directory and are rewritten on every change)",
+        )}
       </Sub>
       <div className="my-1.5 flex flex-wrap items-center gap-2">
         <ImportMarksForm defaultPrefix={defaultPrefix} />
@@ -244,7 +275,7 @@ export function MarkedView({ model }: { model: GalleryModel }) {
 
       <SingleSpectraStitch model={model} />
 
-      <h2 className="mb-1.5 mt-[18px] text-[1.05rem] font-semibold">单条标记</h2>
+      <h2 className="mb-1.5 mt-[18px] text-[1.05rem] font-semibold">{tr("单条标记", "Item marks")}</h2>
       <FilterBar
         view="marked"
         effective={effective}
@@ -258,7 +289,15 @@ export function MarkedView({ model }: { model: GalleryModel }) {
         <table className="mt-2.5 w-full border-collapse text-[13px]">
           <thead>
             <tr className="text-left">
-              {["缩略图", "目录 · 编号", "评级", "标签", "备注", "参数", "路径"].map((h) => (
+              {[
+                tr("缩略图", "Thumbnail"),
+                tr("目录 · 编号", "Directory · number"),
+                tr("评级", "Rating"),
+                tr("标签", "Tags"),
+                tr("备注", "Note"),
+                tr("参数", "Parameters"),
+                tr("路径", "Path"),
+              ].map((h) => (
                 <th key={h} className="border-b border-mast-border bg-mast-bg px-1.5 py-[5px] font-semibold">
                   {h}
                 </th>
@@ -301,7 +340,7 @@ function MarkRows({ list, model, onOpen }: { list: GalleryItem[]; model: Gallery
     rows.push(
       <tr key={it.id} className="align-top">
         <td className={cell}>
-          <button type="button" onClick={() => onOpen(j)} title="点开大图">
+          <button type="button" onClick={() => onOpen(j)} title={tr("点开大图", "Open full size")}>
             <img loading="lazy" src={it.th} alt="" className="block w-[120px] cursor-zoom-in" />
           </button>
         </td>

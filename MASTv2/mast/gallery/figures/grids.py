@@ -18,6 +18,7 @@ import time
 import numpy as np
 
 from mast.gallery import paths as _paths
+from mast.i18n import tr
 from mast.gallery.figures import common as C
 from mast.gallery.inventory import num
 
@@ -47,7 +48,7 @@ def make_grid_sheet(lay: _paths.Layout, it: dict, options: dict | None = None) -
     G = read_3ds(it["p"])
     g, ch, n, nx, ny, have = G["hdr"], G["chans"], G["npts"], G["nx"], G["ny"], G["have"]
     if have <= 0:
-        raise C.JobError("网格里一个点都还没有")
+        raise C.JobError(tr("网格里一个点都还没有", "The grid has no points yet"))
     rows = max(1, math.ceil(have / nx))
     D = G["D"][:rows].astype(np.float64)
     P = G["P"][:rows].astype(np.float64)
@@ -63,7 +64,7 @@ def make_grid_sheet(lay: _paths.Layout, it: dict, options: dict | None = None) -
                  else np.arange(n, dtype=np.float64))
         jI = _first(ch, "Current [AVG] (A)", "Current (A)")
         if jI is None:
-            raise C.JobError("网格里没有电流通道")
+            raise C.JobError(tr("网格里没有电流通道", "The grid has no current channel"))
         I = D[:, :, jI, :] * 1e12
         Iav = np.nanmean(I.reshape(-1, n), axis=0)
         didv = np.gradient(Iav, V) if n > 2 and np.isfinite(Iav).all() else None
@@ -83,7 +84,8 @@ def make_grid_sheet(lay: _paths.Layout, it: dict, options: dict | None = None) -
             if best is None or r > best[0]:
                 best = (r, short, M)
         if best is None or not (best[0] >= 0.3):
-            dl, dunit, dmaps, src = "数值 dI/dV（I 对 V 求导）", "pA/V", np.gradient(I, V, axis=2), "数值导数"
+            dl, dunit, dmaps, src = (tr("数值 dI/dV（I 对 V 求导）", "Numerical dI/dV (derivative of I with respect to V)"),
+                                     "pA/V", np.gradient(I, V, axis=2), tr("数值导数", "numerical derivative"))
         else:
             dl, dunit, dmaps, src = "dI/dV · %s（r=%.2f）" % (best[1], best[0]), "fA", best[2], best[1]
         zi = G["pars"].index("Z (m)") if "Z (m)" in G["pars"] else None
@@ -109,16 +111,17 @@ def make_grid_sheet(lay: _paths.Layout, it: dict, options: dict | None = None) -
     if Z is not None:
         zimg, zlo, zhi = C.to_img(flip(Z), C.lut("afmhot"), (2, 98))
         zimg = zimg.resize((zw, max(1, round(zw * rows / nx))), nearest)
-        d.text((0, 2), "形貌 Z（按行去偏）", fill=C.INK, font=f_tag)
+        d.text((0, 2), tr("形貌 Z（按行去偏）", "Topography Z (row-offset removed)"), fill=C.INK, font=f_tag)
         d.text((0, head_h), "%.0f pm" % (zhi - zlo), fill=C.DIM, font=f_tag)
         canvas.paste(zimg, (0, head_h + lab_h))
     else:
-        d.text((0, 2), "形貌 Z：网格里没有 Z 参数", fill=C.INK, font=f_tag)
+        d.text((0, 2), tr("形貌 Z：网格里没有 Z 参数", "Topography Z: the grid has no Z parameter"), fill=C.INK, font=f_tag)
     x0 = zw + 10
     for bi, (title, maps, table, unit) in enumerate(((dl, dmaps, C.lut("viridis"), dunit),
-                                                     ("电流 I", I, C.lut("magma"), "pA"))):
+                                                     (tr("电流 I", "Current I"), I, C.lut("magma"), "pA"))):
         y0 = bi * block_h
-        d.text((x0, y0 + 2), "%s　每层色标各自 2–98%%，单位 %s" % (title, unit), fill=C.INK, font=f_tag)
+        d.text((x0, y0 + 2), tr("%s　每层色标各自 2–98%%，单位 %s", "%s  per-layer colour scale 2-98%%, unit %s") % (title, unit),
+                   fill=C.INK, font=f_tag)
         for j in range(n):
             cx = x0 + (j % cols) * (pw + gap)
             cy = y0 + head_h + (j // cols) * (lab_h + ph + gap)
@@ -133,15 +136,16 @@ def make_grid_sheet(lay: _paths.Layout, it: dict, options: dict | None = None) -
     left = "%s → %s    %s    %s    %s" % (
         time.strftime("%Y-%m-%d %H:%M:%S", t0) if t0 else "?",
         time.strftime("%m-%d %H:%M:%S", t1) if t1 else "?",
-        C.fmt_bias(bias) if bias is not None else "偏压未记录",
-        C.fmt_cur(setp * 1e12) if setp is not None else "电流未记录",
+        C.fmt_bias(bias) if bias is not None else tr("偏压未记录", "bias not recorded"),
+        C.fmt_cur(setp * 1e12) if setp is not None else tr("电流未记录", "current not recorded"),
         C.fmt_size(G["w_nm"], G["h_nm"]))
     stem = C.stem(it["fn"])
-    right = "%s · %d×%d 点，完成 %d/%d · %d 层 %s→%s · Zoff %.0f pm · %s sweeps · lock-in %s" % (
+    right = tr("%s · %d×%d 点，完成 %d/%d · %d 层 %s→%s · Zoff %.0f pm · %s sweeps · lock-in %s",
+               "%s · %d×%d points, done %d/%d · %d layers %s→%s · Zoff %.0f pm · %s sweeps · lock-in %s") % (
         stem, nx, ny, have, nx * ny, n, C.fmt_bias(float(V[0])), C.fmt_bias(float(V[-1])),
         (num(g.get("Bias Spectroscopy>Z offset (m)"), 0.0) or 0.0) * 1e12,
-        g.get("Bias Spectroscopy>Number of sweeps") or "未记录",
-        g.get("Lock-in>Lock-in status") or "未记录")
+        g.get("Bias Spectroscopy>Number of sweeps") or tr("未记录", "not recorded"),
+        g.get("Lock-in>Lock-in status") or tr("未记录", "not recorded"))
     used = C.caption(d, W, Hc, left, right)
     canvas = canvas.crop((0, 0, W, Hc + used))
 
@@ -149,11 +153,11 @@ def make_grid_sheet(lay: _paths.Layout, it: dict, options: dict | None = None) -
     name = base + ".png"
     C.write_bytes(lay, CAT, name, C.png_bytes(canvas))
     r_best = float(best[0]) if best is not None else None
-    summary = {"dI/dV": src, "完成": f"{have}/{nx * ny}", "层数": int(n)}
-    if src != "数值导数" and r_best is not None:
+    summary = {"dI/dV": src, tr("完成", "Done"): f"{have}/{nx * ny}", tr("层数", "Layers"): int(n)}
+    if src != tr("数值导数", "numerical derivative") and r_best is not None:
         summary["r"] = round(r_best, 2)
     detail = {"didv": src, "r": r_best, "rows": rows, "have": int(have), "n_layers": int(n),
               "V0": float(V[0]), "V1": float(V[-1]), "name": name}
-    return C.write_figure_json(lay, CAT, base, kind="grid_sheets", title="%s · 每层一格" % stem,
+    return C.write_figure_json(lay, CAT, base, kind="grid_sheets", title=tr("%s · 每层一格", "%s · one cell per layer") % stem,
                                files=[name], ids=[it["id"]], options=options, summary=summary,
                                detail=detail, maker_version=VER)

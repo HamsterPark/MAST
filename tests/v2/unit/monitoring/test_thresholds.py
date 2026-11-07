@@ -30,10 +30,10 @@ def _reset():
     set_monitor_thresholds(None)
 
 
-def test_defaults_are_monitoring_on_alerts_on():
+def test_defaults_are_monitoring_on_alerts_off():
     t = MonitorThresholds()
     assert t.enabled is True
-    assert t.alerts_enabled is True
+    assert t.alerts_enabled is False
     assert t.crit_consecutive == 3
 
 
@@ -97,3 +97,10 @@ def test_every_editable_key_exists_on_the_dataclass():
     """A key in the UI list with no field behind it would silently do nothing."""
     fields = set(MonitorThresholds().to_mapping())
     assert set(EDITABLE_KEYS) <= fields
+
+
+def test_current_alerts_default_off_but_acquisition_default_on():
+    t = MonitorThresholds()
+    assert t.enabled is True
+    assert t.alerts_enabled is False
+    assert MonitorThresholds.from_mapping({"cm_alerts_enabled": 1.0}).alerts_enabled is True

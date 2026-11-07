@@ -228,7 +228,13 @@ class ClaudeClient:
         Returns a dict with the same shape as Anthropic responses:
             {"id", "role", "content"=[blocks], "model", "stop_reason", "usage"}
         regardless of the underlying provider.
+
+        Raises ``mast.legacy_gate.LegacyFeaturesDisabled`` (before any request)
+        while legacy features are off — this is the one entry every send of this
+        client goes through (``single_turn`` included).
         """
+        from mast.legacy_gate import require_internal_llm
+        require_internal_llm("legacy LLM client")
         if self._provider in ANTHROPIC_COMPAT_PROVIDERS:
             result = self._chat_anthropic(messages, system, tools)
         else:
@@ -345,7 +351,7 @@ class ClaudeClient:
             raise
 
         content_blocks = [_anthropic_block_to_dict(b) for b in response.content]
-        # F3 (2026-06-08): MiniMax intermittently leaks <think>/<mm:think> CoT
+        # 2026-06-08: MiniMax intermittently leaks <think>/<mm:think> CoT
         # into visible TEXT blocks instead of a proper thinking block. Strip the
         # tag dialect at the source so the raw reasoning + literal tags never
         # reach the chat renderer. MiniMax-only; no-op for clean text / real Claude.
@@ -508,8 +514,7 @@ _THINK_BLOCK_RE = re.compile(
 
 def _strip_think_tags(text: str) -> str:
     """Strip leaked PAIRED ``<think>…</think>`` / ``<mm:think>…</mm:think>``
-    chain-of-thought blocks from a user-visible text block (审查 F3,
-    hardened after adversarial review).
+    chain-of-thought blocks from a user-visible text block.
 
     Some MiniMax responses intermittently put reasoning in a *text* block wrapped
     in think tags instead of a proper ``thinking`` block; the raw CoT then leaks

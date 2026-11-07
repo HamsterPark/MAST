@@ -54,7 +54,13 @@ async def _connect(url: str, api_key: str, *, timeout: float = 20.0):
 
     ``timeout`` is the handshake budget — generous by default because a corporate
     / campus VPN can make the TLS+WS handshake to Aliyun take double-digit seconds
-    (measured ~17 s on the MAST dev box). Callers on a fast link can lower it."""
+    (~17 s observed on a slow link). Callers on a fast link can lower it.
+
+    Refuses (``RealtimeVoiceError``) while legacy features are off — realtime voice
+    serves the built-in chat, whose internal LLM is then disabled."""
+    from mast.legacy_gate import internal_llm_enabled, refusal_message
+    if not internal_llm_enabled():
+        raise RealtimeVoiceError(refusal_message("realtime voice"))
     try:
         import websockets
     except Exception as exc:  # pragma: no cover - websockets is a uvicorn[standard] dep

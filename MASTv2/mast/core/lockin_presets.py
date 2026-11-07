@@ -15,6 +15,7 @@ import logging
 from typing import Any
 
 from mast.core import instrument_profile as _iprof
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +34,10 @@ RESERVED_NAMES = (PRESET_DIDV,)
 #:
 #: phase 不在参数组中；增加此能力前须核验目标仪器的操作面及写入语义。
 _PROFILE_KEYS: "dict[str, tuple[str, str]]" = {
-    "lockin_mod_freq_hz": ("frequency_hz", "仪器档案 lockin_mod_freq_hz"),
-    "lockin_mod_amp_v": ("amplitude_v", "仪器档案 lockin_mod_amp_v"),
+    "lockin_mod_freq_hz": ("frequency_hz", tr("仪器档案 lockin_mod_freq_hz",
+                                              "Instrument profile lockin_mod_freq_hz")),
+    "lockin_mod_amp_v": ("amplitude_v", tr("仪器档案 lockin_mod_amp_v",
+                                           "Instrument profile lockin_mod_amp_v")),
 }
 
 
@@ -77,8 +80,12 @@ class ResolvedLockInPreset:
             "notes": list(self.notes),
             # 明说出来,免得有人以为是漏了。
             "phase_deg": None,
-            "phase_note": ("调制侧 phase 永不下发:本机 Modulate 区没有该字段,"
-                           "TCP 写恒拒(写同值也拒)。相位在解调侧 Ref. Phase。"),
+            "phase_note": tr("调制侧 phase 永不下发:本机 Modulate 区没有该字段,"
+                             "TCP 写恒拒(写同值也拒)。相位在解调侧 Ref. Phase。",
+                             "Modulator-side phase is never sent: this machine's Modulate "
+                             "section has no such field, and TCP writes are always refused "
+                             "(even with the same value). Phase is set on the demodulator "
+                             "side, Ref. Phase."),
         }
 
     @property
@@ -88,22 +95,30 @@ class ResolvedLockInPreset:
 
     def why(self) -> str:
         if self.usable:
-            got = "、".join(f"{k}={v}" for k, v in self.values.items())
-            tail = (f";档案未填、因而不下发:{'、'.join(self.unset)}"
+            got = tr("、", ", ").join(f"{k}={v}" for k, v in self.values.items())
+            tail = (tr(f";档案未填、因而不下发:{'、'.join(self.unset)}",
+                       f"; not sent because the profile leaves them unset: "
+                       f"{', '.join(self.unset)}")
                     if self.unset else "")
-            return f"将下发 {got}{tail}"
-        return ("仪器档案里这一组一个值都没有配置(" + "、".join(self.unset) + ")。"
-                "请在「设置 → 仪器档案 → lock-in」里填写 —— 这组数只由用户输入,"
-                "不经模型。")
+            return tr(f"将下发 {got}{tail}", f"Will send {got}{tail}")
+        return tr("仪器档案里这一组一个值都没有配置(" + "、".join(self.unset) + ")。"
+                  "请在「设置 → 仪器档案 → lock-in」里填写 —— 这组数只由用户输入,"
+                  "不经模型。",
+                  "No value of this group is configured in the instrument profile ("
+                  + ", ".join(self.unset) + "). "
+                  "Fill them in under Settings > Instrument profile > lock-in; "
+                  "these numbers come only from user input, never from the model.")
 
 
 def resolve(name: str = PRESET_DIDV) -> ResolvedLockInPreset:
     """把组名解析成「下发什么」。未知组名直接拒绝,不猜。"""
     lowered = str(name or "").strip().lower()
     if lowered != PRESET_DIDV:
-        raise PresetRejected(
+        raise PresetRejected(tr(
             f"没有名为 {name!r} 的 lock-in 参数组;目前只有 "
-            f"{'、'.join(RESERVED_NAMES)}。")
+            f"{'、'.join(RESERVED_NAMES)}。",
+            f"There is no lock-in parameter group named {name!r}; currently there is only "
+            f"{', '.join(RESERVED_NAMES)}."))
 
     values: "dict[str, float]" = {}
     sources: "dict[str, str]" = {}

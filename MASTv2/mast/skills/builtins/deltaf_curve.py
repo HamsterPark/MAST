@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -40,43 +41,47 @@ class AcquireDeltaFCurve(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "在针尖当前位置采一条频移随高度变化的曲线 Δf(z),同时记电流与振幅,并存成 "
+                tr("在针尖当前位置采一条频移随高度变化的曲线 Δf(z),同时记电流与振幅,并存成 "
                 ".dat 供反演使用。扫描方向朝表面,正的 z_sweep_distance_m 表示往里走多远。"
                 "采之前会读回 PLL 状态:输出没打开就直接失败,不采一条噪声。"
-                "力谱必须配一条干净表面上的同扫程曲线做背景,分两次调用本技能取。"
+                "力谱必须配一条干净表面上的同扫程曲线做背景,分两次调用本技能取。",
+                "Acquire a curve of frequency shift versus height Δf(z) at the current tip position, recording current and amplitude too, and save it as a .dat for inversion. The sweep direction is toward the surface, and a positive z_sweep_distance_m says how far in to go. The PLL state is read back before acquiring: if the output is not on it fails directly rather than acquiring noise. A force spectrum must be paired with a same-range curve on a clean surface as background; call this skill twice to get them.")
             ),
             parameters=[
                 ParameterSpec(
                     name="save_basename", type="str",
-                    description=("存盘名前缀,例如 'Fe_atom'。强烈建议给:后面的反演按"
-                                 "文件路径工作,不给就只能靠时间猜是哪一条。"),
+                    description=(tr("存盘名前缀,例如 'Fe_atom'。强烈建议给:后面的反演按"
+                                 "文件路径工作,不给就只能靠时间猜是哪一条。",
+                                 "Save-name prefix, e.g. 'Fe_atom'. Strongly recommended: the later inversion works by file path, and without it you can only guess from the time which curve is which.")),
                     required=False, default=""),
                 ParameterSpec(
                     name="z_sweep_distance_m", type="float", unit="m",
-                    description="往表面走多远,例如 '500p'(SI 前缀必须写)。",
+                    description=tr("往表面走多远,例如 '500p'(SI 前缀必须写)。", "How far to go toward the surface, e.g. '500p' (the SI prefix is required)."),
                     required=True, min_value=1e-11, max_value=1e-8),
                 ParameterSpec(
                     name="z_offset_m", type="float", unit="m",
-                    description=("起点相对反馈高度的偏移,正值是先抬高,例如 '300p'。"
+                    description=(tr("起点相对反馈高度的偏移,正值是先抬高,例如 '300p'。"
                                  "Δf 的极小值常常在反馈高度之上,所以通常要先抬。"
-                                 "留空表示从反馈高度直接起扫。"),
+                                 "留空表示从反馈高度直接起扫。",
+                                 "Starting offset relative to the feedback height; a positive value means raise first, e.g. '300p'. The minimum of Δf is often above the feedback height, so you usually need to raise first. Empty means start the sweep directly from the feedback height.")),
                     required=False, min_value=-5e-9, max_value=5e-9),
                 ParameterSpec(name="num_points", type="int",
-                              description="曲线点数。", required=False, default=200,
+                              description=tr("曲线点数。", "Number of curve points."), required=False, default=200,
                               min_value=8, max_value=4096),
                 ParameterSpec(name="backward_sweep", type="bool",
-                              description="是否也采回程(用来看迟滞)。",
+                              description=tr("是否也采回程(用来看迟滞)。", "Whether to also acquire the return sweep (to look at hysteresis)."),
                               required=False, default=True),
                 ParameterSpec(
                     name="channel_indexes", type="str",
-                    description=("要记的信号索引,逗号分隔。留空则按名字自动找频移、电流、"
-                                 "振幅三路。"),
+                    description=(tr("要记的信号索引,逗号分隔。留空则按名字自动找频移、电流、"
+                                 "振幅三路。",
+                                 "Signal indices to record, comma-separated. If empty, the frequency-shift, current and amplitude channels are found automatically by name.")),
                     required=False, default=""),
                 ParameterSpec(name="modulator_index", type="int",
-                              description="PLL 调制器序号(单传感器机器就是 1)。",
+                              description=tr("PLL 调制器序号(单传感器机器就是 1)。", "PLL modulator number (1 on a single-sensor machine)."),
                               required=False, default=1, min_value=1, max_value=8),
                 ParameterSpec(name="require_pll_on", type="bool",
-                              description="PLL 输出没开时直接失败(默认如此)。",
+                              description=tr("PLL 输出没开时直接失败(默认如此)。", "Fail directly when the PLL output is not on (the default)."),
                               required=False, default=True),
             ],
             preconditions=["z_controller_on"],
@@ -89,69 +94,57 @@ class AcquireDeltaFCurve(BaseSkill):
         calls = []
         mod = int(params.get("modulator_index") or 1)
 
-        def call(name, *args):
-            if name == "PLL_OutOnOffGet":
-                rec = context.safe_call("PLL_OutOnOffGet", *args)
-            elif name == "PLL_CenterFreqGet":
-                rec = context.safe_call("PLL_CenterFreqGet", *args)
-            elif name == "PLL_FreqShiftGet":
-                rec = context.safe_call("PLL_FreqShiftGet", *args)
-            elif name == "PLL_AmpCtrlSetpntGet":
-                rec = context.safe_call("PLL_AmpCtrlSetpntGet", *args)
-            elif name == "Signals_NamesGet":
-                rec = context.safe_call("Signals_NamesGet", *args)
-            elif name == "ZSpectr_Open":
-                rec = context.safe_call("ZSpectr_Open", *args)
-            elif name == "ZSpectr_ChsSet":
-                rec = context.safe_call("ZSpectr_ChsSet", *args)
-            elif name == "ZSpectr_RangeSet":
-                rec = context.safe_call("ZSpectr_RangeSet", *args)
-            elif name == "ZSpectr_PropsSet":
-                rec = context.safe_call("ZSpectr_PropsSet", *args)
-            elif name == "ZSpectr_Start":
-                rec = context.safe_call("ZSpectr_Start", *args)
-            else:
-                raise ValueError(f"Unsupported delta-f acquisition command: {name}")
+        def keep(rec):
+            # 只记录；动词留在每一处 safe_call("…") 字面量里（安全工具靠 grep 认它们）
             calls.append(rec)
             return rec
 
-        rec = call("PLL_OutOnOffGet", mod)
+        rec = keep(context.safe_call("PLL_OutOnOffGet", mod))
         if rec.error:
             return SkillResult(skill_name=_NAME, success=False, nanonis_calls=calls,
-                               error=f"读不到 PLL 输出状态: {rec.error}")
+                               error=tr(f"读不到 PLL 输出状态: {rec.error}", f"Cannot read the PLL output state: {rec.error}"))
         on = self._first_number(rec.return_value)
         if params.get("require_pll_on", True) and not on:
             return SkillResult(skill_name=_NAME, success=False, nanonis_calls=calls,
-                               error=("PLL 输出是关的,采不到力谱。先 PLLOnOff 打开输出、"
-                                      "设好振幅,等振荡起振(约 3 倍 Q/πf0)再来。"))
-        f0 = self._first_number(call("PLL_CenterFreqGet", mod).return_value)
-        df_rest = self._first_number(call("PLL_FreqShiftGet", mod).return_value)
-        amp_set = self._first_number(call("PLL_AmpCtrlSetpntGet", mod).return_value)
+                               error=(tr("PLL 输出是关的,采不到力谱。先 PLLOnOff 打开输出、"
+                                      "设好振幅,等振荡起振(约 3 倍 Q/πf0)再来。",
+                                      "The PLL output is off, so no force spectrum can be acquired. First turn the output on with PLLOnOff, set the amplitude, and wait for the oscillation to start up (about 3 times Q/πf0) before coming back.")))
+        f0 = self._first_number(keep(context.safe_call("PLL_CenterFreqGet", mod)).return_value)
+        df_rest = self._first_number(keep(context.safe_call("PLL_FreqShiftGet", mod)).return_value)
+        amp_set = self._first_number(keep(context.safe_call("PLL_AmpCtrlSetpntGet", mod)).return_value)
 
-        chans, chan_err = self._channels(params, call)
+        chans, chan_err = self._channels(
+            params, lambda: keep(context.safe_call("Signals_NamesGet")))
         if chans is None:
             return SkillResult(skill_name=_NAME, success=False, nanonis_calls=calls,
                                error=chan_err)
 
-        call("ZSpectr_Open")
-        call("ZSpectr_ChsSet", chans)
+        keep(context.safe_call("ZSpectr_Open"))
+        keep(context.safe_call("ZSpectr_ChsSet", chans))
         z_off = params.get("z_offset_m")
-        call("ZSpectr_RangeSet", float(z_off or 0.0), float(params["z_sweep_distance_m"]))
+        keep(context.safe_call("ZSpectr_RangeSet", float(z_off or 0.0), float(params["z_sweep_distance_m"])))
         n = int(params.get("num_points") or 200)
         bwd = 1 if params.get("backward_sweep", True) else 2
-        call("ZSpectr_PropsSet", bwd, n, 1, 1, 2, 1)
+        keep(context.safe_call("ZSpectr_PropsSet", bwd, n, 1, 1, 2, 1))
         basename = str(params.get("save_basename") or "")
         watermark = self._watermark(context)
-        rec = call("ZSpectr_Start", 1, basename)
+        # ZSpectr_Start blocks for the whole sweep; the recv timeout has to cover it
+        # (spectroscopy._zsweep_duration_s, the same budget AcquireZSpectr uses).
+        from mast.skills.builtins.spectroscopy import zsweep_recv_budget_s
+
+        recv_budget_s, core_s, budget_detail = zsweep_recv_budget_s(context, calls)
+        rec = keep(context.safe_call("ZSpectr_Start", 1, basename, recv_timeout_s=recv_budget_s))
         if rec.error:
             return SkillResult(skill_name=_NAME, success=False, nanonis_calls=calls,
-                               error=f"Δf(z) 采集失败: {rec.error}")
+                               error=tr(f"Δf(z) 采集失败: {rec.error}", f"Δf(z) acquisition failed: {rec.error}"))
 
         data = {"acquisition_complete": True, "num_points": n,
+                "sweep_estimate_s": round(core_s, 1), "recv_timeout_s": round(recv_budget_s, 1),
+                "sweep_settings": budget_detail,
                 "z_sweep_distance_m": float(params["z_sweep_distance_m"]),
                 "z_offset_m": float(z_off or 0.0),
                 "f0_hz": f0, "df_rest_hz": df_rest, "amplitude_setpoint_m": amp_set,
-                "sign_convention": "z_rel 从 0 起、向表面为负",
+                "sign_convention": tr("z_rel 从 0 起、向表面为负", "z_rel starts at 0 and is negative toward the surface"),
                 "save_basename": basename or None}
         parsed = self._parse(rec.return_value, data)
         data["spectrum_parsed"] = parsed
@@ -162,10 +155,10 @@ class AcquireDeltaFCurve(BaseSkill):
             data.setdefault("warnings", []).append("dat_attribution_failed")
         if not parsed and not path:
             return SkillResult(skill_name=_NAME, success=False, nanonis_calls=calls, data=data,
-                               error="曲线块解不开,也没找到对应的 .dat")
-        summary = (f"Δf(z) {n} 点,扫程 {float(params['z_sweep_distance_m']) * 1e12:.0f} pm"
-                   + (f",最小 {data['df_min_hz']:.2f} Hz" if data.get("df_min_hz") is not None else "")
-                   + (f",存为 {path}" if path else ",未找到存盘文件"))
+                               error=tr("曲线块解不开,也没找到对应的 .dat", "The curve block could not be decoded and the matching .dat was not found either"))
+        summary = (tr(f"Δf(z) {n} 点,扫程 {float(params['z_sweep_distance_m']) * 1e12:.0f} pm", f"Δf(z) {n} points, sweep range {float(params['z_sweep_distance_m']) * 1e12:.0f} pm")
+                   + (tr(f",最小 {data['df_min_hz']:.2f} Hz", f", minimum {data['df_min_hz']:.2f} Hz") if data.get("df_min_hz") is not None else "")
+                   + (tr(f",存为 {path}", f", saved as {path}") if path else tr(",未找到存盘文件", ", saved file not found")))
         return SkillResult(skill_name=_NAME, success=True, data=data, summary=summary,
                            nanonis_calls=calls)
 
@@ -193,23 +186,23 @@ class AcquireDeltaFCurve(BaseSkill):
                             return float(w)
         return None
 
-    def _channels(self, params: dict, call) -> tuple[list[int] | None, str]:
+    def _channels(self, params: dict, read_names) -> tuple[list[int] | None, str]:
         raw = str(params.get("channel_indexes") or "").strip()
         if raw:
             try:
                 return [int(v) for v in raw.replace(";", ",").split(",") if v.strip()], ""
             except ValueError:
-                return None, f"channel_indexes 读不成整数列表: {raw!r}"
-        rec = call("Signals_NamesGet")
+                return None, tr(f"channel_indexes 读不成整数列表: {raw!r}", f"channel_indexes could not be read as an integer list: {raw!r}")
+        rec = read_names()
         names = None if rec.error else self._string_list(rec.return_value)
         if not names:
-            return None, "读不到信号表,请显式给 channel_indexes(频移、电流、振幅)"
+            return None, tr("读不到信号表,请显式给 channel_indexes(频移、电流、振幅)", "Cannot read the signal table, please give channel_indexes explicitly (frequency shift, current, amplitude)")
         out: list[int] = []
         df_i = self._find(names, _DF_HINTS)
         cur_i = self._find(names, ("current",))
         amp_i = self._find_amplitude(names)
         if df_i is None:
-            return None, f"信号表里没有频移通道(有的是 {names[:24]}…)"
+            return None, tr(f"信号表里没有频移通道(有的是 {names[:24]}…)", f"No frequency-shift channel in the signal table (available: {names[:24]}...)")
         out.append(df_i)
         for i in (cur_i, amp_i):
             if i is not None and i not in out:

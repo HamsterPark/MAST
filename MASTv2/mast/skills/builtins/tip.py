@@ -16,6 +16,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 
 class SafeRetract(BaseSkill):
@@ -66,10 +67,10 @@ class SafeRetract(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "安全退针（withdraw），随后**回读硬件确认它确实停在了收回位**"
+                tr("安全退针（withdraw），随后**回读硬件确认它确实停在了收回位**"
                 "（Z feedback 断开 + Z 停在收回端）。`retracted` 是三态："
                 "True = 已确认，False = 回读到了、但仍未到位，"
-                "None = 判不了。绝不臆断为 True。"
+                "None = 判不了。绝不臆断为 True。", "Safe withdraw, then **read the hardware back to confirm it really stopped at the retracted position** (Z feedback off + Z at the retracted end). `retracted` is three-state: True = confirmed, False = read back but still not in position, None = cannot tell. Never assume True.")
             ),
             # 下发 + 最多 _confirm_budget_s 的回读确认。常见情形 1–2 s,
             # 这里给的是有界的**上界**(以前的 2.0 是「只发命令」那个版本的数)。
@@ -89,7 +90,7 @@ class SafeRetract(BaseSkill):
                 success=False,
                 error=record.error,
                 data={"retracted": None,
-                      "note": "退针命令没发出去(TCP 失败),更谈不上到位。"},
+                      "note": tr("退针命令没发出去(TCP 失败),更谈不上到位。", "The withdraw command was not sent (TCP failure), let alone confirmed in position.")},
                 nanonis_calls=[record],
             )
 
@@ -129,14 +130,14 @@ class SafeRetract(BaseSkill):
                 success=True,
                 data={"retracted": True, "park": park,
                       "confirm_waited_s": waited_s},
-                summary=f"已确认退针到位（{verdict.evidence()}）",
+                summary=tr(f"已确认退针到位（{verdict.evidence()}）", f"Withdraw confirmed in position ({verdict.evidence()})"),
                 nanonis_calls=[record],
             )
 
         if verdict.state == NOT_PARKED:
-            msg = (f"退针已下发,但 {waited_s:.1f} s 内没有确认到位:{verdict.reason}"
+            msg = (tr(f"退针已下发,但 {waited_s:.1f} s 内没有确认到位:{verdict.reason}"
                    f"（{verdict.evidence()}）。可能还在走,也可能这条命令没生效 —— "
-                   f"两种都没被排除,请复核后再做任何依赖「针已退开」的动作。")
+                   f"两种都没被排除,请复核后再做任何依赖「针已退开」的动作。", f"Withdraw issued, but not confirmed in position within {waited_s:.1f} s: {verdict.reason} ({verdict.evidence()}). It may still be moving, or the command may not have taken effect - neither was ruled out; verify before doing anything that depends on the tip being withdrawn."))
             return SkillResult(
                 skill_name="SafeRetract",
                 success=False,
@@ -147,9 +148,9 @@ class SafeRetract(BaseSkill):
                 nanonis_calls=[record],
             )
 
-        msg = (f"退针**已下发未确认**:{verdict.reason}"
+        msg = (tr(f"退针**已下发未确认**:{verdict.reason}"
                f"（{verdict.evidence()}）。命令发出去了,但判不了它到没到位 —— "
-               f"「判不了」既不是「退到了」也不是「没退到」。")
+               f"「判不了」既不是「退到了」也不是「没退到」。", f"Withdraw **issued but unconfirmed**: {verdict.reason} ({verdict.evidence()}). The command was sent, but whether it reached position cannot be determined - \"cannot tell\" is neither \"withdrawn\" nor \"not withdrawn\"."))
         return SkillResult(
             skill_name="SafeRetract",
             success=True,
@@ -180,7 +181,7 @@ class EmergencyRetract(BaseSkill):
             # behind human approval was backwards (it could delay the very
             # retract that protects the tip). It must execute immediately.
             safety_level=SafetyLevel.AUTO,
-            description="经专用应急端口紧急退针。",
+            description=tr("经专用应急端口紧急退针。", "Emergency withdraw through the dedicated emergency port."),
             estimated_duration_s=3.0,
             composition_level=1,
             tags=["tip", "safety", "emergency", "retract"],

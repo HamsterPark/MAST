@@ -24,8 +24,10 @@ strangler 迁移期间新旧两条路要**并存**。把 v2 装配写进六个 `
 
 中间件走桥，不重抄
 ------------------
-中间件应与既有实现共享行为，因此经 :mod:`mast.agentruntime.compat` 把既有的
-``AgentMiddleware`` 实例桥进新栈——一行都不碰那些文件，逻辑一个字不改。
+The 14 middlewares being ported encode accumulated production fixes, and the
+``_shared/*_mw.py`` files that define them are kept as they are. They are
+**not re-copied**: existing ``AgentMiddleware`` instances are bridged into the new
+stack through :mod:`mast.agentruntime.compat`, leaving those files and their logic untouched.
 
 ``with_middleware=True``（默认）会挂上与旧路径**同一份**通用中间件表；等工作树落定、
 新运行时在生产上烤熟之后，再逐个把桥拆成原生实现，那时每拆一个都有对照测试兜着。

@@ -1,16 +1,15 @@
 import type { ReactNode } from "react";
+import { tr } from "@/lib/i18n";
 
-// Shared agent registry for the Agents inspector parity rebuild.
-// Mirrors the old agents-ui.jsx 7-agent roster + supervisor singleton.
-// Colors / Chinese labels / roles reproduced from the old blueprint so the
-// topology, chips and cards read identically. Live data (model/thinking/
-// active/threads) always comes from /api/agents/snapshot and overrides any
-// static placeholder here.
+// Shared agent registry for the Agents inspector: the agent roster plus the
+// supervisor singleton. Colors, labels and roles are shared so the topology,
+// chips and cards read identically. Live data (model/thinking/active/threads)
+// always comes from /api/agents/snapshot and overrides any static placeholder here.
 
 export const SUP_ID = "_supervisor";
 
 // Stable per-agent palette key (drives the --mast-ag-* token + class map).
-// BUF (视觉摘要) is a side channel with no dedicated hue → falls back to sup.
+// BUF (visual summary) is a side channel with no dedicated hue → falls back to sup.
 export type AgentColorKey = "sup" | "rd" | "lit" | "xd" | "ic" | "dp" | "pw" | "pr";
 
 export type AgentDef = {
@@ -28,23 +27,23 @@ export type AgentDef = {
 // `ck` is the canonical palette key. The two are kept in lock-step with the
 // design tokens in src/index.css so chips/nodes read identically in both themes.
 export const AGENTS: AgentDef[] = [
-  { id: "research_director", short: "RD", cn: "科研策划", color: "#4f46e5", ck: "rd", role: "科研纲领：假设 / 目标 / 谱系 · 委托 XD 起草方案" },
-  { id: "literature", short: "LIT", cn: "文献", color: "#2563eb", ck: "lit", role: "搜索 36 k 论文库 · 抽取实验协议" },
-  { id: "experiment_design", short: "XD", cn: "实验设计", color: "#16a34a", ck: "xd", role: "研究问题 → ExperimentPlan JSON" },
-  { id: "instrument_control", short: "IC", cn: "仪器控制", color: "#0d9488", ck: "ic", role: "执行 Nanonis · 拥有 249 个 skill (L0–L4)" },
-  { id: "data_processing", short: "DP", cn: "数据处理", color: "#7c3aed", ck: "dp", role: "解析 .sxm/.dat/.3ds → 数值指标" },
-  { id: "paper_writing", short: "PW", cn: "论文写作", color: "#d97706", ck: "pw", role: "起草 intro/methods/results/discussion" },
-  { id: "paper_review", short: "PR", cn: "论文审稿", color: "#e11d48", ck: "pr", role: "三轴 rubric 同行评审" },
-  { id: "buffer_summarizer", short: "BUF", cn: "视觉摘要", color: "#475569", ck: "sup", role: "DINOv3 视觉输出 → 中文一句话摘要 · 侧通道" },
+  { id: "research_director", short: "RD", cn: tr("科研策划", "Research director"), color: "#4f46e5", ck: "rd", role: tr("科研纲领：假设 / 目标 / 谱系 · 委托 XD 起草方案", "Research program: hypothesis / goals / lineage · delegates plan drafting to XD") },
+  { id: "literature", short: "LIT", cn: tr("文献", "Literature"), color: "#2563eb", ck: "lit", role: tr("搜索 36 k 论文库 · 抽取实验协议", "Searches a 36k-paper library · extracts experimental protocols") },
+  { id: "experiment_design", short: "XD", cn: tr("实验设计", "Experiment design"), color: "#16a34a", ck: "xd", role: tr("研究问题 → ExperimentPlan JSON", "Research question → ExperimentPlan JSON") },
+  { id: "instrument_control", short: "IC", cn: tr("仪器控制", "Instrument control"), color: "#0d9488", ck: "ic", role: tr("执行 Nanonis · 拥有 249 个 skill (L0–L4)", "Drives Nanonis · owns 249 skills (L0–L4)") },
+  { id: "data_processing", short: "DP", cn: tr("数据处理", "Data processing"), color: "#7c3aed", ck: "dp", role: tr("解析 .sxm/.dat/.3ds → 数值指标", "Parses .sxm/.dat/.3ds → numeric metrics") },
+  { id: "paper_writing", short: "PW", cn: tr("论文写作", "Paper writing"), color: "#d97706", ck: "pw", role: tr("起草 intro/methods/results/discussion", "Drafts intro/methods/results/discussion") },
+  { id: "paper_review", short: "PR", cn: tr("论文审稿", "Paper review"), color: "#e11d48", ck: "pr", role: tr("三轴 rubric 同行评审", "Three-axis rubric peer review") },
+  { id: "buffer_summarizer", short: "BUF", cn: tr("视觉摘要", "Visual summary"), color: "#475569", ck: "sup", role: tr("DINOv3 视觉输出 → 中文一句话摘要 · 侧通道", "DINOv3 vision output → one-line summary · side channel") },
 ];
 
 export const SUPERVISOR: AgentDef = {
   id: SUP_ID,
   short: "SUP",
-  cn: "编排与协调",
+  cn: tr("编排与协调", "Orchestration"),
   color: "#475569",
   ck: "sup",
-  role: "任务分解 · 工作流编排 · 异常处理 · 进度监控 · 人机交互",
+  role: tr("任务分解 · 工作流编排 · 异常处理 · 进度监控 · 人机交互", "Task decomposition · workflow orchestration · error handling · progress monitoring · human-in-the-loop"),
 };
 
 export const AGENT_BY: Record<string, AgentDef> = Object.fromEntries(
@@ -53,7 +52,7 @@ export const AGENT_BY: Record<string, AgentDef> = Object.fromEntries(
 
 // Pipeline order shown in the topology (skips BUF — side channel).
 export const PIPELINE = [
-  // RD 在最前：它回答「为什么做」，是这条链的上游而不是并列的第七个（2026-08-21）。
+  // RD comes first: it answers "why", so it is upstream of the chain rather than a peer.
   "research_director",
   "literature",
   "experiment_design",
@@ -65,10 +64,9 @@ export const PIPELINE = [
 
 // Three-phase grouping reproduced from the old PHASES blueprint.
 //
-// `agents` 从定长二元组放宽成 string[]（2026-08-21）：加 research_director 时
-// 那个 `[string, string]` 会让「一个阶段有三个成员」在类型层就写不出来 —— 而
-// 分组本来就不该被成员数目锁死。定长在这里没有换来任何保护：越界索引不是这份
-// 数据的失败模式，漏掉一个 agent 才是（那由 test_agents_topology 的覆盖断言管）。
+// `agents` is a string[] rather than a fixed-length tuple: a phase may have any
+// number of members. A fixed length protects nothing here; the failure mode is
+// omitting an agent, which the coverage assertion in test_agents_topology catches.
 export const PHASES: {
   id: string;
   cn: string;
@@ -78,9 +76,9 @@ export const PHASES: {
 }[] = [
   // Phase hue tracks its lead agent's --mast-ag-* token (research=LIT, execute=IC,
   // write=PW) so the bands recolor with the theme alongside the agent cards.
-  { id: "research", cn: "调研", en: "research", color: "var(--mast-ag-lit)", agents: ["research_director", "literature", "experiment_design"] },
-  { id: "execute", cn: "实验", en: "execute", color: "var(--mast-ag-ic)", agents: ["instrument_control", "data_processing"] },
-  { id: "write", cn: "撰写", en: "write", color: "var(--mast-ag-pw)", agents: ["paper_writing", "paper_review"] },
+  { id: "research", cn: tr("调研", "Research"), en: "research", color: "var(--mast-ag-lit)", agents: ["research_director", "literature", "experiment_design"] },
+  { id: "execute", cn: tr("实验", "Experiment"), en: "execute", color: "var(--mast-ag-ic)", agents: ["instrument_control", "data_processing"] },
+  { id: "write", cn: tr("撰写", "Writing"), en: "write", color: "var(--mast-ag-pw)", agents: ["paper_writing", "paper_review"] },
 ];
 
 export function agentDef(id: string): AgentDef {
@@ -171,7 +169,7 @@ export function agentColorVar(id: string): string {
 // sup=network, lit=book, xd=beaker, ic=wrench, dp=line-chart, pw=pen-line,
 // pr=clipboard-check. Rendered with currentColor so the parent controls hue.
 const AG_ICON_PATHS: Record<AgentColorKey, ReactNode> = {
-  // 一个假设分叉成两条待验证的路 —— RD 的产出正是「可证伪的纲领 + 委托」
+  // One hypothesis forking into two paths to test: RD produces a falsifiable program plus delegations
   rd: (
     <>
       <circle cx="12" cy="4" r="2.5" />

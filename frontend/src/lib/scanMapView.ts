@@ -14,6 +14,8 @@
 // `node --test` (npm run test:unit) with no build step.
 // ════════════════════════════════════════════════════════════════════════════
 
+import { tr } from "./i18n.ts";
+
 /** A drawable layer the operator can switch off. */
 export type MapLayerId =
   | "underlay" // saved .sxm thumbnails placed by real stage footprint
@@ -39,26 +41,26 @@ export const MAP_LAYER_IDS: MapLayerId[] = [
 
 /** Human labels for the layer switches (kept next to the ids on purpose). */
 export const MAP_LAYER_LABELS: Record<MapLayerId, string> = {
-  underlay: "扫描底图",
-  grid: "网格刻度",
-  avoid: "避让区",
-  history: "历史操作",
-  stale: "旧坐标系",
-  plan: "计划路线",
-  upcoming: "候选序列",
-  next: "建议位置",
+  underlay: tr("扫描底图", "Scan underlay"),
+  grid: tr("网格刻度", "Grid and ticks"),
+  avoid: tr("避让区", "Keep-out zones"),
+  history: tr("历史操作", "History"),
+  stale: tr("旧坐标系", "Old coordinates"),
+  plan: tr("计划路线", "Planned route"),
+  upcoming: tr("候选序列", "Candidate sequence"),
+  next: tr("建议位置", "Suggested position"),
 };
 
 /** One-line rationale shown under each switch. */
 export const MAP_LAYER_HINTS: Record<MapLayerId, string> = {
-  underlay: "已保存 .sxm 按真实舞台坐标铺底",
-  grid: "nm 网格与坐标轴刻度",
-  avoid: "破坏/污染区域，规划会绕开",
-  history: "当前坐标系里已执行的操作",
-  stale: "粗动前的旧坐标（淡显；关掉则完全隐藏）",
-  plan: "已发布的计划路线，按执行顺序编号",
-  upcoming: "当前策略接下来会走的位置",
-  next: "分析给出的下一个推荐位置",
+  underlay: tr("已保存 .sxm 按真实舞台坐标铺底", "Saved .sxm images laid out at their real stage coordinates"),
+  grid: tr("nm 网格与坐标轴刻度", "nm grid and axis ticks"),
+  avoid: tr("破坏/污染区域，规划会绕开", "Damaged / contaminated areas; planning routes around them"),
+  history: tr("当前坐标系里已执行的操作", "Operations already executed in the current coordinate system"),
+  stale: tr("粗动前的旧坐标（淡显；关掉则完全隐藏）", "Old coordinates from before the coarse move (faded; hidden when switched off)"),
+  plan: tr("已发布的计划路线，按执行顺序编号", "Published planned route, numbered in execution order"),
+  upcoming: tr("当前策略接下来会走的位置", "Positions the current strategy would visit next"),
+  next: tr("分析给出的下一个推荐位置", "Next recommended position from the analysis"),
 };
 
 export const DEFAULT_LAYERS: MapLayers = {
@@ -85,14 +87,14 @@ export interface MapPreset {
 export const MAP_PRESETS: MapPreset[] = [
   {
     id: "all",
-    label: "全部",
-    hint: "所有图层",
+    label: tr("全部", "All"),
+    hint: tr("所有图层", "All layers"),
     layers: { ...DEFAULT_LAYERS },
   },
   {
     id: "minimal",
-    label: "精简",
-    hint: "只看表面与当前坐标系里做过什么",
+    label: tr("精简", "Minimal"),
+    hint: tr("只看表面与当前坐标系里做过什么", "Only the surface and what was done in the current coordinate system"),
     layers: {
       underlay: true, grid: false, avoid: false, history: true,
       stale: false, plan: false, upcoming: false, next: false,
@@ -100,8 +102,8 @@ export const MAP_PRESETS: MapPreset[] = [
   },
   {
     id: "planning",
-    label: "规划聚焦",
-    hint: "去掉缩略图与旧坐标，突出去哪儿",
+    label: tr("规划聚焦", "Planning focus"),
+    hint: tr("去掉缩略图与旧坐标，突出去哪儿", "Hide thumbnails and old coordinates to highlight where to go"),
     layers: {
       underlay: false, grid: true, avoid: true, history: true,
       stale: false, plan: true, upcoming: true, next: true,
@@ -110,9 +112,13 @@ export const MAP_PRESETS: MapPreset[] = [
 ];
 
 export const MAP_VIEW_MODES: { id: MapViewMode; label: string; hint: string }[] = [
-  { id: "fit", label: "自动拟合", hint: "把所有内容装进画面" },
-  { id: "follow", label: "跟随扫描框", hint: "只看当前扫描框附近" },
-  { id: "full", label: "压电全域", hint: "整个可达范围，看清位置在量程的哪里" },
+  { id: "fit", label: tr("自动拟合", "Auto fit"), hint: tr("把所有内容装进画面", "Fit everything into view") },
+  { id: "follow", label: tr("跟随扫描框", "Follow scan frame"), hint: tr("只看当前扫描框附近", "Only the area around the current scan frame") },
+  {
+    id: "full",
+    label: tr("压电全域", "Full piezo range"),
+    hint: tr("整个可达范围，看清位置在量程的哪里", "The whole reachable range, showing where the position sits within it"),
+  },
 ];
 
 /**
@@ -132,7 +138,7 @@ export function withLayerDefaults(stored?: Partial<MapLayers> | null): MapLayers
   return out;
 }
 
-/** The preset whose layer set is exactly this one, or null (= 自定义). */
+/** The preset whose layer set is exactly this one, or null (= custom). */
 export function matchPreset(layers: MapLayers): string | null {
   for (const p of MAP_PRESETS) {
     if (MAP_LAYER_IDS.every((id) => p.layers[id] === layers[id])) return p.id;
@@ -212,11 +218,10 @@ export function nextAnalysisDelayMs(
   if (lastFetchedAt == null || !Number.isFinite(lastFetchedAt)) return 0;
   const elapsed = now - lastFetchedAt;
   if (!Number.isFinite(elapsed) || elapsed >= minIntervalMs) return 0;
-  // Clock stepped backwards (NTP correction, the operator fixing the system
-  // time). The stored timestamp is now in the future, and subtracting it would
-  // schedule the next analysis that far out — the overlays would sit frozen for
-  // as long as the jump, which is exactly the silent stall 「UI 绝不冻结」
-  // forbids. An unusable timestamp means "no idea when we last ran": go now.
+  // Clock stepped backwards (NTP correction, a manual system-time change). The
+  // stored timestamp is now in the future, and subtracting it would schedule the
+  // next analysis that far out — the overlays would sit frozen for as long as the
+  // jump. An unusable timestamp means "no idea when we last ran": go now.
   if (elapsed < 0) return 0;
   return Math.max(0, minIntervalMs - elapsed);
 }
@@ -307,7 +312,7 @@ export function isStaleEpoch(
  *
  * Only what is actually DRAWN is fitted — a switched-off layer must not keep
  * pushing the view open around content nobody can see, which is the whole
- * reason 「精简」 is a usable escape from a crowded map.
+ * reason the "Minimal" preset is a usable escape from a crowded map.
  */
 export function boundsForMode(
   mode: MapViewMode,
@@ -380,7 +385,7 @@ function fitBounds(
     // Keep-out discs and the recommendation must be inside the fitted view, or
     // the overlay silently points off-canvas. NOT piezo_half_range_m: fitting
     // the whole ±1.5 µm range would collapse every real nanometre-scale marker
-    // — that is what the explicit 「压电全域」 mode is for.
+    // — that is what the explicit "Full piezo range" mode is for.
     if (layers.avoid) {
       for (const z of analysis.avoid_zones ?? []) {
         ext.add(z.x_m, z.y_m, z.radius_m * 2, z.radius_m * 2);
@@ -402,12 +407,11 @@ function fitBounds(
 // ── map chrome under wheel zoom ────────────────────────────────────────────
 //
 // The map's textual chrome — axis tick numbers, the "X nm" axis label, the nm
-// scale bar and its caption — was laid out in STAGE coordinates pinned to the
-// canvas edges (`y = CANVAS_H - 16`, `x = 4`, `x = PAD`). The wheel zoom is a
-// transform on the Stage, so those coordinates are scaled and translated with
-// everything else: the moment the operator zooms in to read detail, every
-// number that told them the scale slides off the canvas
-// (「滚轮缩放的时候上面的字不跟着缩放」— operator , 2026-08-03).
+// scale bar and its caption — must not be laid out in STAGE coordinates pinned
+// to the canvas edges (`y = CANVAS_H - 16`, `x = 4`, `x = PAD`). The wheel zoom
+// is a transform on the Stage, so such coordinates would be scaled and
+// translated with everything else: the moment the operator zooms in to read
+// detail, every number that gives the scale would slide off the canvas.
 //
 // Chrome is viewport furniture, not surface geometry. These two helpers are
 // what the component needs to keep it that way, and they are pure so the
@@ -462,15 +466,14 @@ export function inverseStageTransform(zoom: { k: number; x: number; y: number })
  * Konva props that keep a Text anchored to a WORLD feature while rendering at a
  * constant SCREEN size under stage zoom `k`.
  *
- * Why this exists on top of {@link inverseStageTransform} (2026-08-05). #52
- * moved the map's GLOBAL chrome — axis ticks, the scale bar — into an
- * inverse-transformed layer, and that was right for furniture pinned to the
- * canvas edges. But five labels belong to a moving feature and therefore stayed
- * in the zoomed world layer: 「针尖」, 「建议下一个位置」, 「压电范围 ±… µm」, and
- * the plan / candidate step numbers. Those scale with the stage, so at the 25×
- * the zoom allows a 10 px caption renders 250 px tall and buries the surface it
- * was labelling. Same complaint, other half of it: captions again failed to
- * stay put under wheel zoom.
+ * Why this exists on top of {@link inverseStageTransform}: the map's GLOBAL
+ * chrome — axis ticks, the scale bar — lives in an inverse-transformed layer,
+ * which is right for furniture pinned to the canvas edges. But five labels
+ * belong to a moving feature and therefore stay in the zoomed world layer: the
+ * tip label, the suggested-next-position label, the piezo-range label, and the
+ * plan / candidate step numbers. Those would scale with the stage, so at the 25×
+ * the zoom allows a 10 px caption would render 250 px tall and bury the surface
+ * it labels.
  *
  * The whole layer cannot simply be inverted here — that would unpin the labels
  * from the features they name. So the anchor stays in world space and only the
@@ -528,7 +531,7 @@ export function fmtNm(valueNm: number, stepNm: number): string {
   return String(+(valueNm + 0).toFixed(decimals));
 }
 
-// ── marker detail (「扫描地图点击标记弹出具体信息、时间等」) ────
+// ── marker detail (clicking a marker opens a popup with details and time) ────
 
 /** The subset of `MapMarkerView` this needs. Structural, so tests need no API types. */
 export interface MarkerLike {
@@ -569,24 +572,24 @@ function nm(v: number | null | undefined): string | null {
  *
  * Omits what it does not have rather than printing a placeholder: a marker with
  * no size is a point operation (a pulse, a spectrum), not a zero-sized scan,
- * and a row reading「尺寸 0 × 0」 would be a statement that is false.
+ * and a row reading "Size 0 × 0" would be false.
  */
 export function markerDetailRows(
   m: MarkerLike,
   currentEpoch?: number | null,
 ): DetailRow[] {
   const rows: DetailRow[] = [];
-  if (m.timestamp) rows.push({ label: "时间", value: m.timestamp.replace("T", " "), mono: true });
-  if (m.skill_name) rows.push({ label: "技能", value: m.skill_name, mono: true });
-  if (m.status) rows.push({ label: "状态", value: statusLabelOf(m.status) });
+  if (m.timestamp) rows.push({ label: tr("时间", "Time"), value: m.timestamp.replace("T", " "), mono: true });
+  if (m.skill_name) rows.push({ label: tr("技能", "Skill"), value: m.skill_name, mono: true });
+  if (m.status) rows.push({ label: tr("状态", "Status"), value: statusLabelOf(m.status) });
   const x = nm(m.x_m);
   const y = nm(m.y_m);
-  if (x && y) rows.push({ label: "位置", value: `X ${x} · Y ${y}`, mono: true });
+  if (x && y) rows.push({ label: tr("位置", "Position"), value: `X ${x} · Y ${y}`, mono: true });
   const w = nm(m.w_m);
   const h = nm(m.h_m);
-  if (w && h) rows.push({ label: "尺寸", value: `${w} × ${h}`, mono: true });
+  if (w && h) rows.push({ label: tr("尺寸", "Size"), value: `${w} × ${h}`, mono: true });
   if (m.angle_deg != null && Number.isFinite(m.angle_deg) && m.angle_deg !== 0) {
-    rows.push({ label: "角度", value: `${m.angle_deg.toFixed(1)}°`, mono: true });
+    rows.push({ label: tr("角度", "Angle"), value: `${m.angle_deg.toFixed(1)}°`, mono: true });
   }
   if (m.coord_epoch != null) {
     // Stale epochs are the one thing here that changes what the operator should
@@ -594,17 +597,17 @@ export function markerDetailRows(
     // the place the operation happened. Say it in words, not just by fading.
     const stale = currentEpoch != null && m.coord_epoch !== currentEpoch;
     rows.push({
-      label: "坐标代次",
-      value: `#${m.coord_epoch}${stale ? "（粗动前的旧坐标系，位置已不再对应）" : ""}`,
+      label: tr("坐标代次", "Coordinate generation"),
+      value: `#${m.coord_epoch}${stale ? tr("（粗动前的旧坐标系，位置已不再对应）", " (old coordinate system from before a coarse move; the position no longer matches)") : ""}`,
     });
   }
-  if (m.source) rows.push({ label: "来源", value: m.source });
+  if (m.source) rows.push({ label: tr("来源", "Source"), value: m.source });
   return rows;
 }
 
 function statusLabelOf(s: string): string {
-  if (s === "planned") return "计划中";
-  if (s === "failed") return "失败";
-  if (s === "done") return "已完成";
+  if (s === "planned") return tr("计划中", "Planned");
+  if (s === "failed") return tr("失败", "Failed");
+  if (s === "done") return tr("已完成", "Done");
   return s;
 }

@@ -18,6 +18,7 @@ z,和事件**之后**那段稳定的 z,两者差多少、往哪边。中间的�
 from __future__ import annotations
 
 from typing import Sequence
+from mast.i18n import tr
 
 #: 跳变检测的默认稳健倍数。**8 是实测出来的,不是口味问题** —— 见
 #: ``monitoring/features.py`` 的 ``FeatureParams``:纯高斯白噪声下,k=5 时一段
@@ -194,8 +195,11 @@ def step_verdict(samples: Sequence[float], times: Sequence[float],
     样本。``cap = times[-1]`` 于是被这一个离群值挟持,后窗往后平移,把**全部**真实
     样本挡在外面。
 
-    一次长延迟可能令尾部窗口只剩一个离群样本，从而把有效采集误报为
-    ``insufficient_data``。必须区分真正缺少样本与时间窗被延迟拉偏。
+    典型情形:一次 122 ms 卡顿把一次健康的 440 点采集
+    (``n_post=161`` → ``up``)变成 ``n=315 n_pre=160 n_post=1 cap=0.3414``
+    → ``insufficient_data``. On hardware that verdict means a pulse was fired but
+    the tip response cannot be judged; returning it with 315 usable samples in
+    hand is a false negative and a real loss of capability.
 
     所以:先按时间取窗;**若不足 ``_MIN_WINDOW_SAMPLES`` 个,就往回够到这个数为止**,
     并把这件事如实标出来(见 ``post_window_starved``)。
@@ -274,10 +278,10 @@ def step_verdict(samples: Sequence[float], times: Sequence[float],
         # 说明整条曲线只有第一到第三段。2026-08-20 的 168 条历史曲线里
         # 160 条是这一种 —— 也就是说那一整批数据**没有一条**记录过判定
         # 真正需要的那一段，而它们当时全都给出了确定的判定。
-        why = ("反馈恢复之后只录到 %.3f s（下限 %.2f s）" % (seg4_s or 0.0,
+        why = (tr("反馈恢复之后只录到 %.3f s（下限 %.2f s）", "Only %.3f s was recorded after feedback was restored (minimum %.2f s)") % (seg4_s or 0.0,
                                                     _MIN_FEEDBACK_SEGMENT_S)
                if seg4_source == "too_short"
-               else "电流压上去之后**再没回到 setpoint** —— 采集在反馈接管之前就结束了")
+               else tr("电流压上去之后**再没回到 setpoint** —— 采集在反馈接管之前就结束了", "After the current was pushed up it **never returned to the setpoint** - the acquisition ended before feedback took over"))
         return {"direction": "insufficient_data",
                 "reason": ("feedback_segment_too_short" if seg4_source == "too_short"
                            else "feedback_segment_not_captured"),
@@ -287,8 +291,10 @@ def step_verdict(samples: Sequence[float], times: Sequence[float],
                 "feedback_segment_s": (float(seg4_s) if seg4_s is not None else None),
                 "feedback_segment_source": seg4_source,
                 "feedback_restored_t": t4,
-                "advice": ("%s —— 判不了。**不要据此加大扎入深度**，"
-                           "先把 post_roll_s 调到 1.5 s 左右再扎一次。" % why),
+                "advice": (tr("%s —— 判不了。**不要据此加大扎入深度**，"
+                              "先把 post_roll_s 调到 1.5 s 左右再扎一次。",
+                              "%s - cannot decide. **Do not increase the dip depth on this basis**; "
+                              "set post_roll_s to about 1.5 s first and dip again.") % why),
                 "max_gap_s": _max_gap(times)}
     pre_s = pre[len(pre) // 2:]
     post_s = post[len(post) // 2:]

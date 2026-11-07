@@ -8,13 +8,14 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { useUiStore } from "@/store";
 import { useElementWidth, useViewportHeight } from "@/hooks/useElementWidth";
 import { TREND_RATIO, sizeChart } from "@/lib/chartSize";
+import { tr } from "@/lib/i18n";
 
 type FFT = components["schemas"]["FFTResponse"];
 
 // One-sided spectrum line chart (freqs_hz × spectrum) via uPlot. Dark theme to
 // match the Lab-Console look; replaces the matplotlib FFT plot in exp_capture.
 //
-// ITEM 6 — fuller 信号捕获 + FFT. Beyond the original single-trace render this
+// Signal capture + FFT. Beyond the original single-trace render this
 // now supports:
 //   · logY      — log-scaled Y axis (distr:3) vs linear (parity with semilogy)
 //   · logX      — log-scaled X axis (decade view of the spectrum)
@@ -30,7 +31,7 @@ type FFT = components["schemas"]["FFTResponse"];
 // uPlot paints to <canvas> and cannot resolve CSS vars, so the axis colours are
 // read off <html> and re-read on theme change. They used to be dark-theme hex
 // literals inlined at the call site, which left the light theme with a near
-// invisible grid (same family of defect as ).
+// invisible grid.
 function token(name: string): string {
   if (typeof window === "undefined") return "";
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -84,10 +85,16 @@ export function spectrumUnits(fft: Pick<FFT, "output" | "unit">): { yLabel: stri
   if (fft.output === "power") {
     return {
       yLabel: `PSD (${unit}²/Hz)`,
-      scaleNote: `功率谱密度 PSD，单位 ${unit}²/Hz（幅度谱密度 ≈ ${unit}/√Hz）`,
+      scaleNote: tr(
+        `功率谱密度 PSD，单位 ${unit}²/Hz（幅度谱密度 ≈ ${unit}/√Hz）`,
+        `Power spectral density (PSD), in ${unit}²/Hz (amplitude spectral density ≈ ${unit}/√Hz)`,
+      ),
     };
   }
-  return { yLabel: `幅值 (${unit})`, scaleNote: `单边幅度谱 |FFT|，单位 ${unit}` };
+  return {
+    yLabel: tr(`幅值 (${unit})`, `Amplitude (${unit})`),
+    scaleNote: tr(`单边幅度谱 |FFT|，单位 ${unit}`, `One-sided amplitude spectrum |FFT|, in ${unit}`),
+  };
 }
 
 interface PeakRow {
@@ -200,7 +207,7 @@ export function FftChart({
     return rows;
   }, [perSeriesArrays, specs, showPeaks, topN]);
 
-  const units = primary ? spectrumUnits(primary) : { yLabel: "幅值", scaleNote: "" };
+  const units = primary ? spectrumUnits(primary) : { yLabel: tr("幅值", "Amplitude"), scaleNote: "" };
 
   const options = useMemo<uPlot.Options>(
     () => {
@@ -223,7 +230,7 @@ export function FftChart({
           stroke: axisStroke,
           grid: { stroke: gridStroke },
           ticks: { stroke: tickStroke },
-          label: logX ? "频率 (Hz, 对数)" : "频率 (Hz)",
+          label: logX ? tr("频率 (Hz, 对数)", "Frequency (Hz, log)") : tr("频率 (Hz)", "Frequency (Hz)"),
           labelGap: 6,
         },
         {
@@ -239,8 +246,7 @@ export function FftChart({
         // Stroke only, in every mode. A single spectrum used to get a `fill`,
         // which floods from the curve down to the baseline — on a log Y axis
         // that is most of the panel, and it made the one-channel view look
-        // categorically different from the compare view of the same data
-        // (「不宜图线下方填色」).
+        // categorically different from the compare view of the same data.
         ...specs.map((sp, i) => ({
           label: sp.label || "signal",
           stroke: OVERLAY_STROKES[i % OVERLAY_STROKES.length],
@@ -277,17 +283,17 @@ export function FftChart({
   );
 
   if (!xFreqs.length) {
-    return <p className="text-sm text-mast-muted">频谱为空。</p>;
+    return <p className="text-sm text-mast-muted">{tr("频谱为空。", "The spectrum is empty.")}</p>;
   }
 
   const peakColumns: ColumnDef<PeakRow, unknown>[] = [
     { accessorKey: "rank", header: "#", cell: (c) => <span className="font-mono">{c.getValue<number>()}</span> },
     ...(specs.length > 1
-      ? [{ accessorKey: "series", header: "通道", cell: (c) => <span className="truncate">{c.getValue<string>()}</span> } as ColumnDef<PeakRow, unknown>]
+      ? [{ accessorKey: "series", header: tr("通道", "Channel"), cell: (c) => <span className="truncate">{c.getValue<string>()}</span> } as ColumnDef<PeakRow, unknown>]
       : []),
-    { accessorKey: "freq", header: "频率", cell: (c) => <span className="font-mono text-mast-accent">{fmtHz(c.getValue<number>())}</span> },
+    { accessorKey: "freq", header: tr("频率", "Frequency"), cell: (c) => <span className="font-mono text-mast-accent">{fmtHz(c.getValue<number>())}</span> },
     { accessorKey: "value", header: units.yLabel, cell: (c) => <span className="font-mono">{fmtVal(c.getValue<number>())}</span> },
-    { accessorKey: "ratio", header: "相对峰", cell: (c) => <span className="font-mono text-mast-muted">{(c.getValue<number>() * 100).toFixed(1)}%</span> },
+    { accessorKey: "ratio", header: tr("相对峰", "Relative to peak"), cell: (c) => <span className="font-mono text-mast-muted">{(c.getValue<number>() * 100).toFixed(1)}%</span> },
   ];
 
   return (
@@ -298,7 +304,7 @@ export function FftChart({
 
       <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-mast-muted">
         <span>
-          游标：
+          {tr("游标：", "Cursor: ")}
           {hover ? (
             <span className="ml-1 font-mono text-mast-text">
               {fmtHz(hover.f)}
@@ -313,26 +319,32 @@ export function FftChart({
               ))}
             </span>
           ) : (
-            <span className="ml-1">移动鼠标到曲线上读取</span>
+            <span className="ml-1">{tr("移动鼠标到曲线上读取", "Hover over the curve to read values")}</span>
           )}
         </span>
-        <span>X 轴：{logX ? "对数" : "线性"}</span>
-        <span>Y 轴：{logY ? "对数 (semilogy)" : "线性"}</span>
-        {(dropDc || logY || logX) && <span>已去除 DC 分量 (f=0)</span>}
+        <span>
+          {tr("X 轴：", "X axis: ")}
+          {logX ? tr("对数", "log") : tr("线性", "linear")}
+        </span>
+        <span>
+          {tr("Y 轴：", "Y axis: ")}
+          {logY ? tr("对数 (semilogy)", "log (semilogy)") : tr("线性", "linear")}
+        </span>
+        {(dropDc || logY || logX) && <span>{tr("已去除 DC 分量 (f=0)", "DC component (f=0) removed")}</span>}
         {(fMin != null || fMax != null) && (
           <span className="text-mast-warn">
-            频率窗 [{fMin != null ? fmtHz(fMin) : "auto"} – {fMax != null ? fmtHz(fMax) : "auto"}]
+            {tr("频率窗", "Frequency window")} [{fMin != null ? fmtHz(fMin) : "auto"} – {fMax != null ? fmtHz(fMax) : "auto"}]
           </span>
         )}
       </div>
-      {units.scaleNote && <p className="text-xs text-mast-muted/80">标度：{units.scaleNote}</p>}
+      {units.scaleNote && <p className="text-xs text-mast-muted/80">{tr("标度：", "Scale: ")}{units.scaleNote}</p>}
 
       {showPeaks && peakRows.length > 0 && (
         <div className="rounded-md border border-mast-border bg-mast-bg/40 p-2">
           <span className="mb-1.5 block text-xs font-semibold text-mast-text">
-            峰值检测（每通道前 {topN}）
+            {tr(`峰值检测（每通道前 ${topN}）`, `Peak detection (top ${topN} per channel)`)}
           </span>
-          <DataTable<PeakRow> data={peakRows} columns={peakColumns} empty="未检出峰值。" />
+          <DataTable<PeakRow> data={peakRows} columns={peakColumns} empty={tr("未检出峰值。", "No peaks detected.")} />
         </div>
       )}
     </div>

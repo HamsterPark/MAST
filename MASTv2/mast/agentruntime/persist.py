@@ -392,7 +392,7 @@ def message_to_row(msg: Any) -> dict:
     if getattr(msg, "usage_metadata", None):
         meta["usage"] = msg.usage_metadata
     # 压缩摘要在 additional_kwargs 上盖了章 —— 迁移进来的历史要保住这个标记，
-    # 否则「这段是摘要不是原话」的信息就没了。
+    # 否则「这段是摘要而非原始消息」的信息就没了。
     if ak.get("mast_compaction"):
         meta["mast_compaction"] = ak["mast_compaction"]
 

@@ -28,6 +28,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -79,27 +80,27 @@ class GrabScanFrameData(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "抓取某一路扫描通道的整帧采样（Scan_FrameDataGrab），"
+                tr("抓取某一路扫描通道的整帧采样（Scan_FrameDataGrab），"
                 "存成一个 .npy 文件；返回的是文件**路径**（不是数组本身）。"
                 "direction=1 取正扫，0 取反扫。通道 0 是"
                 "第一路采集通道（通常是形貌）；通道 14 是 "
-                "Z-controller 信号。"
+                "Z-controller 信号。", "Grab the full-frame samples of one scan channel (Scan_FrameDataGrab) and save them as a .npy file; what is returned is the file **path** (not the array itself). direction=1 takes the forward scan, 0 the backward scan. Channel 0 is the first acquisition channel (usually topography); channel 14 is the Z-controller signal.")
             ),
             parameters=[
                 ParameterSpec(
                     name="channel_index", type="int",
-                    description="采集通道索引（0 = 第一路 / 形貌）",
+                    description=tr("采集通道索引（0 = 第一路 / 形貌）", "Acquisition channel index (0 = first / topography)"),
                     required=True, min_value=0,
                 ),
                 ParameterSpec(
                     name="direction", type="int",
-                    description="1 = 正扫，0 = 反扫",
+                    description=tr("1 = 正扫，0 = 反扫", "1 = forward scan, 0 = backward scan"),
                     required=False, default=1, allowed_values=[0, 1],
                 ),
                 ParameterSpec(
                     name="save_path", type="str",
-                    description=("可选：显式指定 .npy 输出路径；默认 = "
-                                 "<data>/experiments/frames/"),
+                    description=(tr("可选：显式指定 .npy 输出路径；默认 = "
+                                 "<data>/experiments/frames/", "Optional: explicit .npy output path; default = <data>/experiments/frames/")),
                     required=False, default="",
                 ),
             ],
@@ -158,7 +159,7 @@ class GrabScanFrameData(BaseSkill):
                 # sidecars were keyed by name until a finished AutoApproach's
                 # file made every later approach "succeed" instantly, and
                 # `_persist_frame_png` is timestamped for exactly the
-                # history-falsification reason #78 raised. A shared mutable path
+                # history-falsification reason. A shared mutable path
                 # is the defect; a guard on top of it is not the fix.
                 # A millisecond stamp ALONE does not make the name unique: two
                 # grabs issued back to back land in the same millisecond
@@ -190,15 +191,53 @@ class GrabScanFrameData(BaseSkill):
 
 
 class LoadScanFrameFromFile(BaseSkill):
-    """从保存的 .sxm 读取指定通道正反扫二维数组，分别写入 .npy 并返回路径。
-    
-    实时缓冲只反映当前缓冲区，不能用于恢复任意历史帧。存盘帧统一通过
-    sxm_oriented_frames 取出：反扫按采集顺序保存，需要水平方向对齐；向上扫描
-    还需统一行方向。未经对齐的相关性比较可能把时间方向伪影当成相同形貌。
-    
-    只返回路径，不把数组放入 checkpoint；保持 (rows, cols) 形状，以便现有画图和
-    CheckLineQuality 等消费者使用。请求通道不存在时明确失败并列出可用通道，
-    不能自动改用不同物理量。"""
+    """从**存盘 .sxm** 取一个通道的正/反扫二维数组,各存成 ``.npy``,返回两个路径。
+
+    ## 为什么需要它
+
+    ``GrabScanFrameData`` 只抓**活缓冲区** —— 它走 ``Scan_FrameDataGrab`` TCP。
+    于是「拿一帧已经存盘的图去问正反扫一致性」这件事做不了:``CheckLineQuality``
+    要 ``fwd_lines`` / ``bwd_lines`` 两个数组,而唯一能产出它们的技能必须连着仪器,
+    还得那一帧恰好还在缓冲区里。
+
+    数据本身一直都在 .sxm 里,缺的只是一个把它们落到 ``.npy``、让既有判据原样吃下去的口子。
+
+    ## ⚠️ ``read_sxm`` 的那两个数组**不能直接比**
+
+    ``read_sxm`` 返回的 ``channels[name]["forward" | "backward"]`` **不能**直接当作
+    这两个数组用。
+
+    反扫是沿 **−x** 采的,Nanonis 就按采集顺序存盘 ⇒ 存进去的 backward 块是
+    **镜像的**。直接拿它和 forward 比,比的是一张图和**它自己的镜像**
+    (``nanonis_files.sxm_oriented_frames`` 的 docstring 逐字写着这句)。
+    另外 ``:SCAN_DIR: up`` 时首行在画面底部,还要 ``flipud``。
+
+    ⇒ 一律经 :func:`~mast.io.nanonis_files.sxm_oriented_frames` 取帧。
+    其余每一处 .sxm 正反扫比较都走它。
+
+    ### 不镜像会造成什么
+
+    镜像没做时,``trace_retrace_correlation`` 量到的不再是「针尖走出同一条形貌
+    吗」,而是**一个锁在扫描方向上的仪器伪影**:废帧里每条扫描线的 Z 在**时间上**
+    单调跑飞(反馈追不上),正扫与反扫**在时间上朝同一个方向跑**,所以未镜像时
+    两者高度吻合;而真实形貌是钉在**样品坐标**里的,不镜像反而对不上。
+    ⇒ **判据整个反过来**,而且是「越坏分越高」:好帧未镜像时相关性低、镜像后高,
+    废帧恰好相反。
+
+    ## 合同刻意抄 ``GrabScanFrameData``
+
+    * 返回**路径**,绝不返回数组 —— tensor 不进 checkpointer,与那一条同规矩;
+    * 保持 ``(rows, cols)`` 二维 —— 那一条曾经把帧拍平成一维写盘,``plot_scan``
+      于是拒绝作图,整条 scan→figure→report 链在测量之后一步断掉;
+    * 于是 ``CheckLineQuality(fwd_lines=…, bwd_lines=…)`` 和一切吃 ``.npy`` 的判据
+      **不用改一个字**就能吃存盘帧。
+
+    ## 通道选错宁可失败
+
+    ``AssessImageQuality._compute_fwd_bwd_ssim`` 里那段是 ``for ch in ("Z", *channels)``
+    ——「Z 没有就用碰到的第一个」。那样出来的数**看起来完全正常**,只是量的是另一个
+    物理量(电流?Z 误差?)。这里请求的通道不在就**报错并列出有哪些**,不替调用方猜。
+    """
 
     def metadata(self) -> SkillMetadata:
         return SkillMetadata(
@@ -207,30 +246,30 @@ class LoadScanFrameFromFile(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "从一个**已保存**的 .sxm 文件中，抽出某一路通道的正扫与反扫 "
+                tr("从一个**已保存**的 .sxm 文件中，抽出某一路通道的正扫与反扫 "
                 "2-D 帧，各写成一个 .npy；返回的是两个**路径**"
                 "（绝不返回数组本身）。它是 GrabScanFrameData 的离线对应版 —— "
                 "后者只能读实时缓冲。这两个路径可以直接喂给 "
                 "CheckLineQuality、或任何接受 .npy 的判据。若该通道或反扫"
-                "方向不存在，它会**大声报错** —— 绝不拿另一路通道来顶替。"
+                "方向不存在，它会**大声报错** —— 绝不拿另一路通道来顶替。", "From a **saved** .sxm file, extract the forward and backward 2-D frames of one channel and write each to a .npy; what is returned is two **paths** (never the arrays themselves). It is the offline counterpart of GrabScanFrameData - which can only read the live buffer. The two paths can be fed directly to CheckLineQuality, or any criterion that accepts .npy. If the channel or the backward direction does not exist, it **fails loudly** - it never substitutes another channel.")
             ),
             parameters=[
                 ParameterSpec(
                     name="scan_path", type="str",
-                    description="已保存的 .sxm 文件的路径",
+                    description=tr("已保存的 .sxm 文件的路径", "Path of the saved .sxm file"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="channel", type="str",
-                    description=("通道名，按 .sxm 头里写的那样，例如 "
+                    description=(tr("通道名，按 .sxm 头里写的那样，例如 "
                                  "'Z'（形貌）。通道不存在 = 报错，并列出这个"
-                                 "文件里实际有哪些通道。"),
+                                 "文件里实际有哪些通道。", "Channel name, as written in the .sxm header, e.g. 'Z' (topography). Channel does not exist = error, listing which channels the file actually has.")),
                     required=False, default="Z",
                 ),
                 ParameterSpec(
                     name="save_dir", type="str",
-                    description=("可选：输出目录；默认 = "
-                                 "<data>/experiments/frames/"),
+                    description=(tr("可选：输出目录；默认 = "
+                                 "<data>/experiments/frames/", "Optional: output directory; default = <data>/experiments/frames/")),
                     required=False, default="",
                 ),
             ],
@@ -250,27 +289,27 @@ class LoadScanFrameFromFile(BaseSkill):
 
         if not scan_path:
             return SkillResult(skill_name=name, success=False,
-                               error="scan_path 是必填的")
+                               error=tr("scan_path 是必填的", "scan_path is required"))
         # 单一入口:.sxm 只经 io.nanonis_files 读(项目规约 的目录边界规矩)。
         try:
             from mast.io.nanonis_files import read_sxm
             parsed = read_sxm(scan_path)
         except Exception as exc:  # noqa: BLE001
             return SkillResult(skill_name=name, success=False,
-                               error=f"读不了 {scan_path}: {type(exc).__name__}: {exc}")
+                               error=tr(f"读不了 {scan_path}: {type(exc).__name__}: {exc}", f"Cannot read {scan_path}: {type(exc).__name__}: {exc}"))
 
         channels = parsed.get("channels") or {}
         if not channels:
             return SkillResult(skill_name=name, success=False,
-                               error=f"{scan_path} 里没有任何通道数据")
+                               error=tr(f"{scan_path} 里没有任何通道数据", f"No channel data in {scan_path}"))
         ch = channels.get(channel)
         if not isinstance(ch, dict):
             return SkillResult(
                 skill_name=name, success=False,
-                error=(f"这个 .sxm 里没有通道 {channel!r}。它有:"
+                error=(tr(f"这个 .sxm 里没有通道 {channel!r}。它有:"
                        f"{sorted(channels)} —— 请指名要哪一个。"
                        "(不替你挑:挑错通道量出来的数看起来完全正常,"
-                       "只是量的是另一个物理量。)"),
+                       "只是量的是另一个物理量。)", f"This .sxm has no channel {channel!r}. It has: {sorted(channels)} - please name the one you want. (Not picked for you: a number measured on the wrong channel looks perfectly normal, it just measures a different physical quantity.)")),
                 data={"available_channels": sorted(channels)})
 
         fwd, bwd = ch.get("forward"), ch.get("backward")
@@ -280,8 +319,8 @@ class LoadScanFrameFromFile(BaseSkill):
         if missing:
             return SkillResult(
                 skill_name=name, success=False,
-                error=(f"通道 {channel!r} 缺 {'/'.join(missing)} 方向的数据 —— "
-                       "这一帧回答不了正反扫一致性(只扫了一个方向的图就是这样)。"),
+                error=(tr(f"通道 {channel!r} 缺 {'/'.join(missing)} 方向的数据 —— "
+                       "这一帧回答不了正反扫一致性(只扫了一个方向的图就是这样)。", f"Channel {channel!r} lacks data for direction {'/'.join(missing)} - this frame cannot answer forward/backward consistency (that is what a frame scanned in only one direction is like).")),
                 data={"channel": channel, "missing_directions": missing})
 
         # ── 几何归位:反扫镜像 + :SCAN_DIR: up 的行序 ────────────────────────
@@ -299,27 +338,27 @@ class LoadScanFrameFromFile(BaseSkill):
         except Exception as exc:  # noqa: BLE001
             return SkillResult(
                 skill_name=name, success=False,
-                error=(f"几何归位失败({type(exc).__name__}: {exc})—— "
+                error=(tr(f"几何归位失败({type(exc).__name__}: {exc})—— "
                        "宁可失败也不交未归位的帧:未镜像的反扫会让正反扫一致性"
-                       "判据整个反过来(越坏分越高)。"))
+                       "判据整个反过来(越坏分越高)。", f"Geometric normalization failed ({type(exc).__name__}: {exc}) - better to fail than hand over an unnormalized frame: an unmirrored backward scan would turn the forward/backward consistency criterion completely upside down (the worse, the higher the score).")))
         if o_fwd is None or o_bwd is None:
             return SkillResult(
                 skill_name=name, success=False,
-                error=(f"通道 {channel!r} 几何归位后拿不到正/反扫两个方向 —— "
-                       "不交未归位的帧。"))
+                error=(tr(f"通道 {channel!r} 几何归位后拿不到正/反扫两个方向 —— "
+                       "不交未归位的帧。", f"Channel {channel!r} does not give both forward and backward directions after geometric normalization - an unnormalized frame is not handed over.")))
 
         f = np.asarray(o_fwd, dtype=np.float64)
         b = np.asarray(o_bwd, dtype=np.float64)
         if f.ndim != 2 or b.ndim != 2:
             return SkillResult(
                 skill_name=name, success=False,
-                error=(f"正/反扫不是二维: forward{f.shape} backward{b.shape}。"
+                error=(tr(f"正/反扫不是二维: forward{f.shape} backward{b.shape}。"
                        "持久化的帧必须保持图像形状 —— 拍平的 .npy 会让下游作图"
-                       "与逐行判据全部失效。"))
+                       "与逐行判据全部失效。", f"Forward/backward are not 2-D: forward{f.shape} backward{b.shape}. A persisted frame must keep its image shape - a flattened .npy would break all downstream plotting and line-by-line criteria.")))
         if f.shape != b.shape:
             return SkillResult(
                 skill_name=name, success=False,
-                error=f"正反扫形状不一致: {f.shape} vs {b.shape},无法逐点比较。")
+                error=tr(f"正反扫形状不一致: {f.shape} vs {b.shape},无法逐点比较。", f"Forward/backward shapes differ: {f.shape} vs {b.shape}, cannot compare point by point."))
 
         try:
             if save_dir:
@@ -344,7 +383,7 @@ class LoadScanFrameFromFile(BaseSkill):
             np.save(bwd_path, b)
         except Exception as exc:  # noqa: BLE001
             return SkillResult(skill_name=name, success=False,
-                               error=f"写 .npy 失败: {type(exc).__name__}: {exc}")
+                               error=tr(f"写 .npy 失败: {type(exc).__name__}: {exc}", f"Failed to write .npy: {type(exc).__name__}: {exc}"))
 
         return SkillResult(
             skill_name=name, success=True,
@@ -354,8 +393,8 @@ class LoadScanFrameFromFile(BaseSkill):
                   # 说出来。读者不该靠猜来判断这两个 .npy 能不能直接逐点比 ——
                   # 之前它们**不能**,而没有任何一个字段说得出这件事。
                   "orientation": "sample_frame",
-                  "orientation_note": ("反扫已 fliplr 回样品坐标、:SCAN_DIR: up 已 "
-                                       "flipud —— 两个数组可以直接逐点/互相关比较。"),
+                  "orientation_note": (tr("反扫已 fliplr 回样品坐标、:SCAN_DIR: up 已 "
+                                       "flipud —— 两个数组可以直接逐点/互相关比较。", "The backward scan has been fliplr'd back to sample coordinates and :SCAN_DIR: up has been flipud'd - the two arrays can be compared directly point by point / by cross-correlation.")),
                   "source": scan_path},
         )
 
@@ -380,22 +419,22 @@ class CheckScanForCrash(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "从刚采到的这一帧里检测撞针：抓取几路探针通道，"
+                tr("从刚采到的这一帧里检测撞针：抓取几路探针通道，"
                 "只要有任何一路的方差接近零、或出现 NaN，就标记为撞针。"
                 "返回 crash_indicator + status（ok/crash/skipped）+ 每路通道的"
                 "判语。Channels = 逗号分隔的索引列表（默认 '0,14'："
                 "形貌 + Z-controller 信号 —— 撞针会把 Z 压平，哪怕"
-                "通道 0 看起来还说得过去）。"
+                "通道 0 看起来还说得过去）。", "Detect a tip crash from the frame just acquired: grab a few probe channels, and flag a tip crash if any channel has near-zero variance or contains NaN. Returns crash_indicator + status (ok/crash/skipped) + a verdict for each channel. Channels = comma-separated list of indexes (default '0,14': topography + Z-controller signal - a tip crash flattens Z even if channel 0 still looks passable).")
             ),
             parameters=[
                 ParameterSpec(
                     name="channels", type="str",
-                    description="要探测的采集通道索引，逗号分隔",
+                    description=tr("要探测的采集通道索引，逗号分隔", "Acquisition channel indexes to probe, comma-separated"),
                     required=False, default="0,14",
                 ),
                 ParameterSpec(
                     name="direction", type="int",
-                    description="1 = 正扫，0 = 反扫",
+                    description=tr("1 = 正扫，0 = 反扫", "1 = forward scan, 0 = backward scan"),
                     required=False, default=1, allowed_values=[0, 1],
                 ),
             ],
@@ -489,22 +528,22 @@ class ComputeDriftVector(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "抓取当前的扫描帧，与一张参考 .npy 图像做互相关，"
+                tr("抓取当前的扫描帧，与一张参考 .npy 图像做互相关，"
                 "以估计样品漂移；结果以**米**为单位返回"
-                "（drift_x_m, drift_y_m）。漂移跟踪类 workflow 会用到它。"
+                "（drift_x_m, drift_y_m）。漂移跟踪类 workflow 会用到它。", "Grab the current scan frame and cross-correlate it with a reference .npy image to estimate sample drift; the result is returned in **metres** (drift_x_m, drift_y_m). Used by drift-tracking workflows.")
             ),
             parameters=[
                 ParameterSpec(name="ref_path", type="str",
-                              description="参考图像 .npy 的路径（2-D）",
+                              description=tr("参考图像 .npy 的路径（2-D）", "Path of the reference image .npy (2-D)"),
                               required=True),
                 ParameterSpec(name="scan_width_m", type="float", unit="m",
-                              description="扫描框宽度，单位米（用于 px→m 换算）",
+                              description=tr("扫描框宽度，单位米（用于 px→m 换算）", "Scan frame width, in metres (used for px->m conversion)"),
                               required=True, min_value=0.0),
                 ParameterSpec(name="channel_index", type="int",
-                              description="从哪一路通道抓取当前帧",
+                              description=tr("从哪一路通道抓取当前帧", "Which channel to grab the current frame from"),
                               required=False, default=0, min_value=0),
                 ParameterSpec(name="direction", type="int",
-                              description="1 = 正扫，0 = 反扫",
+                              description=tr("1 = 正扫，0 = 反扫", "1 = forward scan, 0 = backward scan"),
                               required=False, default=1, allowed_values=[0, 1]),
             ],
             estimated_duration_s=1.0,
@@ -581,14 +620,14 @@ class ParseRegions(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "解析 + 校验一个由扫描区域组成的 JSON 数组（每个形如 "
+                tr("解析 + 校验一个由扫描区域组成的 JSON 数组（每个形如 "
                 "{center_x_m, center_y_m, width_m, height_m, [angle_deg], [label]}），"
                 "转成 composite 可以 foreach 遍历的归一化列表。坏 "
-                "JSON、>64 个区域、中心/尺寸越界，都会被拒绝。"
+                "JSON、>64 个区域、中心/尺寸越界，都会被拒绝。", "Parse + validate a JSON array of scan regions (each of the form {center_x_m, center_y_m, width_m, height_m, [angle_deg], [label]}) and turn it into a normalized list that a composite can iterate over with foreach. Bad JSON, more than 64 regions, or center/size out of bounds are all rejected.")
             ),
             parameters=[
                 ParameterSpec(name="regions", type="str",
-                              description="由区域对象组成的 JSON 数组（单位米）",
+                              description=tr("由区域对象组成的 JSON 数组（单位米）", "JSON array of region objects (units: metres)"),
                               required=True),
             ],
             estimated_duration_s=0.2,

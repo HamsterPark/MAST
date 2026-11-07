@@ -24,6 +24,7 @@ import logging
 import math
 from pathlib import Path
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -41,8 +42,16 @@ _MAD_TO_SIGMA = 1.4826
 #: 分割阈值(中位数 ± k×σ_MAD)。**未标定。**
 _DEFAULT_THRESHOLD_MAD = 3.0
 
-# 倾斜与纹理的比值用于诊断预处理是否需要调整。
-# 该工作点未标定，不能把比值阈值当成已验证的样品分类边界。
+#: 倾斜告警的比值门。**没有任何标定数据支撑。**
+#:
+#: 已知「**在调平的情况下**,raw 比处理过的更真实」—— 这个前提要能判,
+#: 所以这里量整帧残余平面的峰谷值与噪声 σ 的比。但在一批帧上,
+#: 这个比跨度很大,而**提取在全程都工作正常**(包括比值很高的帧,
+#: 其中的团簇照样被找出来)。
+#:
+#: ⇒ **没有观察到任何一个"因为没调平而失败"的案例**,所以这个数**不是标定出来的**。
+#: 20 的唯一含义是「比已知正常的最大值再高一截,保证不对已知好帧误报」。
+#: 真正的门在哪里,要等一帧真的因为斜坡而分割失败时才知道。
 _DEFAULT_TILT_WARN_RATIO = 20.0
 
 # 最小连通域像素数是未标定的列表过滤参数。
@@ -70,7 +79,7 @@ class ExtractClusters(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "把一张已保存的 .sxm 里**所有**团簇分割出来，以**列表**返回，"
+                tr("把一张已保存的 .sxm 里**所有**团簇分割出来，以**列表**返回，"
                 "每一个带几何量 + 真实 xy 坐标 + 峰高。**半张图也照样能用**"
                 "（只吃已经扫完整的那些行）。找到什么就返回什么，线状伪影也一并返回 "
                 "—— 挑哪一个、怎么判，是调用方的事。配合 "
@@ -78,39 +87,42 @@ class ExtractClusters(BaseSkill):
                 "封装**：它按 `mean ± threshold_sigma × std`（默认 1.5σ，"
                 "plane_subtract 之后）切，这里按 `median ± 3×σ_MAD`（默认 RAW）切，"
                 "**同一帧会得到不同的 blob**；或者自己写"
-                "「圆 且 大 且 高」的合取。"
+                "「圆 且 大 且 高」的合取。",
+                "Segment **all** clusters from a saved .sxm and return them as a **list**, each with geometric quantities + real xy coordinates + peak height. **It works on a half frame too** (it only uses rows that have been fully scanned). It returns whatever it finds, line-like artifacts included - which one to pick and how to judge it is up to the caller. Use together with AssessClusterRoundness - note that **it is a different segmentation, not a wrapper of this one**: it cuts at `mean ± threshold_sigma × std` (default 1.5σ, after plane_subtract), while this one cuts at `median ± 3×σ_MAD` (default RAW), **so the same frame gives different blobs**; or write your own 'round AND large AND tall' conjunction.")
             ),
             parameters=[
                 ParameterSpec(
                     name="scan_path", type="str", required=True,
-                    description="已保存的那张 .sxm 的路径。",
+                    description=tr("已保存的那张 .sxm 的路径。", "Path of the saved .sxm."),
                 ),
                 ParameterSpec(
                     name="channel", type="str", required=False, default="Z",
-                    description=".sxm 头里的通道名（默认 Z）。",
+                    description=tr(".sxm 头里的通道名（默认 Z）。", "Channel name in the .sxm header (default Z)."),
                 ),
                 ParameterSpec(
                     name="polarity", type="str", required=False, default="auto",
                     description=(
-                        "bright | dark | auto。auto 两侧都试，留下"
+                        tr("bright | dark | auto。auto 两侧都试，留下"
                         "**更紧凑**的那一侧，并把两侧的证据都报出来 —— "
-                        "图像可呈现不同极性，因此保留显式选择及双侧证据。"
+                        "同一批帧里两种极性都出现过，所以这件事写不死。",
+                        "bright | dark | auto. auto tries both sides, keeps the **more compact** one, and reports the evidence of both sides - both polarities have appeared in the same batch of frames, so this cannot be hard-coded.")
                     ),
                     allowed_values=["auto", "bright", "dark"],
                 ),
                 ParameterSpec(
                     name="threshold_mad", type="float", required=False,
                     default=_DEFAULT_THRESHOLD_MAD, min_value=0.5, max_value=20.0,
-                    description="分割阈值，单位是 MAD-sigma。UNCALIBRATED。",
+                    description=tr("分割阈值，单位是 MAD-sigma。UNCALIBRATED。", "Segmentation threshold, in MAD-sigma. UNCALIBRATED."),
                 ),
                 ParameterSpec(
                     name="level", type="str", required=False, default="none",
                     allowed_values=["none", "plane"],
                     description=(
-                        "分割**之前**的平场。'none'（默认）= RAW，"
+                        tr("分割**之前**的平场。'none'（默认）= RAW，"
                         "用户要的就是这个。'plane' = 减掉**一个**全局"
                         "平面。**逐行**平场不提供，传进来直接拒绝："
-                        "它吃掉的正是我们要找的那一种团簇。"
+                        "它吃掉的正是我们要找的那一种团簇。",
+                        "Flattening **before** segmentation. 'none' (default) = RAW, which is what the user wants. 'plane' = subtract **one** global plane. **Row-wise** flattening is not offered, and passing it is refused outright: it eats exactly the kind of cluster we are looking for.")
                     ),
                 ),
                 ParameterSpec(
@@ -118,23 +130,27 @@ class ExtractClusters(BaseSkill):
                     default=_DEFAULT_TILT_WARN_RATIO, min_value=0.0,
                     max_value=100000.0,
                     description=(
-                        "残余平面的峰谷值超过这么多倍噪声 sigma 时告警"
+                        tr("残余平面的峰谷值超过这么多倍噪声 sigma 时告警"
                         "（「这一帧没调平，RAW 阈值可能不可靠」）。"
                         "NOT CALIBRATED（未标定）—— 到目前为止"
-                        "还没有观察到任何一帧因此失败。"
+                        "还没有观察到任何一帧因此失败。",
+                        "Warn when the residual plane's peak-to-valley exceeds this many times the noise sigma ('this frame is not levelled, the RAW threshold may be unreliable'). NOT CALIBRATED - so far no frame has been observed to fail because of it.")
                     ),
                 ),
                 ParameterSpec(
                     name="min_area_px", type="int", required=False,
                     default=_DEFAULT_MIN_AREA_PX, min_value=1, max_value=100000,
                     description=(
-                        "过滤比此值小的连通域，使列表可读。此默认值未标定，过滤前后数量均会报告；目标判别应由上层使用完整特征完成。"
+                        tr("比这更小的连通域丢掉。UNCALIBRATED；它存在的意义"
+                        "是**让列表可读**（有的帧会给出几百"
+                        "个连通域），**不是**用来做分辨的。",
+                        "Connected components smaller than this are dropped. UNCALIBRATED; it exists to **keep the list readable** (some frames give hundreds of connected components), **not** for discrimination.")
                     ),
                 ),
                 ParameterSpec(
                     name="max_clusters", type="int", required=False,
                     default=_DEFAULT_MAX_CLUSTERS, min_value=1, max_value=10000,
-                    description="最多返回这么多个，按面积从大到小。",
+                    description=tr("最多返回这么多个，按面积从大到小。", "Return at most this many, from largest to smallest area."),
                 ),
             ],
             estimated_duration_s=2.0,
@@ -154,7 +170,7 @@ class ExtractClusters(BaseSkill):
 
         if not scan_path or not Path(scan_path).exists():
             return SkillResult(skill_name=name, success=False,
-                               error=f"scan_path 不存在: {scan_path!r}")
+                               error=tr(f"scan_path 不存在: {scan_path!r}", f"scan_path does not exist: {scan_path!r}"))
         try:
             import numpy as np
             from scipy.ndimage import label
@@ -163,22 +179,23 @@ class ExtractClusters(BaseSkill):
             from mast.io.nanonis_files import read_sxm
         except ImportError as exc:
             return SkillResult(skill_name=name, success=False,
-                               error=f"缺依赖: {exc}")
+                               error=tr(f"缺依赖: {exc}", f"Missing dependency: {exc}"))
 
         try:
             scan = read_sxm(scan_path)
         except Exception as exc:  # noqa: BLE001
             return SkillResult(skill_name=name, success=False,
-                               error=f"读不了 .sxm: {type(exc).__name__}: {exc}")
+                               error=tr(f"读不了 .sxm: {type(exc).__name__}: {exc}", f"Cannot read .sxm: {type(exc).__name__}: {exc}"))
 
         channels = scan.get("channels") or {}
         ch = channels.get(channel)
         if not isinstance(ch, dict):
             return SkillResult(
                 skill_name=name, success=False,
-                error=(f"这个 .sxm 里没有通道 {channel!r}。它有:{sorted(channels)}"
+                error=(tr(f"这个 .sxm 里没有通道 {channel!r}。它有:{sorted(channels)}"
                        " —— 请指名要哪一个(挑错通道量出来的数看起来完全正常,"
-                       "只是量的是另一个物理量)。"),
+                       "只是量的是另一个物理量)。",
+                       f"This .sxm has no channel {channel!r}. It has: {sorted(channels)} - please name the one you want (numbers measured on the wrong channel look perfectly normal, they just measure a different physical quantity).")),
                 data={"available_channels": sorted(channels)})
         # 先用统一几何入口处理快轴反扫镜像与慢轴方向，再计算仪器坐标。
         # 不能将裸数组中的行列索引直接解释为扫描框的物理位置。
@@ -186,11 +203,11 @@ class ExtractClusters(BaseSkill):
         img = sxm_oriented_frames(scan, channel).get("forward")
         if img is None:
             return SkillResult(skill_name=name, success=False,
-                               error=f"通道 {channel!r} 没有正扫也没有反扫数据")
+                               error=tr(f"通道 {channel!r} 没有正扫也没有反扫数据", f"Channel {channel!r} has neither forward nor backward scan data"))
         img = np.asarray(img, dtype=np.float64)
         if img.ndim != 2 or img.size == 0:
             return SkillResult(skill_name=name, success=False,
-                               error=f"不是二维图像: shape={img.shape}")
+                               error=tr(f"不是二维图像: shape={img.shape}", f"Not a 2-D image: shape={img.shape}"))
 
         ny_full, nx_full = img.shape
 
@@ -204,9 +221,10 @@ class ExtractClusters(BaseSkill):
         if n_scanned < 2:
             return SkillResult(
                 skill_name=name, success=False,
-                error=(f"只有 {n_scanned} 行是扫完整的(共 {ny_full} 行)——"
+                error=(tr(f"只有 {n_scanned} 行是扫完整的(共 {ny_full} 行)——"
                        "这一帧还没有可分析的区域。这是**输入还没准备好**,"
-                       "不是这一帧坏了。"),
+                       "不是这一帧坏了。",
+                       f"Only {n_scanned} rows are fully scanned (of {ny_full}) - this frame has no analysable region yet. This is **input not ready**, not a bad frame.")),
                 data={"rows_total": ny_full, "rows_scanned": n_scanned})
         crop = img[full_rows]
 
@@ -216,18 +234,22 @@ class ExtractClusters(BaseSkill):
         if level in ("line", "line_by_line", "poly1", "poly2", "median"):
             return SkillResult(
                 skill_name=name, success=False,
-                error=("逐行平场会被延展团簇抬高，减去拟合后削弱目标并可能产生伪影，本技能不提供。请使用 level='none'（RAW，默认）或 'plane'（单个全局平面）。"
-                       ))
+                error=(tr("逐行平场会把团簇吃掉,本技能不提供。逐行 poly1 会把大团簇"
+                       "削弱,并可能凭空造出伪影。"
+                       "机制:一行里有大团簇时,那一行的拟合被团簇自己抬起来,减掉之后"
+                       "团簇减掉了自己 —— 越大越宽伤得越狠,正好伤在我们要找的那一种上。"
+                       "请用 level='none'(RAW,默认)或 'plane'(单个全局平面)。",
+                       "Row-by-row flattening eats clusters and is not offered by this skill. Row-wise poly1 weakens large clusters and can conjure artifacts out of nothing. Mechanism: when a row contains a large cluster, that row's fit is lifted by the cluster itself, and after subtraction the cluster has subtracted itself - the larger and wider, the worse the damage, which hits exactly the kind we are looking for. Use level='none' (RAW, default) or 'plane' (a single global plane).")))
         if level not in ("none", "plane"):
             return SkillResult(skill_name=name, success=False,
-                               error=f"level 只能是 none | plane,收到 {level!r}")
+                               error=tr(f"level 只能是 none | plane,收到 {level!r}", f"level must be none | plane, received {level!r}"))
 
         # 残余斜率:「在调平的情况下」这个前提要能判,所以量出来报出去。
         tilt_pp_m = self._plane_pp(crop, np)
         leveled = plane_subtract(crop) if level == "plane" else crop
         if not np.isfinite(leveled).any():
             return SkillResult(skill_name=name, success=False,
-                               error="平场之后没有有限值 —— 这一帧无法分析",
+                               error=tr("平场之后没有有限值 —— 这一帧无法分析", "No finite values after flattening - this frame cannot be analysed"),
                                data={"rows_total": ny_full,
                                      "rows_scanned": n_scanned})
 
@@ -236,18 +258,20 @@ class ExtractClusters(BaseSkill):
         if not (sigma > 0):
             return SkillResult(
                 skill_name=name, success=False,
-                error=("已扫区域的 MAD 是 0 —— 这一段真的是死平的"
-                       "(注意:这条只对**已扫区域**成立,不是被 NaN 行拖累的)"),
+                error=(tr("已扫区域的 MAD 是 0 —— 这一段真的是死平的"
+                       "(注意:这条只对**已扫区域**成立,不是被 NaN 行拖累的)",
+                       "The MAD of the scanned region is 0 - this section really is dead flat (note: this only holds for the **scanned region**, it is not dragged down by NaN rows)")),
                 data={"rows_total": ny_full, "rows_scanned": n_scanned})
 
         tilt_ratio = params.get("tilt_warn_ratio", _DEFAULT_TILT_WARN_RATIO)
         tilt_warning = None
         if tilt_ratio is not None and sigma > 0 and tilt_pp_m / sigma > float(tilt_ratio):
             tilt_warning = (
-                f"整帧残余斜面峰谷 {tilt_pp_m * 1e12:.0f} pm = {tilt_pp_m / sigma:.1f}×噪声,"
+                tr(f"整帧残余斜面峰谷 {tilt_pp_m * 1e12:.0f} pm = {tilt_pp_m / sigma:.1f}×噪声,"
                 f"超过 {float(tilt_ratio):g}× —— **这一帧可能没调平**,RAW 阈值分割"
                 "可能被斜坡主导。可以试 level='plane',但请注意那会同时抬高噪声连通域数。"
-                "(此提示阈值尚未按目标仪器标定，请结合原图核验。)")
+                "(这个门**没有标定数据**:比值很高的帧也可能工作正常。)",
+                f"Residual plane peak-to-valley of the whole frame is {tilt_pp_m * 1e12:.0f} pm = {tilt_pp_m / sigma:.1f}x the noise, more than {float(tilt_ratio):g}x - **this frame may not be levelled**, and RAW threshold segmentation may be dominated by the slope. You can try level='plane', but note that it also raises the number of noise connected components. (This gate has **no calibration data**: frames with a high ratio may still work fine.)"))
 
         # ── 极性 ────────────────────────────────────────────────────────
         sides = {}
@@ -265,7 +289,7 @@ class ExtractClusters(BaseSkill):
             b, d = sides["bright"], sides["dark"]
             chosen = "bright" if (b["largest_aspect"], b["largest_peak_pm"]) >= \
                                  (d["largest_aspect"], d["largest_peak_pm"]) else "dark"
-            rule = "auto:更紧凑(最大连通域长宽比,并列时比峰高)"
+            rule = tr("auto:更紧凑(最大连通域长宽比,并列时比峰高)", "auto: the more compact one (aspect ratio of the largest connected component, peak height breaks ties)")
 
         labelled = sides[chosen]["labelled"]
         n_raw = sides[chosen]["n_raw"]

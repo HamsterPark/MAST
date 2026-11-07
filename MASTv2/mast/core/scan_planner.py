@@ -16,7 +16,7 @@
 ## 分工
 
   * **LLM 说的**:要几张、什么意图(巡查 / 放大 / 变偏压系列 / 重复)、目标特征
-    (闭集词表)、以及用户逐字点名过的数值;
+    (闭集词表)、以及用户明确给出的数值;
   * **本模块决定的**:每张扫哪儿(避开已毁区、避开彼此)、每张用什么参数(查档位表)、
     按什么顺序(减少大跳变)、以及算不出来时**怎么诚实地拒绝**。
 
@@ -34,6 +34,8 @@ import logging
 import math
 from dataclasses import dataclass, field
 from typing import Any
+
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -297,7 +299,8 @@ def plan_batch(
     if kind not in INTENT_KINDS:
         return PlanReject(
             "bad_intent",
-            f"未知的意图类别 {intent.get('kind')!r};可用:{', '.join(INTENT_KINDS)}")
+            tr(f"未知的意图类别 {intent.get('kind')!r};可用:{', '.join(INTENT_KINDS)}",
+               f"Unknown intent kind {intent.get('kind')!r}; available: {', '.join(INTENT_KINDS)}"))
 
     overrides = dict(intent.get("overrides") or {})
     purpose = str(intent.get("purpose") or "auto")
@@ -308,11 +311,13 @@ def plan_batch(
     try:
         n_req = int(n_req) if n_req is not None else None
     except (TypeError, ValueError):
-        return PlanReject("bad_intent", f"n_images 不是整数: {n_req!r}")
+        return PlanReject("bad_intent", tr(f"n_images 不是整数: {n_req!r}",
+                                           f"n_images is not an integer: {n_req!r}"))
     if n_req is not None and (n_req < 1 or n_req > MAX_FRAMES):
         return PlanReject(
             "bad_intent",
-            f"n_images={n_req} 超出 1..{MAX_FRAMES}")
+            tr(f"n_images={n_req} 超出 1..{MAX_FRAMES}",
+               f"n_images={n_req} is outside 1..{MAX_FRAMES}"))
 
     # ── 特征词表检查:超出四类分割能表达的语义 → 诚实拒绝 ────────────────
     target = dict(intent.get("target") or {})
@@ -320,12 +325,17 @@ def plan_batch(
     if feature is not None and str(feature).lower() not in FEATURE_KINDS:
         return PlanReject(
             "needs_semantic_vision",
-            (f"「{feature}」超出了分割能表达的语义。分割只有 "
-             f"{', '.join(FEATURE_KINDS[:4])} 四类几何/异常类别 —— "
-             "DEFECT 是「异常凸凹」,不等于任何特定的物理缺陷类型。"),
+            tr(f"「{feature}」超出了分割能表达的语义。分割只有 "
+               f"{', '.join(FEATURE_KINDS[:4])} 四类几何/异常类别 —— "
+               "DEFECT 是「异常凸凹」,不等于任何特定的物理缺陷类型。",
+               f"'{feature}' is beyond what segmentation can express. Segmentation has only "
+               f"the four geometry/anomaly classes {', '.join(FEATURE_KINDS[:4])} -- "
+               "DEFECT means 'anomalous bump or dip', not any specific physical defect type."),
             alternatives=[
-                "改用四类之一(例如 defect = 任意异常凸凹)",
-                "在扫描地图上人工标点,然后用 feature='user_marked'",
+                tr("改用四类之一(例如 defect = 任意异常凸凹)",
+                   "Use one of the four classes (e.g. defect = any anomalous bump or dip)"),
+                tr("在扫描地图上人工标点,然后用 feature='user_marked'",
+                   "Mark points by hand on the scan map, then use feature='user_marked'"),
             ])
 
     frames: list[PlannedFrame] = []
@@ -334,14 +344,18 @@ def plan_batch(
     if kind == "survey":
         size = float(overrides.get("size_m") or intent.get("size_m") or 0.0)
         if size <= 0:
-            return PlanReject("bad_intent", "survey 需要 size_m(每张图多大)")
+            return PlanReject("bad_intent", tr("survey 需要 size_m(每张图多大)",
+                                               "survey needs size_m (the size of each image)"))
         want = n_req or 4
         positions = list(survey_positions or [])
         if not positions:
             return PlanReject(
                 "no_uncovered_area",
-                "当前策略下这片表面已经没有可用的未覆盖位置了。",
-                alternatives=["粗动换到新区域", "放宽重扫阈值以复用已扫区域"])
+                tr("当前策略下这片表面已经没有可用的未覆盖位置了。",
+                   "Under the current policy there are no uncovered positions left on this surface."),
+                alternatives=[tr("粗动换到新区域", "Coarse-move to a new area"),
+                              tr("放宽重扫阈值以复用已扫区域",
+                                 "Relax the rescan threshold to reuse already scanned areas")])
         exhausted = len(positions) < want
         positions = positions[:want]
         order = order_by_travel(positions, tip_xy)
@@ -351,28 +365,36 @@ def plan_batch(
                 index=slot, center_x_m=x, center_y_m=y, size_m=size,
                 label=f"survey#{slot + 1}",
                 resolved=_resolve_frame((x, y), size, overrides, purpose, resolver),
-                reason="未覆盖区域"))
+                reason=tr("未覆盖区域", "uncovered area")))
         if exhausted:
             _annotate_moves(frames, tip_xy)
             return PlanReject(
                 "candidates_exhausted",
-                (f"只找到 {len(frames)} 个可用位置,少于请求的 {want} 张。"
-                 "可以先扫这几张。"),
-                alternatives=[f"按 {len(frames)} 张执行", "粗动换区后再扫剩下的"],
+                tr(f"只找到 {len(frames)} 个可用位置,少于请求的 {want} 张。"
+                   "可以先扫这几张。",
+                   f"Found only {len(frames)} usable positions, fewer than the {want} requested. "
+                   "You can scan these first."),
+                alternatives=[tr(f"按 {len(frames)} 张执行", f"Run with {len(frames)} images"),
+                              tr("粗动换区后再扫剩下的",
+                                 "Coarse-move to a new area, then scan the rest")],
                 partial=frames)
 
     # ── zoomin:在当前帧里挑特征放大 ─────────────────────────────────────
     elif kind == "zoomin":
         final_size = float(target.get("final_size_m") or overrides.get("size_m") or 0.0)
         if final_size <= 0:
-            return PlanReject("bad_intent", "zoomin 需要 final_size_m(放大到多大)")
+            return PlanReject("bad_intent", tr("zoomin 需要 final_size_m(放大到多大)",
+                                               "zoomin needs final_size_m (how far to zoom in)"))
         want = n_req or 1
         cands = list(zoom_candidates or [])
         if not cands:
             return PlanReject(
                 "candidates_exhausted",
-                "当前帧里没有符合条件的目标(尺寸、离边距离、离台阶距离、避让区过滤后为空)。",
-                alternatives=["先扫一张更大的图再挑", "换一个 feature 类别"])
+                tr("当前帧里没有符合条件的目标(尺寸、离边距离、离台阶距离、避让区过滤后为空)。",
+                   "No qualifying target in the current frame (empty after filtering by size, "
+                   "edge distance, step distance and avoid zones)."),
+                alternatives=[tr("先扫一张更大的图再挑", "Scan a larger image first, then pick"),
+                              tr("换一个 feature 类别", "Try a different feature class")])
         exhausted = len(cands) < want
         cands = cands[:want]
         pts = [(float(c["x_m"]), float(c["y_m"])) for c in cands]
@@ -385,13 +407,14 @@ def plan_batch(
                 label=f"zoom#{slot + 1}:{c.get('feature', '')}",
                 resolved=_resolve_frame(pts[i], final_size, overrides, purpose,
                                         resolver),
-                reason=str(c.get("reason", "分割候选"))))
+                reason=str(c.get("reason", tr("分割候选", "segmentation candidate")))))
         if exhausted:
             _annotate_moves(frames, tip_xy)
             return PlanReject(
                 "candidates_exhausted",
-                f"只找到 {len(frames)} 个候选,少于请求的 {want} 张。",
-                alternatives=[f"按 {len(frames)} 张执行"],
+                tr(f"只找到 {len(frames)} 个候选,少于请求的 {want} 张。",
+                   f"Found only {len(frames)} candidates, fewer than the {want} requested."),
+                alternatives=[tr(f"按 {len(frames)} 张执行", f"Run with {len(frames)} images")],
                 partial=frames)
 
     # ── series / repeat:同一位置,逐张变一个参数 ────────────────────────
@@ -401,7 +424,7 @@ def plan_batch(
         cy = float(center.get("y_m", tip_xy[1]))
         size = float(overrides.get("size_m") or intent.get("size_m") or 0.0)
         if size <= 0:
-            return PlanReject("bad_intent", f"{kind} 需要 size_m")
+            return PlanReject("bad_intent", tr(f"{kind} 需要 size_m", f"{kind} needs size_m"))
 
         if kind == "repeat":
             want = n_req or 2
@@ -411,7 +434,7 @@ def plan_batch(
                     label=f"repeat#{i + 1}",
                     resolved=_resolve_frame((cx, cy), size, overrides, purpose,
                                             resolver),
-                    reason="时序重复"))
+                    reason=tr("时序重复", "temporal repeat")))
         else:
             series = dict(intent.get("series") or {})
             param = str(series.get("param")
@@ -419,20 +442,26 @@ def plan_batch(
             if param not in SERIES_PARAMS:
                 return PlanReject(
                     "bad_intent",
-                    f"series.param 必须是 {', '.join(SERIES_PARAMS)} 之一"
-                    f"(收到 {param!r})")
+                    tr(f"series.param 必须是 {', '.join(SERIES_PARAMS)} 之一"
+                       f"(收到 {param!r})",
+                       f"series.param must be one of {', '.join(SERIES_PARAMS)} "
+                       f"(got {param!r})"))
             values = expand_series(series)
             if not values:
                 return PlanReject(
                     "series_without_values",
-                    (f"要变 {param} 却没说变成哪些值。规划器**不发明序列** —— "
-                     "请给 values 列表,或 start/stop/n。"),
-                    alternatives=["给出 values,例如 [-1.0, -0.5, 0.5, 1.0]",
-                                  "给出 start / stop / n"])
+                    tr(f"要变 {param} 却没说变成哪些值。规划器**不发明序列** —— "
+                       "请给 values 列表,或 start/stop/n。",
+                       f"{param} is to be varied but no values were given. The planner "
+                       "**does not invent sequences** -- give a values list, or start/stop/n."),
+                    alternatives=[tr("给出 values,例如 [-1.0, -0.5, 0.5, 1.0]",
+                                     "Give values, e.g. [-1.0, -0.5, 0.5, 1.0]"),
+                                  tr("给出 start / stop / n", "Give start / stop / n")])
             if len(values) > MAX_FRAMES:
                 return PlanReject(
                     "bad_intent",
-                    f"序列有 {len(values)} 个值,超过单批上限 {MAX_FRAMES}")
+                    tr(f"序列有 {len(values)} 个值,超过单批上限 {MAX_FRAMES}",
+                       f"The series has {len(values)} values, above the per-batch limit {MAX_FRAMES}"))
 
             # 单调序:来回跳会反复激起回滞与充放电瞬态
             current = overrides.get(param)
@@ -447,17 +476,19 @@ def plan_batch(
                     label=f"{param}={val:.4g}",
                     resolved=_resolve_frame((cx, cy), frame_size, per_frame,
                                             purpose, resolver),
-                    reason=f"{param} 系列(单调序)"))
+                    reason=tr(f"{param} 系列(单调序)", f"{param} series (monotonic order)")))
 
     # ── regions_explicit:调用方直接给定区域 ─────────────────────────────
     elif kind == "regions_explicit":
         regions = intent.get("regions") or []
         if not isinstance(regions, (list, tuple)) or not regions:
-            return PlanReject("bad_intent", "regions_explicit 需要非空 regions 列表")
+            return PlanReject("bad_intent", tr("regions_explicit 需要非空 regions 列表",
+                                               "regions_explicit needs a non-empty regions list"))
         if len(regions) > MAX_FRAMES:
             return PlanReject(
                 "bad_intent",
-                f"regions 有 {len(regions)} 个,超过单批上限 {MAX_FRAMES}")
+                tr(f"regions 有 {len(regions)} 个,超过单批上限 {MAX_FRAMES}",
+                   f"regions has {len(regions)} entries, above the per-batch limit {MAX_FRAMES}"))
         pts = []
         sizes = []
         for r in regions:
@@ -466,9 +497,11 @@ def plan_batch(
                 sizes.append(float(r.get("size_m")
                                    or r.get("width_m") or 0.0))
             except (KeyError, TypeError, ValueError):
-                return PlanReject("bad_intent", f"区域格式非法: {r!r}")
+                return PlanReject("bad_intent", tr(f"区域格式非法: {r!r}",
+                                                   f"Invalid region format: {r!r}"))
         if any(s <= 0 for s in sizes):
-            return PlanReject("bad_intent", "每个区域都需要 size_m / width_m")
+            return PlanReject("bad_intent", tr("每个区域都需要 size_m / width_m",
+                                               "Every region needs size_m / width_m"))
         order = order_by_travel(pts, tip_xy)
         for slot, i in enumerate(order):
             frames.append(PlannedFrame(
@@ -477,10 +510,10 @@ def plan_batch(
                 label=str(regions[i].get("label") or f"region#{slot + 1}"),
                 resolved=_resolve_frame(pts[i], sizes[i], overrides, purpose,
                                         resolver),
-                reason="调用方指定"))
+                reason=tr("调用方指定", "specified by caller")))
 
     if not frames:
-        return PlanReject("bad_intent", "展开后没有任何帧")
+        return PlanReject("bad_intent", tr("展开后没有任何帧", "No frames after expansion"))
 
     _annotate_moves(frames, tip_xy)
     total = sum(getattr(f.resolved, "estimated_scan_s", 0.0) for f in frames)
@@ -494,17 +527,24 @@ def plan_batch(
         if budget_s and total > budget_s:
             return PlanReject(
                 "budget_exceeded",
-                (f"这份计划估计需要 {total / 60.0:.1f} 分钟,超过预算 "
-                 f"{float(budget_min):.1f} 分钟。"),
+                tr(f"这份计划估计需要 {total / 60.0:.1f} 分钟,超过预算 "
+                   f"{float(budget_min):.1f} 分钟。",
+                   f"This plan is estimated to take {total / 60.0:.1f} min, over the budget of "
+                   f"{float(budget_min):.1f} min."),
                 alternatives=[
-                    f"减到 {max(1, int(len(frames) * budget_s / total))} 张",
-                    "降低分辨率或提高扫描速度(在档位表里改,或本次显式指定)",
+                    tr(f"减到 {max(1, int(len(frames) * budget_s / total))} 张",
+                       f"Reduce to {max(1, int(len(frames) * budget_s / total))} images"),
+                    tr("降低分辨率或提高扫描速度(在档位表里改,或本次显式指定)",
+                       "Lower the resolution or raise the scan speed (edit the tier table, "
+                       "or specify it explicitly this time)"),
                 ],
                 partial=frames)
 
     n_settle = sum(1 for f in frames if f.needs_settle)
     if n_settle:
-        notes.append(f"{n_settle} 帧之前有大跳变,会先等压电稳定")
+        notes.append(tr(f"{n_settle} 帧之前有大跳变,会先等压电稳定",
+                        f"{n_settle} frame(s) follow a large jump and will wait for the piezo "
+                        "to settle first"))
 
     return ScanPlan(kind=kind, frames=frames, total_estimated_s=total, notes=notes)
 

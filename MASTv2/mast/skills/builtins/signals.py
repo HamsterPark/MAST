@@ -16,6 +16,7 @@ from mast.core.types import (
 )
 from mast.io.nanonis_files import decode_reply
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ class GetSignalsAddRT(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读可用的附加 RT 信号列表，以及当前指派给 Internal 23 与 Internal 24 的名字。"
+                tr("读可用的附加 RT 信号列表，以及当前指派给 Internal 23 与 Internal 24 的名字。", "Read the list of available additional RT signals, and the names currently assigned to Internal 23 and Internal 24.")
             ),
             estimated_duration_s=0.5,
             composition_level=0,
@@ -106,12 +107,12 @@ class GetSignalRange(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读一路信号（0-127）的量程上限与下限。",
+            description=tr("读一路信号（0-127）的量程上限与下限。", "Read the upper and lower range limits of one signal (0-127)."),
             parameters=[
                 ParameterSpec(
                     name="signal_index",
                     type="int",
-                    description="信号序号（0-127）",
+                    description=tr("信号序号（0-127）", "Signal index (0-127)"),
                     required=True,
                     min_value=0,
                     max_value=127,
@@ -156,14 +157,14 @@ class GetSignalValues(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "读若干选定信号的当前值（过采样）。给一份信号序号的列表（0-127）。"
+                tr("读若干选定信号的当前值（过采样）。给一份信号序号的列表（0-127）。", "Read the current values of a few selected signals (oversampled). Give a list of signal indexes (0-127).")
             ),
             parameters=[
                 ParameterSpec(
                     name="signal_indexes",
                     type="str",
                     description=(
-                        "逗号分隔的信号序号，例如 '0,1,14'。每个序号的范围是 0-127。"
+                        tr("逗号分隔的信号序号，例如 '0,1,14'。每个序号的范围是 0-127。", "Comma-separated signal indexes, e.g. '0,1,14'. Each index is in the range 0-127.")
                     ),
                     required=True,
                 ),
@@ -171,7 +172,7 @@ class GetSignalValues(BaseSkill):
                     name="wait_for_newest",
                     type="bool",
                     description=(
-                        "为 True 时，丢掉第一个采样，返回一个完全新鲜的值（会更慢）。默认 False。"
+                        tr("为 True 时，丢掉第一个采样，返回一个完全新鲜的值（会更慢）。默认 False。", "When True, drop the first sample and return a completely fresh value (slower). Default False.")
                     ),
                     required=False,
                     default=False,
@@ -198,10 +199,10 @@ class GetSignalValues(BaseSkill):
         if bad or not indexes:
             return SkillResult(
                 skill_name="GetSignalValues", success=False,
-                error=(f"signal_indexes 解不出通道号:{idx_str!r}。"
-                       + (f"这几段不是整数:{bad}。" if bad else "一个都没给出。")
-                       + "格式是逗号分隔的整数,例如 \"0\" 或 \"0,24,30\"。"
-                         "(通道清单见 ListSignalChannels。)"),
+                error=(tr(f"signal_indexes 解不出通道号:{idx_str!r}。", f"signal_indexes could not be parsed into channel numbers: {idx_str!r}. ")
+                       + (tr(f"这几段不是整数:{bad}。", f"These parts are not integers: {bad}. ") if bad else tr("一个都没给出。", "None was given. "))
+                       + tr("格式是逗号分隔的整数,例如 \"0\" 或 \"0,24,30\"。"
+                         "(通道清单见 ListSignalChannels。)", "The format is comma-separated integers, e.g. \"0\" or \"0,24,30\". (See ListSignalChannels for the channel list.)")),
                 nanonis_calls=[],
             )
         wait = int(params.get("wait_for_newest", False))
@@ -271,8 +272,8 @@ class ListSignalChannels(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "列出 128 路可用的 Nanonis 信号（物理输入／输出／内部通道）及其 0-127 序号。"
-                "会标出哪些序号是电流通道，好让调用方为高速采集挑出隧道电流那一路。"
+                tr("列出 128 路可用的 Nanonis 信号（物理输入／输出／内部通道）及其 0-127 序号。"
+                "会标出哪些序号是电流通道，好让调用方为高速采集挑出隧道电流那一路。", "List the 128 available Nanonis signals (physical inputs/outputs/internal channels) with their 0-127 indexes. Marks which indexes are current channels, so the caller can pick the tunneling current for high-speed acquisition.")
             ),
             estimated_duration_s=0.5,
             composition_level=0,

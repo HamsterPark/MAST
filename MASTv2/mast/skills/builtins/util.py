@@ -11,6 +11,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.skills.base import BaseSkill
 
 
@@ -29,7 +30,7 @@ class LockNanonisUI(BaseSkill):
             version="2.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.DANGEROUS,
-            description=(
+            description=tr(
                 "锁定 Nanonis 软件 —— 这会在它上面盖一个**模态窗口**，并**阻止用户与仪器交互**，"
                 "直到被解锁为止。\n"
                 "\n"
@@ -38,7 +39,18 @@ class LockNanonisUI(BaseSkill):
                 "。这个技能把那件事拿掉了。它需要人工批准正是因为这个原因，而且基本上没有哪个自主任务需要它："
                 "用户若想在无人值守运行期间锁住界面，他自己锁就是了 —— 这恰恰就是重点所在。\n"
                 "\n"
-                "UnlockNanonisUI 是它的反面，并且永远允许。"
+                "UnlockNanonisUI 是它的反面，并且永远允许。",
+                "Lock the Nanonis software -- this puts a **modal window** over it and **prevents the "
+                "user from interacting with the instrument** until it is unlocked.\n"
+                "\n"
+                "DANGEROUS, and not because of anything it does to the hardware. Every other safety "
+                "mechanism here -- the safety gate, the mode gate, the abort button, the approval "
+                "prompt -- ultimately depends on \"a person can walk up to the microscope and take "
+                "over\". This skill removes that. It requires human approval for exactly that reason, "
+                "and practically no autonomous task needs it: a user who wants the UI locked during an "
+                "unattended run can lock it themselves -- that is precisely the point.\n"
+                "\n"
+                "UnlockNanonisUI is its opposite and is always allowed.",
             ),
             parameters=[],
             estimated_duration_s=0.5,
@@ -59,7 +71,8 @@ class LockNanonisUI(BaseSkill):
             skill_name="LockNanonisUI",
             success=True,
             data={"locked": True},
-            summary="Nanonis 界面已锁定——用户在解锁前无法在仪器端操作",
+            summary=tr("Nanonis 界面已锁定——用户在解锁前无法在仪器端操作",
+                       "Nanonis UI locked -- the user cannot operate the instrument until it is unlocked"),
             nanonis_calls=[record],
         )
 
@@ -73,11 +86,16 @@ class UnlockNanonisUI(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
-            description=(
+            description=tr(
                 "解锁 Nanonis 软件，把仪器的控制权还给用户。\n"
                 "\n"
                 "永远允许，无需批准。恢复一个人介入的能力，从来不是危险的那个方向 —— 而「上一次运行结束时界面还锁着」"
-                "是真实会发生的事。"
+                "是真实会发生的事。",
+                "Unlock the Nanonis software and hand control of the instrument back to the user.\n"
+                "\n"
+                "Always allowed, no approval needed. Restoring a person's ability to step in is never "
+                "the dangerous direction -- and \"the UI was still locked when the last run ended\" "
+                "really happens.",
             ),
             parameters=[],
             estimated_duration_s=0.5,
@@ -98,7 +116,7 @@ class UnlockNanonisUI(BaseSkill):
             skill_name="UnlockNanonisUI",
             success=True,
             data={"locked": False},
-            summary="Nanonis 界面已解锁",
+            summary=tr("Nanonis 界面已解锁", "Nanonis UI unlocked"),
             nanonis_calls=[record],
         )
 
@@ -112,26 +130,29 @@ class SaveSettings(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="把 Nanonis 设置存到 .ini 文件，或从 .ini 文件载入。",
+            description=tr("把 Nanonis 设置存到 .ini 文件，或从 .ini 文件载入。",
+                           "Save Nanonis settings to an .ini file, or load them from one."),
             parameters=[
                 ParameterSpec(
                     name="action",
                     type="str",
-                    description="'save' 或 'load'",
+                    description=tr("'save' 或 'load'", "'save' or 'load'"),
                     required=True,
                     allowed_values=["save", "load"],
                 ),
                 ParameterSpec(
                     name="file_path",
                     type="str",
-                    description="设置 .ini 文件的路径（use_session=True 时忽略）",
+                    description=tr("设置 .ini 文件的路径（use_session=True 时忽略）",
+                                   "Path of the settings .ini file (ignored when use_session=True)"),
                     required=False,
                     default="",
                 ),
                 ParameterSpec(
                     name="use_session",
                     type="bool",
-                    description="用当前会话文件，而不是 file_path",
+                    description=tr("用当前会话文件，而不是 file_path",
+                                   "Use the current session file instead of file_path"),
                     required=False,
                     default=False,
                 ),
@@ -184,7 +205,8 @@ class GetAcqPeriod(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读 TCP Receiver 里的采集周期（s）。",
+            description=tr("读 TCP Receiver 里的采集周期（s）。",
+                           "Read the acquisition period (s) in the TCP Receiver."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["util", "acquisition", "read"],
@@ -227,19 +249,21 @@ class LoadLayout(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="从 .ini 文件载入一份 Nanonis 布局。",
+            description=tr("从 .ini 文件载入一份 Nanonis 布局。",
+                           "Load a Nanonis layout from an .ini file."),
             parameters=[
                 ParameterSpec(
                     name="file_path",
                     type="str",
-                    description="布局 .ini 文件的路径（use_session=True 时忽略）",
+                    description=tr("布局 .ini 文件的路径（use_session=True 时忽略）",
+                                   "Path of the layout .ini file (ignored when use_session=True)"),
                     required=False,
                     default="",
                 ),
                 ParameterSpec(
                     name="use_session",
                     type="bool",
-                    description="从当前会话文件载入布局",
+                    description=tr("从当前会话文件载入布局", "Load the layout from the current session file"),
                     required=False,
                     default=False,
                 ),
@@ -274,19 +298,21 @@ class SaveLayout(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="把当前 Nanonis 布局存到 .ini 文件。",
+            description=tr("把当前 Nanonis 布局存到 .ini 文件。",
+                           "Save the current Nanonis layout to an .ini file."),
             parameters=[
                 ParameterSpec(
                     name="file_path",
                     type="str",
-                    description="布局 .ini 文件的路径（use_session=True 时忽略）",
+                    description=tr("布局 .ini 文件的路径（use_session=True 时忽略）",
+                                   "Path of the layout .ini file (ignored when use_session=True)"),
                     required=False,
                     default="",
                 ),
                 ParameterSpec(
                     name="use_session",
                     type="bool",
-                    description="把布局存到当前会话文件",
+                    description=tr("把布局存到当前会话文件", "Save the layout to the current session file"),
                     required=False,
                     default=False,
                 ),
@@ -321,7 +347,7 @@ class GetRTFreq(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读实时控制器频率，单位 Hz。",
+            description=tr("读实时控制器频率，单位 Hz。", "Read the real-time controller frequency, in Hz."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["util", "rt", "frequency", "read"],
@@ -364,12 +390,12 @@ class SetRTFreq(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设定实时控制器频率，单位 Hz。",
+            description=tr("设定实时控制器频率，单位 Hz。", "Set the real-time controller frequency, in Hz."),
             parameters=[
                 ParameterSpec(
                     name="frequency_hz",
                     type="float",
-                    description="RT 频率，单位 Hz",
+                    description=tr("RT 频率，单位 Hz", "RT frequency, in Hz"),
                     unit="Hz",
                     required=True,
                     min_value=0.0,
@@ -403,7 +429,8 @@ class GetRTOversample(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读 TCP Receiver 里的实时过采样值。",
+            description=tr("读 TCP Receiver 里的实时过采样值。",
+                           "Read the real-time oversampling value in the TCP Receiver."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["util", "rt", "oversampling", "read"],
@@ -446,12 +473,13 @@ class SetRTOversample(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设定 TCP Receiver 里的实时过采样值。",
+            description=tr("设定 TCP Receiver 里的实时过采样值。",
+                           "Set the real-time oversampling value in the TCP Receiver."),
             parameters=[
                 ParameterSpec(
                     name="oversampling",
                     type="int",
-                    description="RT 过采样值",
+                    description=tr("RT 过采样值", "RT oversampling value"),
                     required=True,
                     min_value=1,
                 ),
@@ -531,7 +559,7 @@ class GetSessionPath(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读当前 Nanonis 会话文件夹路径。",
+            description=tr("读当前 Nanonis 会话文件夹路径。", "Read the current Nanonis session folder path."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["util", "session", "path", "read"],
@@ -560,20 +588,24 @@ class SetSessionPath(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设定 Nanonis 会话文件夹路径。",
+            description=tr("设定 Nanonis 会话文件夹路径。", "Set the Nanonis session folder path."),
             parameters=[
                 ParameterSpec(
                     name="session_path",
                     type="str",
-                    description="会话文件夹路径",
+                    description=tr("会话文件夹路径", "Session folder path"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="save_settings_to_previous",
                     type="bool",
-                    description=(
+                    description=tr(
                         "切换之前，把仪器**当前**的设置**写进旧**会话的设置文件里。默认 True，所以改会话文件夹并不是一次纯粹的导航操作 —— 它同时会把状态存进你正要离开的那个文件夹。"
-                        "传 False 则只换位置、不碰旧会话。"
+                        "传 False 则只换位置、不碰旧会话。",
+                        "Before switching, write the instrument's **current** settings **into the old** "
+                        "session's settings file. Default True, so changing the session folder is not "
+                        "a pure navigation operation -- it also saves state into the folder you are "
+                        "leaving. Pass False to only change location and leave the old session untouched.",
                     ),
                     required=False,
                     default=True,
@@ -609,8 +641,10 @@ class SetSessionPath(BaseSkill):
                 data={"session_path": None, "requested": session_path,
                       "verified": False, "verify_error": back.error,
                       "save_settings_to_previous": bool(save_prev)},
-                summary=(f"已下发会话路径 {session_path}，但无法读回确认"
-                         f"（{back.error}）——请勿据此认定它已生效。"),
+                summary=tr(f"已下发会话路径 {session_path}，但无法读回确认"
+                           f"（{back.error}）——请勿据此认定它已生效。",
+                           f"Session path {session_path} was sent, but the readback failed "
+                           f"({back.error}) -- do not assume it took effect."),
                 nanonis_calls=calls,
             )
 
@@ -618,8 +652,10 @@ class SetSessionPath(BaseSkill):
         if not _same_session_path(actual, session_path):
             return SkillResult(
                 skill_name="SetSessionPath", success=False,
-                error=(f"会话路径未生效：要求 {session_path!r}，"
-                       f"读回 {actual!r}。后续扫描仍会存到读回的那个目录。"),
+                error=tr(f"会话路径未生效：要求 {session_path!r}，"
+                         f"读回 {actual!r}。后续扫描仍会存到读回的那个目录。",
+                         f"Session path did not take effect: requested {session_path!r}, "
+                         f"read back {actual!r}. Later scans will still be saved to the directory read back."),
                 data={"session_path": actual, "requested": session_path,
                       "verified": True,
                       "save_settings_to_previous": bool(save_prev)},
@@ -647,7 +683,8 @@ class UnlockNanonisUI(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
-            description="解锁 Nanonis 界面（关掉 Lock 模态窗口）。",
+            description=tr("解锁 Nanonis 界面（关掉 Lock 模态窗口）。",
+                           "Unlock the Nanonis UI (close the Lock modal window)."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["util", "unlock", "write"],

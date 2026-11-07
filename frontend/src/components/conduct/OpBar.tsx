@@ -1,28 +1,24 @@
 import { useState } from "react";
 import { Button, Field, Modal, TextField, Toggle } from "@/components/controls";
 import { opEnabled, opLabel, type ConductOp } from "@/lib/conduct";
+import { tr } from "@/lib/i18n";
 
-// ════════════════════════════════════════════════════════════════════════════
-// 五枚操作按钮 —— pause / resume / abort / takeover / attended。
+// The five operation buttons: pause / resume / abort / takeover / attended.
 //
-// ── 两条纪律 ────────────────────────────────────────────────────────────────
+// 1. A disabled button must say why. For an intent that makes no sense in the current
+//    state the backend explicitly rejects it and records op_rejected (no silent no-op),
+//    but the user would only see "I pressed it and nothing happened". The predicate
+//    therefore also exists on this side (`lib/conduct.opEnabled`, kept in parity with
+//    director.OP_VALID_STATUSES by a test) and the reason is put in the title.
 //
-// **一、灰按钮必须说得出为什么灰。** 后端对一个当前状态下没有意义的意图会
-// 「显式拒绝 + 记 op_rejected」,不静默 no-op —— 但用户看到的仍然是「我按了,
-// 什么都没发生」,而且要去翻审计流才知道为什么。所以判据在这一侧也有一份
-// (`lib/conduct.opEnabled`,与 director.OP_VALID_STATUSES 对着 parity 测试),
-// 灰按钮把理由挂在 title 上。
+// 2. The UI never freezes. The worst outcome of a button is "no effect plus a message":
+//    a failed enqueue only shows a toast, with no lock and no spinner waiting for a
+//    reply that never comes. Abort in particular must be possible from any non-terminal
+//    state.
 //
-// **二、UI 绝不冻结。** 每个按钮最坏的结果是「无反应 + 一句提示」:意图入队失败
-// 只弹 toast,不锁死界面、不转圈等一个不会来的回包。abort 尤其如此 —— 它是
-// 「能停不能解」的反面,必须从任何非终态都按得下去。
-//
-// ── abort 为什么要一个理由 ───────────────────────────────────────────────────
-//
-// 后端 schema 把 reason 定成必填。一个没有理由的中止,事后没人答得上「为什么那
-// 一晚停了」——而那句话正是第二天早上唯一有用的东西。所以这里用一个小对话框收它,
-// 而不是让请求带一个空串过去被 422 挡回来。
-// ════════════════════════════════════════════════════════════════════════════
+// Abort requires a reason: the backend schema makes `reason` mandatory, and an abort
+// without one cannot be explained afterwards. A small dialog collects it rather than
+// sending an empty string to be rejected with 422.
 
 export function OpBar({
   status,
@@ -35,10 +31,11 @@ export function OpBar({
   status: string;
   attended: boolean;
   busy: boolean;
-  // 走通用「一个 op 名 = 一条路由」的那几个。剩下的各有各的形状,不能混进来:
-  // abort 要 reason、ack 要 wait_id、waive 要 wait_id+reason、set_attended 要一个
-  // 布尔,而 **override_decision 要 decision_id + reason**(它的卡是 DecisionCard)。
-  // 把它们塞进这个按钮条,参数就得靠调用方猜 —— 而猜出来的那个多半是空串。
+  // Only the ops that follow the generic "one op name = one route" shape. The others
+  // have their own payloads and must not be mixed in: abort needs a reason, ack needs
+  // wait_id, waive needs wait_id + reason, set_attended needs a boolean, and
+  // override_decision needs decision_id + reason (its card is DecisionCard). Passing them
+  // through this bar would leave the caller guessing the arguments.
   onOp: (
     op: Exclude<
       ConductOp,
@@ -76,7 +73,7 @@ export function OpBar({
           disabled={!abortGate.enabled || busy}
           onClick={() => setAbortOpen(true)}
         >
-          中止
+          {tr("中止", "Abort")}
         </Button>
       </span>
 
@@ -84,35 +81,43 @@ export function OpBar({
         <Toggle
           checked={attended}
           onChange={(v) => attendedGate.enabled && !busy && onAttended(v)}
-          label={attended ? "有人值守" : "无人值守"}
+          label={attended ? tr("有人值守", "Attended") : tr("无人值守", "Unattended")}
         />
       </span>
       <span className="text-xs text-mast-faint">
         {attended
-          ? "判不了的时候会问你"
-          : "判不了的时候直接走保守分支（不问人——无人窗口里问了也必然超时）"}
+          ? tr("判不了的时候会问你", "Asks you when it cannot decide")
+          : tr(
+              "判不了的时候直接走保守分支（不问人——无人窗口里问了也必然超时）",
+              "Takes the conservative branch when it cannot decide (does not ask; asking would time out anyway while unattended)",
+            )}
       </span>
 
-      <Modal open={abortOpen} onClose={() => setAbortOpen(false)} title="中止这份 conduct">
+      <Modal open={abortOpen} onClose={() => setAbortOpen(false)} title={tr("中止这份 conduct", "Abort this conduct")}>
         <p className="text-sm text-mast-muted">
-          中止会**立刻**给当前这一步发停止信号（不等下一个 tick——指挥线程可能正卡在一次长动作里），
-          然后走确认式退针。等待态里针已经退了，直接结束。
+          {tr(
+            "中止会**立刻**给当前这一步发停止信号（不等下一个 tick——指挥线程可能正卡在一次长动作里），然后走确认式退针。等待态里针已经退了，直接结束。",
+            "Aborting sends a stop signal to the current step **immediately** (without waiting for the next tick, since the conductor thread may be inside a long action), then withdraws the tip with confirmation. If the conduct is waiting, the tip is already withdrawn and it simply ends.",
+          )}
         </p>
         <p className="mt-2 text-sm text-mast-muted">
-          这是终态：**要接着做请新建一份。**
+          {tr("这是终态：**要接着做请新建一份。**", "This is a terminal state: **to continue, create a new conduct.**")}
         </p>
         <div className="mt-4">
-          <Field label="理由（必填）" hint="第二天早上唯一有用的东西就是这句话。">
+          <Field
+            label={tr("理由（必填）", "Reason (required)")}
+            hint={tr("第二天早上唯一有用的东西就是这句话。", "This line is what you will want to read the next morning.")}
+          >
             <TextField
               value={reason}
               onChange={setReason}
-              placeholder="例：针尖在 S2 第二个偏压上明显变钝，先停下来手工修"
+              placeholder={tr("例：针尖在 S2 第二个偏压上明显变钝，先停下来手工修", "e.g. tip clearly blunted at the second bias of S2; stopping to recondition by hand")}
             />
           </Field>
         </div>
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setAbortOpen(false)}>
-            取消
+            {tr("取消", "Cancel")}
           </Button>
           <Button
             variant="danger"
@@ -123,7 +128,7 @@ export function OpBar({
               setReason("");
             }}
           >
-            确认中止
+            {tr("确认中止", "Confirm abort")}
           </Button>
         </div>
       </Modal>

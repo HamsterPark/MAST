@@ -7,6 +7,7 @@ import {
   KIND_TONE,
   type SpecNode,
 } from "./compositeGraph";
+import { tr } from "@/lib/i18n";
 
 /** Read-only DAG visualization of a composite spec's control-flow tree.
  *  Renders with @xyflow/react when the spec parses into a graph; otherwise
@@ -16,7 +17,7 @@ export function CompositeDag({ spec }: { spec: SpecNode | null | undefined }) {
   const rows = useMemo(() => specToRows(spec), [spec]);
 
   if (!rows.length) {
-    return <p className="text-sm text-mast-muted">该工作流没有可视化节点。</p>;
+    return <p className="text-sm text-mast-muted">{tr("该工作流没有可视化节点。", "This workflow has no nodes to visualize.")}</p>;
   }
 
   // If react-flow produced a graph, show it. (It always does when rows exist,
@@ -62,7 +63,7 @@ export function CompositeDag({ spec }: { spec: SpecNode | null | undefined }) {
 export function CompositeNodeList({ spec }: { spec: SpecNode | null | undefined }) {
   const rows = useMemo(() => specToRows(spec), [spec]);
   if (!rows.length) {
-    return <p className="text-sm text-mast-muted">该工作流没有节点。</p>;
+    return <p className="text-sm text-mast-muted">{tr("该工作流没有节点。", "This workflow has no nodes.")}</p>;
   }
   return (
     <ul className="space-y-1 text-sm">

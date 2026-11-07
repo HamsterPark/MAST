@@ -15,13 +15,14 @@ from mast.api.routes.remote_access import router
 from mast.net.tailscale import TailscaleStatus
 
 
-def _client(*, bound_host: str | None = None, ssl: bool = False, port: int = 7862) -> TestClient:
+def _client(*, bound_host: str | None = None, ssl: bool = False, port: int = 7862,
+            certfile: str | None = None) -> TestClient:
     app = FastAPI()
     app.state.ctx = AppContext()
     if bound_host is not None:
         cfg = types.SimpleNamespace(
             host=bound_host, port=port,
-            ssl_certfile=("cert.pem" if ssl else None),
+            ssl_certfile=(certfile or ("cert.pem" if ssl else None)),
         )
         app.state.uvicorn_server = types.SimpleNamespace(config=cfg)
     app.include_router(router, prefix="/api")
@@ -76,12 +77,66 @@ def test_ipv6_bind_counts_as_bound(monkeypatch):
     monkeypatch.setattr("mast.net.tailscale.get_status", lambda *a, **k: _ready())
     body = _client(bound_host="::", ssl=True).get("/api/remote-access").json()
     assert body["lan_enabled"] is True
+    assert any(u["url"] == "https://[fd7a:115c:a1e0::9]:7862" for u in body["urls"])
+
+
+def test_ipv4_bind_does_not_offer_the_ipv6_url(monkeypatch):
+    # 0.0.0.0 takes no IPv6: the [fd7a:…] URL refused connections.
+    monkeypatch.setattr("mast.net.tailscale.get_status", lambda *a, **k: _ready())
+    body = _client(bound_host="0.0.0.0", ssl=True).get("/api/remote-access").json()
+    assert not any("fd7a" in u["url"] for u in body["urls"])
+
+
+def test_note_names_the_tailnet(monkeypatch):
+    monkeypatch.setattr("mast.net.tailscale.get_status", lambda *a, **k: _ready())
+    body = _client(bound_host="0.0.0.0", ssl=True).get("/api/remote-access").json()
+    assert "tail1a2b.ts.net" in body["note"]
+
+
+def test_lan_ips_lists_every_candidate(monkeypatch):
+    monkeypatch.setattr("mast.net.tailscale.get_status", lambda *a, **k: _ready())
+    monkeypatch.setattr("mast.net.addrs.lan_ipv4_candidates",
+                        lambda *a, **k: ["192.168.50.7", "10.0.1.79"])
+    body = _client(bound_host="0.0.0.0", ssl=True).get("/api/remote-access").json()
+    assert body["lan_ips"] == ["192.168.50.7", "10.0.1.79"]
+    assert body["lan_ip"] == "192.168.50.7"
+
+
+def test_viewer_says_how_the_request_arrived(monkeypatch):
+    monkeypatch.setattr("mast.net.tailscale.get_status", lambda *a, **k: _ready())
+    body = _client(bound_host="0.0.0.0", ssl=True).get(
+        "/api/remote-access", headers={"host": "100.101.102.103:7862"}).json()
+    assert body["viewer"]["host"] == "100.101.102.103:7862"
+    assert body["viewer"]["client_ip"] == "testclient"
+    assert body["viewer"]["via"] == "other"
+
+
+def test_tls_reports_the_pin_and_what_the_cert_does_not_list(monkeypatch, tmp_path):
+    from mast.net.tls import ensure_lan_cert, spki_sha256
+
+    cert, key = tmp_path / "lan_cert.pem", tmp_path / "lan_key.pem"
+    ensure_lan_cert(cert, key, addresses=["10.0.0.11"], hostname="box")
+    monkeypatch.setattr("mast.net.tailscale.get_status", lambda *a, **k: _ready())
+    monkeypatch.setattr("mast.net.addrs.lan_ipv4_candidates", lambda *a, **k: ["10.0.0.11"])
+    body = _client(bound_host="0.0.0.0", certfile=str(cert)).get("/api/remote-access").json()
+    assert body["scheme"] == "https"
+    t = body["tls"]
+    assert t["spki_sha256"] == spki_sha256(cert)
+    assert "10.0.0.11" in t["ip_addresses"] and t["issued_by_mast"] is True
+    assert t["uncovered"] == ["100.101.102.103"]          # Tailscale IP not in the SAN yet
+
+
+def test_no_tls_block_without_a_readable_cert(monkeypatch):
+    monkeypatch.setattr("mast.net.tailscale.get_status", lambda *a, **k: _ready())
+    assert _client(bound_host="0.0.0.0", ssl=True).get("/api/remote-access").json()["tls"] is None
+    assert _client(bound_host="0.0.0.0").get("/api/remote-access").json()["tls"] is None
 
 
 def test_response_shape_is_typed(monkeypatch):
     monkeypatch.setattr("mast.net.tailscale.get_status", lambda *a, **k: _ready())
     body = _client(bound_host="0.0.0.0", ssl=True).get("/api/remote-access").json()
-    for key in ("lan_enabled", "scheme", "port", "lan_ip", "tailscale", "urls", "note"):
+    for key in ("lan_enabled", "scheme", "port", "lan_ip", "lan_ips", "tailscale", "urls",
+                "note", "viewer", "tls"):
         assert key in body
     for key in ("installed", "running", "ready", "backend_state", "device_name",
                 "magic_dns", "tailnet", "ips", "hint"):

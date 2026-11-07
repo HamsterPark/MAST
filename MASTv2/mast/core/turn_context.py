@@ -118,7 +118,7 @@ def reassert_turn_each_resume(gen, holder: dict):
     ``iterate_in_threadpool`` 消费 —— **每次 ``next()`` 单独走一趟
     ``anyio.to_thread.run_sync``，不保证落在同一个 worker 线程上**。于是回合开头
     在线程 A 上设好的 thread-local，下一个 super-step 可能在线程 B 上执行，读不到；
-    更糟的是两条流并发时，B 上残留的是**另一条对话**的值：
+    两条流并发时还会出现，B 上残留的是**另一条对话**的值：
 
         两条并发流实测：
           ('tool','B',77252,'run-C')   ← B 的工具读到了 C 的 run_id

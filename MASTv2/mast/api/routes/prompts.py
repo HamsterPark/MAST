@@ -19,6 +19,7 @@ lazy-import。
 from __future__ import annotations
 
 import logging
+from mast.i18n import tr
 import time
 from typing import Any
 
@@ -108,7 +109,7 @@ def injection_matrix(request: Request) -> InjectionMatrixResponse:
     except Exception as exc:  # noqa: BLE001
         logger.info("prompts manifest unavailable: %s", exc)
         return InjectionMatrixResponse(degraded=True,
-                                       note="注入清单模块读不到（不是「没有注入」）。")
+                                       note=tr("注入清单模块读不到（不是「没有注入」）。", "Injection manifest module could not be read (this does not mean \"nothing was injected\")."))
     agents = list(manifest.all_agents())
     infos: list[AgentInfo] = []
     for a in agents:
@@ -129,8 +130,8 @@ def injection_matrix(request: Request) -> InjectionMatrixResponse:
 
     note = ""
     if all(i.tool_count is None for i in infos):
-        note = ("这个进程还没有建过任何 agent 的图，所以工具面栏是空的 —— "
-                "跑一次对话或一次任务之后就有数字了。这里不做静态估算。")
+        note = (tr("这个进程还没有建过任何 agent 的图，所以工具面栏是空的 —— "
+                "跑一次对话或一次任务之后就有数字了。这里不做静态估算。", "No agent graph has been built in this process yet, so the tool-surface column is empty. Run a conversation or a task and numbers will appear. No static estimate is made here."))
     return InjectionMatrixResponse(agents=infos, blocks=blocks, cells=cells,
                                    note=note)
 
@@ -154,7 +155,7 @@ def agent_injection(agent: str, request: Request,
     if agent not in manifest.all_agents():
         response.status_code = 404
         return AgentInjectionResponse(agent=agent, label=agent,
-                                      tool_surface_note=f"没有名为 {agent} 的 agent。")
+                                      tool_surface_note=tr(f"没有名为 {agent} 的 agent。", f"There is no agent named {agent}."))
 
     m = manifest.manifest_for(agent)
     rec = m.get("build")
@@ -172,10 +173,10 @@ def agent_injection(agent: str, request: Request,
 #: 没有快照的四种原因。**分开说** —— 一个统一的「暂无数据」把它们揉成一种，
 #: 而它们没有一种能靠再点一次解决。
 _REASONS = {
-    "disabled": "快照记录已关闭，所以这里是空的 —— 不是没有发生过模型调用。",
-    "no_calls": "本进程还没有发生过任何模型调用。这里只记录真实请求，不做离线模拟。",
-    "no_calls_for_agent": "本进程跑过模型调用，但没有一次是这个 agent 发的。",
-    "unknown_agent": "没有这个 agent。",
+    "disabled": tr("快照记录已关闭，所以这里是空的 —— 不是没有发生过模型调用。", "Snapshot recording is off, so this is empty. That does not mean no model call happened."),
+    "no_calls": tr("本进程还没有发生过任何模型调用。这里只记录真实请求，不做离线模拟。", "This process has not made any model call yet. Only real requests are recorded; nothing is simulated offline."),
+    "no_calls_for_agent": tr("本进程跑过模型调用，但没有一次是这个 agent 发的。", "This process has made model calls, but none from this agent."),
+    "unknown_agent": tr("没有这个 agent。", "No such agent."),
 }
 
 
@@ -192,7 +193,7 @@ def latest_capture(agent: str, request: Request,
     except Exception as exc:  # noqa: BLE001
         logger.info("prompt capture unavailable: %s", exc)
         return LatestCaptureResponse(found=False, reason_code="degraded",
-                                     reason="注入记录模块读不到。", degraded=True)
+                                     reason=tr("注入记录模块读不到。", "Injection record module could not be read."), degraded=True)
 
     if agent not in manifest.all_agents():
         response.status_code = 404

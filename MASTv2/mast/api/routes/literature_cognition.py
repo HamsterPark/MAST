@@ -51,6 +51,7 @@ from mast.api.schemas_literature_cognition import (
     PhaseSummary,
     PhasesResponse,
 )
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +208,7 @@ async def upload_pdf_endpoint(
     year: str = Form(default=""),
 ) -> IngestResponse:
     """Receive a browser-uploaded PDF, save it to a temp path, ingest it into the
-    big library, and add a POINTER to the chosen library (#125 附加 PDF).
+    big library, and add a POINTER to the chosen library.
 
     This is the browser-facing counterpart of ``POST /literature/ingest`` (which
     takes a server-visible path the SPA cannot produce). The upload is streamed to
@@ -221,7 +222,9 @@ async def upload_pdf_endpoint(
     if filename and not filename.lower().endswith(".pdf"):
         return IngestResponse(
             ok=False, status="error:not_a_pdf",
-            detail=f"仅支持 PDF 上传（收到 {filename!r}）。", degraded=False,
+            detail=tr(f"仅支持 PDF 上传（收到 {filename!r}）。",
+                      f"Only PDF uploads are supported (received {filename!r})."),
+            degraded=False,
         )
 
     try:
@@ -335,15 +338,17 @@ async def attach_si_endpoint(
     """
     filename = (file.filename or "").strip()
     if filename and not filename.lower().endswith(".pdf"):
-        return AttachSiResponse(ok=False, error=f"仅支持 PDF（收到 {filename!r}）。")
+        return AttachSiResponse(ok=False, error=tr(f"仅支持 PDF（收到 {filename!r}）。",
+                                                   f"Only PDF is supported (received {filename!r})."))
     if not (work_id or "").strip():
-        return AttachSiResponse(ok=False, error="需要 work_id。")
+        return AttachSiResponse(ok=False, error=tr("需要 work_id。", "work_id is required."))
 
     try:
         from mast.knowledge import attachments as att_mod
     except Exception as exc:
         logger.warning("attachments backend import failed: %s", exc)
-        return AttachSiResponse(ok=False, error="附件后端不可用", degraded=True)
+        return AttachSiResponse(ok=False, error=tr("附件后端不可用", "Attachment backend unavailable"),
+                                degraded=True)
 
     import os
     import tempfile
@@ -425,7 +430,7 @@ def list_attachments_endpoint(
 @router.post("/literature/manual-entry", response_model=IngestResponse)
 def manual_entry_endpoint(request: Request, body: ManualEntryRequest) -> IngestResponse:
     """Register a paper from TYPED metadata (no PDF) and add a pointer to the
-    chosen library (#125 '直接管理条目').
+    chosen library.
 
     Wraps ``ingest.ingest_manual``: mint/resolve a work_id, store a rich abstract
     row (retrievable with no embed key), best-effort embed for semantic search,
@@ -439,7 +444,8 @@ def manual_entry_endpoint(request: Request, body: ManualEntryRequest) -> IngestR
     if not (body.title or "").strip() and not (body.abstract or "").strip():
         return IngestResponse(
             ok=False, status="error:empty",
-            detail="需要至少提供标题或摘要。", degraded=False,
+            detail=tr("需要至少提供标题或摘要。", "Provide at least a title or an abstract."),
+            degraded=False,
         )
 
     try:
@@ -498,7 +504,9 @@ def fetch_fulltext_endpoint(request: Request, body: FetchRequest) -> FetchRespon
         logger.warning("literature fetch backend import failed: %s", exc)
         return FetchResponse(
             status="unavailable",
-            message="网络组件不可用，无法自动获取。请手动下载 PDF 后上传。",
+            message=tr("网络组件不可用，无法自动获取。请手动下载 PDF 后上传。",
+                       "Network component unavailable, cannot fetch automatically. "
+                       "Download the PDF manually and upload it."),
             degraded=True,
         )
 
@@ -620,11 +628,14 @@ def ingest_status_endpoint(request: Request) -> IngestStatusResponse:
         can_ocr = False
 
     if available:
-        detail = "就绪：可嵌入并写入大库。" if has_key else "可用，但缺 DashScope key → 语义检索降级为关键词匹配。"
+        detail = (tr("就绪：可嵌入并写入大库。", "Ready: can embed and write to the main library.") if has_key
+                  else tr("可用，但缺 DashScope key → 语义检索降级为关键词匹配。",
+                          "Available, but no DashScope key: semantic search degrades to keyword matching."))
         if can_ocr:
-            detail += " 扫描版 PDF 可自动 OCR。"
+            detail += tr(" 扫描版 PDF 可自动 OCR。", " Scanned PDFs are OCR'd automatically.")
     else:
-        detail = "numpy/pandas 不可用 — 无法嵌入/索引 PDF。"
+        detail = tr("numpy/pandas 不可用 — 无法嵌入/索引 PDF。",
+                    "numpy/pandas unavailable: cannot embed or index PDFs.")
     return IngestStatusResponse(
         available=bool(available),
         can_extract_pdf=bool(can_extract),
@@ -683,8 +694,9 @@ def cognition_phases_endpoint(
         out.append(
             PhaseSummary(
                 phase_index=p.get("phase_index"),
-                title=str(p.get("title") or "") or f"阶段 {p.get('phase_index')}",
-                summary=str(p.get("summary") or "") or "(未摘要)",
+                title=str(p.get("title") or "") or tr(f"阶段 {p.get('phase_index')}",
+                                                      f"Phase {p.get('phase_index')}"),
+                summary=str(p.get("summary") or "") or tr("(未摘要)", "(no summary)"),
                 experiment_id=p.get("experiment_id"),
                 started_msg_id=p.get("started_msg_id"),
                 ended_msg_id=p.get("ended_msg_id"),

@@ -28,6 +28,7 @@ from pathlib import Path
 import numpy as np
 
 from mast.gallery import paths as _paths
+from mast.i18n import tr
 from mast.gallery.inventory import dir_key, dir_short
 
 THUMB_W = 400
@@ -472,7 +473,7 @@ def render_grid(path: str, item_id: str, summ: dict, thumbs: Path) -> dict:
                 best = (c, ch[j], M * 1e15)
         num_used = False
         if (best is None or not (best[0] >= 0.3)) and jI is not None and n >= 3:
-            best = (1.0, "数值 dI/dV",
+            best = (1.0, tr("数值 dI/dV", "Numerical dI/dV"),
                     np.gradient(D[:, :, jI, :].astype(np.float64) * 1e12, V, axis=2))
             num_used = True
 
@@ -480,7 +481,8 @@ def render_grid(path: str, item_id: str, summ: dict, thumbs: Path) -> dict:
     stem = item_id.rsplit("/", 1)[-1].rsplit(".", 1)[0]
     t = _stamp(summ.get("t0"))
     t1 = _stamp(summ.get("t1")) if summ.get("t1") else "?"
-    title = "%s · %d×%d · %.3g nm · %d 点 %+.2f→%+.2f V · %s sweep · Zoff %.0f pm · %+.2f V/%.0f pA · %s→%s · 完成 %d/%d" % (
+    title = tr("%s · %d×%d · %.3g nm · %d 点 %+.2f→%+.2f V · %s sweep · Zoff %.0f pm · %+.2f V/%.0f pA · %s→%s · 完成 %d/%d",
+               "%s · %d×%d · %.3g nm · %d pts %+.2f→%+.2f V · %s sweep · Zoff %.0f pm · %+.2f V/%.0f pA · %s→%s · done %d/%d") % (
         stem, nx, ny, G["w_nm"], n, V[0], V[-1], summ.get("sweeps") or "?",
         summ.get("zoff_pm") or 0, summ.get("bias_V") or 0, summ.get("setpoint_pA") or 0,
         t, t1, have, nx * ny)
@@ -498,7 +500,7 @@ def render_grid(path: str, item_id: str, summ: dict, thumbs: Path) -> dict:
                 Z = np.where(np.isfinite(Z), Z, 0.0)
                 lo, hi = np.percentile(Z, [2, 98])
                 AX[0, 0].imshow(Z, origin="lower", cmap="afmhot", vmin=lo, vmax=hi, extent=ext)
-                AX[0, 0].set_title("形貌 Z（按行去偏）%.0f pm" % (hi - lo), **_fp(8))
+                AX[0, 0].set_title(tr("形貌 Z（按行去偏）%.0f pm", "Topography Z (row-levelled) %.0f pm") % (hi - lo), **_fp(8))
             idx = np.unique(np.round(np.linspace(0, n - 1, 8)).astype(int))
             cells = [AX[0, 1], AX[0, 2], AX[0, 3], AX[0, 4], AX[1, 1], AX[1, 2], AX[1, 3], AX[1, 4]]
             cr, name, M = best
@@ -517,7 +519,7 @@ def render_grid(path: str, item_id: str, summ: dict, thumbs: Path) -> dict:
         ax.set_xticks([float(V.min()), 0, float(V.max())])
         ax.tick_params(labelsize=6)
         short = name.replace(" [AVG] (A)", "").replace(" (A)", "").replace("LI Demod 1 ", "LI ")
-        ax.set_title(("平均 %s（pA/V）" % name) if num_used else ("平均 %s  r=%.2f" % (short, cr)),
+        ax.set_title((tr("平均 %s（pA/V）", "Mean %s (pA/V)") % name) if num_used else (tr("平均 %s  r=%.2f", "Mean %s  r=%.2f") % (short, cr)),
                      **_fp(8))
         fig.suptitle(title, **_fp(7.6))
         fig.subplots_adjust(top=0.86, bottom=0.07, left=0.02, right=0.99)
@@ -534,7 +536,7 @@ def render_grid(path: str, item_id: str, summ: dict, thumbs: Path) -> dict:
                 ax.plot(V, s, lw=0.6, alpha=0.5)
         ax.set_xlabel("V", fontsize=8)
         ax.tick_params(labelsize=7)
-        ax.set_title(title + "\n（未扫完：只画已有点的谱）", **_fp(7.6))
+        ax.set_title(title + tr("\n（未扫完：只画已有点的谱）", "\n(scan unfinished: only the spectra of the points taken are drawn)"), **_fp(7.6))
         fig.tight_layout()
     _save_bytes(thumbs, rel, _png(fig))
     return {"ok": True, "why": "", "th": rel, "v": VER_GRID}

@@ -1,24 +1,25 @@
 // ════════════════════════════════════════════════════════════════════════════
-// src/lib/narration.ts — 旁白插在转录的**哪一条后面**。
+// src/lib/narration.ts: where in the transcript a narration entry is inserted.
 //
-// 旁白（narration）是系统在向用户解说一个长任务正在做什么：「我们要打一发
-// 10 V / 500 ms 的脉冲」「扫到 50%」。它**不是助手说的话** —— agent 看不见它，
-// 它也不进 LangGraph 的 message channel。后端：mast/chat/narration.py。
+// Narration is the system explaining to the user what a long task is doing, e.g. "about to
+// fire a 10 V / 500 ms pulse" or "scan at 50%". It is NOT something the assistant said:
+// the agent cannot see it, and it does not enter the LangGraph message channel. Backend:
+// mast/chat/narration.py.
 //
-// 为什么排序逻辑住在这里，而不是写在组件里：
+// Why the ordering logic lives here and not in a component:
 //
-//   两条道各自有序，难的是**把它们并到一起**。消息现在带 `t`（后端
-//   `MessageClockMiddleware`，2026-08-12 起），旁白一直带 `t`，所以主判据是
-//   时间；`anchor`（旁白发出那一刻已渲染的消息条数）退成兜底，只在某一边没有
-//   时刻时才用 —— 它记的是「第几条」，而转录被压缩之后那个坐标系会被整个重写
-//   （见 mergeNarration 的合并规则）。
+//   Each of the two lanes is ordered on its own; the hard part is merging them. Messages
+//   now carry `t` (stamped by the backend `MessageClockMiddleware`) and narration always
+//   has `t`, so time is the primary key. `anchor` (the number of messages rendered when the
+//   narration was emitted) is the fallback, used only when one side has no time: it
+//   records "which message index", and that coordinate system is rewritten when the
+//   transcript is compacted (see the real-session example in mergeNarration).
 //
-//   ⚠️ 这段注释在 2026-08-23 之前写的是「render_history 没有时间戳，所以按
-//   wall-clock 归并做不到」。那句话在 08-12 之后就不成立了，而代码照着它继续
-//   只认 anchor —— **一句过期的注释把一个已经修好的前提锁在了原地**。
+//   Keep this comment in step with the code: a stale statement that timestamps are
+//   unavailable would keep the code on the anchor-only path after the premise is fixed.
 //
-//   归并规则写成纯函数才能被断言。一个埋在 JSX 里的 `.filter()` 出了错的样子是
-//   「旁白偶尔排在奇怪的位置」，没人会去查。
+//   The merge rules are a pure function so they can be asserted. A `.filter()` buried in
+//   JSX fails as "narration is occasionally placed oddly", which nobody investigates.
 //
 //     cd frontend && npm run test:unit
 // ════════════════════════════════════════════════════════════════════════════
@@ -28,7 +29,7 @@ export interface NarrationItem {
   t: number;
   text: string;
   nk?: string;
-  /** 发出这条时已渲染的消息条数；-1 = 没有活跃回合 → 追加到末尾。 */
+  /** Number of messages rendered when this entry was emitted; -1 = no active turn, so append at the end. */
   anchor?: number;
   tone?: string;
   has_image?: boolean;
@@ -39,21 +40,23 @@ export interface NarrationItem {
 export interface MessageLike {
   role: string;
   content: string;
-  /** 这条消息**发生的时刻**（epoch 秒），后端 `MessageClockMiddleware` 盖的。
+  /** When this message happened (epoch seconds), stamped by the backend `MessageClockMiddleware`.
    *
-   *  **缺席有意义**：`undefined` / `null` = 「不知道它是什么时候说的」
-   *  （重启前就在 checkpoint 里的历史、或被压缩摘要替换掉的那一段），
-   *  **不是零时刻**。合并时按「未定时」处理，绝不当成 1970。 */
+   *  Absence is meaningful: `undefined` / `null` means "unknown when it was said" (history
+   *  already in the checkpoint before a restart, or a span replaced by a compaction
+   *  summary), not time zero. The merge treats it as undated and never as 1970. */
   t?: number | null;
 }
 
-/** 消息的**有效时刻**序列：`eff[i]` = 到第 i 条为止已知的最晚时刻。
+/** Effective times of the messages: `eff[i]` is the latest time known up to message i.
  *
- *  · 未盖戳的消息**继承前一条**的有效时刻 —— 它排在那儿，就跟那儿同期；
- *  · 开头那一段全没戳（压缩摘要 / 重启前历史）⇒ `null` = 「比什么都早」，
- *    旁白不会被顶到它们上面去；
- *  · 用 `max` 而不是直接赋值：这样 `eff` **按构造非降**，
- *    于是「第一个比 T 晚的下标」可以直接扫出来，不必假设转录本身有序。
+ *  - an unstamped message inherits the effective time of the previous one: it sits there,
+ *    so it is contemporaneous with that spot;
+ *  - a leading run with no stamps at all (compaction summary / pre-restart history) gives
+ *    `null`, meaning "earlier than anything", so narration is never pushed above it;
+ *  - `max` is used instead of plain assignment so `eff` is non-decreasing by construction,
+ *    and "the first index later than T" can be found by a scan without assuming that the
+ *    transcript itself is ordered.
  */
 function effectiveTimes(messages: readonly MessageLike[]): (number | null)[] {
   const out: (number | null)[] = [];
@@ -71,11 +74,60 @@ export type Lane<M> =
   | { kind: "narration"; item: NarrationItem };
 
 /**
- * 把旁白与消息合并成扁平渲染序列。
- * 两边都有时间戳时按事件时刻归并，避免入队延迟和历史压缩扰乱顺序。
- * 缺时间戳的条目逐条回退到 anchor：n 放在第 n 条消息后，0 放开头；
- * 越界或 -1 放末尾。同一位置按 t 排序，t 相同时以 seq 排序。
- * 工具执行中的旁白可能早于工具返回后才盖戳的助手消息，这符合事件时序。
+ * Insert narration into the message sequence and return a flat render sequence.
+ *
+ * Rules, each guarding against a specific failure:
+ *
+ *  - `anchor = n` inserts AFTER message n (after `messages[n-1]`).
+ *  - `anchor <= 0` inserts at the very front (0 means the transcript was genuinely empty then).
+ *  - `anchor > messages.length` or `-1` appends at the END. The former is the normal state
+ *    while a turn is running (messages not rendered yet); the latter means there is no
+ *    active turn at all (scheduled wake-up, group run, manual trigger). Both land at the
+ *    end but for different reasons, so -1 must not be treated as 0.
+ *  - Several entries on the same anchor are ordered by `t` (event time), and only on equal
+ *    `t` by `seq`.
+ *
+ *    Ordering used to be by `seq` only. `seq` is allocated atomically by SQLite at write
+ *    time, so it records enqueue order, and enqueue order is not event order: the composite
+ *    executor emits synchronously at step start (delay ~0), whereas the vision monitor
+ *    must grab a frame and run the model first (0.5-1.5 s behind). Example:
+ *
+ *        seq 10  21:33:21.453  [bias_pulse]  about to fire a 10 V / 500 ms pulse
+ *        seq 11  21:33:21.939  [scan_done ]  this image has finished scanning
+ *
+ *    "About to pulse" was sorted before "scan finished", although physically the scan must
+ *    end before the executor can reach the next pulse.
+ *
+ *    The backend now lets emitters that know the true event time pass it in
+ *    (`narrate(event_t=...)`), so the frontend must sort by that number, otherwise the
+ *    backend half of the fix is wasted. Emitters that do not know it fall back to emission
+ *    time, so the ordering for synchronous emitters is unchanged.
+ *
+ * ── Entries with timestamps on both sides merge by time; `anchor` is the fallback ──
+ *
+ * Messages have carried `t` since `MessageClockMiddleware` was added, but the merge used
+ * to look at `anchor` only, which wasted the timestamps.
+ *
+ * The cost is measurable. In a long session (running over three hours and compacted
+ * midway) with 15 messages and 36 narration entries, the anchors were 8 / 13 / 28 / 33:
+ *
+ *     narration 04:26 (anchor=8)  ->  drawn AFTER the 08:01 assistant message (3 h 34 min inverted)
+ *     narration 05:40 (anchor=13) ->  drawn after the 08:47 assistant message (3 h 07 min inverted)
+ *     narration 06:50 / 08:05 (anchor=28/33 > 15) -> all pushed to the very end
+ *
+ * `anchor` records the number of messages in state at emission time, but the transcript on
+ * screen no longer has that shape: compaction replaced a long stretch of history with one
+ * summary, dropping the count from thirty-odd to fifteen. A "which index" coordinate points
+ * elsewhere once the coordinate system itself has been rewritten.
+ *
+ * So when both sides have `t`, merge by `t` (time is a coordinate that compaction does not
+ * rewrite); whichever side lacks `t` falls back to `anchor`. This is decided per entry, not
+ * per transcript, since "stamped recent messages plus unstamped old history" is the norm.
+ *
+ * Known approximation: a narration entry emitted in the middle of a tool execution has a
+ * time earlier than the assistant message that is stamped after the tool call returns, so
+ * it sorts before that tool's collapsed block. That is correct (the result had not
+ * happened yet), it just is not aligned inside the collapsed block.
  */
 export function mergeNarration<M extends MessageLike>(
   messages: readonly M[],
@@ -84,7 +136,7 @@ export function mergeNarration<M extends MessageLike>(
   const n = messages.length;
   const eff = effectiveTimes(messages);
   const dated = eff.some((t) => t !== null);
-  // 桶：0..n。超界与 -1 一律归到 n（末尾）。
+  // Buckets 0..n. Out-of-range values and -1 all go to n (the end).
   const buckets = new Map<number, NarrationItem[]>();
   for (const item of items ?? []) {
     const at = placeOne(item, n, eff, dated);
@@ -106,16 +158,18 @@ export function mergeNarration<M extends MessageLike>(
 }
 
 /**
- * 这一条旁白该插在**第几条消息之后**（返回 0..n）。
+ * After which message this narration entry is inserted (returns 0..n).
  *
- * 按时间：找到第一条「有效时刻晚于这条旁白」的消息，插在它前面。
- * `eff` 按构造非降（见 {@link effectiveTimes}），所以一趟线性扫就够，
- * 而且结果与转录本身是否严格有序无关。
+ * By time: find the first message whose effective time is later than the entry and insert
+ * before it. `eff` is non-decreasing by construction (see {@link effectiveTimes}), so one
+ * linear scan suffices, and the result does not depend on the transcript itself being
+ * strictly ordered.
  *
- * 退回 `anchor` 的两种情形，**都不是异常**：
- *  · 这条旁白自己没有可用的 `t`（后端老行数据）；
- *  · 整份转录一条戳都没有（重启前的存档 / 关掉了时钟中间件）。
- * 这两种下，行为与 2026-08-23 之前**逐字相同**。
+ * Two cases fall back to `anchor`, and neither is abnormal:
+ *  - the entry has no usable `t` of its own (old backend rows);
+ *  - the whole transcript has no stamps (archive from before a restart, or the clock
+ *    middleware turned off).
+ * In both cases the behaviour is identical to the anchor-only logic.
  */
 function placeOne(
   item: NarrationItem,
@@ -129,10 +183,11 @@ function placeOne(
   if (t !== null && dated) {
     for (let i = 0; i < n; i++) {
       const e = eff[i];
-      // `null` = 这条消息（以及它前面那些）没有已知时刻 —— 当成「比什么都早」，
-      // 旁白不会被顶到压缩摘要 / 重启前历史的**上面**去。
-      // `undefined` 走同一支：`noUncheckedIndexedAccess` 下越界读也是它，而
-      // 「读不到」和「没有时刻」在这里要的动作相同 —— 都不能拿来做比较。
+      // `null` means this message (and those before it) have no known time. Treat it as
+      // earlier than anything, so narration is never pushed above a compaction summary or
+      // pre-restart history. `undefined` takes the same branch: under
+      // `noUncheckedIndexedAccess` an out-of-range read yields it, and "cannot be read" and
+      // "has no time" need the same action here: neither can be compared.
       if (typeof e === "number" && e > t) return i;
     }
     return n;
@@ -142,10 +197,12 @@ function placeOne(
 }
 
 /**
- * 增量游标：这次该从哪个 seq 之后拉。
+ * Incremental cursor: which seq to fetch after.
  *
- * 只往前，永不后退 —— 后退会让同一批旁白被重复插进列表。会话一换必须归零，
- * 那是**另一条**转录（沿用 seq 会让新会话的前几条被当成已读而永远不显示）。
+ * It only moves forward, never back: going back would insert the same narration twice.
+ * It must be reset when the conversation changes, since that is a different transcript
+ * (reusing the seq would treat the first entries of the new conversation as already read
+ * and never show them).
  */
 export function nextCursor(current: number, latestSeq: number | undefined): number {
   const latest = typeof latestSeq === "number" && Number.isFinite(latestSeq) ? latestSeq : 0;
@@ -153,13 +210,15 @@ export function nextCursor(current: number, latestSeq: number | undefined): numb
 }
 
 /**
- * 排序判据：**事件发生时刻**优先，同刻才看 `seq`。
+ * Sort key: event time first, `seq` only for equal times.
  *
- * `seq` 留作平手裁决而不是被丢掉：它是 SQLite 原子分配的，永远唯一且稳定，
- * 所以两条同一毫秒的旁白不会因为浏览器排序不稳定而来回跳。
+ * `seq` is kept as the tie-breaker rather than dropped: SQLite allocates it atomically, so
+ * it is unique and stable, and two entries in the same millisecond do not jump around due
+ * to unstable browser sorting.
  *
- * `t` 缺失/垃圾 ⇒ 回落到 `seq` 的量级之外是危险的（会把它顶到最前面），
- * 所以缺失时**只比 seq**：不知道发生时刻的那条，就按它入库的位置待着。
+ * With `t` missing or invalid, mixing it into a comparison against `seq`-scale numbers
+ * would be dangerous (it could be pushed to the front), so when `t` is missing only `seq`
+ * is compared: an entry with unknown event time stays where it was stored.
  */
 export function byEventTime(a: NarrationItem, b: NarrationItem): number {
   const ta = Number.isFinite(a?.t) ? a.t : null;
@@ -168,14 +227,15 @@ export function byEventTime(a: NarrationItem, b: NarrationItem): number {
   return (a?.seq ?? 0) - (b?.seq ?? 0);
 }
 
-/** 合并新拉到的一批，按 seq 去重（WS 推送 + 轮询兜底会送来同一条）。 */
+/** Merge a newly fetched batch, de-duplicating by seq (WS push plus the polling fallback deliver the same entry). */
 export function mergeBatch(
   existing: readonly NarrationItem[],
   incoming: readonly NarrationItem[],
 ): NarrationItem[] {
   if (!incoming?.length) return existing as NarrationItem[];
-  // 去重的键仍然是 `seq` —— 它是这条旁白的**身份**（同一条被 WS 和轮询各送
-  // 一次时要能认出是同一条）。`t` 不能当身份：两条不同的旁白可以同刻发生。
+  // De-duplication still keys on `seq`, the identity of an entry (the same entry delivered
+  // once by WS and once by polling must be recognised). `t` cannot be the identity: two
+  // different entries can happen at the same time.
   const bySeq = new Map<number, NarrationItem>();
   for (const it of existing ?? []) bySeq.set(it.seq, it);
   for (const it of incoming) bySeq.set(it.seq, it);
@@ -183,20 +243,21 @@ export function mergeBatch(
 }
 
 /**
- * 旁白上显示的时刻。`HH:MM:SS`，不显示毫秒。
+ * The time shown on a narration entry: `HH:MM:SS`, no milliseconds.
  *
- * Agent 的发言也带上时间。带时间的用处不是
- * 精确计时，是**让顺序可核** —— 一条排在前面的旁白如果时间更晚，那就是排序
- * 出了问题，而在没有时间显示之前，那种错只能靠「感觉有点乱」被发现。
+ * The point of showing a time is not precise timing but making the order checkable: an
+ * entry placed earlier that carries a later time reveals an ordering bug, which would
+ * otherwise only be noticed as "the order feels off".
  *
- * `t` 不是有效数 ⇒ 返回 `""`（不显示），**不显示 1970**：一个假时间比没有
- * 时间坏，因为它会被当成真的去推理。
+ * An invalid `t` returns `""` (nothing shown), never 1970: a fake time is worse than none
+ * because it gets reasoned about as if real.
  */
 export function fmtClock(t: unknown): string {
   const v = typeof t === "number" && Number.isFinite(t) && t > 0 ? t : null;
   if (v === null) return "";
-  // 后端存的是 epoch **秒**（`time.time()`）。毫秒会变成 55000 年，
-  // 所以这里顺手认一下量级 —— 判据是「1971 年之后」。
+  // The backend stores epoch seconds (`time.time()`). Milliseconds would become year
+  // 55000, so the magnitude is recognised here too: anything past 1971 in seconds is
+  // treated as seconds.
   const ms = v > 1e11 ? v : v * 1000;
   const d = new Date(ms);
   if (Number.isNaN(d.getTime())) return "";
@@ -204,7 +265,7 @@ export function fmtClock(t: unknown): string {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-/** 这条 `chat_narration` 事件是不是「我正在看的那个会话」的。 */
+/** Does this `chat_narration` event belong to the conversation currently being viewed? */
 export function isNarrationFor(
   data: { conversation_id?: unknown } | null | undefined,
   conversationId: string | null | undefined,
@@ -213,27 +274,29 @@ export function isNarrationFor(
   return String((data as { conversation_id?: unknown }).conversation_id ?? "") === conversationId;
 }
 
-// 令牌必须是 tailwind.config.ts 里真有的那几个。写错一个不报错、不崩，只是
-// **什么也不做**（元素保持继承来的样式），症状只有用户一句「看不清」——
-// 树里曾经躺过好几个这样的死类名。判据在 test/designTokens.test.ts，
-// 而它是按字符串扫的：**连注释里都不能出现一个不存在的令牌名**。
-// 「good」用 auto（AUTO 安全档的绿）而不是另起一个语义色，不新增令牌。
+// Tokens must be ones that really exist in tailwind.config.ts. A wrong one raises no error
+// and does not crash; it simply does nothing (the element keeps its inherited style), and
+// the only symptom is text that is hard to read. The check is test/designTokens.test.ts,
+// which scans by string, so even comments must not contain a token name that does not
+// exist. "good" reuses auto (the green of the AUTO safety tier) instead of adding a new
+// semantic colour, so no new token is introduced.
 const TONE_CLASS: Record<string, string> = {
   info: "border-mast-border text-mast-muted",
   good: "border-mast-auto-border text-mast-auto",
   warn: "border-mast-warn-border text-mast-warn",
 };
 
-/** tone → 配色。**只做配色，不做判断** —— 未知 tone 退回中性，不猜。 */
+/** tone -> colours. Colours only, no judgement: an unknown tone falls back to neutral instead of guessing. */
 export function toneClass(tone: string | undefined): string {
   return TONE_CLASS[String(tone ?? "info")] ?? TONE_CLASS.info!;
 }
 
 /**
- * 缩略图 URL。`has_image` 为假时返回 null —— 调用方据此**不渲染 `<img>`**。
+ * Thumbnail URL. Returns null when `has_image` is falsy, and callers then do not render an
+ * `<img>`.
  *
- * 这样即使取图端点还没上线（分阶段实施），也不会有任何一个请求发出去：
- * 没有坏掉的图标，没有 404 噪音。
+ * That way no request is made even if the image endpoint is not live yet (staged rollout):
+ * no broken-image icon, no 404 noise.
  */
 export function narrationImageUrl(
   item: NarrationItem,
@@ -246,21 +309,22 @@ export function narrationImageUrl(
   );
 }
 
-// ── 跨挂载留存 ──────────────────────────────────────────────────────────────
+// ── Retention across mounts ────────────────────────────────────────────────
 //
-// 已知问题:切换标签页再回来的时候旁白会消失。
+// Symptom: after switching tabs and coming back, the narration was gone.
 //
-// 原因有两层,少修一层都不行:
+// There are two causes, and both must be fixed:
 //
-//   ① 条目存在 `NarrationLane` 的 `useState` 里、游标存在 `useRef` 里 ——
-//      切走 = 组件卸载 = 两样一起丢。
-//   ② 回来时 react-query 先把**上一次增量请求的缓存**喂回来。那次请求带的是
-//      `after_seq=120` 之类,响应里只有最后两条;`useEffect` 照单全收之后把
-//      游标推到 `latest_seq`,于是**前面一百多条永远补不回来** ——
-//      看起来就是「旁白没有了」。
+//   1. Entries live in `useState` of `NarrationLane` and the cursor in a `useRef`; leaving
+//      the tab unmounts the component and loses both.
+//   2. On return, react-query first feeds back the cache of the last INCREMENTAL request.
+//      That request carried something like `after_seq=120` and its response held only the
+//      last two entries; the `useEffect` accepted it as is and advanced the cursor to
+//      `latest_seq`, so the hundred-odd earlier entries could never be fetched again.
 //
-// 存在模块级 Map 里:切走再回来,条目和游标都还在,而且不必重新拉一遍全量。
-// 按会话分桶 —— 换会话是换一条转录,不能串。
+// Keeping them in a module-level Map means entries and cursor survive leaving and
+// returning, without refetching everything. Entries are bucketed per conversation, since a
+// different conversation is a different transcript and must not mix.
 
 export interface NarrationMemo<T> {
   items: T[];
@@ -269,14 +333,14 @@ export interface NarrationMemo<T> {
 
 const _memo = new Map<string, NarrationMemo<unknown>>();
 
-/** 这条会话攒到哪儿了。没有就给一个空的(不写进表,读不该有副作用)。 */
+/** What has accumulated for this conversation. If nothing, an empty one (not written into the table; a read must not have side effects). */
 export function recallNarration<T>(conversationId: string | null | undefined): NarrationMemo<T> {
   const k = String(conversationId || "");
   const got = k ? _memo.get(k) : undefined;
   return got ? (got as NarrationMemo<T>) : { items: [], cursor: 0 };
 }
 
-/** 记下这条会话攒到哪儿了。 */
+/** Record what has accumulated for this conversation. */
 export function rememberNarration<T>(
   conversationId: string | null | undefined,
   items: T[],
@@ -285,8 +349,9 @@ export function rememberNarration<T>(
   const k = String(conversationId || "");
   if (!k) return;
   _memo.set(k, { items: items as unknown[], cursor });
-  // 只留最近几条会话 —— 一条长任务几百条旁白,无上限会把内存吃掉。
-  // 删最早插入的那个:Map 保序,`keys().next()` 就是它。
+  // Keep only the most recent few conversations: a long task produces hundreds of entries,
+  // and without a cap memory would grow without bound. Delete the earliest inserted one:
+  // Map preserves insertion order, so `keys().next()` is it.
   while (_memo.size > NARRATION_MEMO_MAX) {
     const oldest = _memo.keys().next();
     if (oldest.done) break;
@@ -294,10 +359,10 @@ export function rememberNarration<T>(
   }
 }
 
-/** 记几条会话。3 = 主聊天 + 两个刚看过的,再多没有意义。 */
+/** How many conversations to keep. 3 = the main chat plus two recently viewed; more has no point. */
 export const NARRATION_MEMO_MAX = 3;
 
-/** 换样品/换实验之类需要整个忘掉时用(测试也用它隔离)。 */
+/** For when everything must be forgotten (switching sample/experiment); tests also use it for isolation. */
 export function forgetAllNarration(): void {
   _memo.clear();
 }

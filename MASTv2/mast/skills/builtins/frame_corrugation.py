@@ -38,6 +38,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ class AssessFrameCorrugation(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "量一帧已保存的 .sxm 里表面起伏有多大,再拿它跟样品 profile 的上限"
+                tr("量一帧已保存的 .sxm 里表面起伏有多大,再拿它跟样品 profile 的上限"
                 "比。只读文件,不碰硬件。verdict 取 'high' / 'normal' / 'low' / "
                 "'undecidable' 之一,它是一个**观察**,**不是**针尖结论:一簇台阶给出"
                 "的起伏和一根坏针尖一样大,所以单帧分不开这两者。到底是**针尖**还是"
@@ -82,19 +83,28 @@ class AssessFrameCorrugation(BaseSkill):
                 "'undecidable' 的意思是**这一帧答不了** —— 帧不可用、它的视野与阈值"
                 "标定时的视野对不上(**从来不做**跨尺度换算)、或者根本还没有标定过"
                 "阈值。'low' 的意思是这一帧太平,连正反扫判据也承载不了,于是判据"
-                "**弃权**。阈值与它标定时所用的视野是**一组**:要么都传,要么都不传。"
+                "**弃权**。阈值与它标定时所用的视野是**一组**:要么都传,要么都不传。", "Measure how large the surface corrugation is in a saved .sxm frame, then compare it with the upper limit of the sample profile. "
+"Reads files only, never touches hardware. verdict is one of 'high' / 'normal' / 'low' / "
+"'undecidable'. It is an **observation**, **not** a tip conclusion: a cluster of steps gives "
+"as large a corrugation as a bad tip, so a single frame cannot tell them apart. Whether it is the **tip** or the "
+"**surface** has to be answered by re-measuring at other positions and aggregating (aggregate_cross_points). "
+"'undecidable' means **this frame cannot answer**: the frame is unusable, its field of view does not match the one the threshold "
+"was calibrated at (**never** converted across scales), or no threshold has been calibrated at all. "
+"'low' means this frame is too flat to carry even the forward/backward criterion, so the criterion "
+"**abstains**. The threshold and the field of view it was calibrated at are **one set**: pass both or neither.")
             ),
             parameters=[
                 ParameterSpec(name="scan_path", type="str",
-                              description=".sxm 帧的路径。",
+                              description=tr(".sxm 帧的路径。", "Path of the .sxm frame."),
                               required=True),
                 ParameterSpec(name="channel", type="str",
-                              description="形貌通道('Z' 是标准选择)。",
+                              description=tr("形貌通道('Z' 是标准选择)。", "Topography channel ('Z' is the standard choice)."),
                               required=False, default="Z"),
                 ParameterSpec(
                     name="profile", type="str",
-                    description=("样品阈值 profile 的名字。"
-                                 "留空就用当前生效的那一个。"),
+                    description=(tr("样品阈值 profile 的名字。"
+                                 "留空就用当前生效的那一个。", "Name of the sample threshold profile. "
+"Empty = use the one currently in effect.")),
                     required=False, default=""),
                 # ⚠️ 这两个**刻意不写 `unit=`**。带 unit 的 float 会被
                 # `_si_params` 当成「模型用文本写的有量纲量」,schema 里变成 str,
@@ -104,27 +114,38 @@ class AssessFrameCorrugation(BaseSkill):
                 ParameterSpec(
                     name="threshold_pm", type="float",
                     description=(
-                        "起伏上限,单位**皮米**(就写一个普通数字,例如 40 表示 "
+                        tr("起伏上限,单位**皮米**(就写一个普通数字,例如 40 表示 "
                         "40 pm)。留空则从样品 profile 里取 —— 这里**刻意没有 "
                         "default**:没传的阈值必须保持「没传」,查 profile 那一行"
                         "才到得了。你要是传了这个数,就**必须(MUST)**同时把 "
                         "ref_scan_nm 也传上;一个不带标定视野的阈值毫无意义,"
-                        "只会得到 'undecidable'。"),
+                        "只会得到 'undecidable'。", "Corrugation upper limit, in **picometres** (just a plain number, e.g. 40 means "
+"40 pm). Empty = taken from the sample profile -- there is **deliberately no "
+"default** here: a threshold that was not passed must stay \"not passed\", and only the profile line "
+"can supply it. If you pass this number you **MUST** also pass "
+"ref_scan_nm; a threshold without its calibration field of view is meaningless "
+"and only gives 'undecidable'.")),
                     required=False, min_value=0.1, max_value=1e6),
                 ParameterSpec(
                     name="ref_scan_nm", type="float",
                     description=(
-                        "threshold_pm 是在多大的扫描尺寸上标定的,单位**纳米**"
+                        tr("threshold_pm 是在多大的扫描尺寸上标定的,单位**纳米**"
                         "(就写一个普通数字,例如 100 表示 100 nm)。只有和 "
                         "threshold_pm 一起给才有意义。这一帧自己的扫描尺寸与它"
                         "相差超过容差时,判定就是 'undecidable' —— 起伏"
-                        "**绝不(NEVER)**跨视野换算。"),
+                        "**绝不(NEVER)**跨视野换算。", "The scan size at which threshold_pm was calibrated, in **nanometres** "
+"(just a plain number, e.g. 100 means 100 nm). Only meaningful together with "
+"threshold_pm. When this frame's own scan size differs from it "
+"by more than the tolerance, the verdict is 'undecidable' -- corrugation is "
+"**NEVER** converted across fields of view.")),
                     required=False, min_value=0.1, max_value=1e5),
                 ParameterSpec(
                     name="rel_tol", type="float",
-                    description=("拿这一帧的扫描尺寸去对 ref_scan_nm 时的相对"
+                    description=(tr("拿这一帧的扫描尺寸去对 ref_scan_nm 时的相对"
                                  "容差。0.05 足以覆盖用户输入 100 nm 而实际"
-                                 "得到 99.98 的情况。"),
+                                 "得到 99.98 的情况。", "Relative tolerance when comparing this frame's scan size with ref_scan_nm. "
+"0.05 is enough to cover the case where the user enters 100 nm and "
+"actually gets 99.98.")),
                     required=False, default=0.05,
                     min_value=0.0, max_value=0.5),
             ],
@@ -140,7 +161,7 @@ class AssessFrameCorrugation(BaseSkill):
         channel_name = params.get("channel") or "Z"
         if not path or not Path(path).exists():
             return SkillResult(skill_name=_NAME, success=False,
-                               error=f"文件不存在: {path}")
+                               error=tr(f"文件不存在: {path}", f"File does not exist: {path}"))
 
         try:
             import numpy as np
@@ -151,13 +172,13 @@ class AssessFrameCorrugation(BaseSkill):
             from mast.vision.scan_prep_thresholds import resolve
         except ImportError as exc:
             return SkillResult(skill_name=_NAME, success=False,
-                               error=f"缺依赖: {exc}")
+                               error=tr(f"缺依赖: {exc}", f"Missing dependency: {exc}"))
 
         try:
             scan = read_sxm(path)
         except Exception as exc:  # noqa: BLE001
             return SkillResult(skill_name=_NAME, success=False,
-                               error=f".sxm 读取失败: {exc}")
+                               error=tr(f".sxm 读取失败: {exc}", f"Failed to read .sxm: {exc}"))
 
         # 几何归位的单一真源:backward 的 fliplr 与 :SCAN_DIR: up 的上下翻转都在
         # 这里处理。自己扒 channels 就是在拿一张图跟它自己的镜像比。
@@ -166,7 +187,7 @@ class AssessFrameCorrugation(BaseSkill):
         if arr is None:
             return SkillResult(
                 skill_name=_NAME, success=False,
-                error=f"文件里没有可用通道/正反扫数据(要的是 {channel_name!r})")
+                error=tr(f"文件里没有可用通道/正反扫数据(要的是 {channel_name!r})", f"No usable channel / forward-backward scan data in the file (wanted {channel_name!r})"))
         arr = np.asarray(arr, dtype=np.float64)
 
         th = resolve(params.get("profile") or None)
@@ -253,20 +274,21 @@ class AssessFrameCorrugation(BaseSkill):
 def _summarize(res, data) -> str:
     """给用户/模型读的一句话。**「判不了」与「判出来不好」是两句不同的话。**"""
     head = {
-        "undecidable": "这一帧的起伏判不了",
-        "low": "这一帧起伏太小,判据弃权",
-        "high": "这一帧起伏偏大",
-        "normal": "这一帧起伏正常",
+        "undecidable": tr("这一帧的起伏判不了", "The corrugation of this frame cannot be judged"),
+        "low": tr("这一帧起伏太小,判据弃权", "The corrugation of this frame is too small; the criterion abstains"),
+        "high": tr("这一帧起伏偏大", "The corrugation of this frame is on the high side"),
+        "normal": tr("这一帧起伏正常", "The corrugation of this frame is normal"),
     }.get(res.verdict, res.verdict)
     s = f"{head} —— {res.reason}"
     if res.verdict == "high":
-        s += ("这不是「针坏了」的结论:要判针还是表面,得换位置复测再聚合"
-              "(判据③)。")
+        s += (tr("这不是「针坏了」的结论:要判针还是表面,得换位置复测再聚合"
+              "(判据③)。", "This is not a conclusion that \"the tip is bad\": to tell tip from surface, re-measure at other positions and aggregate "
+"(criterion 3)."))
     if data.get("threshold_source", "").startswith("profile"):
-        s += f" 阈值来源:{data['threshold_source']}。"
+        s += tr(f" 阈值来源:{data['threshold_source']}。", f" Threshold source: {data['threshold_source']}.")
     elif res.threshold_pm is not None:
-        s += " 阈值来源:调用方显式给的。"
-    s += f" 口径 {res.detrend}+{res.statistic};{res.blind_to}"
+        s += tr(" 阈值来源:调用方显式给的。", " Threshold source: given explicitly by the caller.")
+    s += tr(f" 口径 {res.detrend}+{res.statistic};{res.blind_to}", f" Basis {res.detrend}+{res.statistic}; {res.blind_to}")
     return s
 
 

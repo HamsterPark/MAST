@@ -1,22 +1,24 @@
-// 实验 / 样品选择器 —— 「做了一个月这个又回去做那个」的那一次点击。
+// Experiment / sample pickers: the one click to go back to an earlier experiment.
 //
-// 排序按 last_active_at 倒序（不是创建时间）：要回到的那个实验可能是上个月建的，
-// 但昨天才动过。/api/experiments/recent 已经按这个排好了。
+// Sorted by last_active_at descending (not creation time): the experiment to return
+// to may have been created last month but touched yesterday.
+// /api/experiments/recent already returns them in that order.
 
 import { useState } from "react";
 import { Modal, TextField } from "../controls";
 import { Spinner } from "../ui";
+import { tr } from "@/lib/i18n";
 import { useRecentExperiments, useSamplesOf } from "@/api/scope";
 
 function relTime(iso?: string | null): string {
-  if (!iso) return "从未活动";
+  if (!iso) return tr("从未活动", "never active");
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return "";
   const s = Math.max(0, (Date.now() - t) / 1000);
-  if (s < 90) return "刚刚";
-  if (s < 3600) return `${Math.round(s / 60)} 分钟前`;
-  if (s < 86400) return `${Math.round(s / 3600)} 小时前`;
-  return `${Math.round(s / 86400)} 天前`;
+  if (s < 90) return tr("刚刚", "just now");
+  if (s < 3600) return tr(`${Math.round(s / 60)} 分钟前`, `${Math.round(s / 60)} min ago`);
+  if (s < 86400) return tr(`${Math.round(s / 3600)} 小时前`, `${Math.round(s / 3600)} h ago`);
+  return tr(`${Math.round(s / 86400)} 天前`, `${Math.round(s / 86400)} d ago`);
 }
 
 const rowCls =
@@ -40,19 +42,19 @@ export function ExperimentPicker({
   const list = useRecentExperiments(q, open);
 
   return (
-    <Modal open={open} onClose={onClose} title="切换实验">
+    <Modal open={open} onClose={onClose} title={tr("切换实验", "Switch experiment")}>
       <div className="space-y-3">
-        <TextField value={q} onChange={setQ} placeholder="按名称筛选…" />
+        <TextField value={q} onChange={setQ} placeholder={tr("按名称筛选…", "Filter by name…")} />
         <button
           className={rowCls + " border border-dashed border-mast-border-strong text-mast-accent"}
           onClick={onCreate}
         >
-          ＋ 新建实验
+          {tr("＋ 新建实验", "+ New experiment")}
         </button>
         <div className="max-h-[46vh] space-y-1 overflow-auto">
           {list.isLoading && <Spinner />}
           {list.data?.experiments?.length === 0 && (
-            <p className="px-3 py-6 text-center text-sm text-mast-muted">没有匹配的实验</p>
+            <p className="px-3 py-6 text-center text-sm text-mast-muted">{tr("没有匹配的实验", "No matching experiments")}</p>
           )}
           {list.data?.experiments?.map((e) => {
             const isCur = e.id === currentId;
@@ -66,11 +68,11 @@ export function ExperimentPicker({
               >
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm text-mast-text">
-                    {e.name || "(未命名)"}
-                    {isCur && <span className="ml-2 text-xs text-mast-accent">当前</span>}
+                    {e.name || tr("(未命名)", "(unnamed)")}
+                    {isCur && <span className="ml-2 text-xs text-mast-accent">{tr("当前", "Current")}</span>}
                   </span>
                   <span className="block truncate text-xs text-mast-faint">
-                    {e.sample_count} 个样品 · {e.action_count} 条动作 ·{" "}
+                    {tr(`${e.sample_count} 个样品 · ${e.action_count} 条动作`, `${e.sample_count} samples · ${e.action_count} actions`)} ·{" "}
                     {relTime(e.last_active_at)}
                   </span>
                 </span>
@@ -79,7 +81,7 @@ export function ExperimentPicker({
           })}
         </div>
         <p className="text-xs text-mast-faint">
-          切换实验不会结束任何实验 —— 实验永久存在，随时可以再切回来。
+          {tr("切换实验不会结束任何实验 —— 实验永久存在，随时可以再切回来。", "Switching experiments ends none of them; they persist and you can switch back at any time.")}
         </p>
       </div>
     </Modal>
@@ -106,19 +108,19 @@ export function SamplePicker({
   const list = useSamplesOf(experimentId, open);
 
   return (
-    <Modal open={open} onClose={onClose} title={`选择样品 — ${experimentName || "当前实验"}`}>
+    <Modal open={open} onClose={onClose} title={tr(`选择样品 — ${experimentName || "当前实验"}`, `Select sample: ${experimentName || "current experiment"}`)}>
       <div className="space-y-3">
         <button
           className={rowCls + " border border-dashed border-mast-border-strong text-mast-accent"}
           onClick={onCreate}
         >
-          ＋ 新建样品
+          {tr("＋ 新建样品", "+ New sample")}
         </button>
         <div className="max-h-[46vh] space-y-1 overflow-auto">
           {list.isLoading && <Spinner />}
           {list.data?.samples?.length === 0 && (
             <p className="px-3 py-6 text-center text-sm text-mast-muted">
-              这个实验下还没有样品
+              {tr("这个实验下还没有样品", "No samples in this experiment yet")}
             </p>
           )}
           {list.data?.samples?.map((s) => {
@@ -134,11 +136,11 @@ export function SamplePicker({
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm text-mast-text">
                     {s.index ? `S${String(s.index).padStart(2, "0")} · ` : ""}
-                    {s.name || "(未命名)"}
-                    {isCur && <span className="ml-2 text-xs text-mast-accent">当前</span>}
+                    {s.name || tr("(未命名)", "(unnamed)")}
+                    {isCur && <span className="ml-2 text-xs text-mast-accent">{tr("当前", "Current")}</span>}
                   </span>
                   <span className="block truncate text-xs text-mast-faint">
-                    {s.sample_type || "未分类"} · {relTime(s.last_active_at)}
+                    {s.sample_type || tr("未分类", "Uncategorized")} · {relTime(s.last_active_at)}
                   </span>
                 </span>
               </button>
@@ -146,7 +148,7 @@ export function SamplePicker({
           })}
         </div>
         <p className="text-xs text-mast-faint">
-          样品可以来回切换 —— 换样品不会结束上一个，之前那块随时能切回来。
+          {tr("样品可以来回切换 —— 换样品不会结束上一个，之前那块随时能切回来。", "Samples can be switched back and forth; changing sample does not end the previous one.")}
         </p>
       </div>
     </Modal>

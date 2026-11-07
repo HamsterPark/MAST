@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 
 from mast._runtime_paths import project_root
+from mast.i18n import tr
 from mast.config import (
     MASTConfig,
     MODEL_PRESETS,
@@ -70,7 +71,7 @@ logger = logging.getLogger(__name__)
 # ``data`` can carry whole sample traces (TipShapeWithReadback's z/current
 # arrays), so the records layer BOUNDS it — it does not drop it. Before
 # 2026-07-27 the whole dict was thrown away and every action read ``"data": {}``,
-# which reads exactly like a skill that returned nothing ().
+# which reads exactly like a skill that returned nothing.
 _V1_DATA_MAX_CHARS = 20000
 _V1_STR_CAP = 2000
 _V1_SEQ_CAP = 200
@@ -78,7 +79,7 @@ _V1_SEQ_CAP = 200
 # (`CHECK (exit_status IN ('success','aborted','failed','timeout'))`). Callers
 # say "completed"; that value made the UPDATE fail its CHECK constraint and the
 # failure was swallowed at DEBUG level, so no finished run ever got an exit
-# status (2026-07-27, same silent-write family as).
+# status (same silent-write failure class).
 _TRAJ_EXIT_STATUS = {
     "success": "success", "completed": "success", "complete": "success",
     "done": "success", "ok": "success",
@@ -90,8 +91,8 @@ _TRAJ_EXIT_STATUS = {
 
 
 # Fire-and-forget MUST mean "does not propagate", never "is not observable".
-# The 2026-07-27 forensics found the whole agent training log dead for a full
-# day behind `logger.debug(..., exc_info=True)`: every INSERT failed a foreign
+# Once the whole agent training log was dead for a full
+# day was found dead behind `logger.debug(..., exc_info=True)`: every INSERT failed a foreign
 # key, at a 100% rate, and the service log carried not one line about it. These
 # swallow sites now log the first occurrence LOUDLY and then throttle, so a
 # systematic failure is impossible to miss while a flaky one can't spam.
@@ -120,6 +121,40 @@ def _log_swallowed(key: str, msg: str, *args) -> None:
                        msg % args if args else msg, count, key)
 
 
+def _repair_nanonis_path(sp: str) -> str:
+    """把 Nanonis 回包里的路径还原成真字符。
+
+    MAST 的 Nanonis 解码是 latin-1（逐字节一字符，见 ``nanonis_patch`` 里不许「统一成
+    utf-8」的那段注释），所以路径里只要有一个非 ASCII 字符，到这里就是乱码：模拟器按
+    UTF-8 发（STM-Bench），真控制器（LabVIEW）按系统的 ANSI 代码页发（中文 Windows 上
+    是 GBK）。于是「保存目录」解析成一个不存在的路径，所有找扫描文件的地方都扑空。
+    这里把字符还原成原字节，依次按 UTF-8、本机 ANSI 代码页、GBK 试，取第一个指向**真实
+    存在**的目录（或其上级）的；都不存在就取第一个能解出来的。纯 ASCII 原样返回。"""
+    try:
+        raw = sp.encode("latin-1")
+    except UnicodeEncodeError:
+        return sp                      # 已经是真字符（不是 latin-1 逐字节串）
+    if raw.isascii():
+        return sp
+    from pathlib import Path as _P
+    decoded: list[str] = []
+    for enc in ("utf-8", "mbcs", "gbk"):
+        try:
+            cand = raw.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+        if cand not in decoded:
+            decoded.append(cand)
+    for cand in decoded:
+        try:
+            p = _P(cand)
+            if p.exists() or p.parent.is_dir():
+                return cand
+        except (OSError, ValueError):
+            continue
+    return decoded[0] if decoded else sp
+
+
 def _finite(*candidates):
     """First candidate that is a real finite number, else None. NaN/inf are
     rejected at the source — a non-finite coordinate poisons the map's extent
@@ -135,6 +170,14 @@ def _finite(*candidates):
         if math.isfinite(f):
             return f
     return None
+
+
+def _record_attribution_of(payload: dict) -> dict:
+    """``payload["_attribution"]`` —— 直调入账的**调用时**归属快照（实验 / 样品 /
+    v2 实验 / 会话线程，见 ``CoreRuntime._direct_record_attribution``）。没有或形状不对
+    ⇒ ``{}``，各记录函数退回读「当前」的老行为（agent 路径从来不带它）。"""
+    att = payload.get("_attribution") if isinstance(payload, dict) else None
+    return att if isinstance(att, dict) else {}
 
 
 # Files a skill can produce that the v2 store knows how to describe. Anything
@@ -214,7 +257,7 @@ def _register_scan_files(repos, action_id: str, paths) -> int:
     produced). Returns how many were registered.
 
     The v2 store held 0 scan_files for a session that wrote 9 .sxm — the paths
-    existed only in a chat transcript that was itself truncated (/). Only files that ACTUALLY EXIST are registered: a path an
+    existed only in a chat transcript that was itself truncated. Only files that ACTUALLY EXIST are registered: a path an
     agent mentioned but never wrote must stay absent from the record, because
     'is it in scan_files' is exactly the question the claim cross-check asks."""
     import hashlib
@@ -367,12 +410,41 @@ def lateral_coarse_move_info(payload: dict) -> dict | None:
 
 
 def is_crash_report(payload: dict) -> bool:
-    """仅在 crash_indicator is True 时记录撞针，不使用 success 代替判决。
-    
-    一次成功的检测可以发现撞针；success 只说明检查是否执行成功。
-    crash_indicator 的 None 表示未知，不能折叠成已撞或未撞。
-    例如振幅判据在激励关闭、激励状态未知或缺基线时缺少有效比较条件，必须弃权。
-    检测结果与执行结果分开，避免生成假撞针禁区或把未知冒充安全。"""
+    """This result says the tip crashed. Keyed ONLY on ``crash_indicator``.
+
+    ## 为什么这道判据不看 ``success``
+
+    以前这里要求 ``success is False``。那把「**这个检查没跑成**」当成了「**这个检查
+    发现撞了**」的代理,而它们是两件事 —— 一次成功检测到撞针的检查,**是一次成功的
+    运行**:它被问「撞了没有」,它答了。
+
+    代价是真实的:``CheckScanForCrash``(``skills/builtins/scan_frame.py``)撞针时
+    照样 ``success=True``(判决在 ``data`` 里,这是它刻意的设计),于是它报出来的每
+    一次撞针都进不了这道闸 —— 而 ``record_crash`` 的唯一调用点在手写的
+    ``full_scan.py`` 里,也不覆盖它。**两份撞针记忆谁都收不到**,症状是「一切正常」。
+    ``CheckTipCrashByAmplitude``(qPlus 振幅判据)同样是 ``success=True`` + 判决在
+    ``data`` 里,同样漏。
+
+    这个函数的 docstring 一直写着「Keyed on the RESULT carrying ``crash_indicator``」
+    —— **文档说的和代码做的不是一回事**,现在让代码追上文档。
+
+    ## ``None`` 和 ``False`` 的区别在哪 —— 这里只认 ``is True`` 的原因
+
+    ``crash_indicator`` 是**三态**:``True`` = 撞了,``False`` = 没撞,``None`` =
+    **判不了**。第三态不是摆设,它对应一条实机事实:**STM 模式下 qPlus 振幅通道
+    本来就是噪声** —— 音叉没被驱动(``excitation_on=0``)时那 7-8 pm 是未驱动解调器
+    的噪声底,拿它跟自由振荡基线比,**永远**比出「塌了」。实机上 crash
+    advisory 反复出现,全部发生在激励关着的时候。
+
+    所以 ``CheckTipCrashByAmplitude`` 在读不到激励状态 / 没有基线 / 基线与当前激励
+    状态不一致时,一律报 ``None`` 而不是 ``False``。(后来查明:那批误报的根子是
+    拿未驱动读数比**驱动时取的**基线;激励关时取的**残余基线**与激励关时的读数相比
+    是操作员要的「残余振幅归零 = 撞针」,照常给 True/False —— 见 qplus_amplitude
+    的「Two baselines」。)而 STM 下不驱动音叉是**常态**,不是异常
+    ⇒ 把 ``None`` 折成 ``True`` 会让每一次 STM 振幅读数都变成一次假撞针,在一片
+    好表面上撒满 150 nm 禁区;折成 ``False`` 则会把真正的「判不了」冒充成「没撞」。
+    ``is True`` 两个方向都不犯。
+    """
     if not isinstance(payload, dict):
         return False
     data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
@@ -577,7 +649,7 @@ def _notice_vision_verdict(ev, payload: dict) -> None:
     为什么这里要写台账,而 ``buffer_hitl`` 已经为同一条事件写过一行:**两行答的是
     两个问题**。buffer_hitl 那行说的是「一条关键事件到了 agent 状态里,没有升级成
     确认框」;这一行说的是「**这条判定本来会中止一条正在跑的 composite**」——
-    「本来会拦我几次」要的是后面这个数。
+    验收时需要的「本来会拦几次」,要的是后面这个数。
 
     两者也不总是同时存在:buffer_hitl 只在有 agent 带着 buffer 在跑时才有;这个钩子
     跑在视觉发布线程上,手动路径的扫描也照样经过。少了这一行,那些场景下的「本来会
@@ -588,7 +660,8 @@ def _notice_vision_verdict(ev, payload: dict) -> None:
     """
     signal = payload.get("signal")
     reason = str(payload.get("summary_zh") or payload.get("advice")
-                 or payload.get("summary") or "视觉判定针尖状态恶化")
+                 or payload.get("summary") or tr("视觉判定针尖状态恶化",
+                                                 "vision judged the tip state to be degrading"))
     logger.info(
         "视觉针尖 CRITICAL 记录但不中止（signal=%s）：%s。"
         "⑰-C1 之后视觉判定在任何场景下都不再中止 composite；"
@@ -598,7 +671,8 @@ def _notice_vision_verdict(ev, payload: dict) -> None:
         from mast.core.diagnostics import record as _diag
 
         _diag("notice_only", "tip_halt:vision",
-              f"视觉针尖判定 —— 只记录不中止流程：{reason}",
+              tr(f"视觉针尖判定 —— 只记录不中止流程：{reason}",
+                 f"Vision tip verdict -- recorded only, the run is not stopped: {reason}"),
               signal=signal,
               event_id=str(getattr(ev, "event_id", "") or ""),
               seqno=getattr(ev, "seqno", None),
@@ -608,7 +682,7 @@ def _notice_vision_verdict(ev, payload: dict) -> None:
 
 
 def make_tip_halt_hook(app):
-    """A BufferService critical hook that arms the composite halt ().
+    """A BufferService critical hook that arms the composite halt.
 
     Fires on CRITICAL ``tip_quality_drop`` ONLY. A WARN-level drop is an
     observation, not a reason to stop a plan mid-flight, and every other event
@@ -659,7 +733,9 @@ def make_tip_halt_hook(app):
             # agent (grep: 0 producers, 2026-07-28).
             app.raise_tip_halt(
                 str(payload.get("summary_zh") or payload.get("advice")
-                    or payload.get("summary") or "电流监控判定物理越界"),
+                    or payload.get("summary")
+                    or tr("电流监控判定物理越界",
+                          "current monitor judged a physical limit exceeded")),
                 event_id=str(getattr(ev, "event_id", "") or ""),
                 seqno=getattr(ev, "seqno", None),
                 # ⑰-C1 之后走到这里的**只可能**是电流监控来源(视觉在上面就返回了),
@@ -686,11 +762,34 @@ def _attach_halt_check(ctx, app, run_id: str) -> None:
 
 
 def _attach_marker_sink(ctx, app) -> None:
-    """让 composite 子步骤使用与 agent 工具边界相同的地图标记记录器。
-    
-    子步骤走 ExecutionContext.run，不经过 wrap_skill 的 post hook。
-    缺少这条接线时，脉冲等表面操作不会留下地图标记，后续清洁区域选择可能
-    错误地复用已改变的位置。挂接采用尽力而为策略；失败不改变技能执行结果。"""
+    """让 composite 的**子步骤**也能在扫描地图上留下痕迹。
+
+    ## 这个洞本仓补过一次,只补了一半
+
+    地图标记的记录器 ``_record_map_marker`` 挂在 ``_skill_trace_recorder`` 上,
+    而那是 **agent 工具调用边界**(``wrap_skill`` 的 post hook)。composite 的
+    子步骤走 ``ExecutionContext.run``,**不经过那里** —— 与状态缓存回写当初
+    完全同一个洞。状态那半边已补成两条路共用
+    ``patch_state_from_result``;地图这半边没人补。
+
+    ## 它的代价
+
+    ``ForgeAuTip`` 是一次工具调用,而 ``classify_skill("ForgeAuTip")`` 是
+    ``None`` —— 顶层不产生标记;内层的 ``BiasPulseWithReadback`` 到不了边界
+    —— 也不产生标记。于是**流程里打出的每一发 10 V 脉冲,地图上都不存在**。
+
+    紧接着 verify 去找「干净地方」扫图判针尖,``nearest_clean_from`` 看到一张
+    什么都没发生过的地图,把针尖**当前位置**判为干净、以距离 0 排第一,
+    而 ``_relocate`` 距离为 0 时不发移动指令 ⇒ **原地在刚炸出来的坑上扫图**。
+
+    证据:脉冲落点与随后 verify 的
+    scan_center 完全重合。
+
+    随后 level 报「找不到够大的单台面平区」——
+    那就是那个坑。
+
+    尽力而为:挂不上就退回今天的行为(子步骤不留标记),绝不因此影响执行。
+    """
     try:
         ctx.marker_sink = app._record_map_marker  # type: ignore[attr-defined]
     except Exception:  # noqa: BLE001
@@ -744,7 +843,7 @@ def _pos_provenance(marker, params: dict, state, data: dict | None = None) -> di
     """Where a marker's coordinate CAME FROM — commanded, frame, or readback.
 
     Three very different epistemic statuses were being recorded identically
-    ():
+    (2026-07-27):
 
       ``param``          the skill was TOLD to go here. An aim.
       ``scan_frame``     the live scan frame's centre. Where the raster is
@@ -914,7 +1013,7 @@ def _v1_nanonis_calls(calls) -> list:
     """Bound a skill's NanonisCallRecord list for storage (return_value can be a
     whole scan/trace array). Keeps the records themselves — only the payload of
     each call is shrunk — so `if action.nanonis_calls:` becomes true when TCP
-    calls really happened ( → citations/manager.py)."""
+    calls really happened (see citations/manager.py)."""
     if not calls:
         return []
     from mast.core.types import NanonisCallRecord
@@ -948,7 +1047,7 @@ def _ensure_buffer_loop(app):
     Previously the GUI did ``asyncio.run(buf.start())`` — that spins up a loop,
     runs start(), then CLOSES the loop, so ``buf._loop`` was a dead loop and
     every subsequent WAL append was silently dropped (``not loop.is_closed()``
-    guard short-circuited) . Giving the buffer a loop that stays alive for
+    guard short-circuited). Giving the buffer a loop that stays alive for
     the process makes WAL persistence actually work.
     """
     import asyncio
@@ -1045,7 +1144,8 @@ def _ensure_buffer_for_gui(app) -> "object":
                             already = ab is not None and ab.is_set()
                             _rsn = str((ev.payload or {}).get("reason") or "?")
                             _det = str((ev.payload or {}).get("detail") or "")
-                            _why = f"E_STOP 事件(reason={_rsn}){f': {_det}' if _det else ''}"
+                            _why = tr(f"E_STOP 事件(reason={_rsn}){f': {_det}' if _det else ''}",
+                                      f"E_STOP event (reason={_rsn}){f': {_det}' if _det else ''}")
                             if ab is not None:
                                 from mast.core.execution_context import mark_abort
                                 mark_abort(ab, _why)
@@ -1074,6 +1174,11 @@ def _ensure_buffer_for_gui(app) -> "object":
                                             "_abort_event", None)
                             if ex_ab is not None:
                                 ex_ab.set()
+                            # 光学侧（卫星 + 本机光学台）一并急停：看门狗退针、环境告警、
+                            # 外部 agent 急停都走这个 E_STOP。只入队、不阻塞（TERS 契约 §10.1）。
+                            _ostop = getattr(_a, "_optics_emergency_stop", None)
+                            if callable(_ostop):
+                                _ostop(_why)
                             # Log once per latch — an E_STOP storm must not do
                             # per-event sync log I/O on the publisher thread.
                             if not already:
@@ -1086,10 +1191,20 @@ def _ensure_buffer_for_gui(app) -> "object":
                         _buf.register_critical_hook(_estop_sets_abort)
                     except Exception as exc:  # noqa: BLE001
                         logger.debug("E_STOP abort hook wiring failed: %s", exc)
-                    # A separate run-scoped signal lets composites stop at
-                    # step boundaries. It is not the global E_STOP latch,
-                    # which blocks all new instrument actions. Keeping the
-                    # mechanisms distinct preserves recovery operations.
+                    # A CRITICAL tip_quality_drop must be
+                    # able to stop a composite that is ALREADY running. Observed drops
+                    # fired AFTER the hardware action
+                    # had finished, because the only consumer was a middleware
+                    # that runs between LLM calls — and one BatchRegionsScan
+                    # tool call scans 4 regions in 107 s. A drop flagged mid-run
+                    # could be followed by more batches.
+                    #
+                    # Deliberately NOT the E_STOP hook above: that Event is a
+                    # LATCH, and once set, skill_adapter refuses every new
+                    # instrument action — a bad tip would wedge the instrument
+                    # against its own recovery (修针/退针/停扫 all blocked).
+                    # This is a separate, non-latching, run-scoped stop that
+                    # only composites consult, between steps.
                     try:
                         _buf.register_critical_hook(make_tip_halt_hook(_app))
                     except Exception as exc:  # noqa: BLE001
@@ -1156,11 +1271,15 @@ def _background_compaction_line(event: dict) -> str:
     """One operator-facing line, stating only the counts that actually arrived."""
     removed, kept = event.get("removed"), event.get("kept")
     if isinstance(removed, int) and removed > 0 and isinstance(kept, int):
-        return (f"上下文压缩：较早的 {removed} 条消息已被摘要替代，"
-                f"最近 {kept} 条保留原文")
+        return tr(f"上下文压缩：较早的 {removed} 条消息已被摘要替代，"
+                  f"最近 {kept} 条保留原文",
+                  f"Context compaction: {removed} earlier messages were replaced by a summary; "
+                  f"the latest {kept} are kept verbatim")
     if isinstance(removed, int) and removed > 0:
-        return f"上下文压缩：较早的 {removed} 条消息已被摘要替代"
-    return "上下文压缩：此处较早的对话已被摘要替代"
+        return tr(f"上下文压缩：较早的 {removed} 条消息已被摘要替代",
+                  f"Context compaction: {removed} earlier messages were replaced by a summary")
+    return tr("上下文压缩：此处较早的对话已被摘要替代",
+              "Context compaction: the earlier conversation here was replaced by a summary")
 
 
 def _tune_checkpoint_conn(conn) -> None:
@@ -1388,14 +1507,14 @@ class CoreRuntime:
         self._settings = None
         # Single reusable temp .wav path for assistant TTS playback. One file is
         # rewritten per reply and cleaned up at exit instead of leaking a fresh
-        # NamedTemporaryFile(delete=False) on every spoken reply .
+        # NamedTemporaryFile(delete=False) on every spoken reply.
         self._tts_wav_path: str | None = None
         # Phase 7 (RISK A.5): in-process BufferService for the Vision tab.
         # Lazily initialised on first Vision-buffer Tab refresh so unused
         # installs don't pay the WAL setup cost.
         self._buffer = None
         # Long-lived asyncio loop (daemon thread) that owns the BufferService so
-        # its WAL writer keeps running for the process lifetime . Lazily
+        # its WAL writer keeps running for the process lifetime. Lazily
         # created by _ensure_buffer_loop on first Vision-buffer use.
         self._buffer_loop = None
         # Async-init guards so the BufferService warm-up NEVER blocks a Gradio
@@ -1513,6 +1632,19 @@ class CoreRuntime:
             logger.warning("SettingsStore init/apply failed (using defaults): %s", exc)
             self._settings = None
 
+        # ── 站点画像（docs/v2/design/optical_station_witec.md D1）──────────────────
+        # 在这里**一次**定下来：下面起不起 Nanonis 连接与线程都看它。note_boot() 把当前
+        # 画像记为「本进程启动时的画像」并写进启动日志；设置页之后再改只会让
+        # restart_pending 变真，不会让一半的子系统换了画像。必须在设置库发布之后调
+        # （锁存绑在发布的那个库上）。读不出来一律 stm —— 今天所有机器的行为。
+        try:
+            from mast import station as _station
+            self._station_profile = _station.note_boot()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("station profile unreadable (treating as stm): %s", exc)
+            self._station_profile = "stm"
+        optical = self._station_profile == "optical"
+
         # Vision tip-quality thresholds: hydrate the process-level holder from the
         # persisted vision_thresholds so tip discrimination uses the operator's
         # cuts from the first assessment. Separate best-effort block — the vision
@@ -1579,7 +1711,7 @@ class CoreRuntime:
         except Exception as exc:
             logger.debug("conduct knobs hydrate skipped: %s", exc)
 
-        # Experiment default-parameter preferences : hydrate the process-level
+        # Experiment default-parameter preferences: hydrate the process-level
         # holder from the persisted experiment_defaults so IC / experiment_design see
         # the operator's preferred scan size / speed / setpoint / bias from the first
         # turn. Live-read holder like vision_thresholds; the agents never import
@@ -1656,6 +1788,13 @@ class CoreRuntime:
         # guarded inside VisionModule, so the background load is safe.
         try:
             import threading as _th_warm
+            from mast.vision.module import vision_models_enabled as _vision_on
+
+            if not _vision_on():
+                raise RuntimeError("vision models disabled")
+            if optical:
+                # the scorer judges STM tip quality: nothing to score on an optical station
+                raise RuntimeError("optical station profile")
 
             def _warm_vision() -> None:
                 try:
@@ -1702,10 +1841,15 @@ class CoreRuntime:
         connected = 0
         try:
             from mast.core.connection import ConnectionPool
-            self._pool = ConnectionPool(self.config.nanonis)
-            results = self._pool.connect_all()
-            connected = sum(1 for v in results.values() if v)
-            logger.info("ConnectionPool: %d/%d ports connected", connected, len(results))
+            if optical:
+                # 光学站没有 Nanonis：池对象仍然要有（ExecutionContext 需要 pool 与 state，
+                # api/direct_exec.py build_context），但它不拨号。
+                self._pool = self._build_idle_pool()
+            else:
+                self._pool = ConnectionPool(self.config.nanonis)
+                results = self._pool.connect_all()
+                connected = sum(1 for v in results.values() if v)
+                logger.info("ConnectionPool: %d/%d ports connected", connected, len(results))
         except Exception as exc:
             logger.warning("Could not create ConnectionPool: %s", exc)
 
@@ -1723,10 +1867,17 @@ class CoreRuntime:
                 # always read from ``state.snapshot()`` (instant, cached)
                 # instead of having ``state.refresh()`` block the main
                 # thread with 8 sequential safe_call(monitor) round-trips.
-                try:
-                    self._state.start_background_refresh(interval_s=1.0)
-                except Exception as exc:
-                    logger.warning("Could not start state background refresh: %s", exc)
+                #
+                # 光学站：state 对象在（ExecutionContext 要它），但没有东西可轮询 ——
+                # 不起这条线程，快照永远是空的默认值。
+                if optical:
+                    logger.info("InstrumentState: optical station profile - background "
+                                "refresh not started (no Nanonis to poll)")
+                else:
+                    try:
+                        self._state.start_background_refresh(interval_s=1.0)
+                    except Exception as exc:
+                        logger.warning("Could not start state background refresh: %s", exc)
         except Exception as exc:
             logger.warning("Could not create safety/state: %s", exc)
 
@@ -1789,6 +1940,14 @@ class CoreRuntime:
                 set_agent_refresh(self._request_composite_rebuild)
             except Exception as exc:
                 logger.warning("composite hot-register wiring failed: %s", exc)
+            # 工具面第四道门（站点画像）按技能类分类，要活的注册表；外部面的门调
+            # tool_face.compute() 不带参数，靠这里绑定。STM 画像下它只用来收起光学站自己的
+            # 技能模块里的技能（station_face.STATION_ONLY_MODULES），别的什么都不动。
+            try:
+                from mast.skills import tool_face as _tool_face
+                _tool_face.bind_registry(self._registry)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("tool-face registry binding failed: %s", exc)
         except Exception as exc:
             logger.warning("Could not create SkillRegistry: %s", exc)
 
@@ -1800,11 +1959,15 @@ class CoreRuntime:
                     safety=self._safety, state=self._state,
                 )
                 # Start the tip-crash safety watchdog (current anomaly →
-                # SafeRetract via emergency port). 审查 HIGH: it was
+                # SafeRetract via emergency port). It was
                 # implemented but never started on the v2 path, leaving the
                 # hardware safety net dead-wired. It polls harmlessly (gets
                 # errors) until Nanonis is connected, then guards the tip.
-                self._ensure_watchdog()
+                if optical:
+                    logger.info("SafetyWatchdog: optical station profile - not started "
+                                "(no tip to protect)")
+                else:
+                    self._ensure_watchdog()
         except Exception as exc:
             logger.warning("Could not create SkillExecutor: %s", exc)
 
@@ -1829,11 +1992,29 @@ class CoreRuntime:
         # （``Osci2TPump._channels_to_write``）。
         #
         # Own try/except so a monitoring fault cannot stop the runtime coming up.
+        #
+        # 光学站不起它：没有隧道电流可监测，起了也只会停在 comms_down。
+        if optical:
+            logger.info("Current monitor: optical station profile - not started")
+        else:
+            try:
+                from mast.monitoring.service import start_service as _start_current_monitor
+                _start_current_monitor(self)
+            except Exception as exc:
+                logger.warning("Could not start the current monitor: %s", exc)
+
+        # TERS 光学侧接入（docs/v2/design/ters_satellite_integration.md §6/§10）：卫星枢纽
+        # 起线程、订阅看门狗异常、启动时查一次端口归属。自己的 try：卫星通道坏了不许挡住
+        # runtime 起来。
         try:
-            from mast.monitoring.service import start_service as _start_current_monitor
-            _start_current_monitor(self)
-        except Exception as exc:
-            logger.warning("Could not start the current monitor: %s", exc)
+            self._wire_optics_hub()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("卫星枢纽接线失败（光学侧急停仍会尽力而为）：%s", exc)
+
+        # 操作员提示服务（桌面弹窗 / 声音 / 网页；只有操作员能答）：光学站画像下装上。
+        # STM 站不装 —— 那里一切照旧。
+        if optical:
+            self._install_operator_hitl()
 
         try:
             from mast.logging.storage import ExperimentStorage
@@ -1845,10 +2026,12 @@ class CoreRuntime:
             set_active_log(self._experiment_log)
             # Manual-activity watcher: records hand-driven Nanonis frame/tip
             # moves into the experiment-record map (requirement 3). Best-effort.
-            try:
-                self._start_map_activity_watcher()
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("map activity watcher not started: %s", exc)
+            # 光学站没有 Nanonis 可看，不起。
+            if not optical:
+                try:
+                    self._start_map_activity_watcher()
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("map activity watcher not started: %s", exc)
             # Graceful teardown on a normal/signal-driven exit: close the Nanonis
             # pool + stop daemons so the fragile TCP ports aren't abandoned
             # mid-transaction. atexit won't fire on a hard
@@ -1868,32 +2051,40 @@ class CoreRuntime:
                 # Upgrade the rule-based phase summariser + dream consolidator to
                 # real LLM versions (provider-portable, plain .invoke). Best-effort:
                 # both backends fall back to rule-based if the LLM raises.
-                try:
-                    from mast.agents._shared.cognition_llm import (
-                        make_llm_dream_consolidator, make_llm_phase_summarizer,
-                    )
-                    from mast.agents._shared.models import make_chat_model
-                    _cog_llm = make_chat_model("orchestrator", max_tokens=2048)
-                    self._cognition.set_summarizer(make_llm_phase_summarizer(_cog_llm))
-                    self._cognition.set_consolidator(make_llm_dream_consolidator(_cog_llm))
-                except Exception as _cog_llm_exc:  # noqa: BLE001
-                    logger.debug("cognition LLM injection skipped: %s", _cog_llm_exc)
+                # Only with the internal LLM allowed (legacy_features_enabled) at
+                # start-up — with it off no client is built; turning it on later
+                # takes full effect after a restart, like the vision model.
+                from mast.legacy_gate import internal_llm_enabled as _llm_on
+                if _llm_on():
+                    try:
+                        from mast.agents._shared.cognition_llm import (
+                            make_llm_dream_consolidator, make_llm_phase_summarizer,
+                        )
+                        from mast.agents._shared.models import make_chat_model
+                        _cog_llm = make_chat_model("orchestrator", max_tokens=2048)
+                        self._cognition.set_summarizer(make_llm_phase_summarizer(_cog_llm))
+                        self._cognition.set_consolidator(make_llm_dream_consolidator(_cog_llm))
+                    except Exception as _cog_llm_exc:  # noqa: BLE001
+                        logger.debug("cognition LLM injection skipped: %s", _cog_llm_exc)
+                else:
+                    logger.info("cognition: legacy features off — no LLM summariser/"
+                                "consolidator built")
                 # Start the async background "dreaming" consolidation pass. It only
                 # READS the experiment record + WRITES memory rows (never touches
-                # the instrument), so it's safe to run alongside live tasks; it is
-                # idle-gated to skip cycles while the orchestrator is busy and is a
-                # daemon thread (dies with the process). On-demand dreaming is also
-                # available from the 记忆 tab.
-                self._cognition.start_dreaming(
-                    should_dream=lambda: not getattr(self, "_orch_running", False))
+                # the instrument), and is a daemon thread (dies with the process).
+                # Every cycle first asks _dream_allowed(): legacy_features_enabled
+                # (live, fail-safe OFF) AND "the orchestrator is idle". A vetoed
+                # cycle does nothing at all — no DB read, no model call, no memory
+                # write — so with legacy features off the thread is a 1-s sleep loop.
+                self._cognition.start_dreaming(should_dream=self._dream_allowed)
             except Exception as exc:
                 logger.warning("CognitionContext init failed: %s", exc)
                 self._cognition = None
             # Wake scheduler — same idle predicate as dreaming, same daemon-thread
             # shape, and started here beside it because they answer the same
             # question ("what may the system do while nobody is driving it?").
-            # Never wakes anything unless a park exists, so an install that never
-            # enables activation gating pays one no-op tick a minute.
+            # Never wakes anything unless a park exists AND legacy features are
+            # on; with them off a tick only sweeps park deadlines (no model call).
             try:
                 self._ensure_wake_scheduler()
             except Exception as exc:  # noqa: BLE001
@@ -1947,11 +2138,11 @@ class CoreRuntime:
             logger.warning("live v2 records init failed: %s", exc)
             self._v2_repos, self._v2_eid = None, None
 
-        # Training/usage trajectory sink (#8 P1). Wire it to the live v2 repos so
+        # Training/usage trajectory sink. Wire it to the live v2 repos so
         # the skill/agent-turn recorders (_skill_trace_recorder / _turn_trace_
         # recorder) actually persist. In the Gradio→TS rewrite nobody set
-        # _trace_sink, so the whole trajectory log was silently dead (review
-        # 2026-07-03). Best-effort; _active_traj is opened per task/turn.
+        # _trace_sink, so the whole trajectory log was silently dead.
+        # Best-effort; _active_traj is opened per task/turn.
         self._trace_sink = None
         self._active_traj = None
         try:
@@ -1983,7 +2174,9 @@ class CoreRuntime:
             # Nanonis-backed sensors first: their names must be reserved so
             # build_environment_sensors() does not also emit a placeholder under
             # the same name (the dedup would then rename the REAL one).
-            nanonis_sensors = self._build_nanonis_env_sensors()
+            # 光学站：没有 Nanonis，也就没有它的传感器（隧道电流镜像、nanonis_signal）；
+            # 串口自动探测在 build_environment_sensors 里按同一个画像强制关掉。
+            nanonis_sensors = [] if optical else self._build_nanonis_env_sensors()
             sensors = build_environment_sensors(
                 reserved_names=[s.name() for s in nanonis_sensors])
             sensors.extend(nanonis_sensors)
@@ -2056,8 +2249,7 @@ class CoreRuntime:
             else:
                 logger.info("EnvironmentMonitor created with %d placeholder sensor(s) "
                             "(no real hardware detected; background loop idle)", len(sensors))
-            # Stop the loop + close serial handles at process exit (review 2.1.13
-            # #24) so a graceful shutdown doesn't leak COM ports / the thread.
+            # Stop the loop + close serial handles at process exit so a graceful shutdown doesn't leak COM ports / the thread.
             def _stop_env_monitor():
                 m = getattr(self, "_monitor", None)
                 if m is not None:
@@ -2108,7 +2300,17 @@ class CoreRuntime:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Could not start the conduct director: %s", exc)
 
-        if self.config.llm.api_key:
+        # The built-in agent stack (orchestrator graph, chat engine, 查询助手) is
+        # the legacy feature set: with legacy_features_enabled off at start-up no
+        # LLM client is built — the same state as an install without an API key,
+        # which every consumer already handles. Turning legacy features on later
+        # takes effect for this stack after a restart (like the vision model);
+        # turning them off takes effect at once (mast/legacy_gate.py gates calls).
+        from mast.legacy_gate import internal_llm_enabled as _llm_allowed
+        if self.config.llm.api_key and not _llm_allowed():
+            logger.info("Built-in agent stack not built: legacy features are off "
+                        "(the internal LLM is disabled)")
+        if self.config.llm.api_key and _llm_allowed():
             try:
                 from mast.llm.client import ClaudeClient
                 self._claude_client = ClaudeClient(self.config.llm)
@@ -2181,13 +2383,86 @@ class CoreRuntime:
                 self._voice_client = None
 
 
+    # ── 站点画像（mast.station）──────────────────────────────────────────────────
+    def _is_optical(self) -> bool:
+        """本进程是不是光学站画像。用 ``setup()`` 启动时定下的那个值；``setup()`` 没跑过
+        的实例（测试里的 unwired runtime）退回 ``mast.station`` 的当前画像，缺省 stm。
+
+        ⚠ 被测试拿去当 ``self`` 的替身（``SimpleNamespace``）调用的方法**不能**写
+        ``self._is_optical()`` —— 替身上没有它。那些方法（``_resolve_session_dir`` /
+        ``emergency_stop`` / ``reconnect``）直接调 ``station.runtime_is_optical(self)``。"""
+        try:
+            from mast import station as _station
+            return _station.runtime_is_optical(self)
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _build_idle_pool(self):
+        """光学站的 ConnectionPool：对象在（``ExecutionContext`` 需要 pool 与 state，见
+        ``api/direct_exec.py`` build_context），但**永不拨号**。
+
+        四个端口显式置 0（连接层把 0 当「显式停用」：不连、不重连、不刷日志），所以后面
+        任何一处误调 ``safe_call`` 都是一个干净的 ConnectionError，不是一轮轮超时重连。
+        改的是活配置里的端口，不是设置文件里存的值。"""
+        from mast.core.connection import ConnectionPool
+
+        nano = self.config.nanonis
+        for attr in ("port_main", "port_monitor", "port_data", "port_emergency"):
+            setattr(nano, attr, 0)
+        logger.info("ConnectionPool: optical station profile - Nanonis is not used "
+                    "(all four ports disabled, nothing is dialled)")
+        return ConnectionPool(nano)
+
+    def _install_operator_hitl(self) -> None:
+        """装操作员提示服务（``mast.operator_hitl.service.install()``）。
+        那个模块不在这份构建里时只记一行，其余照常；它自己坏了要大声说，不能吞。"""
+        import importlib
+
+        try:
+            # importlib, not ``from mast.operator_hitl import service``: the latter reports a
+            # missing submodule as a bare ImportError, which cannot be told from a module
+            # that exists and is broken.
+            _hitl_service = importlib.import_module("mast.operator_hitl.service")
+        except ModuleNotFoundError as exc:
+            if getattr(exc, "name", None) == "mast.operator_hitl.service":
+                logger.info("operator_hitl.service is not part of this build - operator "
+                            "prompts stay on the in-process backend")
+            else:
+                logger.warning("operator_hitl.service failed to import: %s", exc)
+            return
+        except ImportError as exc:
+            logger.warning("operator_hitl.service failed to import: %s", exc)
+            return
+        try:
+            _hitl_service.install()
+            logger.info("operator_hitl: service installed (optical station profile)")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("operator_hitl: install failed (%s) - operator prompts stay on "
+                           "the in-process backend", exc)
+        # The operator withdrawing laser_area_safe (recorded as not safe, or cleared) takes
+        # every light source dark at once (design §6.4). Registered on whichever store is in
+        # force now: install() swaps the store and listeners do not move with it.
+        try:
+            from mast.instruments import emission_safety
+            from mast.operator_hitl import optical_state
+
+            emission_safety.install_revocation_listener(optical_state.get_store())
+            logger.info("operator_hitl: laser_area_safe revocation switches the light sources off")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("operator_hitl: could not wire the laser_area_safe revocation (%s)", exc)
+
     def reconnect(self) -> int:
         """Attempt to (re)connect to Nanonis. Returns number of ports connected."""
+        from mast import station as _station
+        if _station.runtime_is_optical(self):
+            # 光学站没有 Nanonis；「连接」按钮按下去也不该起一池线程。
+            logger.info("reconnect: optical station profile - there is no Nanonis to connect to")
+            return 0
         from mast.core.connection import ConnectionPool
         from mast.core.state import InstrumentState
         from mast.core.safety import SafetyGuard
 
-        # ORPHAN-THREAD FIX (): stop the OLD InstrumentState's
+        # ORPHAN-THREAD FIX: stop the OLD InstrumentState's
         # background refresh BEFORE we close the pool and replace the state.
         # That daemon thread calls state.refresh() → pool.safe_call() every 1 s
         # against the pool we are about to close_all(); if left running it spins
@@ -2290,18 +2565,80 @@ class CoreRuntime:
         except Exception as exc:
             logger.warning("Could not start SafetyWatchdog: %s", exc)
 
-    # tip halt 是针对单次 run 的一次性步边界信号，与全局 E_STOP 闩不同。
-    # 首个匹配的 composite 步边界消费它；它不阻止新技能，也不阻止退针等恢复动作。
+    # ── tip-quality HALT ─────────────────────────
     #
-    # raise_tip_halt 缺少显式 run_id 时使用 _orch_run_id，而聊天入口可能使用
-    # ConversationEngine.active_run_id；两者不匹配时该入口无法消费 halt。
-    # 这条边界与看门狗、告警投递分别承担不同职责：看门狗可直接请求退针，
-    # 投递在模型调用前通知，halt 只在 composite 步边界起作用。普通 Scan
-    # 调用内部没有这种步边界。
+    # A stop signal with deliberately different physics from ``_orch_abort``:
     #
-    # 若调整为全局信号，必须同时评估退针、换样等恢复流程的豁免和信号期限，
-    # 避免在恢复流程的第一个步边界把它阻止。相关词汇表由 buffer_hitl 和
-    # instrument_lock 维护，并有覆盖测试。
+    #                    _orch_abort (E_STOP / 用户中止)   tip halt
+    #   latches           yes — stays set until cleared      no — one-shot
+    #   blocks new skills yes — skill_adapter refuses all    no — nothing is blocked
+    #   scope             process-wide                       one run_id
+    #   consulted by      skill_adapter, safe_call, executor  composites, between steps
+    #
+    # The latch is exactly wrong for a bad tip: it would refuse 修针 / 退针 /
+    # 停扫 — the remedies — and wedge the instrument against its own recovery.
+    # What a bad tip needs is for the composite that is CURRENTLY grinding
+    # through 5 regions to stop at its next step boundary, and for nothing else
+    # to change. That is all this does.
+    #
+    # One-shot: the first composite step boundary that sees it consumes it. It
+    # is also inert for any other run (a halt raised in run A can never stop
+    # run B), so a new run clears it implicitly.
+    #
+    # ⚠️ 这里原本还有一句「拒绝**开始**新工作是另一件事，已经由
+    # ``BufferHITLMiddleware`` 的 ``wrap_tool_call`` 闸门做掉了」。**那个闸门在
+    # 确认框改造中被整条删掉了**（``buffer_hitl.wrap_tool_call`` 现在无条件透传），
+    # 于是那句话从此就是假话 —— 而它读起来像一条还在生效的保证。修好一处会让
+    # 别处的旧理由静静变成假话，这是本仓反复出现的形状。
+    #
+    # ⚠️ 还有一条**至今未修**的断裂，写在这里因为它就在这个机制上：
+    # :meth:`raise_tip_halt` 被 :func:`make_tip_halt_hook` 调用时**不传 run_id**，
+    # 于是武装在 ``self._orch_run_id`` 上 —— 那个字段只有编排 run-task 会写
+    # (``api/routes/orchestrator.py``)。而主聊天/私聊那条路的 ExecutionContext
+    # 用的是 ``ConversationEngine.active_run_id()``（每回合一个，见下面
+    # ``_ctx()`` 里那段注释）。两个 id 永不相等 ⇒
+    # :meth:`consume_tip_halt` 恒返回 ""，**主聊天路径上这个 halt 从来没有生效过**。
+    # 当初把消费侧从 ``_orch_run_id`` 挪开时，武装侧没跟着改。
+    #
+    # 没有顺手修掉，是因为它是**行为变更**（会让一个目前沉默的停止
+    # 机制重新开始停实验），而一贯的方向是「别再停实验」。补救
+    # 走的是**送达**而不是**停止**：``agents/_shared/alert_delivery_mw`` 把 CRITICAL
+    # 送到 agent 眼前，``skills/composite/forge_au_tip`` 的外环每轮自查一次。
+    #
+    # ═══════════════════════════════════════════════════════════════════
+    # 判定：**不修，不删。** 而这段注释存在，是为了拦住下一个「顺手修」
+    # ═══════════════════════════════════════════════════════════════════
+    #
+    # 上面那条 run_id 断裂是**已知的**，不是没人发现。要修它之前，先看这张表 ——
+    # 目前，同一类信号（``current_monitor`` 的**持续型**：贴轨 / 冻结）
+    # 有**三道网**，各自的射程是：
+    #
+    #   场景                          看门狗          投递中间件        本机制(halt)
+    #   ---------------------------  --------------  ---------------  --------------
+    #   持续贴轨，MAST 在驱动          **真的退针**     下次模型调用告知   步边界中止
+    #   普通 ``Scan`` 工具调用中途      ✔               ✔                ✘ 没有步边界
+    #   composite 跑到一半             ✔               ✔ 两次工具调用之间  ✔
+    #   蓄意修针期间                   抑制(活谓词)     照送             持续类照停
+    #
+    # ⇒ **它的独占格子是空的。** 看门狗覆盖同一类信号而且处置更决定性（退针 > 停在
+    # 步边界）；投递覆盖同一类信号而且不挑执行形态。halt 唯一多出来的是「在 composite
+    # 的**步边界**停下」这个**时机**，而那个时机的价值建立在「停下比退针好」——
+    # 对持续型贴轨这个前提**不成立**：针已经压进表面了，停在步边界只是不再前进。
+    #
+    # 而且「修」不是免费的：改成全局会撞上本段开头那句话 ——
+    # ``check_halt`` 是 ``GraphExecutor`` 对**所有** composite 鸭子类型消费的，
+    # 包括 ``RetractForSampleChange`` / ``PrepareNobleTip`` 这些**解药**流程。
+    # 一个全局且不过期的 halt 会在**正要去退针的那条 composite 的第一个步边界**
+    # 把它停住。要改全局就必须同时带一份解药豁免（词汇现成：
+    # ``buffer_hitl.REMEDY_TOOL_NAMES`` / ``REMEDY_TAGS`` 与
+    # ``instrument_lock.BYPASS_NAMES`` / ``BYPASS_TAGS``，有测试钉着全覆盖）。
+    #
+    # **要修它，先回答：上面那张表里，哪一个场景只有它能覆盖？**
+    # 答不出来就别修 —— 那是拿一份新的豁免逻辑去换一个空格子。
+    #
+    # 顺带一条值得记的：**这个 bug 在被发现之前一直在替我们兜底。** 正因为 run_id
+    # 对不上，「全局 halt 停住解药 composite」这件事一直没有发生过。
+    # 修一个长期存在的缺陷之前，先问：**它现在在替谁挡着什么？**
 
     def raise_tip_halt(self, reason: str, *, run_id: str | None = None,
                        event_id: str = "", seqno=None, source: str = "") -> None:
@@ -2352,9 +2689,12 @@ class CoreRuntime:
                     return ""
                 self._tip_halt = None
             ev = h.get("event_id") or "?"
-            return (f"tip_quality_drop: {h.get('reason') or '视觉判定针尖状态恶化'}"
-                    f"（视觉事件 {ev}）—— 已在当前步骤边界停止本流程，未回滚；"
-                    f"{self._tip_halt_remedy()}")
+            return (f"tip_quality_drop: "
+                    f"{h.get('reason') or tr('视觉判定针尖状态恶化', 'vision judged the tip state to be degrading')}"
+                    + tr(f"（视觉事件 {ev}）—— 已在当前步骤边界停止本流程，未回滚；",
+                         f" (vision event {ev}) -- this run was stopped at the current step "
+                         "boundary, nothing was rolled back; ")
+                    + self._tip_halt_remedy())
         except Exception:  # noqa: BLE001 — a broken halt must not stop work
             _log_swallowed("tip_halt_consume", "consume_tip_halt failed")
             return ""
@@ -2376,15 +2716,22 @@ class CoreRuntime:
             from mast.core.types import OperatingMode
             mode = OperatingMode.coerce(self._current_operating_mode())
         except Exception:  # noqa: BLE001 — unknown mode → the neutral wording
-            return "修针尖后可重跑。"
+            return tr("修针尖后可重跑。", "Re-run after conditioning the tip.")
         if mode is OperatingMode.SAFE:
-            return ("当前为**安全模式**，MAST 不会自动修针尖（电脉冲/tip shaping 均被"
-                    "拒绝）——请人工处理针尖，或切换到 semi/auto 模式后重试。"
-                    "不要在本模式下反复重扫或尝试修针。")
+            return tr("当前为**安全模式**，MAST 不会自动修针尖（电脉冲/tip shaping 均被"
+                      "拒绝）——请人工处理针尖，或切换到 semi/auto 模式后重试。"
+                      "不要在本模式下反复重扫或尝试修针。",
+                      "Currently in **SAFE mode**: MAST will not condition the tip automatically "
+                      "(electrical pulses / tip shaping are both refused) -- handle the tip "
+                      "manually, or switch to semi/auto mode and retry. "
+                      "Do not repeatedly rescan or try to condition the tip in this mode.")
         if mode is OperatingMode.SEMI:
-            return ("当前为**半自动模式**：电脉冲修针需人工确认；可先尝试浅层机械 "
-                    "tip shaping，或请用户处理后重跑。")
-        return "修针尖后可重跑。"
+            return tr("当前为**半自动模式**：电脉冲修针需人工确认；可先尝试浅层机械 "
+                      "tip shaping，或请用户处理后重跑。",
+                      "Currently in **SEMI mode**: electrical-pulse tip conditioning needs "
+                      "manual confirmation; try shallow mechanical tip shaping first, or ask "
+                      "the user to handle it and re-run.")
+        return tr("修针尖后可重跑。", "Re-run after conditioning the tip.")
 
     def clear_tip_halt(self) -> None:
         """Drop any pending halt (operator resolved the interrupt / new run)."""
@@ -2439,7 +2786,7 @@ class CoreRuntime:
             # DEBUG level, behind a locally-minted ULID the caller happily used.
             # Result: the agent training log recorded ZERO rows for a whole day
             # of runs, and 100% of the time an experiment was open — the only
-            # situation worth recording (). The one
+            # situation worth recording. The one
             # trajectory that survived was created 18 s before that day's
             # experiment existed, when the v1 id happened to be None.
             eid, sid = self._v2_scope()
@@ -2480,7 +2827,8 @@ class CoreRuntime:
     def start_experimental_monitor(self, channel: str, interval_s: float = 5.0) -> dict:
         """Long-term single-channel monitor: read *channel* every *interval_s* on a
         daemon thread and append to a CSV. Returns the status dict. This hook was
-        never wired in the TS runtime, so the '长期监控' feature always failed. Single monitor — starting a new one stops the old."""
+        never wired in the TS runtime, so the '长期监控' feature always failed.
+        Single monitor — starting a new one stops the old."""
         import csv
         import threading
         import time as _t
@@ -2781,7 +3129,7 @@ class CoreRuntime:
         「外部 agent ext:<名> 触发急停：…」。闩上的原因应准确保留触发来源。"""
         result = {"aborted": False, "stopped_motion": False, "retracted": False,
                   "errors": []}
-        _why = (str(why or "").strip()[:200]) or "用户按下了急停(E-STOP)"
+        _why = (str(why or "").strip()[:200]) or tr("用户按下了急停(E-STOP)", "The user pressed the E-STOP")
         try:
             ab = getattr(self, "_orch_abort", None)
             if ab is not None:
@@ -2812,7 +3160,28 @@ class CoreRuntime:
         except Exception as exc:  # noqa: BLE001
             result["errors"].append(f"abort: {exc}")
 
+        # 光学侧（卫星的 estop + 每个设备 stop、本机光学台 stop_all）排在 Nanonis 之前：
+        # 它只入队、毫秒级，而下面的 urgent_call 最坏要等几秒（TERS 契约 §10.1）。
+        try:
+            optics = self._optics_emergency_stop(_why)
+            result["optics"] = optics
+            for u in ((optics.get("satellites") or {}).get("unreachable") or []):
+                result["errors"].append(
+                    tr(f"卫星 {u.get('id')} 未连接（{u.get('state')}）：急停没送到，只能靠它自己的"
+                       "死人开关在 deadman_s 内停下枢纽发起的动作",
+                       f"Satellite {u.get('id')} is not connected ({u.get('state')}): the E-STOP "
+                       "did not reach it; only its own deadman switch can stop hub-initiated "
+                       "actions within deadman_s"))
+        except Exception as exc:  # noqa: BLE001
+            result["errors"].append(f"optics: {exc}")
+
         pool = getattr(self, "_pool", None)
+        from mast import station as _station
+        if pool is not None and _station.runtime_is_optical(self):
+            # 光学站没有 Nanonis：下面五条 TCP 命令只会攒出五条「停不下来」的假错误，
+            # 把真正的光学侧结果（上面的 result["optics"]）淹掉。
+            result["nanonis"] = "not used (optical station profile)"
+            pool = None
         if pool is not None:
             # Stop powered motion FIRST (so a retract isn't out-stepped).
             #
@@ -2837,9 +3206,13 @@ class CoreRuntime:
             try:
                 if not getattr(getattr(pool, "_config", None), "port_emergency", 1):
                     result["errors"].append(
-                        "急停口已停用(port_emergency=0):停运动的三个动词发不出去,"
-                        "退针改走 main 且需要等它的角色锁。**要立即停机请用仪器面板"
-                        "上的硬急停。**")
+                        tr("急停口已停用(port_emergency=0):停运动的三个动词发不出去,"
+                           "退针改走 main 且需要等它的角色锁。**要立即停机请用仪器面板"
+                           "上的硬急停。**",
+                           "The emergency port is disabled (port_emergency=0): the three "
+                           "motion-stopping verbs cannot be sent, and the retract goes via main "
+                           "and must wait for its role lock. **To stop immediately, use the "
+                           "hard E-STOP on the instrument panel.**"))
                     result["emergency_port_disabled"] = True
             except Exception:  # noqa: BLE001
                 pass
@@ -2883,6 +3256,168 @@ class CoreRuntime:
         logger.critical("EMERGENCY STOP invoked → %s", result)
         return result
 
+    # ── 光学侧：卫星枢纽 + 本机光学台（TERS 契约 §10.1） ──────────────────────
+    #: 同一次急停会从几条路到达（按钮 → emergency_stop → 它自己发的 buffer E_STOP →
+    #: _estop_sets_abort）。这个窗口内的重复调用只算一次。
+    _OPTICS_ESTOP_DEDUPE_S = 2.0
+    #: 关停时等本机光学台停完的总上限（秒）
+    _OPTICS_SHUTDOWN_JOIN_S = 6.0
+
+    @staticmethod
+    def _optics_safe_off(reason: str, *, retry_s: float = 0.0) -> dict | None:
+        """``emission_safety.safe_off_all``：所有已启用的激光关出光、显微镜关快门，逐台读回。
+        没全确认且 ``retry_s > 0`` 就隔 ``retry_s`` 再来一次。永不抛；返回最后一次的结果。"""
+        try:
+            from mast.instruments import emission_safety
+
+            res = emission_safety.safe_off_all(reason)
+            if retry_s > 0 and not res.get("all_confirmed", True) and res.get("devices"):
+                time.sleep(retry_s)
+                res = emission_safety.safe_off_all(reason + " (retry)")
+            return res
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("光源安全关断失败：%s", exc)
+            return None
+
+    def _optics_emergency_stop(self, why: str = "") -> dict:
+        """卫星：每个已连接的发 ``estop`` 并对每个设备发 ``stop``；本机光学台：
+        ``get_instrument_registry().stop_all()``（放在后台线程里，串口可能慢）。
+
+        尽力而为、不阻塞、永不抛。不需要仪器令牌（契约 §6）。
+        """
+        out: dict = {"satellites": None, "local_optics": None}
+        try:
+            now = time.monotonic()
+            last = float(getattr(self, "_optics_estop_last", 0.0) or 0.0)
+            if last and now - last < self._OPTICS_ESTOP_DEDUPE_S:
+                return {"deduped": True}
+            self._optics_estop_last = now
+        except Exception:  # noqa: BLE001
+            pass
+        reason = (str(why or "").strip() or "MAST E-STOP")[:200]
+        try:
+            from mast.satellite import get_satellite_hub
+
+            out["satellites"] = get_satellite_hub().emergency_stop_all(reason)
+        except Exception as exc:  # noqa: BLE001
+            out["satellites"] = {"errors": [f"{type(exc).__name__}: {exc}"]}
+
+        def _stop_local() -> None:
+            try:
+                from mast.instruments.registry import get_instrument_registry
+
+                get_instrument_registry().stop_all()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("本机光学台急停失败：%s", exc)
+            # 光源与快门再走一遍安全方向（光学站，设计 §6.4）：stop_all 只停本进程已经建出来
+            # 的设备，且急停闩期间 StopWITec / CloseWITecShutter 这类技能都被 ABORT GATE 拒绝，
+            # 这一次就是闩解除前唯一的机会。所以连没建过的激光也关、逐台读回确认，没全确认就
+            # 隔 2 s 再来一次。没配激光 / 显微镜的站（全部 STM 站）这里什么也不做。
+            self._optics_safe_off(f"E-STOP: {reason}", retry_s=2.0)
+
+        try:
+            _threading.Thread(target=_stop_local, name="optics-local-estop", daemon=True).start()
+            out["local_optics"] = "dispatched"
+        except Exception as exc:  # noqa: BLE001
+            out["local_optics"] = f"error: {exc}"
+        return out
+
+    def _wire_optics_hub(self) -> None:
+        """setup() 里调：起卫星枢纽、订阅看门狗异常、登记关停钩子、启动时查端口归属。"""
+        from mast.satellite import get_satellite_hub
+
+        hub = get_satellite_hub()
+        hub.start(runtime=self)
+        self.add_shutdown_hook(self._optics_shutdown, name="satellite hub")
+        # 看门狗异常：EventBus 的 ANOMALY 只有 SafetyWatchdog 在退针**之前**发。订阅回调跑在
+        # 看门狗线程上 —— 另起线程去做，退针一微秒都不许等光学侧。
+        from mast.core.events import EventBus, EventType
+
+        def _on_anomaly(ev, _rt=self, _t=EventType.ANOMALY) -> None:
+            if getattr(ev, "type", None) is not _t:
+                return
+            try:
+                _threading.Thread(
+                    target=_rt._optics_emergency_stop,
+                    args=(tr("看门狗：隧道电流异常（撞针保护退针）",
+                             "Watchdog: abnormal tunnel current (tip-crash protection retract)"),),
+                    name="optics-estop-anomaly", daemon=True).start()
+            except Exception:  # noqa: BLE001
+                pass
+
+        if getattr(self, "_optics_anomaly_cb", None) is None:
+            EventBus.get().subscribe(_on_anomaly)
+            self._optics_anomaly_cb = _on_anomaly
+        try:
+            from mast.core import port_guard
+
+            port_guard.configure(nanonis=getattr(getattr(self, "config", None), "nanonis", None))
+            port_guard.check_async(reason="startup")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("端口归属启动检查没跑成：%s", exc)
+
+    def _optics_shutdown(self) -> None:
+        """关停钩子（服务正常退出）。永不抛。
+
+        卫星只发 ``safe``：语义等同死人开关，只停枢纽发起的运动与采集，不打断有人在 LightField
+        里手动做的采集（E-STOP 与看门狗异常仍发 ``estop``，什么都停）。
+
+        顺序要紧：先 safe 并等卫星确认（``hub.safe_for_shutdown``，关停端点在置 should_exit
+        之前已经做过一次的话这里不重发），再关卫星会话，最后才停本机光学台。本机的 ``stop_all``
+        会经远程驱动给卫星设备发 ``stop`` —— 放在会话关掉之后，枢纽已拒发任何命令，卫星设备在
+        关停时就只收到 safe。
+
+        只做一次：``shutdown()`` 常被调两次（关停端点一次、进程退出时再一次），第二次时会话
+        早关了，再来一遍只会多出「连不上」「没发出去」的误报。
+        """
+        if getattr(self, "_optics_shutdown_done", False):
+            return
+        self._optics_shutdown_done = True
+        try:
+            from mast.satellite import get_satellite_hub
+
+            hub = get_satellite_hub()
+        except Exception as exc:  # noqa: BLE001
+            hub = None
+            logger.debug("satellite hub unavailable at shutdown: %s", exc)
+        if hub is not None:
+            try:
+                hub.safe_for_shutdown("MAST 关停")
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                hub.shutdown()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("satellite hub shutdown: %s", exc)
+
+        def _stop_local() -> None:
+            try:
+                from mast.instruments.registry import get_instrument_registry
+
+                get_instrument_registry().stop_all()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("本机光学台关停时停止失败：%s", exc)
+
+        try:
+            t = _threading.Thread(target=_stop_local, name="optics-local-stop", daemon=True)
+            t.start()
+            # 等它做完再往下走（有上限）：daemon 线程不 join 的话，进程可能在快门关上、激光关出光
+            # 之前就退出了。stop_all 自己最多等每台设备 wait_s，这里给一个总上限。
+            t.join(self._OPTICS_SHUTDOWN_JOIN_S)
+            if t.is_alive():
+                logger.warning("本机光学台关停：%.0f s 内没停完，不再等", self._OPTICS_SHUTDOWN_JOIN_S)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            cb = getattr(self, "_optics_anomaly_cb", None)
+            if cb is not None:
+                from mast.core.events import EventBus
+
+                EventBus.get().unsubscribe(cb)
+                self._optics_anomaly_cb = None
+        except Exception:  # noqa: BLE001
+            pass
+
     def shutdown(self) -> None:
         """Graceful teardown for a clean service stop.
 
@@ -2902,6 +3437,15 @@ class CoreRuntime:
                 _hook()
             except Exception as exc:  # noqa: BLE001 — 一个钩子坏了不能挡住关停
                 logger.warning("shutdown hook %s failed: %s", _hook_name, exc)
+        # 直调动作记录的后台写入器：外部入口停下之后、拆存储之前，有界地
+        # 把排队中的记录写完。写不完就如实记一句 —— 关停不能被一个被锁住的库拖住。
+        try:
+            from mast.logging.record_writer import flush_default_writer
+
+            if not flush_default_writer(5.0):
+                logger.warning("shutdown: 仍有直调动作记录没写完（5 s 冲刷上限已到）")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("shutdown record-writer flush: %s", exc)
         # Release the process-level operating-mode holder FIRST: it points at a
         # bound method of this runtime, so leaving it armed keeps this instance's
         # settings deciding tip verdicts for whatever runs next in the process
@@ -3036,7 +3580,7 @@ class CoreRuntime:
         """Arm the per-run USD ceiling for the run that is about to start.
 
         Called by the run-task bridge right before it drives the graph. The
-        orchestrator's gate has existed since and was never armed by
+        orchestrator's gate has existed for some time but was never armed by
         anyone, so a run's only cost bound was recursion_limit (~$50 worth). See
         ``mast.billing.run_meter`` for the accounting caveat: the meter reports
         system-wide spend since this moment, which over-attributes concurrent work
@@ -3125,7 +3669,7 @@ class CoreRuntime:
             return {}
         # Atomic swap-drain under the lock: take the current list and replace it
         # with a fresh empty one in one critical section, so an interject append
-        # racing this drain is never lost . The previous read-then-clear had
+        # racing this drain is never lost. The previous read-then-clear had
         # a window where an append between the two lines was silently dropped.
         lock = st.get("lock")
         if lock is not None:
@@ -3161,7 +3705,9 @@ class CoreRuntime:
                 try:
                     from mast.core.diagnostics import record as _diag
                     _diag("interject_stale_dropped", _live_task_id,
-                          "上一个任务遗留的插话未被送达（已丢弃，不会污染新任务）",
+                          tr("上一个任务遗留的插话未被送达（已丢弃，不会污染新任务）",
+                             "Interjections left over from the previous task were not delivered "
+                             "(discarded so they cannot pollute the new task)"),
                           count=len(stale))
                 except Exception:  # noqa: BLE001
                     pass
@@ -3172,7 +3718,7 @@ class CoreRuntime:
         # visible to the agent) AND as a STRUCTURED ``directed_targets`` hint the
         # supervisor dispatches to DETERMINISTICALLY (a hard @agent route). The
         # old text-only "(指向 X)" left the LLM router free to ignore the operator's
-        # choice — the "@agent 不管用" report . It still cannot hard-scope
+        # choice — the "@agent had no effect" failure. It still cannot hard-scope
         # delivery MID-batch (the LangGraph super-step barrier delivers it when the
         # running batch hands back), but once delivered it reaches THAT agent.
         texts = []
@@ -3189,7 +3735,7 @@ class CoreRuntime:
                 texts.append(t)
         # NOTE: the consumed list was already swapped out atomically above; do
         # NOT clear st["interjects"] again here — a second clear would wipe any
-        # interjection that arrived WHILE we were formatting these .
+        # interjection that arrived WHILE we were formatting these.
         if texts:
             logger.info("Orchestrator control: delivering %d interjection(s)%s", len(texts),
                         f" (directed → {directed})" if directed else "")
@@ -3207,6 +3753,20 @@ class CoreRuntime:
             return bool(st.get("orchestrator_auto_background")) if st is not None else False
         except Exception:  # noqa: BLE001
             return False
+
+    # ── internal-LLM gate: legacy_features_enabled ──────────────
+    def _dream_allowed(self) -> bool:
+        """Idle predicate of the periodic dreaming cycle: internal LLM allowed
+        (``legacy_features_enabled``, live, fail-safe OFF — see
+        ``mast/legacy_gate.py``) AND the orchestrator is idle.
+
+        The dreaming pass used to run every 30 min whatever the switch said; a
+        service log once showed it calling the model
+        provider (HTTP 429) during an unattended tip
+        approach. A vetoed cycle does no DB read, no model call, no memory write."""
+        from mast.legacy_gate import internal_llm_enabled
+
+        return internal_llm_enabled() and not getattr(self, "_orch_running", False)
 
     # ── wake scheduler (2026-07-30) ──────────────────────────────────────────
     def _wake_ask(self, park: dict, arrived: list, versions: dict) -> dict:
@@ -3242,7 +3802,9 @@ class CoreRuntime:
         # stuck one, which is the failure this whole mechanism has to avoid being.
         self._wake_escalate(
             "woke" if decision.get("action") == "start" else "declined", park,
-            f"到位:{'、'.join(arrived)};理由:{decision.get('reason') or '(未说明)'}")
+            tr(f"到位:{'、'.join(arrived)};理由:{decision.get('reason') or '(未说明)'}",
+               f"arrived: {', '.join(arrived)}; reason: "
+               f"{decision.get('reason') or '(not stated)'}"))
         return decision
 
     def _wake_spawn(self, park: dict) -> str:
@@ -3269,7 +3831,8 @@ class CoreRuntime:
         try:
             rec = mgr.spawn(instruction=instruction,
                             agents=(str(park.get("agent") or ""),),
-                            title=f"唤醒:{park.get('agent')}",
+                            title=tr(f"唤醒:{park.get('agent')}",
+                                     f"Wake: {park.get('agent')}"),
                             seed_artifacts=seed,
                             park_id=str(park.get("park_id") or ""))
             return str(rec.get("run_id") or "")
@@ -3327,7 +3890,9 @@ class CoreRuntime:
                 from mast.goals import DONE, GoalVerdict
 
                 return GoalVerdict(verdict=DONE,
-                                   reason=f"纲领已 {status}（不是判据，是状态）")
+                                   reason=tr(f"纲领已 {status}（不是判据，是状态）",
+                                             f"The campaign is already {status} "
+                                             "(a state, not a criterion)"))
             except Exception:  # noqa: BLE001
                 return None
 
@@ -3397,11 +3962,14 @@ class CoreRuntime:
             return self._wake_scheduler
         try:
             from mast.core.wake_scheduler import WakeScheduler
+            from mast.legacy_gate import internal_llm_enabled
         except Exception as exc:  # noqa: BLE001
             logger.warning("wake scheduler unavailable: %s", exc)
             return None
         sched = WakeScheduler(
             should_wake=lambda: not getattr(self, "_orch_running", False),
+            # legacy_features_enabled, live: off ⇒ a tick only sweeps deadlines.
+            enabled=internal_llm_enabled,
             ask=self._wake_ask,
             spawn=self._wake_spawn,
             escalate=self._wake_escalate,
@@ -3805,7 +4373,8 @@ class CoreRuntime:
                                "back to the LangGraph path", exc)
                 try:
                     emit("_supervisor", "assistant",
-                         f"（v2 编排失败已回退：{type(exc).__name__}: {exc}）")
+                         tr(f"（v2 编排失败已回退：{type(exc).__name__}: {exc}）",
+                            f"(v2 orchestration failed and fell back: {type(exc).__name__}: {exc})"))
                 except Exception:  # noqa: BLE001
                     pass
         orch = self._build_background_orchestrator()
@@ -4046,13 +4615,18 @@ class CoreRuntime:
         store = getattr(self, "_orch_interrupts", None)
         if not isinstance(store, dict):
             raise RuntimeError(
-                "HITL 中断存储不可用(_orch_interrupts 缺失或不是 dict)—— "
-                "这不是「零条待批」,是问不出来")
+                tr("HITL 中断存储不可用(_orch_interrupts 缺失或不是 dict)—— "
+                   "这不是「零条待批」,是问不出来",
+                   "The HITL interrupt store is unavailable (_orch_interrupts is missing or not "
+                   "a dict) -- this is not 'zero pending approvals', it cannot be queried"))
         raw = store.get("pending")
         if not isinstance(raw, dict):
             raise RuntimeError(
-                f"HITL 中断存储的 pending 表读不出来(是 {type(raw).__name__})—— "
-                "这不是「零条待批」,是问不出来")
+                tr(f"HITL 中断存储的 pending 表读不出来(是 {type(raw).__name__})—— "
+                   "这不是「零条待批」,是问不出来",
+                   f"The pending table of the HITL interrupt store cannot be read "
+                   f"(it is {type(raw).__name__}) -- this is not 'zero pending approvals', "
+                   "it cannot be queried"))
         # 刻意不吞异常:锁抛、迭代中被改写,都要让路由那条 degraded 路听见。
         lock = store.get("lock")
         if lock is not None:
@@ -4385,10 +4959,24 @@ class CoreRuntime:
         except Exception as exc:  # pragma: no cover - best-effort
             logger.debug("_on_env_alarm persist failed: %s", exc)
 
-        # status=error 仅说明读取失败，不能据此断定物理环境越限。
-        # alarm 表示有效读数确实越限，继续执行其停止、退针和闩锁策略；
-        # error 只记录并报告读取问题，不在此路径写硬件。
-        # 独立 SafetyWatchdog 直接读取电流，不能由环境镜像读取失败替代其判据。
+        # ── 「读不到」不是「环境故障」 ──────────────────────────────────
+        # ``status="error"`` 只说明**那一次读失败了**(sensor.read() 抛了,或者
+        # 读回的值 float() 不了)。它关于世界本身**一个字都没说**。
+        #
+        # 曾发生:``main`` 端口抖了 21 秒,`tunnel_current`(它是
+        # InstrumentState 那个 1 Hz 电流的**零 TCP 镜像**)有一次转数失败 ⇒
+        # status 变 "error" ⇒ 落到与真空失效 / 热失控同一条路上:**退了针**、
+        # 挂上一个**当时全系统没有任何 API 能解开的**急停闩;而唯一会通知人的
+        # E_STOP 因为 reason 不在白名单里被静默丢掉。界面上看不到任何
+        # 事件,仪器却从那一秒起拒绝一切动作,并提示「用户已中止本次
+        # 运行」。连接自己在 21 秒后就恢复了,仪器和针从头到尾都是好的。
+        #
+        # 所以这两件事从此分开:
+        #   alarm —— 值真的越限了(世界坏了)  ⇒ 停 + 退针 + 挂闩,原样不动;
+        #   error —— 没读到(读取侧的问题)   ⇒ 记录 + 大声记日志,**不动硬件**。
+        #
+        # 针尖不靠这面镜子保护:SafetyWatchdog 直接读电流走 emergency 口,
+        # 那条路与环境监控无关,读失败不会让它失灵。
         if reading.status == "error":
             logger.critical(
                 "环境传感器读不到: %s (status=error, was %s) —— **不停运行、"
@@ -4402,8 +4990,10 @@ class CoreRuntime:
         # (above) but does not abort a run or move hardware.
         if reading.status != "alarm":
             return
-        _why = (f"环境告警:{name} = {reading.value} {reading.unit or ''} "
-                f"越限(was {prev_status})")
+        _why = tr(f"环境告警:{name} = {reading.value} {reading.unit or ''} "
+                  f"越限(was {prev_status})",
+                  f"Environment alarm: {name} = {reading.value} {reading.unit or ''} "
+                  f"out of limits (was {prev_status})")
         logger.critical(
             "ENVIRONMENT ALARM: sensor %s = %s %s (status=%s, was %s) — "
             "aborting autonomous run + retracting tip",
@@ -4533,11 +5123,13 @@ class CoreRuntime:
                     "at": time.time(),
                 }
             logger.info("agent rebuild QUEUED (task active): %s", reason)
-            # NB: this suffix must keep containing the "task running" phrase --
-            # reload_wiring's legacy branch still substring-matches it for
-            # runtimes that predate this method (reload_wiring.py:141).
+            # NB: this suffix must keep containing the "task running" phrase in both
+            # languages ("任务运行中" / "task is running") -- reload_wiring's legacy
+            # branch still substring-matches it for runtimes that predate this method.
             return (_rw.ORCH_PENDING_QUEUED,
-                    "（任务运行中，agent 工具表已排队——当前任务结束后自动生效）")
+                    tr("（任务运行中，agent 工具表已排队——当前任务结束后自动生效）",
+                       "(a task is running; the agent tool table rebuild is queued and takes "
+                       "effect when the current task ends)"))
 
         if getattr(self, "_orchestrator", None) is None:
             return (_rw.ORCH_ABSENT, "")
@@ -4554,8 +5146,14 @@ class CoreRuntime:
                                   daemon=True).start()
         except Exception as exc:  # noqa: BLE001
             logger.warning("could not schedule orchestrator rebuild: %s", exc)
-            return (_rw.ORCH_FAILED, "（agent 工具表重建调度失败——重启生效）")
-        return (_rw.ORCH_REBUILDING, "（agent 工具表后台重建中，数秒后生效）")
+            return (_rw.ORCH_FAILED,
+                    tr("（agent 工具表重建调度失败——重启生效）",
+                       "(the agent tool table rebuild could not be scheduled; restart to "
+                       "take effect)"))
+        return (_rw.ORCH_REBUILDING,
+                tr("（agent 工具表后台重建中，数秒后生效）",
+                   "(the agent tool table is being rebuilt in the background; takes effect "
+                   "in a few seconds)"))
 
     def pending_agent_rebuild(self) -> dict | None:
         """The queued rebuild, if any (read-only; for UI/status endpoints)."""
@@ -4630,7 +5228,15 @@ class CoreRuntime:
         _on_started callback, the per-agent override offload thread, and the
         anyio.to_thread _set_model route can all call this off the main thread;
         without the lock they race (one nulls self._orchestrator while another
-        is mid-build)."""
+        is mid-build).
+
+        With legacy features off (the internal LLM disabled) nothing is built and
+        an existing graph is left as it is — its model calls are refused by the
+        gate anyway, and keeping it means switching back on needs no rebuild."""
+        from mast.legacy_gate import internal_llm_enabled
+        if not internal_llm_enabled():
+            logger.info("orchestrator (re)build skipped: legacy features are off")
+            return False
         with self._orch_build_lock:
             return self._build_orchestrator_impl(
                 agent_model_overrides=agent_model_overrides)
@@ -4681,9 +5287,9 @@ class CoreRuntime:
                     pool=self._pool, state=self._state, registry=self._registry,
                     abort_event=_aborts,
                     run_id=_rid,
-                    owner=f"群聊任务 {_rid or '(未命名)'}",
+                    owner=f"群聊任务 {_rid or '(未命名)'}",  # identity, not display text: see instrument_lock.owner_label
                 )
-                # the NON-LATCHING tip-quality stop a composite polls
+                # The NON-LATCHING tip-quality stop a composite polls
                 # between steps. Attached rather than passed to __init__ so the
                 # signal stays out of the abort machinery it must not be
                 # confused with; graph_executor reads it duck-typed, exactly
@@ -4930,6 +5536,8 @@ class CoreRuntime:
                 # discover(),运行期注册的 spec / custom / overlay / agent 铸的技能
                 # 在群聊里全部消失 —— 静默、无报错(2026-08-25)。
                 instrument_registry=self._registry,
+                # conduct 工具编译方案要 plan 库与技能注册表（私聊同一个 provider）。
+                conduct_context=self._conduct_tool_context,
                 instrument_extra_tools=_ic_meta_tools,
                 experiment_design_extra_tools=_xd_meta_tools,
                 checkpointer=self._orch_checkpointer,
@@ -4997,6 +5605,21 @@ class CoreRuntime:
         return self._orch_checkpointer
 
 
+    def _chat_experiment_id(self) -> str | None:
+        """Id of the active experiment, or None — the namespace chat memory,
+        compaction summaries and operator requests are filed under.
+
+        Restored. It lived on the Gradio app class and was deleted with
+        ``gui/app.py`` while its four callers here stayed:
+        ``_chat_agent_middleware`` raised AttributeError on every build, and
+        ``orchestrator.graph`` swallowed that into an EMPTY middleware list, so
+        every agent ran without compaction / memory recall / summary sink for four
+        months; the private-chat memory and request tools raised on every use.
+        The one test of the wiring passed a stub that carried this method itself.
+        """
+        el = getattr(self, "_experiment_log", None)
+        return el.current_experiment_id if el is not None else None
+
     def _chat_agent_extra_tools(self, agent_id: str = "instrument_control") -> list:
         """Private-chat extras: memory + documents + environment + ask-the-operator
         for every agent, plus the instrument meta-tools for IC only."""
@@ -5031,7 +5654,7 @@ class CoreRuntime:
         # 问不出问题)。把关在服务端,不在这里。
         try:
             from mast.agents._shared.conduct_tools import make_conduct_tools
-            tools += make_conduct_tools(agent_id)
+            tools += make_conduct_tools(agent_id, context=self._conduct_tool_context)
         except Exception as exc:  # noqa: BLE001
             logger.debug("chat conduct tools unavailable: %s", exc)
         # 技能市场工具:同上,两条入口必须给同一族。这里尤其要紧 —— 私聊是用户
@@ -5103,6 +5726,9 @@ class CoreRuntime:
 
         session_dir: str | None = None
         pool = getattr(self, "_pool", None)
+        from mast import station as _station
+        if pool is not None and _station.runtime_is_optical(self):
+            pool = None          # 光学站：没有 Nanonis 会话目录可问（不为这个发 TCP）
         if pool is not None:
             try:
                 rec = pool.safe_call("Util_SessionPathGet", role="main")
@@ -5120,7 +5746,7 @@ class CoreRuntime:
                                     break
                         elif isinstance(vals, str):
                             sp = vals
-                    sp = (sp or "").strip()
+                    sp = _repair_nanonis_path((sp or "").replace("\x00", "").strip())
                     if sp:
                         from pathlib import Path as _P
                         p = _P(sp)
@@ -5147,6 +5773,14 @@ class CoreRuntime:
             except Exception:  # noqa: BLE001 — registry is best-effort
                 pass
         return session_dir
+
+    def _conduct_tool_context(self) -> dict:
+        """What the conduct tools' plan compiler needs (``make_conduct_tools(context=...)``): the
+        live plan store and skill registry. No side effects — unlike :meth:`_meta_tool_context`,
+        which refreshes the Nanonis save directory on every call. Previously the conduct
+        tools had neither, so compiling a plan from an agent failed every time."""
+        return {"plan_store": getattr(self, "_plan_store", None),
+                "registry": getattr(self, "_registry", None)}
 
     def _meta_tool_context(self) -> dict:
         """Provider dict for make_meta_tools — the instrument meta-tool surface
@@ -5379,8 +6013,8 @@ class CoreRuntime:
             pool=self._pool, state=self._state, registry=self._registry,
             abort_event=aborts,
             run_id=_rid,
-            owner="主聊天/私聊")
-        # same non-latching tip-quality stop as the group-chat
+            owner="主聊天/私聊")  # identity, not display text: see instrument_lock.owner_label
+        # Same non-latching tip-quality stop as the group-chat
         # path — a composite run from the private chat is just as
         # capable of grinding through 5 regions on a broken tip.
         _attach_halt_check(ctx, self, _rid)
@@ -5454,8 +6088,8 @@ class CoreRuntime:
             self._conv_store = ConversationStore.from_storage(self._storage)
             def _conv_record_sink(agent_id: str, user_text: str, assistant_text: str) -> None:
                 """Mirror a finished chat turn into the experiment record so the
-                conversation is part of that record (审查 — this was
-                never wired, so chat never reached the records)."""
+                conversation is part of that record (previously unwired, so chat
+                never reached the records)."""
                 storage = getattr(self, "_storage", None)
                 if storage is None or not hasattr(storage, "log_conversation"):
                     return
@@ -5636,6 +6270,12 @@ class CoreRuntime:
         try:
             if not self._fetch_auto_resume_enabled():
                 return {"resumed": 0, "skipped": [{"reason": "disabled by setting"}]}
+            # Resuming means driving an agent turn on the internal LLM, triggered
+            # by an upload / a wishlist answer rather than by anyone asking for it.
+            from mast.legacy_gate import internal_llm_enabled
+            if not internal_llm_enabled():
+                return {"resumed": 0, "skipped": [
+                    {"reason": "legacy features disabled (internal LLM off)"}]}
 
             # One conversation asking for three papers gets ONE "carry on", not three.
             groups: dict[str, list] = {}
@@ -5761,7 +6401,8 @@ class CoreRuntime:
         try:
             mgr.spawn(instruction=text, agents=agents,
                       conversation_id=conversation_id,
-                      title="用户已答复 · 自动续工", priority="normal")
+                      title=tr("用户已答复 · 自动续工", "User replied - auto-resume"),
+                      priority="normal")
         except Exception as exc:  # noqa: BLE001
             logger.info("fetch-resume: spawn failed for %s: %s", conversation_id, exc)
             return False
@@ -5807,7 +6448,7 @@ class CoreRuntime:
             model_id = ui_to_model.get(ui_model, ui_model)
             # Thinking strength: per-agent override, else the high default. This
             # is what makes the Think segmented control real (was persisted but
-            # ignored before 2.1.13). Effective only on Claude models; reasoning
+            # ignored previously). Effective only on Claude models; reasoning
             # models (Kimi/DeepSeek) think high intrinsically.
             level = entry.get("thinking") or self._AGENTS_DEFAULT_THINKING.get(aid, "high")
             try:
@@ -5837,7 +6478,7 @@ class CoreRuntime:
         model_id = self._UI_TO_MODEL_ID.get(entry["model"], entry["model"])
         # No thinking_level here on purpose: this model drives
         # with_structured_output(Route), and Claude extended thinking is
-        # incompatible with the forced tool call that uses (review 2.1.13 #4).
+        # incompatible with the forced tool call that uses.
         try:
             return make_chat_model(model_id=model_id, max_tokens=2048,
                                    temperature=0.1)
@@ -5915,7 +6556,7 @@ class CoreRuntime:
             # background refresh) reflects the frame/tip the skill just set. Do
             # NOT fall back to payload["state_before"] — that is the PRE-skill
             # position and would record a scan/move at its STARTING point, not
-            # its result (). With no live snapshot we rely on the
+            # its result. With no live snapshot we rely on the
             # skill's explicit x/y params; marker_from_skill returns None if it
             # can place nothing, so we simply skip rather than mis-place.
             state = None
@@ -6032,7 +6673,7 @@ class CoreRuntime:
             if classify_skill(skill, category) is None and not subrecords:
                 return
 
-            # MULTI-POSITION skills first (). A
+            # MULTI-POSITION skills first. A
             # composite that visits N places used to leave exactly ONE marker,
             # at the composite's FINAL position, with the composite's overall
             # status: 9 scans across two BatchRegionsScan batches drew 2 boxes,
@@ -6206,7 +6847,7 @@ class CoreRuntime:
         self._map_watch_thread.start()
         # Graceful stop on process exit (matches the env-monitor / TTS daemons):
         # set the stop event so the loop's `_t.sleep` slices exit promptly and
-        # the SQLite connection isn't abandoned mid-write ().
+        # the SQLite connection isn't abandoned mid-write.
         import atexit
         atexit.register(lambda: self._map_watch_stop.set())
         logger.info("Map activity watcher started (interval=%.1fs)", interval_s)
@@ -6974,8 +7615,10 @@ class CoreRuntime:
         self._emit_event("data.session_path.stale", {
             "path": str(path),
             "current_sample": (log.current_sample_id if log else None),
-            "suggested_action": "把 Nanonis 的保存目录重新指向当前样品，或忽略"
-                                "（数据已按当前样品归档）",
+            "suggested_action": tr("把 Nanonis 的保存目录重新指向当前样品，或忽略"
+                                   "（数据已按当前样品归档）",
+                                   "Point the Nanonis save directory back at the current sample, "
+                                   "or ignore (data is already filed under the current sample)"),
         }, severity="warning")
         logger.warning("Nanonis session path 仍指向旧样品的目录：%s "
                        "—— 数据已按当前样品归档，但建议在 Nanonis 里改回来", path)
@@ -7027,6 +7670,28 @@ class CoreRuntime:
         except Exception:  # noqa: BLE001
             return True
 
+    @staticmethod
+    def _state_to_dict(state):
+        """A HardwareState (dataclass) or plain object as a JSON-able dict; dicts
+        and None pass through.
+
+        Restored from the Gradio app class (deleted with it).
+        Its one caller is the training-trace step below; without it
+        every ``record_step`` raised AttributeError inside the swallowing
+        ``except``, so no skill step reached an active trajectory."""
+        if state is None or isinstance(state, dict):
+            return state
+        try:
+            import dataclasses
+            if dataclasses.is_dataclass(state):
+                return dataclasses.asdict(state)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            return {k: v for k, v in vars(state).items() if not k.startswith("_")}
+        except Exception:  # noqa: BLE001
+            return None
+
     def _skill_trace_recorder(self, payload: dict) -> str | None:
         """Injected into wrap_skill; records one IC skill call as a tool_call step
         on the active trajectory. Fire-and-forget + fail-safe.
@@ -7051,13 +7716,13 @@ class CoreRuntime:
         # failures. This store is independent of the optional training trace sink;
         # a recording error must not prevent skill execution.
         self._record_v1_action(payload)
-        # Ground truth for the claim cross-check ().
+        # Ground truth for the claim cross-check.
         self._note_run_skill(payload)
         # V2 records action — the store the Records tab reads. Written HERE (the
         # recorder seam, which fires for every outcome) rather than from the
         # tip-shape post_hook, which wrap_skill only calls on success: that is
-        # why the v2 store held 22 rows, all 'succeeded', for a session the v1
-        # store recorded 27 actions and 5 failures for ().
+        # why the v2 store held only 'succeeded' rows for a session the v1
+        # store recorded failures for.
         action_id = self._record_v2_action(payload)
         sink = getattr(self, "_trace_sink", None)
         traj = getattr(self, "_active_traj", None)
@@ -7097,7 +7762,8 @@ class CoreRuntime:
         import time as _t
         self._map_last_skill_ts = _t.monotonic()
 
-    def _record_direct_skill_call(self, payload: dict) -> dict:
+    def _record_direct_skill_call(self, payload: dict, *, note_activity: bool = True,
+                                  lock_retry_s: float = 0.0) -> dict:
         """一次**直调**（技能直调 API / 外部 agent 网关）的入账 —— 只写事实表。
 
         为什么不复用 :meth:`_skill_trace_recorder`：直调的顶层技能走
@@ -7110,18 +7776,82 @@ class CoreRuntime:
         返回 ``{"v1", "v2_action_id", "experiment_id", "sample_id"}``，让调用方能
         如实告诉外部 agent「这次动作记进去了没有、记在哪」—— 没有活动实验时 v1 的
         外键会让插入失败，那正是要说出来的事。
+
+        两个关键字参数给后台写入器用（``mast.logging.record_writer``，2026-11-03）：
+
+        * ``note_activity=False`` —— 活动戳已经由调用方在**请求线程上**打过了。戳是给
+          手动操作监视器看的「这一刻技能刚跑完」，挪到写入线程上会晚到（库被锁时晚
+          几十秒），那段时间里的状态变化就会被算到人头上。
+        * ``lock_retry_s > 0`` —— 撞上 ``database is locked`` 时在这个预算内退避重试。
+          只重试「第一条 INSERT 之前就被锁」的那一种（v1 / v2 各自独立），所以不会写出
+          重复行；预算用完照旧记日志、返回 False / None。
+
+        ``payload["_attribution"]``（可选，见 :meth:`_direct_record_attribution`）是**调用
+        时**的归属快照：异步写入时「当前实验 / 当前会话」可能已经变了，记录必须挂在动作
+        发生时的那一个上。
         """
-        self._note_skill_activity()
+        if note_activity:
+            self._note_skill_activity()
+        att = _record_attribution_of(payload)
         el = getattr(self, "_experiment_log", None)
-        exp_id = getattr(el, "current_experiment_id", None) if el else None
-        sample_id = getattr(el, "current_sample_id", None) if el else None
-        v1_ok = bool(self._record_v1_action(payload))
-        action_id = self._record_v2_action(payload)
+        exp_id = (att["experiment_id"] if "experiment_id" in att
+                  else (getattr(el, "current_experiment_id", None) if el else None))
+        sample_id = (att["sample_id"] if "sample_id" in att
+                     else (getattr(el, "current_sample_id", None) if el else None))
+        retry = float(lock_retry_s or 0.0)
+        if retry > 0:
+            from mast.logging.record_writer import call_with_lock_retry, is_sqlite_locked
+
+            def _v1() -> bool:
+                return bool(self._record_v1_action(payload, raise_locked=True))
+
+            def _v2() -> "str | None":
+                return self._record_v2_action(payload, raise_locked=True)
+
+            try:
+                v1_ok = bool(call_with_lock_retry(_v1, budget_s=retry))
+            except Exception as exc:  # noqa: BLE001 — 预算用完仍被锁：照旧记日志、照旧吞
+                if not is_sqlite_locked(exc):
+                    raise
+                _log_swallowed("v1_action_record",
+                               "V1 action record failed for %s (still locked after %.0f s)",
+                               payload.get("skill"), retry)
+                v1_ok = False
+            try:
+                action_id = call_with_lock_retry(_v2, budget_s=retry)
+            except Exception as exc:  # noqa: BLE001
+                if not is_sqlite_locked(exc):
+                    raise
+                _log_swallowed("v2_action_record",
+                               "V2 action record failed for %s (still locked after %.0f s)",
+                               payload.get("skill"), retry)
+                action_id = None
+        else:
+            v1_ok = bool(self._record_v1_action(payload))
+            action_id = self._record_v2_action(payload)
         return {"v1": v1_ok, "v2_action_id": action_id,
                 "experiment_id": exp_id, "sample_id": sample_id}
 
+    def _direct_record_attribution(self) -> dict:
+        """入账归属的**调用时**快照：当前实验 / 样品、v2 实验、当前会话线程。
 
-    def _record_v1_action(self, payload: dict) -> bool:
+        直调的入账挪到后台写入线程之后（2026-11-03），写入时刻可能比动作晚好几秒
+        （库被锁时更久）；那期间用户新建了实验、或切了会话，记录就会挂错地方。调用方
+        在请求线程上取这份快照放进 ``payload["_attribution"]``，写入时以它为准。永不抛。
+        """
+        out: dict = {}
+        try:
+            el = getattr(self, "_experiment_log", None)
+            out["experiment_id"] = getattr(el, "current_experiment_id", None) if el else None
+            out["sample_id"] = getattr(el, "current_sample_id", None) if el else None
+            out["v2_eid"] = getattr(self, "_v2_eid", None)
+            out["thread_id"] = getattr(self, "_active_thread_id", None)
+        except Exception:  # noqa: BLE001
+            return {}
+        return out
+
+
+    def _record_v1_action(self, payload: dict, *, raise_locked: bool = False) -> bool:
         """Persist one skill call as a V1 ActionRecord — the store the Records UI
         reads (get_experiment_detail → storage.get_actions). Records EVERY skill
         with its REAL outcome so failures (timeouts, crashes, missing-module) are
@@ -7136,6 +7866,13 @@ class CoreRuntime:
         it; the direct-call path reports it back to the external caller).
         ``payload["context"]`` (optional) fills the ``actions.context`` column —
         who asked for this call when that is not the in-process agent.
+
+        ``raise_locked=True`` (the background record writer, 2026-11-03): a
+        ``database is locked`` error is re-raised instead of swallowed so the
+        caller can back off and retry. Safe to retry: the row is one INSERT in
+        its own transaction, so a locked attempt wrote nothing. Every other error
+        is still swallowed exactly as before. ``payload["_attribution"]`` (the
+        call-time snapshot) wins over the live experiment log when present.
         """
         storage = getattr(self, "_storage", None)
         if storage is None:
@@ -7147,9 +7884,12 @@ class CoreRuntime:
 
             from mast.core.types import ActionRecord, SkillResult
 
+            att = _record_attribution_of(payload)
             el = getattr(self, "_experiment_log", None)
-            exp_id = getattr(el, "current_experiment_id", None) if el else None
-            sample_id = getattr(el, "current_sample_id", None) if el else None
+            exp_id = (att["experiment_id"] if "experiment_id" in att
+                      else (getattr(el, "current_experiment_id", None) if el else None))
+            sample_id = (att["sample_id"] if "sample_id" in att
+                         else (getattr(el, "current_sample_id", None) if el else None))
             # action_to_dict json.dumps(parameters) WITHOUT a default handler, so a
             # stray non-serialisable arg would raise — pre-flatten to JSON-safe.
             try:
@@ -7158,8 +7898,12 @@ class CoreRuntime:
                 params = {}
             from mast.core.types import HardwareState
 
-            # Preserve the result payload, including returned readings, state,
-            # calls, duration, summary and artifact paths, when recording the action.
+            # This used to build an EMPTY SkillResult
+            # (data {} / state None / nanonis_calls [] / elapsed 0 / summary
+            # None) and throw the rest of the payload away, so every row of a
+            # field session were shaped `{"data": {}, "nanonis_calls": [], ...}`
+            # — even GetCurrent / GetZPosition, whose only value IS the number
+            # they returned, and the .sxm paths existed nowhere in the record.
             duration_s = float(payload.get("duration_ms") or 0) / 1000.0
             elapsed = payload.get("elapsed_s")
             data = _v1_result_data(payload.get("data"))
@@ -7206,23 +7950,33 @@ class CoreRuntime:
                 # made every consumer of the v1 vocabulary ("auto"/"llm"/"human")
                 # read garbage. NOTE: it still cannot say a HUMAN approved a
                 # CONFIRM-level skill — nothing on this path records the HITL
-                # verdict, and the v2 `approvals` table is empty ( §2).
+                # verdict, and the v2 `approvals` table is empty.
                 approval_source=str(payload.get("approval_source") or "auto"),
                 context=str(payload.get("context") or ""),
             )
             storage.log_action(rec)
             return True
-        except Exception:  # logging must never break the skill
+        except Exception as exc:  # logging must never break the skill
+            if raise_locked:
+                from mast.logging.record_writer import is_sqlite_locked
+
+                if is_sqlite_locked(exc):
+                    raise
             _log_swallowed("v1_action_record", "V1 action record failed for %s",
                            payload.get("skill"))
             return False
 
 
     def _note_run_skill(self, payload: dict) -> None:
-        """Accumulate executed skills and successfully written artifacts for this run.
+        """Accumulate what THIS run actually did: every skill call that reached
+        execution, and every artifact that really landed on disk.
 
-        This bounded cross-check buffer lets claim auditing distinguish reported
-        completion from recorded actions. It retains only the most recent runs."""
+        This is the half of the claim cross-check that did not exist. Once
+        an agent reported a completed STS grid and named
+        a per-point summary file; no skill ran, no file was written, and the run
+        ended as 「完成」. Nothing could contradict it because
+        nothing kept a per-run record of what had happened. Bounded to the few
+        most recent runs — this is a cross-check buffer, not a log."""
         run = str(getattr(self, "_orch_run_id", "") or "")
         led = getattr(self, "_run_ledger", None)
         if led is None:
@@ -7277,17 +8031,38 @@ class CoreRuntime:
                     "unsupported_completion": False}
 
 
-    def _record_v2_action(self, payload: dict) -> str | None:
-        """Persist each skill call as a V2 actions row and return its id.
+    def _record_v2_action(self, payload: dict, *, raise_locked: bool = False) -> str | None:
+        """Persist one skill call as a V2 ``actions`` row and return its id.
 
-        Record succeeded or failed outcome, error, actual parameters, duration and
-        tool_call_id. The Records UI and audit queries share this store. Recording
-        is best-effort and must not break the skill."""
+        The v2 store is what the Records tab and every audit query read. Until
+        recently the only writer was the tip-shape post_hook, and wrap_skill
+        calls a post_hook ONLY on success — so the v2 store was a success-only
+        ledger: a session that the v1 store recorded with
+        failures for showed up here as 100% 'succeeded' rows, with
+        ``params_json = '{}'``, ``duration_ms``/``thread_id``/``tool_call_id``
+        all NULL. The most important row it dropped was
+        ``AutoApproach failed: The tip is NOT engaged; do not scan``.
+
+        Writes the REAL outcome (succeeded / failed + error), the REAL params
+        (which also feed the schema's ``param_bias_v`` / ``param_setpoint_a`` /
+        ``param_x_m`` / ``param_y_m`` generated columns, previously all NULL),
+        the duration and the tool_call_id. Fire-and-forget + fail-safe.
+
+        ``raise_locked=True`` (the background record writer, 2026-11-03):
+        re-raise ``database is locked`` ONLY when it hits ``actions.begin`` —
+        the first INSERT, before anything of this record exists — so a retry
+        cannot leave a duplicate row. A lock after ``begin`` (approvals,
+        succeed/fail, scan_files) is swallowed as before: the row is already
+        there and a retry would write a second one. ``payload["_attribution"]``
+        (the call-time snapshot) wins over the live v2 experiment / chat thread.
+        """
+        att = _record_attribution_of(payload)
         repos = getattr(self, "_v2_repos", None)
-        eid = getattr(self, "_v2_eid", None)
+        eid = att["v2_eid"] if att.get("v2_eid") else getattr(self, "_v2_eid", None)
         if repos is None or not eid:
             return None
         skill = str(payload.get("skill") or "")
+        began = False
         try:
             import json as _json
             try:
@@ -7298,16 +8073,23 @@ class CoreRuntime:
             duration_ms = payload.get("duration_ms")
             duration_ms = int(duration_ms) if isinstance(duration_ms, (int, float)) else None
             # agent_id / thread_id：payload 里带了就用（直调与外部网关 —— 它们与
-            # 当前群聊线程无关，挂上去就是错的归属），没带就保持原来的缺省。
+            # 当前群聊线程无关，挂上去就是错的归属），没带就保持原来的缺省
+            # （有调用时快照就用快照里的会话，见 _direct_record_attribution）。
+            if "thread_id" in payload:
+                thread_id = payload["thread_id"]
+            elif "thread_id" in att:
+                thread_id = att["thread_id"]
+            else:
+                thread_id = getattr(self, "_active_thread_id", None)
             aid = repos.actions.begin(
                 experiment_id=eid,
                 agent_id=str(payload.get("agent_id") or "instrument_control"),
                 action_type=skill,
                 params=params,
-                thread_id=(payload["thread_id"] if "thread_id" in payload
-                           else getattr(self, "_active_thread_id", None)),
+                thread_id=thread_id,
                 tool_call_id=payload.get("tool_call_id") or None,
             )
+            began = True
             # 本来会等人批准、现在直接跑掉的动作,补一行 approvals。
             # 语义 = **已执行并通知**(approver_kind=automated_policy)。
             # 判据在 skill_adapter 打的标(``auto_approved``),与中间件和 executor
@@ -7345,7 +8127,12 @@ class CoreRuntime:
                        or "failed (no error text)")
                 repos.actions.fail(aid, err[:2000], duration_ms=duration_ms)
             return aid
-        except Exception:  # records must never break the skill
+        except Exception as exc:  # records must never break the skill
+            if raise_locked and not began:
+                from mast.logging.record_writer import is_sqlite_locked
+
+                if is_sqlite_locked(exc):
+                    raise
             _log_swallowed("v2_action_record", "V2 action record failed for %s", skill)
             return None
 

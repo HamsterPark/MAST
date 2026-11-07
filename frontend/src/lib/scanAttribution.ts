@@ -1,9 +1,11 @@
-// 按实验 / 样品分组浏览的数据整形。
+// Data shaping for browsing scans grouped by experiment / sample.
 //
 // GET /api/scans/latest walks the disk, and a path alone cannot say which
 // experiment claimed a file. GET /api/scans/attribution reads the v2
 // `file_locations` table, which is the record of that. This file turns the flat
 // row list into the experiment→sample→files shape the browser renders.
+
+import { tr } from "./i18n.ts";
 
 export interface AttributionEntryLike {
   sha256: string;
@@ -93,5 +95,5 @@ export function pathKeys(entry: AttributionEntryLike): string[] {
 export function groupSummary(g: { files: readonly unknown[]; bytes: number }): string {
   const mb = g.bytes / (1024 * 1024);
   const size = mb >= 1 ? `${mb.toFixed(1)} MB` : `${(g.bytes / 1024).toFixed(0)} KB`;
-  return `${g.files.length} 个文件 · ${size}`;
+  return tr(`${g.files.length} 个文件 · ${size}`, `${g.files.length} ${g.files.length === 1 ? "file" : "files"} · ${size}`);
 }

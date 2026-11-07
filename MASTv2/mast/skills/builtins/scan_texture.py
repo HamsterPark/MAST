@@ -39,6 +39,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -57,34 +58,34 @@ class AssessScanTexture(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "量一帧 .sxm 上晶格起伏有多强（逐方向，皮米）、逐行条纹噪声有多强"
+                tr("量一帧 .sxm 上晶格起伏有多强（逐方向，皮米）、逐行条纹噪声有多强"
                 "（同单位，可直接与晶格比），以及把帧切成小块后有多少块的晶格"
                 "压得住其余结构。回答的是「有多好、哪一块好」，"
-                "**不回答「有没有原子分辨」** —— 那是 AssessAtomicResolution 的事。"
+                "**不回答「有没有原子分辨」** —— 那是 AssessAtomicResolution 的事。", "Measure on a .sxm frame how strong the lattice modulation is (per direction, in picometres), how strong the row-by-row stripe noise is (same unit, directly comparable with the lattice), and, after cutting the frame into small tiles, how many tiles have a lattice that dominates the remaining structure. It answers \"how good, and which part is good\", **not \"is there atomic resolution\"** - that is the job of AssessAtomicResolution.")
             ),
             parameters=[
                 ParameterSpec(
                     name="scan_path", type="str",
-                    description="要分析的 .sxm 文件路径。",
+                    description=tr("要分析的 .sxm 文件路径。", "Path of the .sxm file to analyse."),
                     required=True),
                 ParameterSpec(
                     name="channel", type="str",
-                    description="形貌通道名，默认 Z。",
+                    description=tr("形貌通道名，默认 Z。", "Topography channel name, default Z."),
                     required=False, default="Z"),
                 ParameterSpec(
                     name="tile_nm", type="float",
                     description=(
-                        "分块的边长，纳米。默认 4 nm —— 它不是阈值而是几何选择："
-                        "块里至少要装下 8 个晶格周期，装不下就整个不给块图。"),
+                        tr("分块的边长，纳米。默认 4 nm —— 它不是阈值而是几何选择："
+                        "块里至少要装下 8 个晶格周期，装不下就整个不给块图。", "Tile edge length, in nanometres. Default 4 nm - it is not a threshold but a geometric choice: a tile must hold at least 8 lattice periods, and if it cannot, no tile map is given at all.")),
                     unit="nm", required=False, default=4.0,
                     min_value=0.5, max_value=100.0),
                 ParameterSpec(
                     name="good_ratio", type="float",
                     description=(
-                        "一块算「晶格清楚」的比值门槛（晶格带幅值 / 同块其余结构幅值）。"
-                        "**刻意没有默认值**：0.6 只在真机的 WO₂I₂ 上标过一夜"
-                        "（好帧 0.77-1.41、条纹区 0.10-0.35），换体系必须重标。"
-                        "不传时仍给出逐块比值与中位数，只是不给「好块占比」。"),
+                        tr("一块算「晶格清楚」的比值门槛（晶格带幅值 / 同块其余结构幅值）。"
+                        "**刻意没有默认值**：0.6 只在单一体系上标过，"
+                        "换体系必须重标。"
+                        "不传时仍给出逐块比值与中位数，只是不给「好块占比」。", "Ratio threshold for a tile to count as \"lattice clear\" (lattice-band amplitude / amplitude of the rest of the structure in the same tile). **Deliberately has no default**: 0.6 was calibrated on a single system only, and must be recalibrated for a different system. If not passed, the per-tile ratios and median are still given, only the \"fraction of good tiles\" is not.")),
                     required=False,
                     min_value=0.0, max_value=10.0),
             ],
@@ -129,8 +130,8 @@ class AssessScanTexture(BaseSkill):
             data["reason"] = cell.reason
             data["streak_pm"] = streak_amplitude_pm(fr.forward, fr.nm_per_px)
             notes.append(
-                "找不到可用的晶格方向（%s）—— 晶格幅值与块图都无从谈起，因为它们"
-                "都是「沿着那个方向」的量。条纹幅值仍然给了：它不需要知道晶格在哪。"
+                tr("找不到可用的晶格方向（%s）—— 晶格幅值与块图都无从谈起，因为它们"
+                "都是「沿着那个方向」的量。条纹幅值仍然给了：它不需要知道晶格在哪。", "No usable lattice direction found (%s) - lattice amplitude and tile map are out of the question, because both are quantities \"along that direction\". The stripe amplitude is still given: it does not need to know where the lattice is.")
                 % cell.reason)
             data["notes"] = notes
             return SkillResult(skill_name=_NAME, success=True, data=data,
@@ -176,9 +177,9 @@ class AssessScanTexture(BaseSkill):
             if good_ratio is None:
                 data["tile_good_fraction"] = None
                 notes.append(
-                    "没传 good_ratio，所以不给「好块占比」—— 那个数需要一个本机标定过的"
+                    tr("没传 good_ratio，所以不给「好块占比」—— 那个数需要一个本机标定过的"
                     "门槛，而随包发布的 0.6 只在一个样品上标过。逐块比值与中位数"
-                    "（%.2f）是测量，不需要门槛，已经给了。" % tiles.median_ratio)
+                    "（%.2f）是测量，不需要门槛，已经给了。", "good_ratio was not passed, so the \"fraction of good tiles\" is not given - that number needs a threshold calibrated on this machine, and the shipped 0.6 was calibrated on one sample only. The per-tile ratios and median (%.2f) are measurements, need no threshold, and are given.") % tiles.median_ratio)
             else:
                 data["tile_good_fraction"] = round(tiles.good_fraction, 3)
                 data["tile_good_ratio_used"] = float(good_ratio)
@@ -189,9 +190,9 @@ class AssessScanTexture(BaseSkill):
             data["tile_last_scanned_median"] = round(last, 3)
             if first > 0 and (last / first < 0.5 or first / last < 0.5):
                 notes.append(
-                    "先扫的那一排块中位 %.2f、后扫的 %.2f —— 针尖在这一帧里变了。"
+                    tr("先扫的那一排块中位 %.2f、后扫的 %.2f —— 针尖在这一帧里变了。"
                     "**这一帧的读数是两段不同状态的平均**，拿它代表「现在的针尖」"
-                    "会指向过去式（与 assess_atomic_phase 的半帧检查同一件事）。"
+                    "会指向过去式（与 assess_atomic_phase 的半帧检查同一件事）。", "The tiles scanned first have median %.2f and those scanned later %.2f - the tip changed during this frame. **The reading of this frame is an average of two different states**, and using it to represent \"the current tip\" would point to the past (the same thing as the half-frame check in assess_atomic_phase).")
                     % (first, last))
         else:
             notes.extend(tiles.warnings)
@@ -205,25 +206,25 @@ class AssessScanTexture(BaseSkill):
 
 def _summary(data: dict) -> str:
     if data.get("verdict") == "undetermined":
-        return "这一帧上找不到晶格方向，量不了晶格幅值与块图。"
+        return tr("这一帧上找不到晶格方向，量不了晶格幅值与块图。", "No lattice direction can be found in this frame, so lattice amplitude and tile map cannot be measured.")
     lat = data.get("lattice_local_pm")
     bp = data.get("lattice_bandpass_pm")
     ratio = data.get("streak_to_lattice")
     bits = []
     if lat is not None:
-        bits.append("局域原子起伏 %.1f pm（逐块相干，与视野无关）" % lat)
+        bits.append(tr("局域原子起伏 %.1f pm（逐块相干，与视野无关）", "local atomic modulation %.1f pm (coherent per tile, independent of field of view)") % lat)
     elif data.get("lattice_coherent_pm") is not None and bp is not None:
-        bits.append("整帧相干起伏 %.1f pm（帧内失相会压低它；带通上界 %.1f pm）"
+        bits.append(tr("整帧相干起伏 %.1f pm（帧内失相会压低它；带通上界 %.1f pm）", "whole-frame coherent modulation %.1f pm (dephasing within the frame lowers it; band-pass upper bound %.1f pm)")
                     % (data["lattice_coherent_pm"], bp))
     if ratio is not None:
-        bits.append("条纹/晶格 %.2f（同为带通口径）" % ratio)
+        bits.append(tr("条纹/晶格 %.2f（同为带通口径）", "stripe/lattice %.2f (same band-pass basis)") % ratio)
     if data.get("tile_good_fraction") is not None:
-        bits.append("%.0f%% 的块晶格清楚" % (100 * data["tile_good_fraction"]))
+        bits.append(tr("%.0f%% 的块晶格清楚", "%.0f%% of tiles have a clear lattice") % (100 * data["tile_good_fraction"]))
     elif data.get("tile_median_ratio") is not None:
-        bits.append("块比值中位 %.2f（未给门槛，不算占比）" % data["tile_median_ratio"])
-    s = "；".join(bits) if bits else "量不出可报的量"
+        bits.append(tr("块比值中位 %.2f（未给门槛，不算占比）", "tile ratio median %.2f (no threshold given, so no fraction)") % data["tile_median_ratio"])
+    s = "；".join(bits) if bits else tr("量不出可报的量", "nothing reportable could be measured")
     if ratio is not None and ratio > 1.5:
-        s += "。条纹带的功率超过晶格带 —— 这帧「脏」的来源是逐行短划，不是晶格弱。"
+        s += tr("。条纹带的功率超过晶格带 —— 这帧「脏」的来源是逐行短划，不是晶格弱。", ". The stripe band has more power than the lattice band - this frame is \"dirty\" because of per-line dashes, not because the lattice is weak.")
     return s
 
 

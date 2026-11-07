@@ -22,41 +22,37 @@ import {
   type ParamSpecLike,
   type TemplateRowLike,
 } from "@/lib/conductForm";
+import { tr } from "@/lib/i18n";
 
-// ════════════════════════════════════════════════════════════════════════════
-// 新建一份 conduct —— **这一页是唯一的入口**。
+// Creating a conduct. This card is the only entry point; the action must be reachable
+// from the UI, because an action that cannot be done looks the same on screen as one
+// that does not exist (approve is UI-only for the same reason).
 //
-// 在它之前空态上写的是「新建走 POST /api/conducts」,也就是说这个动作只有 curl
-// 一条路。那与 approve 是同一个形状(设计 §7 让 approve 只接受 UI 来源 ⇒ 不给按钮
-// approve 就不存在),而**做不到的动作和不存在的动作在屏幕上长得一模一样**。
+// The form pre-fills no physical quantity. Every `ParamSpec.default` is None on
+// purpose: if a value cannot be filled in, the working point of the experiment is not
+// decided yet and the operator should stop. The backend `ParamSpecRow` contract has no
+// default field at all, so nothing can be pre-filled by accident.
 //
-// ── 表单不预填任何物理量 ────────────────────────────────────────────────────
+// The user is never locked out:
+// 1. The submit button is always enabled. Local validation only warns in advance; the
+//    backend is the source of truth, so a local check stricter than `check_params`
+//    cannot trap the user.
+// 2. If the experiment dropdown cannot be loaded, the id can be typed by hand
+//    (`experiment_id` is required, so a dead dropdown would block creation).
+// 3. A template that cannot be approved can still be used to create a draft; it is the
+//    later approve step that is blocked.
 //
-// 每个格子都是空的。模板的 `ParamSpec.default` 全是 `None` 且是刻意的:填不出来
-// 就说明这次实验的工作点还没定,那正是该停下来的时候。后端的 `ParamSpecRow` 契约
-// 里**根本没有 default 这个字段** —— 拿不到就不会预填,这比在这里写一行「记得别
-// 预填」可靠。
-//
-// ── 三处「不许把人锁在门外」──────────────────────────────────────────────────
-//
-// 1. **提交按钮永远能按。** 本地校验只是提前告知(红字 + 一句提示),真源是后端。
-//    本地判据万一比 `check_params` 严,用户不会被自己这一侧锁死。
-// 2. **实验下拉拉不到时留手填。** `experiment_id` 必填,下拉堵死就等于新建堵死。
-// 3. **批不下去的模板照样能建草稿。** 被挡的是下一步的 approve,不是这一步。
-//
-// ── 逐字段回显 ──────────────────────────────────────────────────────────────
-//
-// 400 的回包里 `params_echo` 是后端**按字段分好组**的,直接盖到对应格子上。而
-// `errors` 里没能落到任何格子上的那些(单活跃不变式、模板不存在……)一条都不许
-// 吞 —— 逐字段回显是好东西,但它不能变成一个吞掉其余一切的漏斗。
-// ════════════════════════════════════════════════════════════════════════════
+// Per-field echo: the `params_echo` of a 400 response is grouped per field by the
+// backend and is shown on the matching input. Entries in `errors` that map to no input
+// (single-active invariant, unknown template, ...) must all be shown as well; the
+// per-field echo must not become a funnel that swallows everything else.
 
 export function NewConductCard({
   activeConductId,
   onCreated,
   onClose,
 }: {
-  /** 当前那个未了结的 conduct(单活跃不变式)。非空 ⇒ 新建会被 409。 */
+  /** The currently unfinished conduct (single-active invariant). Non-empty means creating will be rejected with 409. */
   activeConductId: string;
   onCreated: (conductId: string) => void;
   onClose: () => void;
@@ -100,7 +96,7 @@ export function NewConductCard({
 
   const chooseTemplate = (id: string) => {
     setSpecId(id);
-    // 换模板 = 换一整套参数。**初值全空** —— 见文件头。
+    // A different template means a whole new parameter set. Initial values are all empty (see file header).
     setValues(initialValues(pickTemplate(rows, id)?.params_schema ?? []));
     setOutcome(null);
     setServerErrs({});
@@ -109,8 +105,8 @@ export function NewConductCard({
 
   const setOne = (name: string, v: string) => {
     setValues((prev) => ({ ...prev, [name]: v }));
-    // 后端那条错误说的是**上次提交的那个值**。值一改它就过期了 —— 留着不动
-    // 就是拿一次旧结论当成对当前输入的判断。
+    // The backend error refers to the value that was last submitted. Once the value
+    // changes it is stale, so it is dropped rather than shown against the new input.
     setServerErrs((prev) => {
       if (!(name in prev)) return prev;
       const next = { ...prev };
@@ -128,13 +124,13 @@ export function NewConductCard({
           spec_id: specId,
           experiment_id: experimentId.trim(),
           params: built.params,
-          // 手建的不是从某个 APPROVED plan 编译来的。空串就是「没有来源」——
-          // 编造一个 plan id 会让审计流里多出一份根本不存在的来路。
+          // A hand-made conduct is not compiled from an APPROVED plan. The empty string
+          // means "no source"; inventing a plan id would put a nonexistent origin into the audit trail.
           from_plan_id: "",
         },
       });
-      // 4xx 的**回包体**才是有用的那部分(哪个格子错了),所以不 throw:
-      // throw 掉的话屏幕上只剩一句「加载失败」,而后端刚刚逐字段说清楚了。
+      // The body of a 4xx response is the useful part (which field is wrong), so do not
+      // throw: that would leave only a generic "failed to load" line.
       const out: CreateOutcomeLike = response.ok
         ? ((data ?? {}) as CreateOutcomeLike)
         : normalizeCreateError(error ?? data, response.status);
@@ -144,8 +140,14 @@ export function NewConductCard({
       setNote(msg);
       if (response.ok && out.ok && out.conduct_id) onCreated(String(out.conduct_id));
     } catch (e) {
-      // 发不出去(网络/代理)⇒ 一句话,**不冻结**、不转一个不会停的圈。
-      setNote({ text: `发不出去：${String((e as Error)?.message ?? e)}`, tone: "err" });
+      // Request could not be sent (network/proxy): show one line; never freeze or spin forever.
+      setNote({
+        text: tr(
+          `发不出去：${String((e as Error)?.message ?? e)}`,
+          `Could not send request: ${String((e as Error)?.message ?? e)}`,
+        ),
+        tone: "err",
+      });
     } finally {
       setBusy(false);
     }
@@ -158,18 +160,20 @@ export function NewConductCard({
     <Card className="border-mast-accent">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="text-[17px] font-semibold text-mast-text">新建一份 conduct</h3>
+          <h3 className="text-[17px] font-semibold text-mast-text">{tr("新建一份 conduct", "New conduct")}</h3>
           <p className="mt-1 text-sm text-mast-muted">
-            建出来的是**草稿**：它不会自己跑起来，下一步还要有人批准。
-            参数一个都不预填——填不出来就说明这次实验的工作点还没定。
+            {tr(
+              "建出来的是**草稿**：它不会自己跑起来，下一步还要有人批准。参数一个都不预填——填不出来就说明这次实验的工作点还没定。",
+              "This creates a **draft**: it will not run by itself and still needs approval. No parameter is pre-filled; if you cannot fill one in, the working point of this experiment is not decided yet.",
+            )}
           </p>
         </div>
         <Button variant="ghost" onClick={onClose}>
-          收起
+          {tr("收起", "Collapse")}
         </Button>
       </div>
 
-      {/* ── 模板 ───────────────────────────────────────────────────────── */}
+      {/* Template */}
       <div className="mt-4">
         {listState.kind === "loading" && <Spinner label={listState.message} />}
         {listState.kind === "unreadable" && (
@@ -181,14 +185,14 @@ export function NewConductCard({
         {listState.kind === "ready" && (
           <div className="max-w-lg">
             <Field
-              label="模板（必填）"
-              hint="模板决定阶段与步骤；数值一个都不在模板里，全在下面那些格子里。"
+              label={tr("模板（必填）", "Template (required)")}
+              hint={tr("模板决定阶段与步骤；数值一个都不在模板里，全在下面那些格子里。", "The template defines stages and steps; none of the values are in the template, they are all in the fields below.")}
             >
               <SelectField
                 value={specId}
                 onChange={chooseTemplate}
                 options={[
-                  { value: "", label: "（请选择一个模板）" },
+                  { value: "", label: tr("（请选择一个模板）", "(choose a template)") },
                   ...rows.map((r) => ({
                     value: String(r.spec_id ?? ""),
                     label: templateOptionLabel(r),
@@ -204,17 +208,17 @@ export function NewConductCard({
         <>
           {picked.stages?.length ? (
             <p className="mt-2 text-xs text-mast-faint">
-              阶段：{picked.stages.join(" → ")}
+              {tr("阶段：", "Stages: ")}{picked.stages.join(" → ")}
             </p>
           ) : null}
 
-          {/* 批不下去 ≠ 不能建。被挡的是下一步。 */}
+          {/* Not approvable does not mean not creatable; the next step is what is blocked. */}
           {approval.blocked && (
             <div className="mt-3 rounded-mast-ctl border border-mast-warn-border bg-mast-warn-bg px-3 py-2.5 text-sm text-mast-warn">
               <p>{approval.text}</p>
               {picked.findings?.length ? (
                 <>
-                  <p className="mt-2 text-xs text-mast-faint">发现：</p>
+                  <p className="mt-2 text-xs text-mast-faint">{tr("发现：", "Findings:")}</p>
                   <ul className="ml-4 list-disc text-xs">
                     {picked.findings.map((f) => (
                       <li key={f}>{f}</li>
@@ -224,7 +228,7 @@ export function NewConductCard({
               ) : null}
               {picked.checks_skipped?.length ? (
                 <>
-                  <p className="mt-2 text-xs text-mast-faint">这些检查**没能跑**：</p>
+                  <p className="mt-2 text-xs text-mast-faint">{tr("这些检查**没能跑**：", "These checks **did not run**:")}</p>
                   <ul className="ml-4 list-disc text-xs">
                     {picked.checks_skipped.map((s) => (
                       <li key={s}>{s}</li>
@@ -235,38 +239,38 @@ export function NewConductCard({
             </div>
           )}
 
-          {/* ── 实验归属 ──────────────────────────────────────────────── */}
+          {/* Experiment binding */}
           <div className="mt-4 max-w-lg">
             {expState.kind === "list" ? (
               <Field
-                label="绑定的实验（必填）"
-                hint="没有实验归属的 conduct，产物没有落点：spec 快照与 progress.jsonl 都写进那个实验的文件夹。"
+                label={tr("绑定的实验（必填）", "Bound experiment (required)")}
+                hint={tr("没有实验归属的 conduct，产物没有落点：spec 快照与 progress.jsonl 都写进那个实验的文件夹。", "A conduct without an experiment has nowhere to write its output: the spec snapshot and progress.jsonl go into that experiment's folder.")}
               >
                 <SelectField
                   value={experimentId}
                   onChange={setExperimentId}
                   options={[
-                    { value: "", label: "（请选择一个实验）" },
+                    { value: "", label: tr("（请选择一个实验）", "(choose an experiment)") },
                     ...expRows.map((e) => ({
                       value: String(e.id ?? ""),
-                      label: `${e.name || e.id}${e.sample_name ? `（${e.sample_name}）` : ""}`,
+                      label: `${e.name || e.id}${e.sample_name ? ` (${e.sample_name})` : ""}`,
                     })),
                   ]}
                 />
               </Field>
             ) : (
-              <Field label="绑定的实验 ID（必填）" hint={expState.message}>
+              <Field label={tr("绑定的实验 ID（必填）", "Bound experiment ID (required)")} hint={expState.message}>
                 <TextField value={experimentId} onChange={setExperimentId} mono
-                  placeholder="实验 ID" />
+                  placeholder={tr("实验 ID", "Experiment ID")} />
               </Field>
             )}
           </div>
 
-          {/* ── 逐字段 ────────────────────────────────────────────────── */}
+          {/* Per-field inputs */}
           {specs.length ? (
             <div className="mt-4">
               <h4 className="mb-2 text-sm font-semibold text-mast-muted">
-                这个模板要你填的参数（{specs.length} 个）
+                {tr(`这个模板要你填的参数（${specs.length} 个）`, `Parameters this template needs (${specs.length})`)}
               </h4>
               <div className="grid gap-3 sm:grid-cols-2">
                 {specs.map((p) => (
@@ -282,21 +286,23 @@ export function NewConductCard({
             </div>
           ) : (
             <p className="mt-4 text-sm text-mast-faint">
-              这个模板没有声明可填参数。
+              {tr("这个模板没有声明可填参数。", "This template declares no fillable parameters.")}
             </p>
           )}
 
-          {/* ── 提交 ──────────────────────────────────────────────────── */}
+          {/* Submit */}
           {activeConductId && (
             <div className="mt-4 rounded-mast-ctl border border-mast-warn-border bg-mast-warn-bg px-3 py-2.5 text-sm text-mast-warn">
-              已经有一份未了结的 conduct（{activeConductId}）。单活跃不变式由数据库执行，
-              所以这一次多半会被拒 —— 按钮**不拦你**，那句拒绝由后端说，说得比这里准。
+              {tr(
+                `已经有一份未了结的 conduct（${activeConductId}）。单活跃不变式由数据库执行，所以这一次多半会被拒 —— 按钮**不拦你**，那句拒绝由后端说，说得比这里准。`,
+                `There is already an unfinished conduct (${activeConductId}). The single-active invariant is enforced by the database, so this will most likely be rejected. The button **does not stop you**; the rejection comes from the backend, which words it more precisely.`,
+              )}
             </div>
           )}
 
           {topErrors.length > 0 && (
             <div className="mt-4 rounded-mast-ctl border border-mast-danger-border bg-mast-danger-bg px-3 py-2.5 text-sm text-mast-danger">
-              <p className="font-semibold">没建成</p>
+              <p className="font-semibold">{tr("没建成", "Not created")}</p>
               <ul className="ml-4 mt-1 list-disc text-xs">
                 {topErrors.map((e) => (
                   <li key={e}>{e}</li>
@@ -307,10 +313,10 @@ export function NewConductCard({
 
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <Button variant="primary" loading={busy} onClick={submit}>
-              建立草稿
+              {tr("建立草稿", "Create draft")}
             </Button>
-            {/* 本地看出来的问题写在这里，但**不禁用按钮**:一个本地判错就再也
-                提交不上去的表单，是「能停不能解」的又一例。 */}
+            {/* Locally detected problems are shown here but the button is not disabled:
+                a form that can never be submitted after a local false alarm is a dead end. */}
             {pre && <span className="text-xs text-mast-warn">{pre}</span>}
             {note && (
               <span
@@ -329,14 +335,15 @@ export function NewConductCard({
 }
 
 /**
- * 一个格子。
+ * One parameter field.
  *
- * 单位、用途、包络**写在格子旁边**,不藏在 tooltip 里:1.5 nA 填成 1.5 安培那次,
- * 缺的正是「这一格的单位是安培、上限是 100 nA」这句话摆在眼前。
+ * Unit, purpose and envelope are written next to the field, not hidden in a tooltip,
+ * so the unit and the upper limit are visible while typing.
  *
- * 回读(`= 1.50 nA（= 1.5e-9 A）`)是这一格最要紧的东西:它显示的是**系统实际
- * 收到的那个数**,量级错了当场看得见 —— 而包络只在越界时才出声,量级错在包络
- * 之内的那些(比如 50 pA 打成 5 pA)只有回读能帮上忙。
+ * The read-back (`= 1.50 nA (= 1.5e-9 A)`) is the most important part: it shows the
+ * number the system actually received, so a wrong order of magnitude is visible at once.
+ * The envelope only complains when a value is out of range; magnitude errors inside the
+ * envelope (e.g. 5 pA typed instead of 50 pA) are only caught by the read-back.
  */
 function ParamField({
   spec,
@@ -351,7 +358,7 @@ function ParamField({
 }) {
   const parsed = parseParamInput(raw, spec);
   const hint = envelopeHint(spec);
-  // 后端那句优先:它是真源。本地那句在还没提交时先顶上。
+  // The backend message wins (source of truth); the local one fills in before the first submit.
   const error = serverError || parsed.error;
   const required = spec.required !== false;
 
@@ -360,23 +367,23 @@ function ParamField({
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-mast-muted">
           <span className="font-mono text-mast-text">{spec.name}</span>
-          {spec.unit ? <span className="ml-1 text-xs">（{spec.unit}）</span> : null}
+          {spec.unit ? <span className="ml-1 text-xs">({spec.unit})</span> : null}
           {required ? (
-            <span className="ml-1 text-xs text-mast-danger">必填</span>
+            <span className="ml-1 text-xs text-mast-danger">{tr("必填", "Required")}</span>
           ) : (
-            <span className="ml-1 text-xs text-mast-faint">选填（留空则用模板的默认值）</span>
+            <span className="ml-1 text-xs text-mast-faint">{tr("选填（留空则用模板的默认值）", "Optional (leave empty to use the template default)")}</span>
           )}
         </span>
         <input
           type="text"
           value={raw}
           onChange={(e) => onChange(e.target.value)}
-          placeholder={spec.unit ? `如 1.5${spec.unit === "A" ? "n" : ""}${spec.unit}` : ""}
+          placeholder={spec.unit ? `${tr("如 ", "e.g. ")}1.5${spec.unit === "A" ? "n" : ""}${spec.unit}` : ""}
           className="rounded-mast-ctl border border-mast-border-strong bg-mast-panel px-2.5 py-2 font-mono text-sm tabular-nums text-mast-text outline-none focus:border-mast-accent"
         />
       </label>
 
-      {/* 系统**实际**收到的那个数。 */}
+      {/* The number the system actually received. */}
       {parsed.echo && (
         <span className="font-mono text-xs text-mast-accent">= {parsed.echo}</span>
       )}

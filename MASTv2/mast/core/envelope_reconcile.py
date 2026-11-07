@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import logging
+from mast.i18n import tr
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -31,10 +32,14 @@ Z_SOURCE_SOFT_LIMITS = "ZCtrl_LimitsGet (enabled)"
 
 @dataclass(frozen=True)
 class ZTravel:
-    """Z 行程区间及其读取来源。
-    
-    未启用的软限值不参与边界计算。source 用于区分压电全程推导出的半程
-    与已启用的软限，便于调用方解释余量所用的分母。
+    """Z 实际能走到的区间，以及**是哪一条读答出来的**。
+
+    ``source`` 不是装饰。这个模块存在的起因就是「一个算错分母的百分比和一个算对
+    的长得一模一样」：``monitoring/aux_channels`` 的 ``z_headroom_frac`` 对着
+    ``ZCtrl_LimitsGet`` 算，而软限值在 ``z_limits_enabled = 0`` 时**不起任何作用**
+    （手册写明 "has no effect"，`instrument_limits.py:98-100` 引过）。当
+    ``z_limits_enabled = 0`` 时 ⇒ 那条「Z 逼近量程」的告警算的是一对惰性数字的百分比，
+    顶死在行程尽头时不可能响。带上来源，下一次算错才有人看得出来。
     """
 
     lo_m: float
@@ -111,11 +116,11 @@ class EnvelopeFinding:
     note: str            # 人话
 
     def describe(self) -> str:
-        arrow = "宽" if self.direction == WIDER else "窄"
+        arrow = tr("宽", "wider") if self.direction == WIDER else tr("窄", "narrower")
         return (
-            f"{self.field_name}: 配置 {self.configured:.4g} vs 实测 "
+            tr(f"{self.field_name}: 配置 {self.configured:.4g} vs 实测 "
             f"{self.measured:.4g}（{self.source}）—— 配置{arrow} {self.ratio:.3g}×。"
-            f"{self.note}"
+            f"{self.note}", f"{self.field_name}: configured {self.configured:.4g} vs measured {self.measured:.4g} ({self.source}); the configuration is {arrow} by {self.ratio:.3g}x. {self.note}")
         )
 
 
@@ -140,15 +145,15 @@ class EnvelopeReconciliation:
 
     def summary(self) -> str:
         if not self.findings and not self.unreadable:
-            return "安全包络与实测行程一致"
+            return tr("安全包络与实测行程一致", "Safety envelope agrees with the measured travel")
         parts: list[str] = []
         if self.findings:
-            parts.append(f"{len(self.findings)} 项与实测不一致")
+            parts.append(tr(f"{len(self.findings)} 项与实测不一致", f"{len(self.findings)} item(s) disagree with the measurement"))
         if self.wider:
-            parts.append(f"其中 {len(self.wider)} 项配置比硬件更宽（该上限没在拦任何东西）")
+            parts.append(tr(f"其中 {len(self.wider)} 项配置比硬件更宽（该上限没在拦任何东西）", f"of which {len(self.wider)} item(s) are configured wider than the hardware (that limit blocks nothing)"))
         if self.unreadable:
-            parts.append(f"{len(self.unreadable)} 项读不到：{', '.join(self.unreadable)}")
-        return "；".join(parts)
+            parts.append(tr(f"{len(self.unreadable)} 项读不到：{', '.join(self.unreadable)}", f"{len(self.unreadable)} item(s) could not be read: {', '.join(self.unreadable)}"))
+        return tr("；", "; ").join(parts)
 
 
 def _floats(value: Any, n: int) -> list[float] | None:
@@ -270,12 +275,12 @@ def reconcile_envelope(
                 found = _compare(
                     f_name, float(cfg), xy_half, "Piezo_RangeGet/2",
                     note_wider=(
-                        "包络允许的横向坐标超出压电行程 —— 这段「上限」不拦任何东西，"
-                        "真正的边界是压电本身。"
+                        tr("包络允许的横向坐标超出压电行程 —— 这段「上限」不拦任何东西，"
+                        "真正的边界是压电本身。", "The lateral coordinates the envelope allows exceed the piezo travel: this stretch of \"limit\" blocks nothing, and the real boundary is the piezo itself.")
                     ),
                     note_narrower=(
-                        "包络比压电行程窄，样品上有一部分区域系统看不见（覆盖率与"
-                        "换区建议都按这个假边界算）。"
+                        tr("包络比压电行程窄，样品上有一部分区域系统看不见（覆盖率与"
+                        "换区建议都按这个假边界算）。", "The envelope is narrower than the piezo travel: part of the sample area is invisible to the system (coverage and re-area suggestions are computed from this false boundary).")
                     ),
                 )
                 if found:
@@ -285,14 +290,14 @@ def reconcile_envelope(
         if isinstance(cfg_scan, (int, float)):
             found = _compare(
                 "scan_size_max_m", float(cfg_scan), xy_full, "Piezo_RangeGet",
-                note_wider="扫描尺寸上限大于压电全程，扫不出来的框会在硬件侧被截断。",
-                note_narrower="扫描尺寸上限小于压电全程，最大视野扫不到。",
+                note_wider=tr("扫描尺寸上限大于压电全程，扫不出来的框会在硬件侧被截断。", "The scan-size limit is larger than the full piezo range: frames that cannot be scanned will be truncated on the hardware side."),
+                note_narrower=tr("扫描尺寸上限小于压电全程，最大视野扫不到。", "The scan-size limit is smaller than the full piezo range: the maximum field of view cannot be scanned."),
             )
             if found:
                 findings.append(found)
 
     # Z 的硬件边界：压电半程；若 Nanonis Z 限值**已启用**且更紧，取更紧的那个。
-    # 未启用的限值不算数（§1.3：手册原话 "has no effect"）。
+    # 未启用的限值不算数（手册写明 "has no effect"）。
     # 判定本身住在 :func:`resolve_z_travel` —— 采样路径（monitoring/aux_channels）
     # 用的是同一个函数，两边不许各算各的。
     if zlim is not None:
@@ -319,16 +324,16 @@ def reconcile_envelope(
                 findings.append(EnvelopeFinding(
                     field_name=f_name, configured=0.0, measured=float(z_bound),
                     direction=NARROWER, ratio=0.0, source=z_source,
-                    note=("配置把 Z 行程在 0 处切断，而这台机器的 Z 可以走到 "
+                    note=(tr("配置把 Z 行程在 0 处切断，而这台机器的 Z 可以走到 "
                           f"∓{z_bound:.3g} m —— 0 不是一个有物理含义的边界，"
-                          "隧穿侧那半个行程整个被挡在门外。"),
+                          "隧穿侧那半个行程整个被挡在门外。", f"The configuration cuts the Z travel off at 0, while this machine's Z can reach -/+{z_bound:.3g} m: 0 is not a physically meaningful boundary, and the whole tunnelling-side half of the travel is locked out.")),
                 ))
                 continue
             found = _compare(
                 f_name, float(cfg), float(z_bound), z_source,
-                note_wider=("Z 包络超出实际行程 —— 这条上限不构成保护，"
-                            "真正的撞针保护在 SafeTip / Z 控制器 / 进针逻辑里。"),
-                note_narrower="Z 包络比实际行程窄，可用行程被白白砍掉一部分。",
+                note_wider=(tr("Z 包络超出实际行程 —— 这条上限不构成保护，"
+                            "真正的撞针保护在 SafeTip / Z 控制器 / 进针逻辑里。", "The Z envelope exceeds the real travel: this limit gives no protection; the real tip-crash protection lives in SafeTip / the Z controller / the approach logic.")),
+                note_narrower=tr("Z 包络比实际行程窄，可用行程被白白砍掉一部分。", "The Z envelope is narrower than the real travel: part of the usable travel is cut off for nothing."),
             )
             if found:
                 findings.append(found)

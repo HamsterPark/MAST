@@ -17,7 +17,8 @@ import logging
 import time
 
 from mast.core.types import NanonisCallRecord
-from mast.instruments.base import InstrumentError
+from mast.instruments.base import InstrumentError, MotionAborted
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +27,37 @@ __all__ = [
     "nanonis_scalar",
     "signal_names",
     "mean_std",
+    "value_units",
     "resolve_lockin_index",
+    "trigger_port_refusal",
+    "DEFAULT_TRIGGER_PORT",
+    "DEFAULT_TRIGGER_LINE",
     "PointAcquirer",
 ]
+
+#: Port B (1), line 2 — the default camera trigger line.
+#: Line numbers are 1-based in DigLines.Pulse too (measured on Mimea 5.1.15016:
+#: lines=[2] raised TTLValGet index 1, [1] index 0, [0] nothing).
+DEFAULT_TRIGGER_PORT = 1
+DEFAULT_TRIGGER_LINE = 2
+
+
+def trigger_port_refusal(port: int) -> str:
+    """Port A carries the PMD4 link on a Nanonis PMD4 rig ("The PMD4 DIO port A
+    connector must be connected to SC4 DIO port A", Nanonis help). A scan that set A-line 1 to an output and pulsed
+    it would be driving the coarse-motor controller's control lines. Refused,
+    never "confirmed" — no prompt can tell whether this rig's port A is free.
+    Every port the machine config reserves (``reserved_digital_ports``) is
+    refused as well, the same way the generic digital-line skills refuse it."""
+    if int(port) == 0:
+        return (tr("trigger_port=0（Port A）被拒绝：PMD4 机器上 Port A 是 PMD4 的控制口，"
+                "把它的线改成输出并打脉冲就是在拨粗动控制器的控制线。相机触发在 Port B"
+                "（trigger_port=1）。", "trigger_port=0 (Port A) is refused: on the PMD4 machine Port A is the control port of the PMD4, "
+"and turning its lines into outputs and pulsing them would be toggling the control lines of the coarse controller. The camera trigger is on Port B "
+"(trigger_port=1)."))
+    from mast.instruments.motor_groups import digital_port_refusal
+
+    return digital_port_refusal(port)
 
 
 # ── pure helpers (moved here as the single source; re-exported by callers) ──
@@ -87,6 +116,16 @@ def signal_names(record: NanonisCallRecord) -> list[str]:
         if isinstance(item, (list, tuple)):
             stack = list(item) + stack
     return []
+
+
+#: Units of the value columns whose unit is fixed. ``sig<N>_mean`` is a Nanonis
+#: signal slot whose unit depends on what is wired there — left out, not guessed.
+_COLUMN_UNITS = {"current_a": "A", "lockin_v": "V"}
+
+
+def value_units(columns) -> dict[str, str]:
+    """``{column: unit}`` for the LiveHub ``meta.units`` of a scan stream."""
+    return {c: _COLUMN_UNITS[c] for c in columns if c in _COLUMN_UNITS}
 
 
 def mean_std(values: list[float]) -> tuple[float, float]:
@@ -201,6 +240,9 @@ class PointAcquirer:
         if not self.trigger:
             return None
         port, line, _width = self.trigger
+        refusal = trigger_port_refusal(port)
+        if refusal:
+            return refusal
         rec = self._ctx.safe_call("DigLines_PropsSet", line, port, 1, 1)
         nanonis_calls.append(rec)
         return rec.error or None
@@ -220,7 +262,12 @@ class PointAcquirer:
         cur: list[float] = []
         li: list[float] = []
         extra: dict[int, list[float]] = {xi: [] for xi in self.extra_indices}
+        check_abort = getattr(self._ctx, "check_abort", None)
         for k in range(self.samples):
+            # Reads stay allowed after an abort, so without this a long average
+            # (samples × interval) ran to the end after the operator stopped.
+            if callable(check_abort) and check_abort():
+                raise MotionAborted(f"aborted after {k}/{self.samples} samples at this point")
             if k and self.interval_s > 0:
                 time.sleep(self.interval_s)
             if self.read_current:

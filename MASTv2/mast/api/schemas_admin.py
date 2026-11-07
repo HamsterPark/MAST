@@ -6,7 +6,7 @@ These are the typed contract for the write/admin surface that mirrors the live
 Gradio handlers (``gui/admin_panel.py``, ``gui/settings_store.py``,
 ``gui/route_auth.py``, ``admin/override_store.py``). The shapes are exported via
 ``/openapi.json`` and consumed by the frontend type generators; the SINGLE
-SOURCE OF TYPES rule (F4) means we re-use the core models verbatim where they
+SOURCE OF TYPES rule (F4) means we re-use the core models unchanged where they
 exist instead of forking a parallel copy that could drift.
 
 EVERY response carries a ``degraded`` boolean so a standalone API process (no
@@ -23,7 +23,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-# Re-use the core hardware-safety model verbatim (no parallel copy that drifts).
+# Re-use the core hardware-safety model directly (no parallel copy that drifts).
 from mast.config import SafetyLimits as SafetyLimits  # noqa: F401  (re-export)
 
 # The eight override categories the admin surface can edit. Mirrors the
@@ -164,7 +164,7 @@ class SensorEntry(BaseModel):
     unit: Optional[str] = None
     extra: dict[str, Any] = Field(
         default_factory=dict,
-        description="type-specific fields (address/channel/baudrate/alarm/...) passed through verbatim",
+        description="type-specific fields (address/channel/baudrate/alarm/...) passed through unchanged",
     )
 
 
@@ -403,7 +403,7 @@ class PromptSummary(BaseModel):
     """One inventory row — metadata only, no full body (the list stays small).
 
     ``availability`` is the honest bit:
-      * ``static``          — a constant; ``preview``/detail show it verbatim
+      * ``static``          — a constant; ``preview``/detail show it unchanged
       * ``live``            — rendered now from CURRENT persisted state (real)
       * ``needs_hardware``  — needs a Nanonis read; NOT rendered, reason given
       * ``needs_request``   — per-request only; NOT rendered, reason given

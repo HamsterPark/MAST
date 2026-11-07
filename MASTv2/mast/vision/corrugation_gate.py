@@ -2,12 +2,12 @@
 
 设计文档:``docs/v2/design/`` 的「S1 修针循环 conduct 化」设计,D1-D3 / D10 / §3.1
 (文件名按「S1 修针循环」检索;通用层注释不写样品名前缀 ——
-``stm_capability_vs_sample_layer.md`` 拍板④,由
+``stm_capability_vs_sample_layer.md`` 的约定④,由
 ``tests/v2/unit/test_no_sample_names_in_generic_layer.py`` 强制)。
 
 ## 它回答的问题,以及它**不**回答的那个
 
-跨点判据要求「表面起伏极大**且**换位置扫依旧」—— 这是一个**合取**。
+对坏针的判据是「表面起伏极大**且**换位置扫依旧」—— 这是一个**合取**。
 本模块只做前半句:这一帧的起伏比阈值大不大。后半句(是针还是表面)由
 :func:`mast.conduct.cross_check.aggregate_cross_points` 的跨点聚合回答。
 
@@ -24,8 +24,10 @@
 本模块**不自己去趋势、不自己取统计量** —— 同一个物理量的第二份实现迟早各自漂移,
 而且「同名不同预处理 = 不同的量」,阈值跨口径不可搬。
 
-当前使用 OLS + std 口径；其他去趋势或统计方法不能沿用未重新验证的阈值。
-:data:`DETREND` / :data:`STATISTIC` 随每个数字共同报告。将来选型跑完要换口径,换的是**阈值和口径一起换** ——
+⚠️ **目前只有一个口径(OLS + std)**,因为口径选型(设计 D10 的 2×2 候选:
+OLS/RANSAC × std/MAD)**尚未经实测检验**,而 D10 的立场是「只定候选集与选择
+程序,不预先定死口径」。所以 :data:`DETREND` / :data:`STATISTIC` 是两个**常量**,跟着每个
+数字一起报出去。将来选型跑完要换口径,换的是**阈值和口径一起换** ——
 一个 pm 数字离开 ``(detrend, statistic, ref_scan_nm)`` 三个声明就没有意义。
 
 ## 判定顺序不能换

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import io
+from mast.i18n import tr
 import logging
 import sys
 from dataclasses import dataclass, field
@@ -53,11 +54,11 @@ def capture(max_width: int = DEFAULT_MAX_WIDTH) -> Capture:
     """抓当前桌面。**绝不抛异常** —— 诊断工具坏掉不该变成 500。"""
     if not sys.platform.startswith("win"):
         return Capture(reason="unsupported_platform",
-                       detail=f"桌面截图目前只在 Windows 上实现（当前 {sys.platform}）")
+                       detail=tr(f"桌面截图目前只在 Windows 上实现（当前 {sys.platform}）", f"Desktop capture is only implemented on Windows for now (current: {sys.platform})"))
     try:
         from PIL import ImageGrab
     except Exception as exc:  # noqa: BLE001
-        return Capture(reason="no_pillow", detail=f"Pillow 不可用：{exc}")
+        return Capture(reason="no_pillow", detail=tr(f"Pillow 不可用：{exc}", f"Pillow unavailable: {exc}"))
 
     try:
         img = ImageGrab.grab(all_screens=True)
@@ -66,9 +67,11 @@ def capture(max_width: int = DEFAULT_MAX_WIDTH) -> Capture:
         # 是功能坏了。
         return Capture(
             reason="no_desktop",
-            detail=f"抓不到交互桌面：{exc}",
-            notes=["MAST 必须跑在用户登录的交互会话里（双击启动）才能截图；"
-                   "从 SSH 或以服务方式运行时抓不到桌面（session 0 隔离）。"])
+            detail=tr(f"抓不到交互桌面：{exc}", f"Cannot capture the interactive desktop: {exc}"),
+            notes=[tr("MAST 必须跑在用户登录的交互会话里（双击启动）才能截图；"
+                      "从 SSH 或以服务方式运行时抓不到桌面（session 0 隔离）。",
+                      "MAST must run in the logged-in user's interactive session (started by double-click) to take screenshots; "
+                      "run from SSH or as a service it cannot capture the desktop (session 0 isolation).")])
     except Exception as exc:  # noqa: BLE001
         return Capture(reason="error", detail=f"{type(exc).__name__}: {exc}")
 
@@ -77,8 +80,8 @@ def capture(max_width: int = DEFAULT_MAX_WIDTH) -> Capture:
         out.blank = _is_uniform(img)
         if out.blank:
             out.notes.append(
-                "整张截图只有一种颜色 —— 抓到了但内容是空的。常见于没有交互桌面"
-                "（此时分辨率往往报成 1024×768 这类默认值），而不是屏幕真的是空白。")
+                tr("整张截图只有一种颜色 —— 抓到了但内容是空的。常见于没有交互桌面"
+                "（此时分辨率往往报成 1024×768 这类默认值），而不是屏幕真的是空白。", "The whole screenshot is a single colour: it was captured but its content is empty. Common when there is no interactive desktop (the resolution is then often reported as a default such as 1024x768), rather than the screen really being blank."))
         if max_width and img.width > max_width:
             h = max(1, round(img.height * max_width / img.width))
             img = img.resize((max_width, h))
@@ -90,7 +93,7 @@ def capture(max_width: int = DEFAULT_MAX_WIDTH) -> Capture:
         # 把它算成失败会丢掉「分辨率是多少」这个诊断线索。
         out.ok = True
     except Exception as exc:  # noqa: BLE001
-        return Capture(reason="error", detail=f"编码失败：{type(exc).__name__}: {exc}",
+        return Capture(reason="error", detail=tr(f"编码失败：{type(exc).__name__}: {exc}", f"Encoding failed: {type(exc).__name__}: {exc}"),
                        raw_width=img.width, raw_height=img.height)
     finally:
         try:

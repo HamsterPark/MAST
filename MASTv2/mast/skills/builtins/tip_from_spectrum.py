@@ -46,6 +46,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.skills.base import BaseSkill
 from mast.skills.builtins.spectrum_assess import (
     _header_kind,
@@ -92,7 +93,7 @@ class AssessTipFromSpectrum(BaseSkill):
             version="1.0.0",
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
-            description=(
+            description=tr(
                 "从一条已保存的谱（.dat）判断针尖。只读，不碰硬件。这不是数据质量闸门 —— 那是 "
                 "AssessSpectrum，它回答的是「这条曲线值不值得留」。这里问的是「这根针尖好不好」："
                 "干净针尖的 I(z) 曲线是单一指数，其衰减给出 ~4-5 eV 的表观势垒；稳定针尖的 I(V) 光滑、"
@@ -101,53 +102,89 @@ class AssessTipFromSpectrum(BaseSkill):
                 "对那条判据只能给出 'unrated'，绝不给出坏结论；gated_criteria "
                 "说明实际是哪几条做的判决。I(z) 的势垒窗有物理依据，因此带默认值；I(V) "
                 "的形状分是无量纲的，出厂为 NONE。success=true 只表示这个文件读得出来；判断在 "
-                "data.verdict 里。"
+                "data.verdict 里。",
+                "Judge the tip from a saved spectrum (.dat). Read-only, touches no hardware. This is "
+                "not a data-quality gate -- that is AssessSpectrum, which answers \"is this curve "
+                "worth keeping\". This one asks \"is this tip any good\": a clean tip's I(z) curve "
+                "is a single exponential whose decay gives an apparent barrier of ~4-5 eV; a stable "
+                "tip's I(V) is smooth, spike-free and roughly antisymmetric. verdict is a closed "
+                "four-state set: tip_ok / tip_suspect / tip_bad / unrated -- \"cannot tell\" is "
+                "NEVER folded into 'tip_bad'. A threshold left empty is UNCALIBRATED and can only "
+                "yield 'unrated' for that criterion, never a bad verdict; gated_criteria lists "
+                "which criteria actually decided. The I(z) barrier window has a physical basis and "
+                "therefore ships with defaults; the I(V) shape scores are dimensionless and ship "
+                "as NONE. success=true only means the file could be read; the judgement is in "
+                "data.verdict.",
             ),
             parameters=[
                 ParameterSpec(name="dat_path", type="str",
-                              description="已保存的 .dat 谱文件路径。",
+                              description=tr("已保存的 .dat 谱文件路径。", "Path of the saved .dat spectrum file."),
                               required=True),
                 ParameterSpec(
                     name="kind", type="str",
-                    description=("auto / iv / iz。'auto' 从 DATA 本身判断（哪一列在被扫）；"
-                                 "文件头只用来交叉核对，因为文件头字段说的是软件最后被设成了什么。"),
+                    description=tr("auto / iv / iz。'auto' 从 DATA 本身判断（哪一列在被扫）；"
+                                   "文件头只用来交叉核对，因为文件头字段说的是软件最后被设成了什么。",
+                                   "auto / iv / iz. 'auto' decides from the DATA itself (which "
+                                   "column is being swept); the file header is only used as a "
+                                   "cross-check, because header fields record what the software "
+                                   "was last set to."),
                     required=False, default="auto",
                     allowed_values=["auto", "iv", "iz"]),
                 ParameterSpec(
                     name="min_fit_r2", type="float",
-                    description=("仅 I(z)。判定「一条干净的单指数」所需的对数-线性拟合质量下限。默认 "
-                                 "UNCALIBRATED —— 留空则这条判据只报一个数。"),
+                    description=tr("仅 I(z)。判定「一条干净的单指数」所需的对数-线性拟合质量下限。默认 "
+                                   "UNCALIBRATED —— 留空则这条判据只报一个数。",
+                                   "I(z) only. Lower bound on the log-linear fit quality required "
+                                   "to call a curve a clean single exponential. Default "
+                                   "UNCALIBRATED -- left empty, this criterion only reports a number."),
                     required=False, min_value=0.0, max_value=1.0),
                 ParameterSpec(
                     name="barrier_ev_min", type="float",
-                    description=("仅 I(z)。表观势垒窗的下沿。默认 "
-                                 f"{DEFAULT_BARRIER_EV_MIN} eV —— 这个默认值是 "
-                                 "PHYSICAL 的（干净金属功函数 4-5 eV），不是标定出来的。"
-                                 "设为 0 可关掉这条判据。"),
+                    description=tr("仅 I(z)。表观势垒窗的下沿。默认 "
+                                   f"{DEFAULT_BARRIER_EV_MIN} eV —— 这个默认值是 "
+                                   "PHYSICAL 的（干净金属功函数 4-5 eV），不是标定出来的。"
+                                   "设为 0 可关掉这条判据。",
+                                   "I(z) only. Lower edge of the apparent-barrier window. Default "
+                                   f"{DEFAULT_BARRIER_EV_MIN} eV -- this default is PHYSICAL "
+                                   "(clean-metal work function 4-5 eV), not calibrated. "
+                                   "Set to 0 to disable this criterion."),
                     required=False, default=DEFAULT_BARRIER_EV_MIN,
                     min_value=0.0, max_value=50.0),
                 ParameterSpec(
                     name="barrier_ev_max", type="float",
-                    description=("仅 I(z)。表观势垒窗的上沿。默认 "
-                                 f"{DEFAULT_BARRIER_EV_MAX} eV。"
-                                 "设为 0 可关掉这条判据。"),
+                    description=tr("仅 I(z)。表观势垒窗的上沿。默认 "
+                                   f"{DEFAULT_BARRIER_EV_MAX} eV。"
+                                   "设为 0 可关掉这条判据。",
+                                   "I(z) only. Upper edge of the apparent-barrier window. Default "
+                                   f"{DEFAULT_BARRIER_EV_MAX} eV. "
+                                   "Set to 0 to disable this criterion."),
                     required=False, default=DEFAULT_BARRIER_EV_MAX,
                     min_value=0.0, max_value=50.0),
                 ParameterSpec(
                     name="max_jumps", type="int",
-                    description=("允许出现多少次电流突跳（I(z) 看 n_jumps / I(V) 看 n_spikes）。"
-                                 "在斜坡中途跳变的针尖是不稳定的。默认 UNCALIBRATED。"),
+                    description=tr("允许出现多少次电流突跳（I(z) 看 n_jumps / I(V) 看 n_spikes）。"
+                                   "在斜坡中途跳变的针尖是不稳定的。默认 UNCALIBRATED。",
+                                   "How many current jumps are allowed (n_jumps for I(z) / "
+                                   "n_spikes for I(V)). A tip that jumps mid-ramp is unstable. "
+                                   "Default UNCALIBRATED."),
                     required=False, min_value=0, max_value=10000),
                 ParameterSpec(
                     name="min_smoothness", type="float",
-                    description=("仅 I(V)。无量纲形状分，取值在 [0,1]。UNCALIBRATED —— "
-                                 "这个量没有公开发表的数值，本台设备上也没测过，所以它是刻意留空的。"),
+                    description=tr("仅 I(V)。无量纲形状分，取值在 [0,1]。UNCALIBRATED —— "
+                                   "这个量没有公开发表的数值，本台设备上也没测过，所以它是刻意留空的。",
+                                   "I(V) only. Dimensionless shape score in [0,1]. UNCALIBRATED -- "
+                                   "there is no published value for this quantity and it has not "
+                                   "been measured on this instrument, so it is deliberately left empty."),
                     required=False, min_value=0.0, max_value=1.0),
                 ParameterSpec(
                     name="min_symmetry", type="float",
-                    description=("仅 I(V)。无量纲反对称性分，取值在 [0,1]。UNCALIBRATED —— "
-                                 "出厂留空。NOTE 有能隙或不对称的衬底会让一根 GOOD 针尖看起来不对称，"
-                                 "所以在不知道衬底的情况下拿它否决，会把好针尖判成坏的。"),
+                    description=tr("仅 I(V)。无量纲反对称性分，取值在 [0,1]。UNCALIBRATED —— "
+                                   "出厂留空。NOTE 有能隙或不对称的衬底会让一根 GOOD 针尖看起来不对称，"
+                                   "所以在不知道衬底的情况下拿它否决，会把好针尖判成坏的。",
+                                   "I(V) only. Dimensionless antisymmetry score in [0,1]. "
+                                   "UNCALIBRATED -- ships empty. NOTE a gapped or asymmetric "
+                                   "substrate can make a GOOD tip look asymmetric, so vetoing on it "
+                                   "without knowing the substrate would turn good tips into bad ones."),
                     required=False, min_value=0.0, max_value=1.0),
             ],
             tags=("analysis", "tip", "spectroscopy", "readonly"),
@@ -160,7 +197,7 @@ class AssessTipFromSpectrum(BaseSkill):
         path = str(params["dat_path"])
         if not Path(path).exists():
             return SkillResult(skill_name=name, success=False,
-                               error=f"文件不存在: {path}")
+                               error=tr(f"文件不存在: {path}", f"File does not exist: {path}"))
 
         try:
             import numpy as np
@@ -169,19 +206,19 @@ class AssessTipFromSpectrum(BaseSkill):
             from mast.vision.spectroscopy import assess_iv, assess_iz
         except ImportError as exc:
             return SkillResult(skill_name=name, success=False,
-                               error=f"缺依赖: {exc}")
+                               error=tr(f"缺依赖: {exc}", f"Missing dependency: {exc}"))
 
         try:
             dat = read_dat(path)
         except Exception as exc:  # noqa: BLE001
             return SkillResult(skill_name=name, success=False,
-                               error=f".dat 读取失败: {exc}")
+                               error=tr(f".dat 读取失败: {exc}", f"Failed to read .dat: {exc}"))
 
         columns = dat.get("columns") or {}
         header = dat.get("header") or {}
         if not columns:
             return SkillResult(skill_name=name, success=False,
-                               error=".dat 里没有 [DATA] 段")
+                               error=tr(".dat 里没有 [DATA] 段", "No [DATA] section in the .dat"))
 
         names = list(columns.keys())
         cur_name = _pick_directional(names, _CURRENT_PATTERNS, backward=False)
@@ -217,7 +254,8 @@ class AssessTipFromSpectrum(BaseSkill):
         notes: list[str] = []
         if header_kind and kind and header_kind != kind:
             # 不拦，只说：两个来源不一致本身是一条值得看见的信息。
-            notes.append(f"header_says={header_raw!r}，而数据看起来是 {kind}")
+            notes.append(tr(f"header_says={header_raw!r}，而数据看起来是 {kind}",
+                            f"header_says={header_raw!r}, but the data looks like {kind}"))
 
         max_jumps = params.get("max_jumps")
 
@@ -253,15 +291,19 @@ class AssessTipFromSpectrum(BaseSkill):
             if b_min and b_max and float(b_max) > float(b_min):
                 if res.barrier_ev is None:
                     # 拟合不出势垒 ⇒ 这一条判不了，**不是**「势垒不对」。
-                    notes.append("barrier_ev 拟合不出来 —— 这一条没参与判决")
+                    notes.append(tr("barrier_ev 拟合不出来 —— 这一条没参与判决",
+                                    "barrier_ev could not be fitted -- this criterion did not take part in the verdict"))
                 elif not res.is_clean_exponential:
                     # ⚠️ 这一支是一条真机纪律：**在一条不是指数的曲线上，
                     # 「指数拟合的斜率」没有物理意义**。纯噪声照样能 polyfit 出
                     # 一个斜率，于是也照样能换算出一个「势垒」——那个数不是读数，
                     # 是拟合的副产物。拿它去判针尖，就是在自己刚造出来的数上做
                     # 判决。曲线的问题已经由上面那条 clean_exponential 说了。
-                    notes.append("拟合站不住（不是单指数），势垒值没有物理意义 —— "
-                                 "这一条没参与判决")
+                    notes.append(tr("拟合站不住（不是单指数），势垒值没有物理意义 —— "
+                                    "这一条没参与判决",
+                                    "The fit does not hold (not a single exponential), so the barrier "
+                                    "value has no physical meaning -- this criterion did not take "
+                                    "part in the verdict"))
                 else:
                     gated.append("barrier_ev")
                     if not (float(b_min) <= float(res.barrier_ev) <= float(b_max)):
@@ -302,8 +344,10 @@ class AssessTipFromSpectrum(BaseSkill):
                 gated.append("symmetry")
                 if float(res.symmetry) < float(min_sym):
                     flags.append("symmetry_below_min")
-                notes.append("symmetry 参与了判决 —— 注意带隙/不对称衬底会让"
-                             "一根好针看起来不对称")
+                notes.append(tr("symmetry 参与了判决 —— 注意带隙/不对称衬底会让"
+                                "一根好针看起来不对称",
+                                "symmetry took part in the verdict -- note that a gapped or "
+                                "asymmetric substrate can make a good tip look asymmetric"))
 
         verdict = _to_verdict(flags, gated)
         return SkillResult(

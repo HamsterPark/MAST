@@ -1,22 +1,21 @@
 """Operator verdict → LangGraph HITL Decision translation.
 
-WHY THIS MODULE EXISTS (the rig)
+WHY THIS MODULE EXISTS
 -----------------------------------------------------------
 This logic used to live as ``MASTApp._build_decision`` in ``mast/gui/app.py``.
-Commit ``7aa1996`` ("全量转向 TypeScript SPA，彻底删除 Gradio", 2026-06-21)
-deleted that file **without migrating these functions**, while
+The rewrite to a TypeScript SPA (removing Gradio) deleted that file **without migrating these functions**, while
 ``api/routes/agents_control.py`` kept reaching for them via
 ``getattr(app, "_build_decision", None)``. ``CoreRuntime`` never had them, so
 that lookup returned ``None`` on every single call and the endpoint answered::
 
     {"status": "degraded", "detail": "live decision builder unavailable"}
 
-Consequence: for ~5 weeks **no human approval could be granted at all** — not
+Consequence: **no human approval could be granted at all** — not
 DANGEROUS-skill gates, not workflow human nodes, and not ``buffer_hitl`` for
 CRITICAL hardware events (tip_quality_drop / E_STOP / retract_needed). The
 operator's click reached the backend and got a well-formed reply; it just never
 woke the blocked worker. The run stayed stuck, which in turn kept a stream
-worker pinned and made the whole group chat look "blocked" ().
+worker pinned and made the whole group chat look "blocked".
 
 The unit tests did not catch it because the fake app in
 ``tests/v2/unit/api/test_agents_control.py`` **defined its own**
@@ -30,6 +29,8 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +167,8 @@ def build_workflow_route(verdict: str, routes: list | None,
     target = (verdict or "").strip().lower()
     match = next((r for r in opts if r.lower() == target), None)
     if opts and match is None:
-        return None, f"route {verdict!r} 不在选项 {opts} 内"
+        return None, tr(f"route {verdict!r} 不在选项 {opts} 内",
+                        f"route {verdict!r} is not one of the options {opts}")
     return {"route": match or (verdict or "resolved"), "note": note or ""}, None
 
 
@@ -191,13 +193,17 @@ def build_ask_answer(selected: list | None, custom_text: str | None,
     txt = (custom_text or "").strip()
     unknown = [s for s in sel if s not in labels]
     if unknown:
-        return None, f"选项 {unknown} 不在这个问题给出的选项内"
+        return None, tr(f"选项 {unknown} 不在这个问题给出的选项内",
+                        f"Options {unknown} are not among the options given for this question")
     if not meta.get("multi_select", False) and len(sel) > 1:
-        return None, "这个问题是单选，只能选择一项"
+        return None, tr("这个问题是单选，只能选择一项",
+                        "This question is single-choice; select only one option")
     if txt and not meta.get("allow_custom", True):
-        return None, "这个问题不接受自定义回答，请从给出的选项中选择"
+        return None, tr("这个问题不接受自定义回答，请从给出的选项中选择",
+                        "This question does not accept a custom answer; choose from the given options")
     if not sel and not txt:
-        return None, "回答为空：请至少选择一项，或填写自定义回答"
+        return None, tr("回答为空：请至少选择一项，或填写自定义回答",
+                        "The answer is empty: select at least one option or enter a custom answer")
     return {"selected": sel, "custom_text": txt, "note": note or ""}, None
 
 

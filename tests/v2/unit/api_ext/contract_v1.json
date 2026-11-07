@@ -20,6 +20,10 @@
   ],
   [
    "GET",
+   "/data/search"
+  ],
+  [
+   "GET",
    "/guide"
   ],
   [
@@ -101,6 +105,118 @@
   [
    "POST",
    "/skills/proposals"
+  ],
+  [
+   "DELETE",
+   "/detectors/{detector_id}"
+  ],
+  [
+   "GET",
+   "/detectors"
+  ],
+  [
+   "GET",
+   "/detectors/{detector_id}"
+  ],
+  [
+   "GET",
+   "/runner"
+  ],
+  [
+   "GET",
+   "/runner/{run_id}"
+  ],
+  [
+   "GET",
+   "/vista/acts/{job_id}"
+  ],
+  [
+   "GET",
+   "/vista/history"
+  ],
+  [
+   "GET",
+   "/vista/notes/{which}"
+  ],
+  [
+   "GET",
+   "/vista/status"
+  ],
+  [
+   "POST",
+   "/detectors"
+  ],
+  [
+   "POST",
+   "/detectors/{detector_id}/enable"
+  ],
+  [
+   "POST",
+   "/detectors/{detector_id}/test"
+  ],
+  [
+   "POST",
+   "/literature/search"
+  ],
+  [
+   "POST",
+   "/runner/start"
+  ],
+  [
+   "POST",
+   "/runner/{run_id}/hook"
+  ],
+  [
+   "POST",
+   "/runner/{run_id}/stop"
+  ],
+  [
+   "POST",
+   "/vista/act"
+  ],
+  [
+   "POST",
+   "/vista/hello"
+  ],
+  [
+   "POST",
+   "/vista/inspect"
+  ],
+  [
+   "POST",
+   "/vista/measure/{tool}"
+  ],
+  [
+   "POST",
+   "/vista/observe"
+  ],
+  [
+   "POST",
+   "/vista/read_values"
+  ],
+  [
+   "POST",
+   "/wait"
+  ],
+  [
+   "PUT",
+   "/vista/notes/{which}"
+  ],
+  [
+   "GET",
+   "/optical-layouts"
+  ],
+  [
+   "GET",
+   "/optical-layouts/{layout_id}"
+  ],
+  [
+   "GET",
+   "/optical-layouts/{layout_id}/render.png"
+  ],
+  [
+   "POST",
+   "/optical-layouts/{layout_id}/comments"
   ]
  ],
  "schemas": {
@@ -126,6 +242,10 @@
    "request_id",
    "skill"
   ],
+  "LayoutCommentBody": [
+   "component_id",
+   "text"
+  ],
   "NoteBody": [
    "content",
    "kind",
@@ -139,8 +259,16 @@
    "rationale"
   ],
   "RequestBody": [
+   "attest_slots",
    "kind",
-   "message"
+   "message",
+   "number_max",
+   "number_min",
+   "options",
+   "severity",
+   "timeout_s",
+   "title",
+   "unit"
   ],
   "ScopeBody": [
    "experiment",
@@ -154,6 +282,72 @@
    "id",
    "name",
    "sample_type"
+  ],
+  "ActBody": [
+   "action",
+   "after",
+   "client_meta",
+   "note",
+   "params",
+   "request_id",
+   "skill",
+   "skill_params",
+   "wait_s"
+  ],
+  "DetectorCreate": [
+   "applies_to",
+   "code",
+   "description",
+   "max_runtime_s",
+   "name"
+  ],
+  "DetectorEnable": [
+   "enabled"
+  ],
+  "DetectorTestBody": [
+   "frame"
+  ],
+  "LiteratureSearchBody": [
+   "k",
+   "library_id",
+   "material",
+   "query"
+  ],
+  "MetaBody": [
+   "client_meta"
+  ],
+  "NotesBody": [
+   "client_meta",
+   "content"
+  ],
+  "RunnerHook": [
+   "event",
+   "payload"
+  ],
+  "RunnerStart": [
+   "base_url",
+   "client",
+   "compact_pct",
+   "compact_window_tokens",
+   "effort",
+   "image_limit_per_session",
+   "image_reserve",
+   "max_budget_usd",
+   "max_recoveries",
+   "max_segments",
+   "model",
+   "preflight",
+   "stall_turns",
+   "task",
+   "turn_timeout_s"
+  ],
+  "RunnerStop": [
+   "reason"
+  ],
+  "WaitBody": [
+   "conditions",
+   "since",
+   "timeout_s"
   ]
  }
 }

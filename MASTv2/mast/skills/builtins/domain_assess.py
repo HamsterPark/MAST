@@ -45,6 +45,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -52,29 +53,37 @@ logger = logging.getLogger(__name__)
 #: 「判不了」不给下一步等于死路,而且每一条的下一步都不一样 —— 尤其
 #: ``scale_gate``(换更小的视野)与 ``too_few_periods``(换**更大**的视野)是相反的。
 NEXT_STEP: dict[str, str] = {
-    "unknown_pixel_size": "帧的几何信息缺失,补 header/扫描范围来源再判。",
-    "scale_gate": "这一帧太粗,分辨不了晶格 —— 换更小的视野或更多像素。"
-                  "这不等于「这里没有畴」。",
-    "scale_reduced": "落在过渡带,测量本身是降级的 —— 换更小的视野,"
-                     "或显式接受过渡带(allow_reduced_scale)。",
-    "too_few_periods": "帧里的晶格周期太少,判据静默失效 —— 换**更大**的视野"
-                       "(注意与 scale_gate 的方向相反)。",
-    "insufficient_data": "这一帧不是一张可用的二维图。",
-    "resampled_input": "输入被重采样过 —— 拿原生采集帧来(尺度门在重采样帧上等于没有)。",
-    "unknown_frame_angle": "帧角读不到 —— 补角度来源。**不按 0° 处理**:"
-                           "那会让同一个畴在两种帧角下报成两个畴。",
-    "no_atomic_phase": "这一帧根本没有原子分辨 —— 换点或修针。**不是新畴**。",
-    "no_peaks": "原子周期带里没有可用谱峰 —— 换点或修针。",
-    "slow_axis_degenerate": "主峰落在慢轴缺口里,而不做行对齐时它不存在 —— "
-                            "把扫描框转 ~30° 重扫一张再判。",
-    "shear_suspect": "径向周期与快扫方向的周期对不上 —— 降扫描速度/等漂移稳再扫。",
-    "no_reference": "还没有标定过的参照系 —— 先采一批指纹、聚类、人确认,"
-                    "固化成 config/domain_references/*.json。这是正常流程的第一步。",
-    "reference_unusable": "参照系里没有可比的原型 —— 检查那个 JSON。",
-    "ambiguous_match": "到每个原型的距离都差不多,而且哪个的峰都不全在 —— "
-                       "同点重采一帧,仍不可判就换个偏移点。",
-    "no_match": "指纹像谁都不像(可能是第三个畴)—— **这是证据矛盾,交给人看**,"
-                "不要自动加一簇。",
+    "unknown_pixel_size": tr("帧的几何信息缺失,补 header/扫描范围来源再判。", "Frame geometry is missing; supply the header / scan-range source and judge again."),
+    "scale_gate": tr("这一帧太粗,分辨不了晶格 —— 换更小的视野或更多像素。"
+                  "这不等于「这里没有畴」。", "This frame is too coarse to resolve the lattice: use a smaller field of view or more pixels. "
+"That does not mean \"there is no domain here\"."),
+    "scale_reduced": tr("落在过渡带,测量本身是降级的 —— 换更小的视野,"
+                     "或显式接受过渡带(allow_reduced_scale)。", "In the transition band, so the measurement itself is degraded: use a smaller field of view, "
+"or explicitly accept the transition band (allow_reduced_scale)."),
+    "too_few_periods": tr("帧里的晶格周期太少,判据静默失效 —— 换**更大**的视野"
+                       "(注意与 scale_gate 的方向相反)。", "Too few lattice periods in the frame, so the criterion silently fails: use a **larger** field of view "
+"(note this is the opposite direction to scale_gate)."),
+    "insufficient_data": tr("这一帧不是一张可用的二维图。", "This frame is not a usable 2D image."),
+    "resampled_input": tr("输入被重采样过 —— 拿原生采集帧来(尺度门在重采样帧上等于没有)。", "The input was resampled: use the natively acquired frame (the scale gate is meaningless on a resampled frame)."),
+    "unknown_frame_angle": tr("帧角读不到 —— 补角度来源。**不按 0° 处理**:"
+                           "那会让同一个畴在两种帧角下报成两个畴。", "The frame angle cannot be read: supply an angle source. **Do not treat it as 0 deg**: "
+"that would report the same domain as two domains under two frame angles."),
+    "no_atomic_phase": tr("这一帧根本没有原子分辨 —— 换点或修针。**不是新畴**。", "This frame has no atomic resolution at all: move to another spot or recondition the tip. **It is not a new domain**."),
+    "no_peaks": tr("原子周期带里没有可用谱峰 —— 换点或修针。", "No usable spectral peak in the atomic-period band: move to another spot or recondition the tip."),
+    "slow_axis_degenerate": tr("主峰落在慢轴缺口里,而不做行对齐时它不存在 —— "
+                            "把扫描框转 ~30° 重扫一张再判。", "The main peak falls in the slow-axis gap and would not exist without row alignment: "
+"rotate the scan frame by ~30 deg, rescan, and judge again."),
+    "shear_suspect": tr("径向周期与快扫方向的周期对不上 —— 降扫描速度/等漂移稳再扫。", "The radial period does not match the fast-scan-direction period: lower the scan speed / wait for drift to settle and rescan."),
+    "no_reference": tr("还没有标定过的参照系 —— 先采一批指纹、聚类、人确认,"
+                    "固化成 config/domain_references/*.json。这是正常流程的第一步。", "No calibrated reference frame yet: first collect a batch of fingerprints, cluster them, have a person confirm, "
+"and freeze them into config/domain_references/*.json. This is the normal first step."),
+    "reference_unusable": tr("参照系里没有可比的原型 —— 检查那个 JSON。", "No comparable prototype in the reference frame: check that JSON."),
+    "ambiguous_match": tr("到每个原型的距离都差不多,而且哪个的峰都不全在 —— "
+                       "同点重采一帧,仍不可判就换个偏移点。", "The distances to every prototype are similar and no prototype has all its peaks: "
+"resample a frame at the same spot; if it is still undecidable, move to another offset point."),
+    "no_match": tr("指纹像谁都不像(可能是第三个畴)—— **这是证据矛盾,交给人看**,"
+                "不要自动加一簇。", "The fingerprint resembles none of them (possibly a third domain). **The evidence conflicts; hand it to a person**; "
+"do not add a cluster automatically."),
 }
 
 
@@ -88,7 +97,7 @@ class AssessDomainPhase(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "认出一帧已保存的 .sxm 显示的是**哪一个**原子相 / 畴 —— 面向多畴、"
+                tr("认出一帧已保存的 .sxm 显示的是**哪一个**原子相 / 畴 —— 面向多畴、"
                 "孪晶或多相晶体。只读文件,不碰硬件。它抽出一张**方向-周期**峰表"
                 "(也就是指纹),再拿它去比对 config/domain_references/*.json 里"
                 "**经用户确认过**的原型。**没有**这样一个参照系文件时,它返回 "
@@ -97,34 +106,47 @@ class AssessDomainPhase(BaseSkill):
                 "verdict='mixed' 表示两个畴的峰**都在**,也就是有一道畴界正穿过"
                 "**这一帧** —— 找畴界的时候,这是最有价值的信号。帧角读不出来的帧"
                 "一律拒判(绝不按 0 deg 处理);比 0.05 nm/px 还粗的帧宁可拒绝判定,"
-                "也不报「没有」。"
+                "也不报「没有」。", "Identify which atomic phase / domain a saved .sxm frame shows, for multi-domain, "
+"twinned or multi-phase crystals. Reads the file only and never touches hardware. It extracts a "
+"**direction-period** peak table (the fingerprint) and compares it with the "
+"**user-confirmed** prototypes in config/domain_references/*.json. With **no** such reference file "
+"it returns verdict='undetermined', reason='no_reference', plus the fingerprint itself -- "
+"this is the correct first output, not a failure: code must never invent \"this is phase A\" on its own. "
+"verdict='mixed' means the peaks of both domains are **present**, i.e. a domain boundary crosses "
+"**this frame** -- when hunting for domain boundaries this is the most valuable signal. A frame whose "
+"angle cannot be read is always refused (never treated as 0 deg); a frame coarser than 0.05 nm/px is "
+"refused rather than reported as \"none\".")
             ),
             parameters=[
                 ParameterSpec(name="scan_path", type="str",
-                              description=".sxm 帧的路径(要原子分辨的那种)。",
+                              description=tr(".sxm 帧的路径(要原子分辨的那种)。", "Path of the .sxm frame (one with atomic resolution)."),
                               required=True),
                 ParameterSpec(name="channel", type="str",
-                              description="形貌通道('Z' 是标准选择)。",
+                              description=tr("形貌通道('Z' 是标准选择)。", "Topography channel ('Z' is the standard choice)."),
                               required=False, default="Z"),
                 ParameterSpec(
                     name="reference_version", type="str",
-                    description=("畴参照系的版本(例如 'v001')。留空就取最新的"
-                                 "那一版。不存在的版本一律拒绝,绝不悄悄换成别的。"),
+                    description=(tr("畴参照系的版本(例如 'v001')。留空就取最新的"
+                                 "那一版。不存在的版本一律拒绝,绝不悄悄换成别的。", "Version of the domain reference frame (e.g. 'v001'). Leave empty to take the latest one. "
+"A version that does not exist is always rejected, never silently replaced by another.")),
                     required=False, default=""),
                 ParameterSpec(
                     name="sample", type="str",
-                    description=("样品名。只有当多个样品的参照系并存时才需要"
-                                 "(那种情况下它宁可拒绝,也不去猜)。"),
+                    description=(tr("样品名。只有当多个样品的参照系并存时才需要"
+                                 "(那种情况下它宁可拒绝,也不去猜)。", "Sample name. Only needed when reference frames of several samples coexist "
+"(in that case it refuses rather than guesses).")),
                     required=False, default=""),
                 ParameterSpec(
                     name="max_peaks", type="int",
-                    description=("保留几个方向-周期峰。六方晶格给出 3 个不同"
-                                 "方向(mod 180),矩形晶格是 2 个。"),
+                    description=(tr("保留几个方向-周期峰。六方晶格给出 3 个不同"
+                                 "方向(mod 180),矩形晶格是 2 个。", "How many direction-period peaks to keep. A hexagonal lattice gives 3 distinct "
+"directions (mod 180), a rectangular lattice 2.")),
                     required=False, default=6, min_value=1, max_value=24),
                 ParameterSpec(
                     name="allow_reduced_scale", type="bool",
-                    description=("接受 0.02-0.05 nm/px 这条过渡带。"
-                                 "在那里,测量本身就是降级的。"),
+                    description=(tr("接受 0.02-0.05 nm/px 这条过渡带。"
+                                 "在那里,测量本身就是降级的。", "Accept the 0.02-0.05 nm/px transition band. "
+"There the measurement itself is degraded.")),
                     required=False, default=False),
             ],
             estimated_duration_s=4.0,
@@ -140,7 +162,7 @@ class AssessDomainPhase(BaseSkill):
         channel_name = params.get("channel") or "Z"
         if not Path(path).exists():
             return SkillResult(skill_name=name, success=False,
-                               error=f"文件不存在: {path}")
+                               error=tr(f"文件不存在: {path}", f"File does not exist: {path}"))
 
         try:
             import numpy as np
@@ -150,26 +172,26 @@ class AssessDomainPhase(BaseSkill):
             from mast.vision.domain_phase import classify, extract_fingerprint
             from mast.vision.domain_reference import load_reference
         except ImportError as exc:
-            return SkillResult(skill_name=name, success=False, error=f"缺依赖: {exc}")
+            return SkillResult(skill_name=name, success=False, error=tr(f"缺依赖: {exc}", f"Missing dependency: {exc}"))
 
         try:
             scan = read_sxm(path)
         except Exception as exc:  # noqa: BLE001
             return SkillResult(skill_name=name, success=False,
-                               error=f".sxm 读取失败: {exc}")
+                               error=tr(f".sxm 读取失败: {exc}", f"Failed to read .sxm: {exc}"))
 
         channels = scan.get("channels", {}) or {}
         ch = channels.get(channel_name) or next(iter(channels.values()), None)
         if ch is None:
             return SkillResult(
                 skill_name=name, success=False,
-                error=f"文件里没有可用通道(要的是 {channel_name!r})")
+                error=tr(f"文件里没有可用通道(要的是 {channel_name!r})", f"No usable channel in the file (wanted {channel_name!r})"))
         arr = ch.get("forward")
         if arr is None:
             arr = ch.get("backward")
         if arr is None:
             return SkillResult(skill_name=name, success=False,
-                               error="通道里没有正扫/反扫数据")
+                               error=tr("通道里没有正扫/反扫数据", "No forward/backward scan data in the channel"))
         arr = np.asarray(arr, dtype=np.float64)
 
         # 像素尺度与帧角:两个都从 header 来。**帧角读不到就是 None**,
@@ -235,23 +257,27 @@ class AssessDomainPhase(BaseSkill):
 
         if verdict.verdict == "mixed":
             summary = (
-                f"两个畴的峰**都在这一帧里**(覆盖率 "
+                tr(f"两个畴的峰**都在这一帧里**(覆盖率 "
                 f"{', '.join(f'{k} {v:.0%}' for k, v in verdict.coverage.items())})"
-                f" —— 畴界就在这一帧的视野内。")
+                f" —— 畴界就在这一帧的视野内。", f"Peaks of both domains are **in this frame** (coverage "
+f"{', '.join(f'{k} {v:.0%}' for k, v in verdict.coverage.items())})"
+f" -- the domain boundary lies within the field of view of this frame."))
         elif verdict.verdict == "undetermined":
             why = verdict.reason or "unknown"
-            summary = f"判不了({why})。{NEXT_STEP.get(why, '')}".strip()
+            summary = tr(f"判不了({why})。{NEXT_STEP.get(why, '')}", f"Cannot judge ({why}). {NEXT_STEP.get(why, '')}").strip()
             if fp.n_peaks:
-                summary += (f" 指纹照报:{fp.n_peaks} 个方向-周期峰"
-                            + (f",样品系 "
-                               f"{', '.join(f'{p.k_angle_sample_deg:.1f}°/{p.period_nm:.3f}nm' for p in fp.peaks)}"
-                               if fp.scan_angle_deg is not None else "(帧角未知,不可比)")
-                            + "。")
+                summary += (tr(f" 指纹照报:{fp.n_peaks} 个方向-周期峰", f" Fingerprint as measured: {fp.n_peaks} direction-period peaks")
+                            + (tr(f",样品系 "
+                               f"{', '.join(f'{p.k_angle_sample_deg:.1f}°/{p.period_nm:.3f}nm' for p in fp.peaks)}", f", sample frame "
+f"{', '.join(f'{p.k_angle_sample_deg:.1f}°/{p.period_nm:.3f}nm' for p in fp.peaks)}")
+                               if fp.scan_angle_deg is not None else tr("(帧角未知,不可比)", "(frame angle unknown, not comparable)"))
+                            + tr("。", "."))
         else:
-            summary = (f"畴 {verdict.label}(距离 {verdict.distances[verdict.label]:.4f}"
-                       f" ≤ 容差,与次近拉开 {verdict.margin:.4f})。")
+            summary = (tr(f"畴 {verdict.label}(距离 {verdict.distances[verdict.label]:.4f}"
+                       f" ≤ 容差,与次近拉开 {verdict.margin:.4f})。", f"Domain {verdict.label} (distance {verdict.distances[verdict.label]:.4f}"
+f" <= tolerance, margin to the runner-up {verdict.margin:.4f})."))
         if fp.warnings:
-            summary += f" 警告:{', '.join(fp.warnings)}。"
+            summary += tr(f" 警告:{', '.join(fp.warnings)}。", f" Warning: {', '.join(fp.warnings)}.")
 
         return SkillResult(skill_name=name, success=True, data=data, summary=summary)
 

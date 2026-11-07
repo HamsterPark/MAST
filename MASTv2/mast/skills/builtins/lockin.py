@@ -19,6 +19,7 @@ from mast.core.types import (
 )
 from mast.io.nanonis_files import decode_reply, scalar_int_from_reply
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 
 def _extract(parsed, index: int = 0, default=None):
@@ -43,12 +44,12 @@ class ConfigureLockIn(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="配置 lock-in 放大器调制的开/关与各项参数。",
+            description=tr("配置 lock-in 放大器调制的开/关与各项参数。", "Configure the on/off state and parameters of the lock-in amplifier modulation."),
             parameters=[
                 ParameterSpec(
                     name="mod_on",
                     type="bool",
-                    description="启用或禁用调制",
+                    description=tr("启用或禁用调制", "Enable or disable the modulation"),
                     required=True,
                 ),
                 # 可选参数不声明默认值，避免模型把 schema 中的默认建议变成显式写入。
@@ -58,8 +59,9 @@ class ConfigureLockIn(BaseSkill):
                 ParameterSpec(
                     name="amplitude_v",
                     type="float",
-                    description=("调制幅度，单位伏特。省略 = 幅度保持原样。显式写 0 依然有效，"
-                                 "而且依然表示 0 V —— 正因如此，本参数绝不能对外声称默认值是 0。"),
+                    description=(tr("调制幅度，单位伏特。省略 = 幅度保持原样。显式写 0 依然有效，"
+                                 "而且依然表示 0 V —— 正因如此，本参数绝不能对外声称默认值是 0。", "Modulation amplitude, in volts. Omitted = amplitude left as is. An explicit 0 is still valid "
+"and still means 0 V -- which is exactly why this parameter must never claim to default to 0 externally.")),
                     unit="V",
                     required=False,
                     min_value=0.0,
@@ -68,7 +70,7 @@ class ConfigureLockIn(BaseSkill):
                 ParameterSpec(
                     name="frequency_hz",
                     type="float",
-                    description=("调制频率，单位 Hz。省略 = 频率保持原样。"),
+                    description=(tr("调制频率，单位 Hz。省略 = 频率保持原样。", "Modulation frequency, in Hz. Omitted = frequency left as is.")),
                     unit="Hz",
                     required=False,
                     min_value=0.0,
@@ -79,8 +81,15 @@ class ConfigureLockIn(BaseSkill):
                     # No default: omit phase unless the caller explicitly requests a write.
                     # Modulator phase may be unsupported by a device; demodulator reference phase
                     # is a separate setting exposed by ConfigureLockInDemod.
-                    description=("调制相位，单位度。只有明确要修改时才提供；省略表示不写调制侧相位。设备未必支持此字段；若要修改解调参考相位，请使用 ConfigureLockInDemod。"
-                                 ),
+                    description=(tr("调制相位，单位度。**除非你明确就是要改相位，否则请省略本参数。** "
+                                 "在某些设备上，调制器根本没有相位字段，"
+                                 "这次写入会被无条件拒绝 —— 你想要的相位几乎一定是 DEMODULATOR 的 "
+                                 "Ref. Phase（ConfigureLockInDemod）。省略 = "
+                                 "完全不写调制器的相位寄存器。", "Modulation phase, in degrees. **Omit this parameter unless you explicitly mean to change the phase.** "
+"On some devices the modulator has no phase field at all, "
+"and this write is unconditionally rejected -- the phase you want is almost certainly the DEMODULATOR's "
+"Ref. Phase (ConfigureLockInDemod). Omitted = "
+"the modulator's phase register is not written at all.")),
                     unit="deg",
                     required=False,
                     min_value=-360.0,
@@ -181,12 +190,12 @@ class ConfigureLockInDemod(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="配置 lock-in 解调器：信号、谐波、滤波器、相位。",
+            description=tr("配置 lock-in 解调器：信号、谐波、滤波器、相位。", "Configure the lock-in demodulator: signal, harmonic, filters, phase."),
             parameters=[
                 ParameterSpec(
                     name="demodulator",
                     type="int",
-                    description="解调器编号（从 1 开始）",
+                    description=tr("解调器编号（从 1 开始）", "Demodulator number (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -194,7 +203,7 @@ class ConfigureLockInDemod(BaseSkill):
                 ParameterSpec(
                     name="signal_index",
                     type="int",
-                    description="解调信号索引（0-127）",
+                    description=tr("解调信号索引（0-127）", "Demodulated signal index (0-127)"),
                     required=False,
                     min_value=0,
                     max_value=127,
@@ -202,14 +211,14 @@ class ConfigureLockInDemod(BaseSkill):
                 ParameterSpec(
                     name="harmonic",
                     type="int",
-                    description="谐波次数（1=基频）",
+                    description=tr("谐波次数（1=基频）", "Harmonic order (1 = fundamental)"),
                     required=False,
                     min_value=1,
                 ),
                 ParameterSpec(
                     name="lp_order",
                     type="int",
-                    description="低通滤波器阶数（-1=不改，0=关，1-8）",
+                    description=tr("低通滤波器阶数（-1=不改，0=关，1-8）", "Low-pass filter order (-1 = unchanged, 0 = off, 1-8)"),
                     required=False,
                     min_value=-1,
                     max_value=8,
@@ -217,7 +226,7 @@ class ConfigureLockInDemod(BaseSkill):
                 ParameterSpec(
                     name="lp_cutoff_hz",
                     type="float",
-                    description="低通滤波器截止频率（0=不改）",
+                    description=tr("低通滤波器截止频率（0=不改）", "Low-pass filter cutoff frequency (0 = unchanged)"),
                     unit="Hz",
                     required=False,
                     min_value=0.0,
@@ -225,7 +234,7 @@ class ConfigureLockInDemod(BaseSkill):
                 ParameterSpec(
                     name="hp_order",
                     type="int",
-                    description="高通滤波器阶数（-1=不改，0=关，1-8）",
+                    description=tr("高通滤波器阶数（-1=不改，0=关，1-8）", "High-pass filter order (-1 = unchanged, 0 = off, 1-8)"),
                     required=False,
                     min_value=-1,
                     max_value=8,
@@ -233,7 +242,7 @@ class ConfigureLockInDemod(BaseSkill):
                 ParameterSpec(
                     name="hp_cutoff_hz",
                     type="float",
-                    description="高通滤波器截止频率（0=不改）",
+                    description=tr("高通滤波器截止频率（0=不改）", "High-pass filter cutoff frequency (0 = unchanged)"),
                     unit="Hz",
                     required=False,
                     min_value=0.0,
@@ -241,7 +250,7 @@ class ConfigureLockInDemod(BaseSkill):
                 ParameterSpec(
                     name="phase_deg",
                     type="float",
-                    description="解调器的参考相位",
+                    description=tr("解调器的参考相位", "Reference phase of the demodulator"),
                     unit="deg",
                     required=False,
                     min_value=-360.0,
@@ -324,18 +333,23 @@ class GetLockInConfig(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "把 lock-in 完整读回来：开/关、幅度、频率、相位，以及 —— 以前只写不可读的那部分 "
+                tr("把 lock-in 完整读回来：开/关、幅度、频率、相位，以及 —— 以前只写不可读的那部分 "
                 "—— 它调制的到底是哪一路信号、谐波次数、调制器与解调器的相位寄存器、"
                 "解调器的实时信号及其 sync 滤波器。\n"
                 "\n"
                 "相信任何一条 dI/dV 之前，先查 `modulated_signal`：调制错了信号的 lock-in "
-                "会给出一条完美干净、却彻头彻尾错误的曲线，而且它没有任何一处看起来是错的。"
+                "会给出一条完美干净、却彻头彻尾错误的曲线，而且它没有任何一处看起来是错的。", "Read the lock-in back in full: on/off, amplitude, frequency, phase, and -- the part that used to be write-only and unreadable "
+"-- which signal it actually modulates, the harmonic order, the phase registers of the modulator and demodulator, "
+"the live signal of the demodulator and its sync filter.\n"
+"\n"
+"Before trusting any dI/dV, check `modulated_signal`: a lock-in that modulates the wrong signal "
+"gives a perfectly clean but utterly wrong curve, and nothing about it looks wrong.")
             ),
             parameters=[
                 ParameterSpec(
                     name="modulator",
                     type="int",
-                    description="调制器编号（从 1 开始）",
+                    description=tr("调制器编号（从 1 开始）", "Modulator number (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -343,7 +357,7 @@ class GetLockInConfig(BaseSkill):
                 ParameterSpec(
                     name="demodulator",
                     type="int",
-                    description="解调器编号（从 1 开始）；默认取调制器的编号",
+                    description=tr("解调器编号（从 1 开始）；默认取调制器的编号", "Demodulator number (starting from 1); default is the modulator number"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -424,12 +438,12 @@ class GetDemodHPFilter(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读某个 lock-in 解调器的高通滤波器阶数与截止频率。",
+            description=tr("读某个 lock-in 解调器的高通滤波器阶数与截止频率。", "Read the high-pass filter order and cutoff frequency of a lock-in demodulator."),
             parameters=[
                 ParameterSpec(
                     name="demodulator",
                     type="int",
-                    description="解调器编号（从 1 开始）",
+                    description=tr("解调器编号（从 1 开始）", "Demodulator number (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -473,12 +487,12 @@ class GetDemodHarmonic(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读某个 lock-in 解调器的谐波次数。",
+            description=tr("读某个 lock-in 解调器的谐波次数。", "Read the harmonic order of a lock-in demodulator."),
             parameters=[
                 ParameterSpec(
                     name="demodulator",
                     type="int",
-                    description="解调器编号（从 1 开始）",
+                    description=tr("解调器编号（从 1 开始）", "Demodulator number (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -517,12 +531,12 @@ class GetDemodLPFilter(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读某个 lock-in 解调器的低通滤波器阶数与截止频率。",
+            description=tr("读某个 lock-in 解调器的低通滤波器阶数与截止频率。", "Read the low-pass filter order and cutoff frequency of a lock-in demodulator."),
             parameters=[
                 ParameterSpec(
                     name="demodulator",
                     type="int",
-                    description="解调器编号（从 1 开始）",
+                    description=tr("解调器编号（从 1 开始）", "Demodulator number (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -566,12 +580,12 @@ class GetDemodPhase(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读某个 lock-in 解调器的参考相位。",
+            description=tr("读某个 lock-in 解调器的参考相位。", "Read the reference phase of a lock-in demodulator."),
             parameters=[
                 ParameterSpec(
                     name="demodulator",
                     type="int",
-                    description="解调器编号（从 1 开始）",
+                    description=tr("解调器编号（从 1 开始）", "Demodulator number (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -610,12 +624,12 @@ class GetDemodPhasReg(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读某个 lock-in 解调器的相位寄存器索引（1-8）。",
+            description=tr("读某个 lock-in 解调器的相位寄存器索引（1-8）。", "Read the phase register index (1-8) of a lock-in demodulator."),
             parameters=[
                 ParameterSpec(
                     name="demodulator",
                     type="int",
-                    description="解调器编号（从 1 开始）",
+                    description=tr("解调器编号（从 1 开始）", "Demodulator number (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -654,12 +668,12 @@ class SetDemodRTSignals(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置某个 lock-in 解调器的 RT 信号（X/Y 或 R/phi）。",
+            description=tr("设置某个 lock-in 解调器的 RT 信号（X/Y 或 R/phi）。", "Set the RT signal (X/Y or R/phi) of a lock-in demodulator."),
             parameters=[
                 ParameterSpec(
                     name="demodulator",
                     type="int",
-                    description="解调器编号（从 1 开始）",
+                    description=tr("解调器编号（从 1 开始）", "Demodulator number (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -667,7 +681,7 @@ class SetDemodRTSignals(BaseSkill):
                 ParameterSpec(
                     name="rt_signals",
                     type="int",
-                    description="0 = X/Y，1 = R/phi",
+                    description=tr("0 = X/Y，1 = R/phi", "0 = X/Y, 1 = R/phi"),
                     required=True,
                     min_value=0,
                     max_value=1,
@@ -703,12 +717,12 @@ class GetDemodSignal(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读某个 lock-in 解调器的解调信号索引（0-127）。",
+            description=tr("读某个 lock-in 解调器的解调信号索引（0-127）。", "Read the demodulated signal index (0-127) of a lock-in demodulator."),
             parameters=[
                 ParameterSpec(
                     name="demodulator",
                     type="int",
-                    description="解调器编号（从 1 开始）",
+                    description=tr("解调器编号（从 1 开始）", "Demodulator number (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -747,12 +761,12 @@ class SetDemodSyncFilter(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="开/关某个 lock-in 解调器的 sync 滤波器。",
+            description=tr("开/关某个 lock-in 解调器的 sync 滤波器。", "Turn the sync filter of a lock-in demodulator on or off."),
             parameters=[
                 ParameterSpec(
                     name="demodulator",
                     type="int",
-                    description="解调器编号（从 1 开始）",
+                    description=tr("解调器编号（从 1 开始）", "Demodulator number (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -760,7 +774,7 @@ class SetDemodSyncFilter(BaseSkill):
                 ParameterSpec(
                     name="sync_filter_on",
                     type="bool",
-                    description="True 启用 sync 滤波器，False 禁用",
+                    description=tr("True 启用 sync 滤波器，False 禁用", "True enables the sync filter, False disables it"),
                     required=True,
                 ),
             ],
@@ -794,12 +808,12 @@ class SetModHarmonic(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置某个 lock-in 调制器的谐波次数。",
+            description=tr("设置某个 lock-in 调制器的谐波次数。", "Set the harmonic order of a lock-in modulator."),
             parameters=[
                 ParameterSpec(
                     name="modulator",
                     type="int",
-                    description="调制器编号（从 1 开始）",
+                    description=tr("调制器编号（从 1 开始）", "Modulator number (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -807,7 +821,7 @@ class SetModHarmonic(BaseSkill):
                 ParameterSpec(
                     name="harmonic",
                     type="int",
-                    description="谐波次数（1 = 基频）",
+                    description=tr("谐波次数（1 = 基频）", "Harmonic order (1 = fundamental)"),
                     required=True,
                     min_value=1,
                 ),
@@ -842,12 +856,12 @@ class SetModPhasReg(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="把某个 lock-in 调制器指派到一个相位寄存器（1-8）。",
+            description=tr("把某个 lock-in 调制器指派到一个相位寄存器（1-8）。", "Assign a lock-in modulator to a phase register (1-8)."),
             parameters=[
                 ParameterSpec(
                     name="modulator",
                     type="int",
-                    description="调制器编号（从 1 开始）",
+                    description=tr("调制器编号（从 1 开始）", "Modulator number (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -855,7 +869,7 @@ class SetModPhasReg(BaseSkill):
                 ParameterSpec(
                     name="phase_register_index",
                     type="int",
-                    description="相位寄存器索引（1-8）",
+                    description=tr("相位寄存器索引（1-8）", "Phase register index (1-8)"),
                     required=True,
                     min_value=1,
                     max_value=8,
@@ -891,12 +905,12 @@ class SetModSignal(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="为某个 lock-in 调制器选择被调制的信号（按索引 0-127）。",
+            description=tr("为某个 lock-in 调制器选择被调制的信号（按索引 0-127）。", "Select the signal modulated by a lock-in modulator (by index 0-127)."),
             parameters=[
                 ParameterSpec(
                     name="modulator",
                     type="int",
-                    description="调制器编号（从 1 开始）",
+                    description=tr("调制器编号（从 1 开始）", "Modulator number (starting from 1)"),
                     required=False,
                     default=1,
                     min_value=1,
@@ -904,7 +918,7 @@ class SetModSignal(BaseSkill):
                 ParameterSpec(
                     name="signal_index",
                     type="int",
-                    description="信号索引（0-127），取自 Signals 列表",
+                    description=tr("信号索引（0-127），取自 Signals 列表", "Signal index (0-127), taken from the Signals list"),
                     required=True,
                     min_value=0,
                     max_value=127,

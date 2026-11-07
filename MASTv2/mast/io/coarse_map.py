@@ -7,8 +7,8 @@ generation at a time — and answers "what happened inside this patch". The
 generation boundary is the whole point: after a lateral coarse move those metre
 coordinates address a different piece of surface, so the old markers are excluded.
 
-This module works at **stage scale**. It answers directly the question of how to
-avoid returning to a spot already worked.
+This module works at **stage scale**. It answers the question
+"after moving around, how do we avoid returning to a place already worked?"
 
 Not as a rule — as a map. Each generation is a **site**: somewhere on the sample
 the tip has actually worked. Plot the sites and the answer to "where should we go
@@ -54,6 +54,7 @@ import json
 import math
 from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Sequence
+from mast.i18n import tr
 
 __all__ = [
     "CoarseMapConfig",
@@ -145,7 +146,8 @@ class CoarseMapConfig:
         后果不只是图上画得糊:这个数直接进 :func:`_blocked_by` 的
         ``need = site_spacing_steps + rel_unc``。走过 20 次之后,新落点被要求离
         旧站点 468 步而不是 200 步 —— 在 10000 步的行程预算里,这等于把可用站点
-        数砍掉一多半,然后报「没有可去的新站点了」。「粗动大地图现在的默认误差大的离谱。」
+        数砍掉一多半,然后报「没有可去的新站点了」。默认误差
+        明显偏大。
 
         原式还有一个一眼可见的毛病:**同一段路,拆成的命令越多误差越小**。
         200 步一次是 60,拆成 4 次 50 步是 30,拆成 16 次是 15 —— 而走过的路一样长。
@@ -443,7 +445,7 @@ def plan_relocation(sites: Sequence[CoarseSite], cfg: CoarseMapConfig,
 
     ## 2026-08-18:为什么不是「clearance 最大的赢」
 
-    已知问题:粗动大地图的推荐方向总是把人引向 +X。
+    问题:粗动大地图的推荐方向总是偏向 +X。
 
     原来的排序是 ``sort(key=-clearance)``。而 ``clearance`` 是**离所有已访问站点
     的最小余量** —— 最大化它,字面意思就是「尽量远离去过的地方」。于是:
@@ -485,27 +487,34 @@ def plan_relocation(sites: Sequence[CoarseSite], cfg: CoarseMapConfig,
     relative move along one axis is still monotone even when the absolute
     position is lost, whereas a return trip needs a number we no longer have."""
     if not sites:
-        return None, "还没有任何粗动记录。"
+        return None, tr("还没有任何粗动记录。", "There are no coarse-motion records yet.")
     cur = sites[-1]
     move = int(steps or cfg.default_move_steps)
     if move <= 0:
-        return None, "移动步数必须为正。"
+        return None, tr("移动步数必须为正。", "The number of steps to move must be positive.")
 
     if not cur.position_known:
         last_dir = _last_known_direction(sites)
         if last_dir is None:
-            return None, (
+            return None, tr(
                 "粗动里程表已失效(有一次粗动没有记下方向/步数),而且找不到最近一次"
                 "已知方向 —— 无法在不知道自己在哪的情况下规划落点。"
-                "请用户补记一次粗动方向,或直接手动移动后用 record_coarse_move 补记。")
+                "请用户补记一次粗动方向,或直接手动移动后用 record_coarse_move 补记。",
+                "The coarse-motion odometer is invalid (one coarse move did not record its direction/steps) and no recent "
+                "move with a known direction can be found - a landing point cannot be planned without knowing where we are. "
+                "Ask the user to record the direction of one coarse move, or move by hand and then record it with record_coarse_move.")
         axis = AXIS_OF[last_dir]
         return RelocationPlan(
             axis=axis, direction=last_dir, steps=move,
             lands_at=(cur.x_steps, cur.y_steps), clearance_steps=0.0,
-            reason=(f"粗动里程表已失效(某次粗动缺方向/步数),因此**只允许沿上一次的方向"
-                    f"{last_dir} 继续前进** {move} 步,不允许回头 —— "
-                    "相对位移在单轴上仍然单调,而回到某个具体位置需要绝对坐标,"
-                    "那个数字现在是假的。")), "里程表不确定:只给同向前进。"
+            reason=tr(f"粗动里程表已失效(某次粗动缺方向/步数),因此**只允许沿上一次的方向"
+                      f"{last_dir} 继续前进** {move} 步,不允许回头 —— "
+                      "相对位移在单轴上仍然单调,而回到某个具体位置需要绝对坐标,"
+                      "那个数字现在是假的。",
+                      f"The coarse-motion odometer is invalid (a coarse move lacks direction/steps), so **only continuing "
+                      f"in the previous direction {last_dir}** for {move} steps is allowed, no going back - "
+                      "a relative displacement is still monotonic on a single axis, but returning to a specific position "
+                      "needs absolute coordinates, and that number is now wrong.")), tr("里程表不确定:只给同向前进。", "Odometer uncertain: only forward in the same direction is offered.")
 
     # An open-loop stage needs MARGIN, not just nominal spacing: the destination
     # has to clear the old site by the spacing PLUS the travel uncertainty. So a
@@ -520,6 +529,7 @@ def plan_relocation(sites: Sequence[CoarseSite], cfg: CoarseMapConfig,
         candidates: list[tuple[float, RelocationPlan]] = []
         rejected: list[str] = []
         budget_hit = False
+        blocked_hit = False
         for direction in ("x+", "x-", "y+", "y-"):
             axis = AXIS_OF[direction]
             sign = SIGN_OF[direction]
@@ -528,30 +538,44 @@ def plan_relocation(sites: Sequence[CoarseSite], cfg: CoarseMapConfig,
             travelled = abs(nx) if axis == "x" else abs(ny)
             if travelled > cfg.axis_step_budget:
                 budget_hit = True
-                rejected.append(f"{direction}:会走到 {travelled} 步,超出单轴行程预算 "
-                                f"{cfg.axis_step_budget} 步")
+                rejected.append(tr(f"{direction}:会走到 {travelled} 步,超出单轴行程预算 "
+                                   f"{cfg.axis_step_budget} 步",
+                                   f"{direction}: would travel {travelled} steps, exceeding the single-axis travel budget "
+                                   f"of {cfg.axis_step_budget} steps"))
                 continue
             blocked, clearance = _blocked_by((nx, ny), sites, cfg, move)
             if blocked:
-                rejected.append(f"{direction}:落点会压在已经去过的站点上"
-                                f"(需要 {cfg.site_spacing_steps} 步间距 + 这段路程的"
-                                f"不确定量)")
+                blocked_hit = True
+                rejected.append(tr(f"{direction}:落点会压在已经去过的站点上"
+                                   f"(需要 {cfg.site_spacing_steps} 步间距 + 这段路程的"
+                                   f"不确定量)",
+                                   f"{direction}: the landing point would sit on a site already visited "
+                                   f"(needs {cfg.site_spacing_steps} steps of spacing + the travel "
+                                   f"uncertainty)"))
                 continue
-            grow_note = (f"(已从 {cfg.default_move_steps} 步自动加大到 {move} 步 —— "
-                         "开环粗动需要留出行程不确定量的余量)" if grown else "")
+            grow_note = (tr(f"(已从 {cfg.default_move_steps} 步自动加大到 {move} 步 —— "
+                            "开环粗动需要留出行程不确定量的余量)",
+                            f" (automatically increased from {cfg.default_move_steps} to {move} steps - "
+                            "open-loop coarse motion needs a margin for the travel uncertainty)") if grown else "")
             candidates.append((clearance, RelocationPlan(
                 axis=axis, direction=direction, steps=move, lands_at=(nx, ny),
                 clearance_steps=clearance,
-                reason=(f"沿 {direction} 走 {move} 步到 ({nx}, {ny}) 步位置{grow_note},"
-                        f"距最近的已访问站点还余 {clearance:.0f} 步。"
-                        f"当前站点 #{cur.index} 已用 "
-                        f"{cur.summary.get('scans', 0)} 次扫图 / "
-                        f"{cur.summary.get('damage', 0)} 次破坏"
+                reason=(tr(f"沿 {direction} 走 {move} 步到 ({nx}, {ny}) 步位置{grow_note},"
+                           f"距最近的已访问站点还余 {clearance:.0f} 步。"
+                           f"当前站点 #{cur.index} 已用 "
+                           f"{cur.summary.get('scans', 0)} 次扫图 / "
+                           f"{cur.summary.get('damage', 0)} 次破坏",
+                           f"Move {move} steps along {direction} to step position ({nx}, {ny}){grow_note}, "
+                           f"leaving {clearance:.0f} steps to the nearest visited site. "
+                           f"The current site #{cur.index} has had "
+                           f"{cur.summary.get('scans', 0)} scans / "
+                           f"{cur.summary.get('damage', 0)} damage events")
                         # 未归类的那些也要露面 —— 否则一个刚跑完修针、记了几十条
                         # 事件的站点会显示成「0 扫图 / 0 破坏」,读起来像没动过。
-                        + (f" / 另有 {cur.summary.get('other', 0)} 条未归类事件"
+                        + (tr(f" / 另有 {cur.summary.get('other', 0)} 条未归类事件",
+                              f" / plus {cur.summary.get('other', 0)} uncategorised events")
                            if cur.summary.get("other") else "")
-                        + "。"))))
+                        + tr("。", ".")))))
 
         if candidates:
             # 目标 = **少走**(离原点最近);``clearance`` 已经在 ``blocked`` 那里
@@ -560,10 +584,10 @@ def plan_relocation(sites: Sequence[CoarseSite], cfg: CoarseMapConfig,
             # 用平方距离:整数、精确,不引入浮点并列。
             candidates.sort(key=lambda t: (t[1].lands_at[0] ** 2
                                            + t[1].lands_at[1] ** 2, -t[0]))
-            note = f"已排除 {len(rejected)} 个方向。" if rejected else ""
+            note = tr(f"已排除 {len(rejected)} 个方向。", f"{len(rejected)} directions were ruled out.") if rejected else ""
             return candidates[0][1], note
 
-        if budget_hit and all("行程预算" in r for r in rejected):
+        if budget_hit and not blocked_hit:
             # Growing the move cannot help when the wall is the travel budget.
             break
         if steps is not None:
@@ -572,9 +596,11 @@ def plan_relocation(sites: Sequence[CoarseSite], cfg: CoarseMapConfig,
         move = int(move * 1.5) + 1
         grown = True
 
-    return None, ("四个方向都不能走:" + ";".join(rejected) +
-                  "。样品这一带已经用完了 —— 需要换样品,"
-                  "或由用户放宽单轴行程预算/站点间距。")
+    return None, (tr("四个方向都不能走:", "None of the four directions can be used: ") + ";".join(rejected) +
+                  tr("。样品这一带已经用完了 —— 需要换样品,"
+                     "或由用户放宽单轴行程预算/站点间距。",
+                     ". This area of the sample is used up - change the sample, "
+                     "or have the user relax the single-axis travel budget / site spacing."))
 
 
 def _last_known_direction(sites: Sequence[CoarseSite]) -> str | None:

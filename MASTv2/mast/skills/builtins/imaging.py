@@ -19,6 +19,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 _log = logging.getLogger(__name__)
 
@@ -159,8 +160,7 @@ def _scan_props_series_name(parsed) -> str:
     otherwise. Exists so ``StartScan`` stops issuing a SECOND ``Scan_PropsGet``
     just for this: the two reads can disagree, and the disagreement is not
     harmless — an empty series name written into ``Scan_PropsSet`` clobbers the
-    operator's configured filename prefix down to ``unnamed####`` (review
-    2026-07-03). One read, one answer.
+    operator's configured filename prefix down to ``unnamed####``. One read, one answer.
     """
     body = _props_body(parsed)
     if body is None:
@@ -252,14 +252,15 @@ def _read_scan_props(context, calls: list) -> "tuple[object, str]":
                 parsed = getattr(rec, "return_value", None)
                 if _props_body(parsed) is not None:
                     return parsed, ""
-                error = (f"Scan_PropsGet 回包读不懂"
-                         f"({type(parsed).__name__})")
+                error = (tr(f"Scan_PropsGet 回包读不懂"
+                         f"({type(parsed).__name__})", f"Cannot parse the Scan_PropsGet reply "
+f"({type(parsed).__name__})"))
         except Exception as exc:  # noqa: BLE001 — 读失败要变成一句话,不是崩溃
             error = f"{type(exc).__name__}: {exc}"
         if attempt < _PROPS_GET_ATTEMPTS:
             _log.warning("Scan_PropsGet 第 %d 次读失败(%s),再试一次。",
                          attempt, error)
-    return None, error or "Scan_PropsGet 失败(原因未知)"
+    return None, error or tr("Scan_PropsGet 失败(原因未知)", "Scan_PropsGet failed (reason unknown)")
 
 
 def _build_scan_basename() -> str:
@@ -411,13 +412,70 @@ def _match_signal(query: str, sig_names: list[str]) -> int | None:
 
 
 class StartScan(BaseSkill):
-    """发起一次受控扫描，并检查有限帧工作流所依赖的连续扫描状态。
-    ScanAt、FullScan 与 WaitScanComplete 依赖一次开始对应一帧的约定。
-    Scan_PropsSet 同时写入多个属性；模块清单未知时不构造猜测值覆盖用户设置。
-    因此开始前仍需读回 continuous，不能把未完成配置当成连续扫描已经关闭。
-    默认仅在 continuous 明确关闭时放行；开启或未知时拒绝。
-    调用方可修复读取、在控制器关闭连续扫描，或显式使用 allow_continuous_scan。
-    覆盖会告警并记录 continuous_scan_override_used，使下游知道有限帧前提不再成立。
+    """Start scanning — and refuse to start a scan that cannot end.
+
+    ═══════════════════════════════════════════════════════════════════════════
+    「一次 start = 一帧」这个前提需要有人负责
+    ═══════════════════════════════════════════════════════════════════════════
+
+    ScanAt / FullScan / WaitScanComplete / 视觉监视器 / 扫描地图登记 —— 全部照着
+    「一次 ``Scan_Action(start)`` 等于一帧」写的。而这件事只在 Nanonis 的
+    ``Continuous scan`` 关着时成立,关它的唯一手段是 ``Scan.PropsSet``。
+
+    曾出现过这样的失效链:``Scan_PropsGet`` 的解析崩在 ``*+i``
+    上 ⇒ 读不到「保存哪些模块参数」清单 ⇒ 按当时的设计**整发 Scan_PropsSet 都不下**
+    ⇒ continuous 没被关掉 ⇒ 每一次 ``WaitScanComplete`` 都 ``outcome=restarted``
+    并等满超时。而 ``StartScan`` 本身报的是 **success**。
+
+    ── 先查过的:**没有只改一个属性的调用** ────────────────────────────────
+
+    别再去找了。Nanonis 编程接口里 ``Scan.*`` 一共 17 个函数
+    (``TCP-reference/tcp_protocol.txt``;``nanonis_spm`` 实现了其中 16 个,
+    少一个 ``Scan.WaitEndOfLine``):Action / StatusGet / WaitEndOfScan /
+    WaitEndOfLine / FrameSet / FrameGet / BufferSet / BufferGet / **PropsSet** /
+    PropsGet / SpeedSet / SpeedGet / FrameDataGrab / XYPosGet / Save /
+    BackgroundPaste / BackgroundDelete。**能改 Continuous scan 标志的只有
+    ``Scan.PropsSet`` 一个**,而它是一发七个实参,模块名数组是其中之一。
+    所以「绕过模块名数组去单独关掉 continuous」这条路不存在。
+
+    ── 为什么读不到清单就不敢下发(这条顾虑是对的,保留) ──────────────────────
+
+    ``Scan.PropsSet`` 的七个实参里,四个 unsigned int 明确定义了 ``0 = no change``;
+    **模块名数组没有任何值被定义为「保持原样」**(TCP-reference/tcp_protocol.txt
+    "Scan.PropsSet";nanonis_spm NanonisClass.py:2978-2990)。在一份对哨兵值如此
+    啰嗦的文档里,沉默是有含义的。手上最接近的证据也指向同一边:同一发里的
+    **Series name** 传空串**已知**会把用户配的文件名前缀打回 ``unnamed####``
+    —— 那是同类的变长字段。⇒ 空数组按「清空」预期,不按「不改」。
+    这是**类比,不是实测**,而它只用于决定「不冒险」,不用于决定去做什么。
+
+    ── 所以第二层的修法不是「发明一个兜底」,是**不再让扫描静默地跑不完** ──────
+
+    ``Scan_Action(start)`` 现在有一道前置闸门:只有在**回读确认 continuous 是关的**
+    时才发。三态,不是两态 ——
+
+    * ``False``(读回 0)⇒ 放行。
+    * ``True``(读回 1) ⇒ 拒绝:这一帧确定不会停,发出去只是把 300 秒预算烧掉,
+      并让下游把第 N+2 帧当成第 N 帧。
+    * ``None``(读不到 / 回包给的值不在 GET 表里)⇒ **也拒绝**。这一条是本次
+      设计里最有争议的一点,理由写在下面「要推翻这个决定需要什么」里。
+
+    出口有三个,而且都是真出口(「能停不能解」是已知的死锁形状):
+
+    1. 修那次读 —— 读不到本身通常是个 bug,它值得被看见;
+    2. 在 Nanonis 的 Scan 模块里把 ``Continuous scan`` 关掉 —— 下一次 StartScan
+       读到 0 就直接放行,**根本不需要写**。读得到、只是不敢写的那个格局,这一条
+       就解开了;
+    3. ``allow_continuous_scan=True`` —— 明确接受一次可能永不结束的扫描。用了
+       会 WARNING,并在结果里留下 ``continuous_scan_override_used``。
+
+    ── 要推翻「读不到也拒绝」需要什么 ──────────────────────────────────────
+
+    需要证明**读不到 continuous** 与 **continuous 实际是开的** 不相关。已见的
+    证据指向相反方向:曾有一次读不到,而它**确实开着**
+    (同一次扫描的 wait 报 ``restarted``)。样本很少,证据弱;但把「不知道」当成「关着」
+    的代价是整批扫描全部作废。若日后拿到
+    「读不到但其实是关着」的反例,把 ``None`` 分支改成放行 + 告警即可 ——
+    改动点只有 :meth:`_continuous_gate` 一处。
     """
 
     def metadata(self) -> SkillMetadata:
@@ -426,16 +484,16 @@ class StartScan(BaseSkill):
             version="1.1.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="用当前参数启动一次扫描。",
+            description=tr("用当前参数启动一次扫描。", "Start a scan with the current parameters."),
             preconditions=["z_controller_on"],
             parameters=[
                 ParameterSpec(
                     name="direction", type="str", required=False, default="down",
                     allowed_values=["down", "up"],
                     description=(
-                        "扫描方向。``down`` = 从帧顶往下扫(默认);"
-                        "``up`` = 从帧底往上扫。"
-                        "对应 ``Scan_Action(0, dir)`` 的第二个参数(0=down / 1=up)。"
+                        tr("扫描方向。``down`` = 从帧顶往下扫(出厂默认);``up`` = 从帧底往上扫。"
+                        "对应 ``Scan_Action(0, dir)`` 的第二个参数(0=down / 1=up)。", "Scan direction. ``down`` = scan from the top of the frame downward (factory default); ``up`` = scan from the bottom upward. "
+"Corresponds to the second argument of ``Scan_Action(0, dir)`` (0=down / 1=up).")
                     ),
                 ),
                 ParameterSpec(
@@ -444,14 +502,21 @@ class StartScan(BaseSkill):
                     required=False,
                     default=False,
                     description=(
-                        "**用户级覆盖,不是重试开关。** 置 True 表示:即使 MAST "
+                        tr("**用户级覆盖,不是重试开关。** 置 True 表示:即使 MAST "
                         "无法确认 Nanonis 的 Continuous scan 已经关掉,也照样发起"
                         "扫描。代价是具体的 —— 扫描可能一帧接一帧永不停止,于是 "
                         "WaitScanComplete 只能等满超时(outcome=restarted),而 "
                         "SaveScan / 扫描地图登记拿到的可能是第 N+2 帧而不是第 N 帧。"
                         "**先试另外两条出口**:把那次读失败当 bug 修掉;或者直接在 "
                         "Nanonis 的 Scan 模块里关掉 Continuous scan(那样下一次 "
-                        "StartScan 读到「关」就直接放行)。"
+                        "StartScan 读到「关」就直接放行)。", "**User-level override, not a retry switch.** True means: start "
+"the scan even if MAST cannot confirm that Nanonis's Continuous scan has been turned off. The cost is concrete -- "
+"the scan may run frame after frame without stopping, so "
+"WaitScanComplete can only wait out the timeout (outcome=restarted), "
+"and SaveScan / scan-map registration may get frame N+2 instead of frame N. "
+"**Try the other two exits first**: fix that read failure as a bug; or turn Continuous scan off directly in "
+"Nanonis's Scan module (then the next "
+"StartScan reads \"off\" and goes straight through).")
                     ),
                 ),
             ],
@@ -464,10 +529,42 @@ class StartScan(BaseSkill):
     def execute(self, context, params: dict) -> SkillResult:
         calls = []
 
-        # 保存模块清单遵循读到则原样保留、读不到则不猜测写入的原则。
-        # Scan_PropsSet 会同时更新多个属性，清单未知时不发整条设置命令。
-        # 这也意味着 continuous/autosave 未必完成配置，必须由后续读回与闸门检查。
-        # 读取失败、确认零个模块、读到非空清单是三种状态；确认空清单时传空数组不丢失既有选择。
+        # ── 存进文件头的模块清单:**读到就原样写回,读不到就一个字都不改** ──
+        #
+        # 用户可以在 Nanonis 里把 `modules parameters to save` 改成全选,例如为了把扫描时的
+        # **倾斜矫正角**(`Piezo Configuration>Tilt X/Y (deg)`)存进文件头。
+        # 若这里用硬编码的兜底清单去覆盖它,会有两个问题:
+        #
+        # 1. 兜底清单里的模块名必须与 Nanonis 的真实模块名一致(例如真正的模块叫
+        #    **`Piezo Configuration`**,不是 `"Piezo"`);名字不对就是静默的空操作,
+        #    而代码读起来像已经包含了它。
+        # 2. 只要 `Scan_PropsGet` 读失败,兜底清单就会把用户**手配的全选**覆盖成
+        #    一份更短的清单 —— 不是「保存不全」,是**悄悄改掉了用户配好的东西**,
+        #    而且 `except: pass` 会让它一声不吭。
+        #
+        # ⚠️ **协议里没有「不改」这一档**。`Scan.PropsSet` 的 0=不改只对**四个**
+        # unsigned int 字段(Continuous / Bouncy / Autosave / Autopaste)成立;
+        # 模块名是「size + count + 数组」,**没有任何值被文档定义为"保持原样"**
+        # (nanonis_spm NanonisClass.py:2978-2990;TCP-reference/tcp_protocol.txt
+        # 的 "Scan.PropsSet" 逐字相同)。一份对哨兵值如此啰嗦的文档,在这个字段上
+        # 的沉默是有含义的。手上最接近的旁证也指向同一边:同一发里的 **Series
+        # name** 传空串**已知**会把文件名前缀打回 ``unnamed####``,
+        # 那是同类的变长字段。⇒ 空数组按「清空」预期。
+        # 这是**类比,不是实测**,而它只用来决定「不冒险」,不用来决定去做什么。
+        # 所以不发明兜底:**读不到就整发不下**。
+        #
+        # 代价说清楚:那一发同时带着 continuous=Off 与 autosave=All。读不到清单时
+        # 这两样也一起不设,保持用户当前的设置。这是**故意的**取舍 —— 少设一次
+        # autosave 是看得见、可恢复的(下面有读回与告警);把手配的模块清单清掉
+        # 是看不见、不可恢复的。
+        #
+        # ⇒ 而这个取舍的**后果**(扫描可能永不结束)不再被吞掉:见下面那道闸门。
+        #
+        # ── 「读不到」「读到零个」「读到一份清单」是**三**件事 ──────────────
+        # 从前只有两条:非空 ⇒ read,其余 ⇒ unchanged。于是「用户一个模块都没选」
+        # 被并进了「问不出来」,而那正是**唯一**一种不必读清单也能安全下发的情形:
+        # 空数组无论按「清空」还是按「不改」解释,作用在一份本来就空的清单上都是
+        # 空操作。见 :func:`_scan_props_module_count` 的自述。
         module_names: list[str] = []
         module_names_source = "unchanged"
         module_count: "int | None" = None
@@ -488,7 +585,7 @@ class StartScan(BaseSkill):
                 module_names = heuristic
                 module_names_source = "read"
             else:
-                read_error = "Scan_PropsGet 回包里没有模块名数组"
+                read_error = tr("Scan_PropsGet 回包里没有模块名数组", "No module-name array in the Scan_PropsGet reply")
 
         if module_names_source == "unchanged":
             # **出声**。原来这里是 `except: pass` + 硬编码兜底,连「我用了兜底值」
@@ -497,7 +594,7 @@ class StartScan(BaseSkill):
                 "StartScan: 读不到当前的「保存哪些模块参数」清单(%s)—— "
                 "**不下发 Scan_PropsSet**,用户配的清单保持原样。"
                 "代价:本次不设 continuous=Off / autosave=All,它们保持仪器当前设置。",
-                read_error or "原因未知")
+                read_error or tr("原因未知", "reason unknown"))
 
         # Scan_PropsSet(cont, bouncy, autosave, basename, comment, modules_names, flags)
         # Build a basename from the active experiment + sample (v0.3.12) so files
@@ -555,7 +652,7 @@ class StartScan(BaseSkill):
             "saved_modules": module_names,
             # 「这份清单是读到的,还是我们没动」—— 两者的下游动作不同,而从
             # `saved_modules` 本身分不出来(读不到时它是空表,看起来像"没有模块"
-            # 而不是"没问到")。要求的那个 bug 就活在这个区分里。
+            # 而不是"没问到")。保存信息不全的那个 bug 就活在这个区分里。
             # 三个值:read(读到 N 个) / read_empty(读到确实是 0 个) / unchanged(问不出来)。
             "module_names_source": module_names_source,
             "module_names_read_error": read_error or None,
@@ -603,9 +700,11 @@ class StartScan(BaseSkill):
             data["vision_monitor"] = False
             return SkillResult(
                 skill_name="StartScan", success=False,
-                error=(f"direction 只能是 'down' 或 'up',收到 {direction!r}。"
+                error=(tr(f"direction 只能是 'down' 或 'up',收到 {direction!r}。"
                        "**不猜**:猜错的代价是一整帧扫在错误方向上,而文件头会"
-                       "如实记下它,于是后面每一处按方向归位的分析都跟着错。"),
+                       "如实记下它,于是后面每一处按方向归位的分析都跟着错。", f"direction must be 'down' or 'up', got {direction!r}. "
+"**No guessing**: the cost of a wrong guess is a whole frame scanned in the wrong direction, and the file header "
+"records it faithfully, so every later analysis that places data by direction goes wrong too.")),
                 data=data,
                 nanonis_calls=calls,
             )
@@ -674,23 +773,31 @@ class StartScan(BaseSkill):
             return ""
 
         written = module_names_source in ("read", "read_empty")
-        why_not_written = (f"读「保存哪些模块参数」清单失败:"
+        why_not_written = (tr(f"读「保存哪些模块参数」清单失败:"
                            f"{read_error or '原因未知'} —— 而协议里没有"
                            f"「模块名保持原样」这一档,所以整发 Scan_PropsSet "
-                           f"都不敢下,免得清空用户配好的清单")
+                           f"都不敢下,免得清空用户配好的清单", f"Failed to read the \"which module parameters to save\" list: "
+f"{read_error or 'reason unknown'} -- and the protocol has no "
+f"\"leave module names as they are\" option, so the whole Scan_PropsSet "
+f"is not sent, to avoid wiping the list the user configured"))
         if still_on is True and written:
-            head = ("Nanonis 的 **Continuous scan 是开着的**,而这次**写了也没关掉**"
-                    "(下发 Scan_PropsSet 之后回读仍然是「开」)。")
+            head = (tr("Nanonis 的 **Continuous scan 是开着的**,而这次**写了也没关掉**"
+                    "(下发 Scan_PropsSet 之后回读仍然是「开」)。", "Nanonis's **Continuous scan is on**, and this time **writing did not turn it off** "
+"(after sending Scan_PropsSet the readback is still \"on\")."))
         elif still_on is True:
-            head = (f"Nanonis 的 **Continuous scan 是开着的**,而这次**根本没能写**"
-                    f"({why_not_written})。")
+            head = (tr(f"Nanonis 的 **Continuous scan 是开着的**,而这次**根本没能写**"
+                    f"({why_not_written})。", f"Nanonis's **Continuous scan is on**, and this time **it could not be written at all** "
+f"({why_not_written})."))
         elif written:
-            head = (f"下发了 Scan_PropsSet,但**回读不到** Continuous scan 状态"
+            head = (tr(f"下发了 Scan_PropsSet,但**回读不到** Continuous scan 状态"
                     f"({readback_error or '回包里没有这个标志'}),"
-                    f"无法确认它已经关掉。")
+                    f"无法确认它已经关掉。", f"Scan_PropsSet was sent, but the Continuous scan state **cannot be read back** "
+f"({readback_error or 'the reply has no such flag'}), "
+f"so it cannot be confirmed to be off."))
         else:
-            head = (f"**读不到** Nanonis 的 Continuous scan 状态,而且这次也没能写"
-                    f"({why_not_written})。")
+            head = (tr(f"**读不到** Nanonis 的 Continuous scan 状态,而且这次也没能写"
+                    f"({why_not_written})。", f"The Continuous scan state of Nanonis **cannot be read**, and this time it could not be written either "
+f"({why_not_written})."))
 
         if override:
             _log.warning(
@@ -702,7 +809,7 @@ class StartScan(BaseSkill):
 
         _log.warning("StartScan: %s **不发起扫描。**", head)
         return (
-            f"{head}\n"
+            tr(f"{head}\n"
             "**不发起这次扫描** —— 一次 start 就不再等于一帧:扫描会一帧接一帧地"
             "跑下去,WaitScanComplete 只能等满超时(outcome=restarted),而 "
             "SaveScan / 扫描地图登记拿到的可能是第 N+2 帧。发出去比不发更坏,"
@@ -710,7 +817,7 @@ class StartScan(BaseSkill):
             f"(读回的 GET 值:before={continuous_before}, 0=关 1=开;"
             f"模块清单来源={module_names_source})\n"
             "三条出口:\n"
-            "  1. **修那次读**。读不到通常本身就是 bug(2026-08-19 那次是 "
+            "  1. **修那次读**。读不到通常本身就是 bug(例如 "
             "Scan_PropsGet 的 `*+i` 解析崩了),它值得被看见而不是被绕过。\n"
             "  2. **在 Nanonis 的 Scan 模块里手动关掉 Continuous scan**。"
             "下一次 StartScan 读到「关」就直接放行 —— 根本不需要写,也就不用冒"
@@ -718,7 +825,23 @@ class StartScan(BaseSkill):
             "  3. 明确接受风险:`allow_continuous_scan=True`。**这是用户的决定,"
             "不是自动重试的开关** —— agent 遇到这条应当把上面两条报给用户,"
             "而不是自己把它打开重来一遍(打开之后拿到的那一帧,可能不是你以为的"
-            "那一帧)。"
+            "那一帧)。", f"{head}\n"
+"**This scan is not started** -- one start would no longer equal one frame: the scan would keep going "
+"frame after frame, WaitScanComplete can only wait out the timeout (outcome=restarted), and "
+"SaveScan / scan-map registration may get frame N+2. Sending is worse than not sending, "
+"and worse in places you cannot see.\n"
+f"(GET values read back: before={continuous_before}, 0=off 1=on; "
+f"module list source={module_names_source})\n"
+"Three exits:\n"
+"  1. **Fix that read.** A failed read is usually a bug in itself (for example "
+"the `*+i` parsing of Scan_PropsGet crashing), and it deserves to be seen, not bypassed.\n"
+"  2. **Turn Continuous scan off by hand in Nanonis's Scan module.** "
+"The next StartScan reads \"off\" and goes straight through -- no write is needed, and so no risk of "
+"wiping the \"which module parameters to save\" list.\n"
+"  3. Explicitly accept the risk: `allow_continuous_scan=True`. **This is the user's decision, "
+"not an automatic-retry switch** -- when an agent meets this, it should report the two exits above to the user, "
+"not turn it on itself and rerun (the frame obtained after turning it on may not be "
+"the frame you think it is).")
         )
 
 
@@ -731,7 +854,7 @@ class StopScan(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
-            description="停止当前的扫描。",
+            description=tr("停止当前的扫描。", "Stop the current scan."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["scan", "imaging", "write"],
@@ -771,23 +894,26 @@ class ConfigureScan(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "配置扫描框：中心、尺寸、角度，以及采集通道。"
+                tr("配置扫描框：中心、尺寸、角度，以及采集通道。"
                 "默认还会顺带设置由 line_time_s 推导出的扫描速度"
                 "（线速度 = width_m / line_time_s）；传 set_scan_speed=False "
-                "则保持当前扫描速度不动。"
+                "则保持当前扫描速度不动。", "Configure the scan frame: centre, size, angle, and acquisition channels. "
+"By default it also sets the scan speed derived from line_time_s "
+"(line speed = width_m / line_time_s); pass set_scan_speed=False "
+"to leave the current scan speed untouched.")
             ),
             parameters=[
                 ParameterSpec(
                     name="center_x_m",
                     type="float",
-                    description="扫描中心的 X 坐标，单位米",
+                    description=tr("扫描中心的 X 坐标，单位米", "X coordinate of the scan centre, in metres"),
                     unit="m",
                     required=True,
                 ),
                 ParameterSpec(
                     name="center_y_m",
                     type="float",
-                    description="扫描中心的 Y 坐标，单位米",
+                    description=tr("扫描中心的 Y 坐标，单位米", "Y coordinate of the scan centre, in metres"),
                     unit="m",
                     required=True,
                 ),
@@ -795,9 +921,11 @@ class ConfigureScan(BaseSkill):
                     name="width_m",
                     type="float",
                     description=(
-                        "扫描宽度，单位**米**（SI），**不是**纳米。"
+                        tr("扫描宽度，单位**米**（SI），**不是**纳米。"
                         "换算：100 nm → 100n，50 nm → 50n。像 "
-                        "100（=100 m）这样的裸数值是单位错误，会被拒绝。"
+                        "100（=100 m）这样的裸数值是单位错误，会被拒绝。", "Scan width, in **metres** (SI), **not** nanometres. "
+"Conversion: 100 nm -> 100n, 50 nm -> 50n. A bare number like "
+"100 (= 100 m) is a unit error and is rejected.")
                     ),
                     unit="m",
                     required=True,
@@ -808,9 +936,11 @@ class ConfigureScan(BaseSkill):
                     name="height_m",
                     type="float",
                     description=(
-                        "扫描高度，单位**米**（SI），**不是**纳米。"
+                        tr("扫描高度，单位**米**（SI），**不是**纳米。"
                         "换算：100 nm → 100n，50 nm → 50n。像 "
-                        "100（=100 m）这样的裸数值是单位错误，会被拒绝。"
+                        "100（=100 m）这样的裸数值是单位错误，会被拒绝。", "Scan height, in **metres** (SI), **not** nanometres. "
+"Conversion: 100 nm -> 100n, 50 nm -> 50n. A bare number like "
+"100 (= 100 m) is a unit error and is rejected.")
                     ),
                     unit="m",
                     required=True,
@@ -821,11 +951,15 @@ class ConfigureScan(BaseSkill):
                     name="angle_deg",
                     type="float",
                     description=(
-                        "扫描角度，单位度。**省略**它则保持当前扫描框的"
+                        tr("扫描角度，单位度。**省略**它则保持当前扫描框的"
                         "角度不变（角度会从仪器回读；若这次回读失败，"
                         "这个技能就**失败**，它绝不会臆断为 "
                         "0°）。想要与坐标轴对齐的扫描框，就显式传 "
-                        "0。"
+                        "0。", "Scan angle, in degrees. **Omitting** it keeps the angle of the current scan frame "
+"(the angle is read back from the instrument; if that readback fails, "
+"this skill **fails**, it never assumes "
+"0 deg). For a frame aligned with the axes, pass "
+"0 explicitly.")
                     ),
                     unit="deg",
                     required=False,
@@ -841,13 +975,14 @@ class ConfigureScan(BaseSkill):
                     name="channels",
                     type="str",
                     description=(
-                        "要采集的通道名，逗号分隔。默认：'Z,Current'。"
-                        "做 STS mapping 时加上 lock-in：'Z,Current,LI Demod 1 X,LI Demod 1 Y'"
+                        tr("要采集的通道名，逗号分隔。默认：'Z,Current'。"
+                        "做 STS mapping 时加上 lock-in：'Z,Current,LI Demod 1 X,LI Demod 1 Y'", "Names of the channels to acquire, comma separated. Default: 'Z,Current'. "
+"For STS mapping add the lock-in: 'Z,Current,LI Demod 1 X,LI Demod 1 Y'")
                     ),
                     required=False,
                     default="Z,Current",
                 ),
-                # 审查: ConfigureScan used to *silently* overwrite the
+                # ConfigureScan used to *silently* overwrite the
                 # scan speed to width/0.1s (a hardcoded 0.1 s line time) on every
                 # call, with no way for the caller to opt out — a hidden side
                 # effect that clobbered any speed the user/LLM had deliberately set
@@ -859,11 +994,15 @@ class ConfigureScan(BaseSkill):
                     name="set_scan_speed",
                     type="bool",
                     description=(
-                        "为 True（默认）时，顺带设置由 line_time_s 推导出的"
+                        tr("为 True（默认）时，顺带设置由 line_time_s 推导出的"
                         "扫描速度（正扫线速度 = width_m / line_time_s，"
                         "保持每行耗时恒定）。设为 False 则**只**配置扫描框 + 通道，"
                         "并保持当前扫描速度不动"
-                        "（要显式控制速度请用 SetScanSpeed）。"
+                        "（要显式控制速度请用 SetScanSpeed）。", "When True (default), also set the scan speed derived from line_time_s "
+"(forward line speed = width_m / line_time_s, "
+"keeping the time per line constant). When False, **only** the scan frame + channels are configured "
+"and the current scan speed is left untouched "
+"(use SetScanSpeed for explicit speed control).")
                     ),
                     required=False,
                     default=True,
@@ -872,11 +1011,15 @@ class ConfigureScan(BaseSkill):
                     name="line_time_s",
                     type="float",
                     description=(
-                        "每条扫描线的耗时，单位秒；当 set_scan_speed 为 True "
+                        tr("每条扫描线的耗时，单位秒；当 set_scan_speed 为 True "
                         "时用它推导扫描速度。**留空则按这个扫描框尺寸"
                         "套用出厂的 scan tier**（8 nm -> "
                         "原子级档 -> 1.2 s/line）。set_scan_speed 为 False "
-                        "时本项忽略。"
+                        "时本项忽略。", "Time per scan line, in seconds; used to derive the scan speed when set_scan_speed is True. "
+"**Empty = apply the factory scan tier for this scan frame size** "
+"(8 nm -> "
+"atomic-scale tier -> 1.2 s/line). Ignored when set_scan_speed "
+"is False.")
                     ),
                     unit="s",
                     required=False,
@@ -933,10 +1076,13 @@ class ConfigureScan(BaseSkill):
                     skill_name=self.metadata().name,
                     success=False,
                     error=(
-                        "无法读回当前扫描角度(Scan_FrameGet 失败或回包读不懂),"
+                        tr("无法读回当前扫描角度(Scan_FrameGet 失败或回包读不懂),"
                         "拒绝配置扫描帧 —— 用一个假定的 0° 会**静默地把扫描框转正**,"
                         "而调用方要的是「保持当前角度」。"
-                        "若确实要 0°,请显式传 angle_deg=0.0。"
+                        "若确实要 0°,请显式传 angle_deg=0.0。", "Cannot read back the current scan angle (Scan_FrameGet failed or the reply cannot be parsed); "
+"refusing to configure the scan frame -- using an assumed 0 deg would **silently straighten the scan frame**, "
+"while the caller wants \"keep the current angle\". "
+"If 0 deg is really wanted, pass angle_deg=0.0 explicitly.")
                     ),
                     nanonis_calls=calls,
                 )
@@ -973,23 +1119,29 @@ class ConfigureScan(BaseSkill):
             if mismatch.get("unreadable"):
                 return SkillResult(
                     skill_name="ConfigureScan", success=False,
-                    error=("Scan_FrameSet 发出去了，但**读不回**扫描帧"
+                    error=(tr("Scan_FrameSet 发出去了，但**读不回**扫描帧"
                            "(Scan_FrameGet 失败或回包读不懂) —— 拒绝继续。"
                            "「读不到」不是「设上了」：仪器可能已经把框夹到量程内，"
-                           "而此后每一张图的坐标都会是假的。"),
+                           "而此后每一张图的坐标都会是假的。", "Scan_FrameSet was sent, but the scan frame **cannot be read back** "
+"(Scan_FrameGet failed or the reply cannot be parsed) -- refusing to continue. "
+"\"Cannot read\" is not \"was set\": the instrument may have clamped the frame into range, "
+"and from then on the coordinates of every image would be false.")),
                     data={"requested_frame": [center_x, center_y, width, height, angle],
                           "frame_readback": None},
                     nanonis_calls=calls,
                 )
             parts = ", ".join(
-                "%s 要 %.4g 实得 %.4g" % (k, v["requested"], v["readback"])
+                tr("%s 要 %.4g 实得 %.4g", "%s asked %.4g got %.4g") % (k, v["requested"], v["readback"])
                 for k, v in mismatch.items())
             return SkillResult(
                 skill_name="ConfigureScan", success=False,
-                error=("仪器没有接受这个扫描帧，它把框改了：%s。"
+                error=(tr("仪器没有接受这个扫描帧，它把框改了：%s。"
                        "**拒绝，不夹紧** —— 按夹紧后的框扫出来的图，坐标与"
                        "请求的对不上，而图看着完全正常。"
-                       "把中心挪回量程内，或把 size_m 调小。" % parts),
+                       "把中心挪回量程内，或把 size_m 调小。", "The instrument did not accept this scan frame; it changed the frame: %s. "
+"**Refused, not clamped** -- an image scanned with the clamped frame has coordinates that do not match "
+"the requested ones, while the image looks perfectly normal. "
+"Move the centre back within range, or reduce size_m.") % parts),
                 data={"requested_frame": [center_x, center_y, width, height, angle],
                       "frame_readback": frame_readback,
                       "frame_mismatch": mismatch},
@@ -1034,12 +1186,22 @@ class ConfigureScan(BaseSkill):
         except Exception:  # pragma: no cover — 读不到半程 = 判不了，见下
             half_x = half_y = None
         if frame_over:
-            over_nm = ", ".join("%s 超 %.0f nm" % (k, v * 1e9)
+            over_nm = ", ".join(tr("%s 超 %.0f nm", "%s exceeds by %.0f nm") % (k, v * 1e9)
                                 for k, v in frame_over.items()
                                 if k.endswith(("_high_m", "_low_m")))
             return SkillResult(
                 skill_name="ConfigureScan", success=False,
-                error=("扫描帧伸出压电量程：%s（半程 ±%.0f/±%.0f nm）。拒绝该请求，不自动夹紧；设置被接受并原样读回仍不能保证扫描输出不会达到限位。请将中心移回量程内或减小 size_m。"
+                error=(tr("扫描帧伸出压电量程：%s（半程 ±%.0f/±%.0f nm）。"
+                       "**拒绝，不夹紧** —— 仪器不会拒绝超范围的帧，它照单全收、"
+                       "读回也原样返回；被夹住的是扫描时的输出电压，于是超出去的"
+                       "那部分像素**不是数据**（溢出部分的相邻列差会明显变小，"
+                       "而图看着完全正常）。"
+                       "把中心挪回量程内，或把 size_m 调小。", "The scan frame extends beyond the piezo range: %s (half range ±%.0f/±%.0f nm). "
+"**Refused, not clamped** -- the instrument does not refuse an out-of-range frame, it accepts it as given and "
+"reads it back unchanged; what gets clamped is the output voltage during the scan, so the pixels beyond "
+"the range **are not data** (in the overflowing columns "
+"the difference between adjacent columns shrinks markedly, while the image looks perfectly normal). "
+"Move the centre back within range, or reduce size_m.")
                        % (over_nm, (half_x or 0) * 1e9, (half_y or 0) * 1e9)),
                 data={"requested_frame": [center_x, center_y, width, height, angle],
                       "frame_readback": frame_readback,
@@ -1052,6 +1214,10 @@ class ConfigureScan(BaseSkill):
             _log.warning("读不到压电半程(Piezo_CalibrGet)，扫描帧越界这一格未验")
 
         requested = [ch.strip() for ch in channels_str.split(",") if ch.strip()]
+        # 「采集通道」这一发做了什么：set（整组设好）/ set_failed（仪器拒了）/
+        # unchanged（没请求，没动）/ unchanged_partial_match（请求里有名字没匹配到，
+        # 整组不设，保持操作员当前通道）/ unchanged_read_failed（读不到信号名清单）。
+        channels_source = "unchanged"
         if requested:
             try:
                 rec_signals = context.safe_call("Signals_NamesGet")
@@ -1072,22 +1238,45 @@ class ConfigureScan(BaseSkill):
 
                     if sig_names:
                         channel_indexes = []
+                        missing = []
                         for ch in requested:
                             idx = _match_signal(ch, sig_names)
                             if idx is not None:
                                 channel_indexes.append(idx)
                             else:
-                                _log.warning("Channel '%s' not found in signals, skipping", ch)
+                                missing.append(ch)
 
-                        if channel_indexes:
+                        # ⚠️ **不设部分缓冲**（否则会出现「扫图时自动取消通道
+                        # 的获取，只剩 Current 通道」）。若把匹配上的那部分照设：
+                        # 请求 "Z,Current" 时若 "Z" 没匹配到信号名（某些仪器配置下会如此），
+                        # 缓冲被设成**只剩 Current**，操作员要的其它通道被悄悄砍掉。
+                        # 少匹配一个 ⇒ 整组不设，保持操作员当前的采集通道不动，并大声
+                        # 说出来。宁可不动，也不静默砍 —— 与 StartScan「读不到模块清单
+                        # 就不下发 Scan_PropsSet」同一条原则（别悄悄改掉操作员配好的）。
+                        if missing:
+                            _log.warning(
+                                "ConfigureScan: 请求通道 %s 里 %s 没匹配到任何信号名"
+                                "（只匹配到 %d/%d）—— **不改采集通道**，保持操作员当前"
+                                "设置，以免把缓冲砍成不完整的一组。",
+                                requested, missing, len(channel_indexes), len(requested))
+                            channels_source = "unchanged_partial_match"
+                        elif channel_indexes:
                             rec_buf = context.safe_call(
                                 "Scan_BufferSet", channel_indexes, 0, 0,
                             )
                             calls.append(rec_buf)
                             if rec_buf.error:
                                 _log.warning("Scan_BufferSet failed: %s", rec_buf.error)
+                                channels_source = "set_failed"
+                            else:
+                                channels_source = "set"
+                    else:
+                        channels_source = "unchanged_read_failed"
+                else:
+                    channels_source = "unchanged_read_failed"
             except Exception as exc:
                 _log.warning("Channel selection failed: %s", exc)
+                channels_source = "unchanged_error"
 
         # Optionally set the scan speed, derived from the (now explicit) line
         # time. This used to run unconditionally with a hardcoded 0.1 s line
@@ -1130,6 +1319,10 @@ class ConfigureScan(BaseSkill):
                 "piezo_half_x_m": half_x,
                 "piezo_half_y_m": half_y,
                 "channels": channels_str,
+                # 这一发对采集通道实际做了什么（见上面 channels_source 的取值表）。
+                # unchanged_partial_match = 请求里有名字没匹配到、整组没设、保持了
+                # 操作员的通道（而不是砍成只剩 Current）。
+                "channels_source": channels_source,
                 "scan_speed_set": speed_set,
                 "line_time_s": line_time if set_scan_speed else None,
                 "line_time_source": line_time_source if set_scan_speed else None,
@@ -1148,12 +1341,12 @@ class SetScanSpeed(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置扫描速度：正/反扫速度，或每行耗时。",
+            description=tr("设置扫描速度：正/反扫速度，或每行耗时。", "Set the scan speed: forward/backward speed, or time per line."),
             parameters=[
                 ParameterSpec(
                     name="fwd_speed",
                     type="float",
-                    description="正扫速度，单位 m/s",
+                    description=tr("正扫速度，单位 m/s", "Forward scan speed, in m/s"),
                     unit="m/s",
                     required=True,
                     min_value=0.0,
@@ -1161,7 +1354,7 @@ class SetScanSpeed(BaseSkill):
                 ParameterSpec(
                     name="bwd_speed",
                     type="float",
-                    description="反扫速度，单位 m/s",
+                    description=tr("反扫速度，单位 m/s", "Backward scan speed, in m/s"),
                     unit="m/s",
                     required=True,
                     min_value=0.0,
@@ -1169,7 +1362,7 @@ class SetScanSpeed(BaseSkill):
                 ParameterSpec(
                     name="fwd_line_time",
                     type="float",
-                    description="正扫每行耗时，单位秒",
+                    description=tr("正扫每行耗时，单位秒", "Time per line of the forward scan, in seconds"),
                     unit="s",
                     required=True,
                     min_value=0.0,
@@ -1177,7 +1370,7 @@ class SetScanSpeed(BaseSkill):
                 ParameterSpec(
                     name="bwd_line_time",
                     type="float",
-                    description="反扫每行耗时，单位秒",
+                    description=tr("反扫每行耗时，单位秒", "Time per line of the backward scan, in seconds"),
                     unit="s",
                     required=True,
                     min_value=0.0,
@@ -1186,16 +1379,17 @@ class SetScanSpeed(BaseSkill):
                     name="keep_const",
                     type="int",
                     # Matches Nanonis Scan_SpeedSet "Keep parameter constant"
-                    # EXACTLY (审查 — the old labels were off by one
+                    # EXACTLY (the old labels were off by one
                     # and 2 was unreachable): 0=no change, 1=keep linear SPEED
                     # constant, 2=keep TIME-per-line constant.
-                    description=("0 = 不变，1 = 保持线速度恒定，"
-                                 "2 = 保持每行耗时恒定"),
+                    description=(tr("0 = 不变，1 = 保持线速度恒定，"
+                                 "2 = 保持每行耗时恒定", "0 = unchanged, 1 = keep line speed constant, "
+"2 = keep time per line constant")),
                     required=False,
                     default=0,
                     allowed_values=[0, 1, 2],
                 ),
-                # 审查 [#139]: execute() read params.get("speed_ratio")
+                # execute() read params.get("speed_ratio")
                 # but the parameter was never declared, so it was a dead read —
                 # permanently pinned to the fallback (1) and impossible for the
                 # GUI/LLM/composite to set. Declare it (Nanonis Scan_SpeedSet's
@@ -1204,7 +1398,7 @@ class SetScanSpeed(BaseSkill):
                 ParameterSpec(
                     name="speed_ratio",
                     type="float",
-                    description="正扫/反扫速度比（1.0 = 对称）",
+                    description=tr("正扫/反扫速度比（1.0 = 对称）", "Forward/backward scan speed ratio (1.0 = symmetric)"),
                     required=False,
                     default=1.0,
                     min_value=0.0,
@@ -1265,12 +1459,12 @@ class GetScanXYPosition(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="读取当前扫描的 X、Y 位置。",
+            description=tr("读取当前扫描的 X、Y 位置。", "Read the current X, Y position of the scan."),
             parameters=[
                 ParameterSpec(
                     name="wait_for_newest",
                     type="bool",
-                    description="是否等待最新的数据",
+                    description=tr("是否等待最新的数据", "Whether to wait for the latest data"),
                     required=False,
                     default=True,
                 ),
@@ -1322,19 +1516,19 @@ class ScanBackgroundPaste(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="把当前的扫描数据缓冲粘贴到 background。",
+            description=tr("把当前的扫描数据缓冲粘贴到 background。", "Paste the current scan data buffer into the background."),
             parameters=[
                 ParameterSpec(
                     name="wait_until_pasted",
                     type="bool",
-                    description="等到数据粘贴完成再返回",
+                    description=tr("等到数据粘贴完成再返回", "Return only after the data has been pasted"),
                     required=False,
                     default=True,
                 ),
                 ParameterSpec(
                     name="timeout_ms",
                     type="int",
-                    description="超时时长，单位毫秒（-1 = 无限等待）",
+                    description=tr("超时时长，单位毫秒（-1 = 无限等待）", "Timeout, in milliseconds (-1 = wait indefinitely)"),
                     required=False,
                     default=-1,
                 ),
@@ -1384,26 +1578,26 @@ class ScanBackgroundDelete(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="删除最近一次、或全部已粘贴的 scan background。",
+            description=tr("删除最近一次、或全部已粘贴的 scan background。", "Delete the most recent, or all pasted scan backgrounds."),
             parameters=[
                 ParameterSpec(
                     name="wait_until_deleted",
                     type="bool",
-                    description="等到数据删除完成再返回",
+                    description=tr("等到数据删除完成再返回", "Return only after the data has been deleted"),
                     required=False,
                     default=True,
                 ),
                 ParameterSpec(
                     name="timeout_ms",
                     type="int",
-                    description="超时时长，单位毫秒（-1 = 无限等待）",
+                    description=tr("超时时长，单位毫秒（-1 = 无限等待）", "Timeout, in milliseconds (-1 = wait indefinitely)"),
                     required=False,
                     default=-1,
                 ),
                 ParameterSpec(
                     name="delete_all",
                     type="bool",
-                    description="True=删除全部 background，False=只删最近一次",
+                    description=tr("True=删除全部 background，False=只删最近一次", "True = delete all backgrounds, False = delete only the most recent"),
                     required=False,
                     default=False,
                 ),

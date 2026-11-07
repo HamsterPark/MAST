@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import asdict, dataclass, fields, replace
+from mast.i18n import tr
 
 #: 在设置 UI 里露出的键。前端从 :func:`knob_catalog` 动态渲染，所以加旋钮
 #: 只需要动这个元组。
@@ -66,18 +67,30 @@ FIELD_BOUNDS: dict[str, tuple[float, float]] = {
 
 #: 中文标签 + 一句提示，给设置 UI。
 KNOB_LABELS: dict[str, tuple[str, str]] = {
-    "eh_enabled": ("记录环境历史", "1=后台聚合并保留环境参数历史,0=完全关闭"),
-    "eh_spectra_enabled": ("记录电流噪声谱", "定期从电流监控的段流里存一条全谱快照"),
-    "eh_z_enabled": ("记录 Z 噪声谱", "需要 Osci2T 双通道;会短暂占用 data 通道"),
-    "eh_bucket_s": ("聚合粒度(秒)", "多长时间聚成一个统计桶;桶永久保留"),
-    "eh_raw_keep_days": ("原始读数保留(天)", "超期的逐条读数滚删,只留统计桶(告警行永久保留)"),
-    "eh_sweep_interval_s": ("清扫间隔(秒)", "多久检查一次过期的原始读数"),
-    "eh_spectrum_interval_s": ("噪声谱间隔(秒)", "多久存一条噪声谱快照"),
-    "eh_spectrum_bins": ("噪声谱点数", "对数分箱后的频点数;越多越细也越占地方"),
-    "eh_spectrum_min_segments": ("噪声谱最少段数", "攒够这么多安静段才敢发一条快照"),
-    "eh_spectrum_accum_every_s": ("噪声谱取样间隔(秒)", "每隔多久从段流里收一段进来攒"),
-    "eh_z_interval_s": ("Z 噪声谱间隔(秒)", "多久采一次 Z 噪声谱"),
-    "eh_z_burst_s": ("Z 采集时长(秒)", "每次 Z 采集持续多久;越长分辨率越好也越占通道"),
+    "eh_enabled": (tr("记录环境历史", "Record environment history"),
+                   tr("1=后台聚合并保留环境参数历史,0=完全关闭", "1 = aggregate and keep environment parameter history in the background, 0 = fully off")),
+    "eh_spectra_enabled": (tr("记录电流噪声谱", "Record current noise spectra"),
+                           tr("定期从电流监控的段流里存一条全谱快照", "Periodically save a full-spectrum snapshot from the current monitor segment stream")),
+    "eh_z_enabled": (tr("记录 Z 噪声谱", "Record Z noise spectra"),
+                     tr("需要 Osci2T 双通道;会短暂占用 data 通道", "Needs Osci2T dual channel; briefly occupies the data channel")),
+    "eh_bucket_s": (tr("聚合粒度(秒)", "Aggregation interval (s)"),
+                    tr("多长时间聚成一个统计桶;桶永久保留", "How long one statistics bucket spans; buckets are kept forever")),
+    "eh_raw_keep_days": (tr("原始读数保留(天)", "Raw reading retention (days)"),
+                         tr("超期的逐条读数滚删,只留统计桶(告警行永久保留)", "Expired per-reading rows are rolled off, keeping only statistics buckets (alarm rows are kept forever)")),
+    "eh_sweep_interval_s": (tr("清扫间隔(秒)", "Sweep interval (s)"),
+                            tr("多久检查一次过期的原始读数", "How often to check for expired raw readings")),
+    "eh_spectrum_interval_s": (tr("噪声谱间隔(秒)", "Noise spectrum interval (s)"),
+                               tr("多久存一条噪声谱快照", "How often to save a noise spectrum snapshot")),
+    "eh_spectrum_bins": (tr("噪声谱点数", "Noise spectrum points"),
+                         tr("对数分箱后的频点数;越多越细也越占地方", "Number of frequency points after log binning; more is finer but takes more space")),
+    "eh_spectrum_min_segments": (tr("噪声谱最少段数", "Noise spectrum minimum segments"),
+                                 tr("攒够这么多安静段才敢发一条快照", "Only emit a snapshot after this many quiet segments are accumulated")),
+    "eh_spectrum_accum_every_s": (tr("噪声谱取样间隔(秒)", "Noise spectrum sampling interval (s)"),
+                                  tr("每隔多久从段流里收一段进来攒", "How often to take one segment from the stream to accumulate")),
+    "eh_z_interval_s": (tr("Z 噪声谱间隔(秒)", "Z noise spectrum interval (s)"),
+                        tr("多久采一次 Z 噪声谱", "How often to acquire a Z noise spectrum")),
+    "eh_z_burst_s": (tr("Z 采集时长(秒)", "Z acquisition duration (s)"),
+                     tr("每次 Z 采集持续多久;越长分辨率越好也越占通道", "How long each Z acquisition lasts; longer gives better resolution but occupies the channel longer")),
 }
 
 #: 实为布尔的旋钮（0/1）—— UI 渲染成开关。

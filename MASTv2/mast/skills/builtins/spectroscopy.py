@@ -18,6 +18,7 @@ vendored from v1 mast/skills/builtins/spectroscopy.py 2026-04-23. Zero behaviour
 from __future__ import annotations
 
 import logging
+import time
 
 from mast.core.types import (
     ParameterSpec,
@@ -28,6 +29,7 @@ from mast.core.types import (
 )
 from mast.io.nanonis_files import channel_ids_from_buffer
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 
 def _reshape_spectrum(variables):
@@ -37,31 +39,31 @@ def _reshape_spectrum(variables):
     返回 (channel_map, num_points, reason)，成功时 reason 为空。
     解码失败必须带原因，与一条有效但零点数的谱明确区分，不能静默缺少字段。"""
     if not (isinstance(variables, (list, tuple)) and len(variables) >= 6):
-        n = len(variables) if isinstance(variables, (list, tuple)) else "非序列"
-        return {}, 0, f"Variables 不足 6 项(实际 {n}),不是一个谱数据块"
+        n = len(variables) if isinstance(variables, (list, tuple)) else tr("非序列", "not a sequence")
+        return {}, 0, tr(f"Variables 不足 6 项(实际 {n}),不是一个谱数据块", f"Variables has fewer than 6 items (actual {n}), not a spectrum data block")
     ch_names = variables[2] if isinstance(variables[2], list) else []
     data_2d = variables[5]
     try:
         rows = int(variables[3])  # rows = channels
         cols = int(variables[4])  # cols = sweep points
     except (TypeError, ValueError):
-        return {}, 0, (f"行列数不是整数(rows={variables[3]!r}, "
-                       f"cols={variables[4]!r})")
+        return {}, 0, (tr(f"行列数不是整数(rows={variables[3]!r}, "
+                       f"cols={variables[4]!r})", f"Row/column counts are not integers (rows={variables[3]!r}, cols={variables[4]!r})"))
     if hasattr(data_2d, "tolist"):
         data_2d = data_2d.tolist()
     if not (isinstance(data_2d, list) and rows > 0 and cols > 0):
-        return {}, 0, (f"数据块不是列表或行列数非正(rows={rows}, cols={cols}, "
-                       f"data={type(data_2d).__name__})")
+        return {}, 0, (tr(f"数据块不是列表或行列数非正(rows={rows}, cols={cols}, "
+                       f"data={type(data_2d).__name__})", f"Data block is not a list or row/column counts are not positive (rows={rows}, cols={cols}, data={type(data_2d).__name__})"))
     import numpy as np
     try:
         arr = np.array(data_2d, dtype=np.float64).reshape(rows, cols)
     except (ValueError, TypeError) as exc:
-        return {}, 0, f"{rows}×{cols} 装不下这段数据: {exc}"
+        return {}, 0, tr(f"{rows}×{cols} 装不下这段数据: {exc}", f"{rows}x{cols} cannot hold this data: {exc}")
     channel_map: dict = {}
     for i, name in enumerate(ch_names[:rows]):
         channel_map[name] = arr[i, :].tolist()
     if not channel_map:
-        return {}, 0, f"数据解开了({rows}×{cols}),但一个通道名都没有"
+        return {}, 0, tr(f"数据解开了({rows}×{cols}),但一个通道名都没有", f"Data was unpacked ({rows}x{cols}), but there is not a single channel name")
     return channel_map, cols, ""
 
 
@@ -105,6 +107,52 @@ def _coerce_float_list(value) -> list[float]:
 
 
 logger = logging.getLogger(__name__)
+
+
+#: 幂等调用在传输层失败后、重做之前停多久（秒）。
+#:
+#: 曾出现过：ConfigureSTS 的 ``LimitsSet`` 超时 → 连接池重连并原样重发 →
+#: 重发在替换连接上被控制器重置（它还在忙上一条）→ 技能失败；**20 ms 后**另一个
+#: 调用方在同一角色上重连一次就成功了。所以「隔一会儿再做一次」能救回来，而
+#: 连接池自己那一次重发救不回来。停一秒是给控制器把手头那条做完。
+_IDEMPOTENT_RETRY_PAUSE_S = 1.0
+
+
+def _call_idempotent(calls: list, call):
+    """Run ``call`` — a thunk holding ONE literal ``context.safe_call("…")`` of an
+    IDEMPOTENT command — and run it once more after a transport-level failure;
+    every attempt goes into ``calls``.
+
+    A thunk, not a verb argument: the verb has to stay a literal inside
+    ``safe_call(...)``, because the abort-policy checker, the security audit and
+    the coverage census all find Nanonis commands by grepping for exactly that
+    (``tests/v2/unit/core/test_safe_call_verbs_are_literal.py``).
+
+    **Only for commands that set a property to an absolute value, or read one**
+    (``*_Open``, ``*_LimitsSet``, ``*_PropsSet``, ``*_PropsGet``…): sending them
+    twice leaves the controller exactly where once would. Never for ``*_Start``,
+    motion, pulses — a resend there can run the action twice.
+
+    Only a record the real connection pool flagged as a transport failure
+    (``connection.is_transport_failure``) is retried; an application error (a
+    locked parameter, a value out of range) comes back as it is, because doing
+    it again cannot change the answer. Records from anything else (the abort
+    gate, test doubles) carry no flag and pass straight through."""
+    from mast.core.connection import is_transport_failure
+
+    rec = call()
+    calls.append(rec)
+    if not (getattr(rec, "error", "") and is_transport_failure(rec)):
+        return rec
+    logger.warning("%s failed at the transport level (%s); retrying once in %.1f s",
+                   getattr(rec, "method", "?"), rec.error, _IDEMPOTENT_RETRY_PAUSE_S)
+    time.sleep(_IDEMPOTENT_RETRY_PAUSE_S)
+    again = call()
+    calls.append(again)
+    if getattr(again, "error", ""):
+        again.error = (f"{again.error} (retried once after a transport failure; "
+                       f"first attempt: {rec.error})")
+    return again
 
 
 def _attach_saved_dat(context, data: dict) -> None:
@@ -162,8 +210,7 @@ def _sweep_duration_s(context, calls: list) -> tuple[float, dict]:
     """
     npts = nsw = None
     bwd = True
-    rec = context.safe_call("BiasSpectr_PropsGet")
-    calls.append(rec)
+    rec = _call_idempotent(calls, lambda: context.safe_call("BiasSpectr_PropsGet"))
     v = rec.return_value
     var = v[2] if isinstance(v, (list, tuple)) and len(v) > 2 else None
     # BiasSpectr.PropsGet Variables =
@@ -177,8 +224,7 @@ def _sweep_duration_s(context, calls: list) -> tuple[float, dict]:
             npts = nsw = None
 
     t: dict = {}
-    rec2 = context.safe_call("BiasSpectr_TimingGet")
-    calls.append(rec2)
+    rec2 = _call_idempotent(calls, lambda: context.safe_call("BiasSpectr_TimingGet"))
     v2 = rec2.return_value
     var2 = v2[2] if isinstance(v2, (list, tuple)) and len(v2) > 2 else None
     keys = ["z_averaging_time_s", "z_offset_m", "initial_settling_time_s",
@@ -194,7 +240,7 @@ def _sweep_duration_s(context, calls: list) -> tuple[float, dict]:
 
     if npts is None or nsw is None or "integration_time_s" not in t:
         return _SWEEP_BUDGET_FALLBACK_S, {
-            "why": "读不到扫掠设定，退回保守上限",
+            "why": tr("读不到扫掠设定，退回保守上限", "Could not read the sweep settings, falling back to a conservative limit"),
             "npts": npts, "nsweeps": nsw, "timing_keys": sorted(t),
         }
     per_pt = t.get("settling_time_s", 0.0) + t["integration_time_s"]
@@ -207,6 +253,229 @@ def _sweep_duration_s(context, calls: list) -> tuple[float, dict]:
                   "per_point_s": round(per_pt, 4), "core_s": round(core, 1)}
 
 
+def _plain_int(v) -> "int | None":
+    """An int field of a decoded reply, bare or as a one-element sequence (Nanonis array
+    fields arrive as tuples of 1-tuples, scalars sometimes as one-element lists)."""
+    while isinstance(v, (list, tuple)) and len(v) == 1:
+        v = v[0]
+    if isinstance(v, bool):
+        return int(v)
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _read_current_num_sweeps(context, calls: list) -> "int | None":
+    """当前 BiasSpectr 的扫掠数（读不到给 ``None``）。
+
+    ``BiasSpectr.PropsGet`` 的 Variables = [Save all, **Number of sweeps**,
+    Backward sweep, Number of points, …]（与 :func:`_sweep_duration_s` 同一份回包、
+    同一处取法：``var[1]``）。``ConfigureSTS`` 用它在「调用方没显式给扫掠数」时**保持
+    操作员原来的设置**，而不是把它打回 1。
+
+    ⚠️ 读不到时返回 ``None``（不是 1）—— 把「读不到」折成一个具体值正是
+    一类典型的错误形状。调用方拿到 ``None`` 时自己决定怎么办（见 ConfigureSTS）。
+    """
+    rec = _call_idempotent(calls, lambda: context.safe_call("BiasSpectr_PropsGet"))
+    v = rec.return_value
+    var = v[2] if isinstance(v, (list, tuple)) and len(v) > 2 else None
+    if isinstance(var, (list, tuple)) and len(var) >= 2:
+        n = _plain_int(var[1])
+        if n is not None and n >= 1:
+            return n
+    return None
+
+
+def _abort_fn(context):
+    """操作员中止回调（``context.check_abort``），拿不到就给 ``None``。"""
+    a = getattr(context, "check_abort", None)
+    return a if callable(a) else None
+
+
+def _read_sweep_start_v(context, calls: list):
+    """测谱**起始偏压**（``BiasSpectr.LimitsGet`` 的 start），读不到给 ``(None, 原因)``。
+
+    Variables = [start_v, end_v]（与 ``GetSTSLimits`` 同一处取法）。``AcquireSTS`` 的
+    ``ramp_before`` 用它当「要 ramp 到的测谱偏压」—— 不另加一个偏压目标参数，起始偏压
+    就是 ConfigureSTS 已经配好的那个。
+    """
+    rec = _call_idempotent(calls, lambda: context.safe_call("BiasSpectr_LimitsGet"))
+    v = rec.return_value
+    var = v[2] if isinstance(v, (list, tuple)) and len(v) > 2 else None
+    if isinstance(var, (list, tuple)) and len(var) >= 1:
+        s = var[0]
+        while isinstance(s, (list, tuple)) and len(s) == 1:
+            s = s[0]
+        try:
+            return float(s), ""
+        except (TypeError, ValueError):
+            return None, tr(f"start 不是数: {s!r}", f"start is not a number: {s!r}")
+    return None, (getattr(rec, "error", "") or tr("BiasSpectr_LimitsGet 回包里没有上下限",
+                                                  "BiasSpectr_LimitsGet reply has no limits"))
+
+
+def _ramp_working_point(context, calls: list, *, bias_to, setpoint_to,
+                        slew_v_per_s, abort=None) -> dict:
+    """把偏压（和可选的电流 setpoint）从**当前读到的值**分步 ramp 到目标值。
+
+    返回 ``{"ok", "error", "bias_from", "setpoint_from"}``。``bias_from`` /
+    ``setpoint_from`` 是 ramp **开始前读到的当前值**，供调用方做测谱后的还原快照
+    （还原成读到的值，不是写死值）。
+
+    ── 安全模式（复刻 ``bias.SetBias``）─────────────────────────────────────
+    * ramp 前必须读到当前偏压，**读不到就拒绝**——绝不从臆断的 0 V 起步，那正是
+      slew 要防的那一跳。
+    * 每步 ``Bias_Set``(+``ZCtrl_SetpntSet``) 后停 100 ms，整个过程可被操作员中止
+      （停在两个都过了边界检查的中间值上是安全的）。
+    * ``slew_v_per_s`` 为空 / ≤0 时走**瞬时设定**，与 ``SetBias`` 的默认一致
+      （ramp 速率沿用 SetBias 默认）。
+    * 偏压与 setpoint **同步**走同样的步数（一个平滑过渡），feedback 全程是调用方
+      的当前状态（成像态 ON）——随后才由 ConfigureSTS 的 Z-hold 进入扫掠。
+
+    ``setpoint_to is None`` ⇒ 只 ramp 偏压、不碰 setpoint；但无论如何都读一次当前
+    setpoint 放进 ``setpoint_from``（还原快照要用）。
+    """
+    import numpy as np
+
+    def _read_scalar(call):
+        # ``call`` 是一个 thunk，里面是**字面量** ``context.safe_call("…")``：verb 必须留在
+        # safe_call(...) 里的字面量上，否则 abort 检查 / 安全审计 / 覆盖普查都 grep 不到它
+        # （tests/v2/unit/core/test_safe_call_verbs_are_literal.py）。同文件 _call_idempotent
+        # 用的是同一套路。
+        rec = call()
+        calls.append(rec)
+        rv = getattr(rec, "return_value", None)
+        if not getattr(rec, "error", "") and isinstance(rv, (list, tuple)) and len(rv) > 2:
+            x = rv[2]
+            while isinstance(x, (list, tuple)) and len(x) == 1:
+                x = x[0]
+            if isinstance(x, (list, tuple)) and x:
+                x = x[0]
+            try:
+                return float(x)
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    v0 = _read_scalar(lambda: context.safe_call("Bias_Get"))
+    if v0 is None:
+        return {"ok": False, "bias_from": None, "setpoint_from": None,
+                "error": tr("读不到当前偏压(Bias_Get)，拒绝 ramp——不从臆断的 0 V 起步。",
+                            "Could not read the current bias (Bias_Get); refusing to ramp — "
+                            "will not start from an assumed 0 V.")}
+    i0 = _read_scalar(lambda: context.safe_call("ZCtrl_SetpntGet"))
+    if setpoint_to is not None and i0 is None:
+        return {"ok": False, "bias_from": v0, "setpoint_from": None,
+                "error": tr("读不到当前电流 setpoint(ZCtrl_SetpntGet)，而本次要 ramp setpoint，拒绝。",
+                            "Could not read the current setpoint (ZCtrl_SetpntGet) while a "
+                            "setpoint ramp was requested; refusing.")}
+
+    def _set_once(bv, sv):
+        r1 = context.safe_call("Bias_Set", float(bv))
+        calls.append(r1)
+        if getattr(r1, "error", ""):
+            return f"Bias_Set @ {bv:.4f} V: {r1.error}"
+        if sv is not None:
+            r2 = context.safe_call("ZCtrl_SetpntSet", float(sv))
+            calls.append(r2)
+            if getattr(r2, "error", ""):
+                return f"ZCtrl_SetpntSet @ {sv:.3e} A: {r2.error}"
+        return ""
+
+    # 瞬时：无 slew，或偏压变化 < 1 mV（与 SetBias 同一门槛）。
+    if not (slew_v_per_s and slew_v_per_s > 0) or abs(float(bias_to) - v0) <= 0.001:
+        err = _set_once(bias_to, setpoint_to)
+        return {"ok": not err, "error": err, "bias_from": v0, "setpoint_from": i0}
+
+    step_interval = 0.1
+    n_steps = max(1, int(abs(float(bias_to) - v0) / (slew_v_per_s * step_interval)))
+    bias_steps = np.linspace(v0, float(bias_to), n_steps + 1)[1:]
+    if setpoint_to is not None and i0 is not None:
+        setp_steps = list(np.linspace(i0, float(setpoint_to), n_steps + 1)[1:])
+    else:
+        setp_steps = [None] * n_steps
+    for i, (bv, sv) in enumerate(zip(bias_steps, setp_steps)):
+        if callable(abort) and abort():
+            return {"ok": False, "bias_from": v0, "setpoint_from": i0,
+                    "error": tr(f"operator 在 ramp 中途中止(第 {i}/{n_steps} 步，偏压 {bv:.4f} V)；"
+                                f"工作点停在安全中间值。",
+                                f"aborted by operator mid-ramp (step {i}/{n_steps}, bias {bv:.4f} V); "
+                                f"working point left at a safe intermediate value.")}
+        err = _set_once(bv, sv)
+        if err:
+            return {"ok": False, "error": err, "bias_from": v0, "setpoint_from": i0}
+        time.sleep(step_interval)
+    return {"ok": True, "error": "", "bias_from": v0, "setpoint_from": i0}
+
+
+def _zsweep_duration_s(context, calls: list) -> tuple[float, dict]:
+    """How long one Z spectrum takes by the controller's own settings (s), and how that was
+    worked out — the Z counterpart of :func:`_sweep_duration_s`.
+
+    ``ZSpectr_Start`` with Get data = 1 blocks for the whole sweep before it answers, exactly
+    like ``BiasSpectr_Start``; until 7.0.1 nothing raised the socket's recv timeout for it,
+    so a Z spectrum longer than the pool's ~5 s left its reply on a socket nobody read and
+    misaligned every later call on that connection (a past failure of
+    ``AcquireSTS``). Same model, the reply layouts from ``nanonis_spm``:
+
+    * ``ZSpectr.PropsGet`` -> [Backward sweep (H), Number of points (i), Parameters size,
+      Number of parameters, Parameters (*+c), Fixed parameters size, Number of fixed
+      parameters, Fixed parameters (*+c), Number of sweeps (H), Save all (H)];
+    * ``ZSpectr.TimingGet`` -> [Z averaging, Initial settling, Max slew rate, Settling,
+      Integration, End settling, Z control time] (7 float32).
+
+    Unreadable settings fall back to :data:`_SWEEP_BUDGET_FALLBACK_S` (the long side)."""
+    npts = nsw = None
+    bwd = True
+    rec = _call_idempotent(calls, lambda: context.safe_call("ZSpectr_PropsGet"))
+    v = rec.return_value
+    var = v[2] if isinstance(v, (list, tuple)) and len(v) > 2 else None
+    if isinstance(var, (list, tuple)) and len(var) >= 9:
+        b, n, s = _plain_int(var[0]), _plain_int(var[1]), _plain_int(var[8])
+        if n is not None and s is not None:
+            npts, nsw = max(n, 1), max(s, 1)
+            bwd = bool(b) if b is not None else True
+
+    t: dict = {}
+    rec2 = _call_idempotent(calls, lambda: context.safe_call("ZSpectr_TimingGet"))
+    v2 = rec2.return_value
+    var2 = v2[2] if isinstance(v2, (list, tuple)) and len(v2) > 2 else None
+    keys = ["z_averaging_time_s", "initial_settling_time_s", "max_slew_rate_v_per_s",
+            "settling_time_s", "integration_time_s", "end_settling_time_s", "z_control_time_s"]
+    if isinstance(var2, (list, tuple)):
+        for i, k in enumerate(keys):
+            if i < len(var2):
+                try:
+                    x = var2[i]
+                    while isinstance(x, (list, tuple)) and len(x) == 1:
+                        x = x[0]
+                    t[k] = float(x)
+                except (TypeError, ValueError):
+                    pass
+
+    if npts is None or nsw is None or "integration_time_s" not in t:
+        return _SWEEP_BUDGET_FALLBACK_S, {
+            "why": tr("读不到 Z 谱扫掠设定，退回保守上限", "Could not read the Z spectroscopy sweep settings, falling back to a conservative limit"),
+            "npts": npts, "nsweeps": nsw, "timing_keys": sorted(t),
+        }
+    per_pt = t.get("settling_time_s", 0.0) + t["integration_time_s"]
+    per_sweep = (t.get("initial_settling_time_s", 0.0)
+                 + t.get("end_settling_time_s", 0.0)
+                 + t.get("z_control_time_s", 0.0)
+                 + t.get("z_averaging_time_s", 0.0))
+    core = npts * per_pt * (2 if bwd else 1) * nsw + per_sweep * nsw
+    return core, {"npts": npts, "nsweeps": nsw, "backward": bwd,
+                  "per_point_s": round(per_pt, 4), "core_s": round(core, 1)}
+
+
+def zsweep_recv_budget_s(context, calls: list) -> tuple[float, float, dict]:
+    """``(recv timeout for ZSpectr_Start, estimated sweep s, how)``: the estimate from
+    :func:`_zsweep_duration_s` with the same margin ``AcquireSTS`` gives a bias sweep."""
+    core_s, detail = _zsweep_duration_s(context, calls)
+    return core_s * _SWEEP_BUDGET_FACTOR + _SWEEP_BUDGET_PAD_S, core_s, detail
+
+
 class AcquireSTS(BaseSkill):
     """Acquire a single STS spectrum at the current position."""
 
@@ -217,17 +486,67 @@ class AcquireSTS(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "在当前针尖位置采一条 STS 谱。使用当前的 lock-in 与 bias 扫描设置。传 save_basename "
-                "可以控制保存下来的 .dat 文件名（为了可追溯 —— 例如按网格点命名）。"
+                tr("在当前针尖位置采一条 STS 谱。使用当前的 lock-in 与 bias 扫描设置。传 save_basename "
+                "可以控制保存下来的 .dat 文件名（为了可追溯 —— 例如按网格点命名）。", "Acquire one STS spectrum at the current tip position. Uses the current lock-in and bias sweep settings. Pass save_basename to control the file name of the saved .dat (for traceability - e.g. named by grid point).")
             ),
             parameters=[
                 ParameterSpec(
                     name="save_basename",
                     type="str",
-                    description=("保存下来的谱文件的基名（留空 = 沿用模块当前的基名）。"
-                                 "它让网格/批量测量能把每一个 .dat 与它的坐标对应起来。"),
+                    description=(tr("保存下来的谱文件的基名（留空 = 沿用模块当前的基名）。"
+                                 "它让网格/批量测量能把每一个 .dat 与它的坐标对应起来。", "Base name of the saved spectrum file (empty = keep the module's current base name). It lets grid/batch measurements match each .dat to its coordinates.")),
                     required=False,
                     default="",
+                ),
+                ParameterSpec(
+                    name="ramp_before",
+                    type="bool",
+                    description=(tr("测谱前把偏压从成像值**分步 ramp** 到测谱起始偏压（取自 "
+                                 "ConfigureSTS 配的上下限的 start），别一步突变以免伤针。默认关="
+                                 "现有行为不变。给了 spectro_setpoint_a 时电流 setpoint 一起同步 ramp。",
+                                 "Before the sweep, **ramp** the bias step by step from its imaging value to the "
+                                 "spectroscopy start bias (the start of the limits set via ConfigureSTS) instead of "
+                                 "jumping, to protect the tip. Off by default (no change to existing behaviour). When "
+                                 "spectro_setpoint_a is given, the current setpoint is ramped in sync.")),
+                    required=False,
+                    default=False,
+                ),
+                ParameterSpec(
+                    name="restore_after",
+                    type="bool",
+                    description=(tr("测谱后把偏压（和被改过的电流 setpoint）**ramp 回**测谱前快照到的成像值。"
+                                 "默认关。谱已拿到的前提下，恢复失败只告警、不判这次采集失败。",
+                                 "After the sweep, **ramp** the bias (and the current setpoint, if it was changed) "
+                                 "back to the imaging values snapshotted before spectroscopy. Off by default. Once the "
+                                 "spectrum is in hand, a failed restore only warns and does not fail the acquisition.")),
+                    required=False,
+                    default=False,
+                ),
+                ParameterSpec(
+                    name="spectro_setpoint_a",
+                    type="float",
+                    description=(tr("测谱用的电流 setpoint（安培）。给了才在 ramp_before 时把 setpoint "
+                                 "一起 ramp 过去、并在 restore_after 时还原；留空 = 全程不碰 setpoint。",
+                                 "Current setpoint for spectroscopy, in amps. Only when given is the setpoint ramped "
+                                 "across during ramp_before and restored during restore_after; empty = the setpoint is "
+                                 "never touched.")),
+                    unit="A",
+                    required=False,
+                    default=None,
+                ),
+                ParameterSpec(
+                    name="ramp_slew_rate_v_per_s",
+                    type="float",
+                    description=(tr("偏压 ramp 速率（V/s），与 SetBias 同语义：留空 = 瞬时切换（SetBias 的默认）；"
+                                 "给了才分步限速。只在 ramp_before / restore_after 打开时起作用。",
+                                 "Bias ramp rate (V/s), same semantics as SetBias: empty = switch instantly (SetBias's "
+                                 "default); give a value for a rate-limited stepped ramp. Only matters when ramp_before "
+                                 "/ restore_after is on.")),
+                    unit="V/s",
+                    required=False,
+                    default=None,
+                    min_value=0.01,
+                    max_value=100.0,
                 ),
             ],
             preconditions=["z_controller_on"],
@@ -238,8 +557,46 @@ class AcquireSTS(BaseSkill):
 
     def execute(self, context, params: dict) -> SkillResult:
         calls = []
-        rec_open = context.safe_call("BiasSpectr_Open")
-        calls.append(rec_open)
+        save_basename = str(params.get("save_basename", "") or "")
+        ramp_before = bool(params.get("ramp_before", False))
+        restore_after = bool(params.get("restore_after", False))
+        spectro_setpoint_a = params.get("spectro_setpoint_a")
+        ramp_slew = params.get("ramp_slew_rate_v_per_s")
+        # restore 只还原「这次真改过的量」：setpoint 只有在 ramp_before 时给了
+        # spectro_setpoint_a 才动过，才需要还原。
+        changed_setpoint = ramp_before and spectro_setpoint_a is not None
+        ramp_snapshot: dict | None = None
+
+        _call_idempotent(calls, lambda: context.safe_call("BiasSpectr_Open"))
+
+        # ── 测谱前把偏压(和 setpoint)从成像值分步 ramp 到测谱值 ──────
+        # 偏压/电流要从扫图值慢慢变到测谱值，别一步突变以免伤针。
+        # ramp 到的偏压 = ConfigureSTS 配的 start（这里读回来），setpoint = 调用方给的
+        # spectro_setpoint_a（不给就不碰）。先快照当前成像值，供 restore_after 还原。
+        # ramp 失败（读不到当前偏压 / Bias_Set 失败）就**拒绝起扫**——没能安全建立测谱
+        # 条件，不如不扫。
+        if ramp_before:
+            start_v, lim_err = _read_sweep_start_v(context, calls)
+            if start_v is None:
+                return SkillResult(
+                    skill_name="AcquireSTS", success=False,
+                    error=tr(f"ramp_before=True，但读不到测谱起始偏压({lim_err}) —— 拒绝起扫："
+                             f"不知道要 ramp 到哪。先用 ConfigureSTS 配好上下限，或关掉 ramp_before。",
+                             f"ramp_before=True, but the spectroscopy start bias could not be read ({lim_err}) "
+                             f"- refusing to sweep: nowhere to ramp to. Configure the limits via ConfigureSTS "
+                             f"first, or turn ramp_before off."),
+                    data={"working_point_ramped": False}, nanonis_calls=calls)
+            rb = _ramp_working_point(
+                context, calls, bias_to=start_v, setpoint_to=spectro_setpoint_a,
+                slew_v_per_s=ramp_slew, abort=_abort_fn(context))
+            if not rb["ok"]:
+                return SkillResult(
+                    skill_name="AcquireSTS", success=False,
+                    error=tr(f"测谱前 ramp 工作点失败：{rb['error']} —— 拒绝起扫（没能安全建立测谱条件）。",
+                             f"Failed to ramp the working point before spectroscopy: {rb['error']} "
+                             f"- refusing to sweep (could not safely establish spectroscopy conditions)."),
+                    data={"working_point_ramped": False}, nanonis_calls=calls)
+            ramp_snapshot = {"bias_v": rb["bias_from"], "setpoint_a": rb["setpoint_from"]}
 
         # NOTE: AcquireSTS deliberately does NOT call BiasSpectr_PropsSet here.
         # PropsSet's Z-offset arg has no "no change" sentinel and BiasSpectr_
@@ -248,7 +605,6 @@ class AcquireSTS(BaseSkill):
         # protective pre-STS Z retract on every acquire.
         # Save/autosave/Z-offset are configured via ConfigureSTS; Acquire only
         # starts the sweep and (Get data=1) returns the spectrum regardless.
-        save_basename = str(params.get("save_basename", "") or "")
 
         # BiasSpectr_Start 阻塞直至整条扫掠结束，recv 预算必须覆盖实际采集时长。
         # 过早超时会使迟到回包污染下一次调用，也可能令控制器状态停在采集中间。
@@ -269,6 +625,12 @@ class AcquireSTS(BaseSkill):
         # 上面已经挡过),不是「谱拿到了」。这两件事在这个技能里是分开的 ——
         # 见下面 success 的取法。
         data: dict = {"acquisition_complete": True}
+        # 测谱前有没有做 ramp、从哪个成像工作点来的（供追溯 / restore 对账）。
+        data["working_point_ramped"] = bool(ramp_before)
+        if ramp_snapshot is not None:
+            data["imaging_bias_v"] = ramp_snapshot["bias_v"]
+            if changed_setpoint:
+                data["imaging_setpoint_a"] = ramp_snapshot["setpoint_a"]
         # 记账：这条谱按仪器设定算出来要多久、我们把 recv 超时抬到了多少。
         # 出问题时这是第一现场 —— 抬得不够会表现成「连接莫名其妙废了」。
         data["sweep_estimate_s"] = round(core_s, 1)
@@ -281,8 +643,8 @@ class AcquireSTS(BaseSkill):
             channel_map, num_points, why = _reshape_spectrum(parsed[2])
         else:
             channel_map, num_points, why = {}, 0, (
-                f"return_value 不是 (err, raw, Variables) 三元组: "
-                f"{type(parsed).__name__}")
+                tr(f"return_value 不是 (err, raw, Variables) 三元组: "
+                f"{type(parsed).__name__}", f"return_value is not an (err, raw, Variables) triple: {type(parsed).__name__}"))
         # **总是**落这个键。只在失败时出现的标志,会让按它分支的调用方在成功
         # 路径上读到 KeyError —— 那是把一个诚实标志变成一颗新的雷。
         data["spectrum_parsed"] = bool(channel_map)
@@ -303,6 +665,24 @@ class AcquireSTS(BaseSkill):
             logger.warning("AcquireSTS: 返回的数据块解不开 —— %s", why)
         _attach_saved_dat(context, data)
 
+        # ── 测谱后把工作点 ramp 回成像态（可选）────────────────────
+        # 谱已经拿到（上面）。恢复是善后：把偏压（和被改过的 setpoint）ramp 回**测谱前
+        # 快照到的成像值**（还原成读到的值，不是写死值）。恢复失败只告警、不翻盘这次
+        # 采集——否则会把一次拿到了谱的采集判成失败。两条返回路径（下面的失败与成功）
+        # 都在这之后，所以恢复对两者都生效。
+        if restore_after and ramp_snapshot is not None:
+            rr = _ramp_working_point(
+                context, calls,
+                bias_to=ramp_snapshot["bias_v"],
+                setpoint_to=(ramp_snapshot["setpoint_a"] if changed_setpoint else None),
+                slew_v_per_s=ramp_slew, abort=_abort_fn(context))
+            data["working_point_restored"] = rr["ok"]
+            if not rr["ok"]:
+                data["working_point_restore_error"] = rr["error"]
+                logger.warning(
+                    "AcquireSTS: 测谱后恢复工作点失败：%s —— 谱已拿到，但针尖仍停在测谱"
+                    "条件，下次成像前请手动复位偏压/电流。", rr["error"])
+
         # ── success 的取法(2026-08-15 普查 A3;判据写在这里,别照搬别处)──
         # ConfigureSTS 打开 autosave ⇒ 每次采集都有一份 .dat 落盘。所以
         # 「内联块解不开」时数据**可能仍然在盘上**;那时报失败会把 agent 推去
@@ -318,10 +698,10 @@ class AcquireSTS(BaseSkill):
             return SkillResult(
                 skill_name="AcquireSTS",
                 success=False,
-                error=(f"扫掠跑完了,但返回的数据块解不开({why}),"
+                error=(tr(f"扫掠跑完了,但返回的数据块解不开({why}),"
                        f"而且没有找到自动保存的 .dat —— 这次采集没有在任何地方"
                        f"留下可用的谱。若 autosave 是开着的,请到 Nanonis 的保存"
-                       f"目录自己确认一次(这里只看最近 120 s 内最新的 .dat)。"),
+                       f"目录自己确认一次(这里只看最近 120 s 内最新的 .dat)。", f"The sweep finished, but the returned data block could not be unpacked ({why}), and no autosaved .dat was found - this acquisition left no usable spectrum anywhere. If autosave is on, check the Nanonis save directory yourself (this only looks at the newest .dat from the last 120 s).")),
                 data=data,
                 nanonis_calls=calls,
             )
@@ -342,12 +722,12 @@ class ConfigureSTS(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="配置 STS 的 bias 扫描参数。",
+            description=tr("配置 STS 的 bias 扫描参数。", "Configure the bias sweep parameters of STS."),
             parameters=[
                 ParameterSpec(
                     name="start_v",
                     type="float",
-                    description="扫描起始电压，单位伏特",
+                    description=tr("扫描起始电压，单位伏特", "Sweep start voltage, in volts"),
                     unit="V",
                     required=True,
                     min_value=-10.0,
@@ -356,7 +736,7 @@ class ConfigureSTS(BaseSkill):
                 ParameterSpec(
                     name="end_v",
                     type="float",
-                    description="扫描终止电压，单位伏特",
+                    description=tr("扫描终止电压，单位伏特", "Sweep end voltage, in volts"),
                     unit="V",
                     required=True,
                     min_value=-10.0,
@@ -365,15 +745,28 @@ class ConfigureSTS(BaseSkill):
                 ParameterSpec(
                     name="num_points",
                     type="int",
-                    description="扫描的点数",
+                    description=tr("扫描的点数", "Number of points in the sweep"),
                     required=True,
                     min_value=2,
                     max_value=10000,
                 ),
                 ParameterSpec(
+                    name="num_sweeps",
+                    type="int",
+                    description=(
+                        tr("平均的扫掠数（往返算一次）。留空 / 0 = **保持操作员在 "
+                        "Nanonis 里当前设的值不动**；给 ≥1 才覆盖它。原来这里被写死成 "
+                        "1，于是用户在 GUI 里设的多次平均每次配置都被打回 1。", "Number of sweeps to average (forth and back count as one). Empty / 0 = **leave the value the operator currently set in Nanonis untouched**; give >= 1 to override it. This used to be hard-coded to 1 here, so the multiple averages a user set in the GUI were reset to 1 on every configuration.")
+                    ),
+                    required=False,
+                    default=0,
+                    min_value=0,
+                    max_value=1000,
+                ),
+                ParameterSpec(
                     name="z_offset_m",
                     type="float",
-                    description="谱学期间的 Z 偏移，单位米",
+                    description=tr("谱学期间的 Z 偏移，单位米", "Z offset during spectroscopy, in metres"),
                     unit="m",
                     required=False,
                     default=0.0,
@@ -389,10 +782,12 @@ class ConfigureSTS(BaseSkill):
         end_v = params["end_v"]
         num_points = params["num_points"]
         z_offset_m = params.get("z_offset_m", 0.0)
+        num_sweeps_param = int(params.get("num_sweeps", 0) or 0)
         calls = []
 
-        rec_open = context.safe_call("BiasSpectr_Open")
-        calls.append(rec_open)
+        # Every call here sets an absolute value, so a transport failure is
+        # retried once (``_call_idempotent``; a first-load timeout).
+        rec_open = _call_idempotent(calls, lambda: context.safe_call("BiasSpectr_Open"))
         if rec_open.error:
             return SkillResult(
                 skill_name="ConfigureSTS",
@@ -401,8 +796,8 @@ class ConfigureSTS(BaseSkill):
                 nanonis_calls=calls,
             )
 
-        rec_limits = context.safe_call("BiasSpectr_LimitsSet", start_v, end_v)
-        calls.append(rec_limits)
+        rec_limits = _call_idempotent(
+            calls, lambda: context.safe_call("BiasSpectr_LimitsSet", start_v, end_v))
         if rec_limits.error:
             return SkillResult(
                 skill_name="ConfigureSTS",
@@ -411,10 +806,30 @@ class ConfigureSTS(BaseSkill):
                 nanonis_calls=calls,
             )
 
-        rec_props = context.safe_call(
-            "BiasSpectr_PropsSet", 1, 1, 1, num_points, z_offset_m, 1, 2,
-        )
-        calls.append(rec_props)
+        # ── 扫掠数（PropsSet 第 2 个实参）──────────────────────────────────
+        # 原来写死成 1，于是用户在 Nanonis GUI 里设的多次平均每次 ConfigureSTS
+        # 都被打回 1（曾出现过：测谱时 SweepS 自动变为 1）。``BiasSpectr_
+        # PropsSet`` 的扫掠数**没有「不改」哨兵值**，所以「保持」= 先读回来再原样
+        # 写。显式给 num_sweeps(≥1) 才覆盖；读不到当前值时退回 1 并说出来
+        # （「读不到」不默默折成一个让人以为保持住了的值）。
+        if num_sweeps_param >= 1:
+            effective_sweeps = num_sweeps_param
+            sweeps_source = "override"
+        else:
+            current_sweeps = _read_current_num_sweeps(context, calls)
+            if current_sweeps is not None:
+                effective_sweeps = current_sweeps
+                sweeps_source = "preserved"
+            else:
+                effective_sweeps = 1
+                sweeps_source = "fallback_unreadable"
+                logger.warning(
+                    "ConfigureSTS: 读不到当前扫掠数，退回 1 —— "
+                    "无法确认是否保持了操作员在 GUI 里设的平均扫掠数。")
+
+        rec_props = _call_idempotent(calls, lambda: context.safe_call(
+            "BiasSpectr_PropsSet", 1, effective_sweeps, 1, num_points, z_offset_m, 1, 2,
+        ))
         if rec_props.error:
             return SkillResult(
                 skill_name="ConfigureSTS",
@@ -432,8 +847,8 @@ class ConfigureSTS(BaseSkill):
         #     and as the sweep crosses 0 V it drives the tip into the surface.
         #   • Reset Bias = On → bias returns to the imaging value after the sweep
         #     (don't leave the junction parked at the sweep end voltage).
-        rec_adv = context.safe_call("BiasSpectr_AdvPropsSet", 1, 1, 0, 0)
-        calls.append(rec_adv)
+        rec_adv = _call_idempotent(
+            calls, lambda: context.safe_call("BiasSpectr_AdvPropsSet", 1, 1, 0, 0))
         # Non-fatal: some controllers/firmware may reject AdvPropsSet; the sweep
         # can still run. Surface it in data rather than failing the config.
         adv_ok = not getattr(rec_adv, "error", "")
@@ -446,6 +861,10 @@ class ConfigureSTS(BaseSkill):
                 "end_v": end_v,
                 "num_points": num_points,
                 "z_offset_m": z_offset_m,
+                # 实际设下去的扫掠数，以及它从哪来：override（调用方给的）/
+                # preserved（保持了操作员原值）/ fallback_unreadable（读不到退回 1）。
+                "num_sweeps": effective_sweeps,
+                "num_sweeps_source": sweeps_source,
                 "z_controller_hold": True if adv_ok else None,
                 "reset_bias": True if adv_ok else None,
             },
@@ -462,19 +881,19 @@ class ConfigureZSpectr(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="配置 Z 谱学：Z 偏移、扫描距离与点数。",
+            description=tr("配置 Z 谱学：Z 偏移、扫描距离与点数。", "Configure Z spectroscopy: Z offset, sweep distance and number of points."),
             parameters=[
                 ParameterSpec(
                     name="z_offset_m",
                     type="float",
-                    description="Z 偏移，单位米",
+                    description=tr("Z 偏移，单位米", "Z offset, in metres"),
                     unit="m",
                     required=True,
                 ),
                 ParameterSpec(
                     name="z_sweep_distance_m",
                     type="float",
-                    description="Z 扫描距离，单位米",
+                    description=tr("Z 扫描距离，单位米", "Z sweep distance, in metres"),
                     unit="m",
                     required=True,
                     min_value=0.0,
@@ -482,7 +901,7 @@ class ConfigureZSpectr(BaseSkill):
                 ParameterSpec(
                     name="num_points",
                     type="int",
-                    description="扫描的点数",
+                    description=tr("扫描的点数", "Number of points in the sweep"),
                     required=True,
                     min_value=2,
                     max_value=10000,
@@ -490,7 +909,7 @@ class ConfigureZSpectr(BaseSkill):
                 ParameterSpec(
                     name="backward_sweep",
                     type="bool",
-                    description="启用反扫",
+                    description=tr("启用反扫", "Enable backward sweep"),
                     required=False,
                     default=True,
                 ),
@@ -507,8 +926,8 @@ class ConfigureZSpectr(BaseSkill):
         backward = params.get("backward_sweep", True)
         calls = []
 
-        rec_open = context.safe_call("ZSpectr_Open")
-        calls.append(rec_open)
+        # All three set absolute values: retried once on a transport failure.
+        rec_open = _call_idempotent(calls, lambda: context.safe_call("ZSpectr_Open"))
         if rec_open.error:
             return SkillResult(
                 skill_name="ConfigureZSpectr",
@@ -517,8 +936,8 @@ class ConfigureZSpectr(BaseSkill):
                 nanonis_calls=calls,
             )
 
-        rec_range = context.safe_call("ZSpectr_RangeSet", z_offset, z_distance)
-        calls.append(rec_range)
+        rec_range = _call_idempotent(
+            calls, lambda: context.safe_call("ZSpectr_RangeSet", z_offset, z_distance))
         if rec_range.error:
             return SkillResult(
                 skill_name="ConfigureZSpectr",
@@ -527,11 +946,10 @@ class ConfigureZSpectr(BaseSkill):
                 nanonis_calls=calls,
             )
 
-        rec_props = context.safe_call(
+        rec_props = _call_idempotent(calls, lambda: context.safe_call(
             "ZSpectr_PropsSet",
             int(backward), num_points, 1, 1, 2, 1,
-        )
-        calls.append(rec_props)
+        ))
         if rec_props.error:
             return SkillResult(
                 skill_name="ConfigureZSpectr",
@@ -562,7 +980,7 @@ class AcquireZSpectr(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="在当前针尖位置采一条 Z 谱。",
+            description=tr("在当前针尖位置采一条 Z 谱。", "Acquire one Z spectrum at the current tip position."),
             preconditions=["z_controller_on"],
             estimated_duration_s=30.0,
             composition_level=1,
@@ -572,13 +990,15 @@ class AcquireZSpectr(BaseSkill):
     def execute(self, context, params: dict) -> SkillResult:
         calls = []
 
-        rec_open = context.safe_call("ZSpectr_Open")
-        calls.append(rec_open)
+        # Open and PropsSet are idempotent (retried once on a transport failure);
+        # ZSpectr_Start is NOT — a resend can run a second sweep — so it is not.
+        _call_idempotent(calls, lambda: context.safe_call("ZSpectr_Open"))
+        _call_idempotent(calls, lambda: context.safe_call("ZSpectr_PropsSet", 0, 0, 0, 1, 2, 1))
 
-        rec_props = context.safe_call("ZSpectr_PropsSet", 0, 0, 0, 1, 2, 1)
-        calls.append(rec_props)
-
-        record = context.safe_call("ZSpectr_Start", 1, "")
+        # ZSpectr_Start blocks for the whole sweep: the recv timeout has to cover it (see
+        # _zsweep_duration_s; without this a sweep longer than ~5 s broke the connection).
+        recv_budget_s, core_s, budget_detail = zsweep_recv_budget_s(context, calls)
+        record = context.safe_call("ZSpectr_Start", 1, "", recv_timeout_s=recv_budget_s)
         calls.append(record)
         if record.error:
             return SkillResult(
@@ -588,7 +1008,10 @@ class AcquireZSpectr(BaseSkill):
                 nanonis_calls=calls,
             )
 
-        data: dict = {"acquisition_complete": True}
+        data: dict = {"acquisition_complete": True,
+                      "sweep_estimate_s": round(core_s, 1),
+                      "recv_timeout_s": round(recv_budget_s, 1),
+                      "sweep_settings": budget_detail}
         parsed = record.return_value
         # return_value is (error_string, raw_bytes, Variables). For ZSpectr.Start
         # the Variables (ResponseTypes ["i","i","*+c","i","i","2f","i","*f"]) are:
@@ -602,8 +1025,8 @@ class AcquireZSpectr(BaseSkill):
             channel_map, num_points, why = _reshape_spectrum(parsed[2])
         else:
             channel_map, num_points, why = {}, 0, (
-                f"return_value 不是 (err, raw, Variables) 三元组: "
-                f"{type(parsed).__name__}")
+                tr(f"return_value 不是 (err, raw, Variables) 三元组: "
+                f"{type(parsed).__name__}", f"return_value is not an (err, raw, Variables) triple: {type(parsed).__name__}"))
         data["spectrum_parsed"] = bool(channel_map)
         if channel_map:
             data["channel_names"] = list(channel_map.keys())
@@ -637,9 +1060,9 @@ class AcquireZSpectr(BaseSkill):
             return SkillResult(
                 skill_name="AcquireZSpectr",
                 success=False,
-                error=(f"扫掠跑完了,但返回的数据块解不开({why})。"
+                error=(tr(f"扫掠跑完了,但返回的数据块解不开({why})。"
                        f"这个技能不落盘,内联返回是唯一的一份 —— "
-                       f"这次采集没有留下任何可用的谱。"),
+                       f"这次采集没有留下任何可用的谱。", f"The sweep finished, but the returned data block could not be unpacked ({why}). This skill does not save to disk, the inline return is the only copy - this acquisition left no usable spectrum.")),
                 data=data,
                 nanonis_calls=calls,
             )
@@ -660,46 +1083,46 @@ class ConfigureSTSTiming(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="配置 Bias Spectroscopy 的时序参数。",
+            description=tr("配置 Bias Spectroscopy 的时序参数。", "Configure the timing parameters of Bias Spectroscopy."),
             parameters=[
                 ParameterSpec(
                     name="z_avg_time_s", type="float",
-                    description="Z 平均时间", unit="s",
+                    description=tr("Z 平均时间", "Z averaging time"), unit="s",
                     required=True, min_value=0.0,
                 ),
                 ParameterSpec(
                     name="z_offset_m", type="float",
-                    description="Z 偏移", unit="m",
+                    description=tr("Z 偏移", "Z offset"), unit="m",
                     required=False, default=0.0,
                 ),
                 ParameterSpec(
                     name="init_settling_s", type="float",
-                    description="初始建立时间", unit="s",
+                    description=tr("初始建立时间", "Initial settling time"), unit="s",
                     required=True, min_value=0.0,
                 ),
                 ParameterSpec(
                     name="max_slew_rate_v_s", type="float",
-                    description="最大压摆率", unit="V/s",
+                    description=tr("最大压摆率", "Maximum slew rate"), unit="V/s",
                     required=True, min_value=0.0,
                 ),
                 ParameterSpec(
                     name="settling_s", type="float",
-                    description="每点的建立时间", unit="s",
+                    description=tr("每点的建立时间", "Settling time per point"), unit="s",
                     required=True, min_value=0.0,
                 ),
                 ParameterSpec(
                     name="integration_s", type="float",
-                    description="每点的积分时间", unit="s",
+                    description=tr("每点的积分时间", "Integration time per point"), unit="s",
                     required=True, min_value=0.0,
                 ),
                 ParameterSpec(
                     name="end_settling_s", type="float",
-                    description="结束时的建立时间", unit="s",
+                    description=tr("结束时的建立时间", "End settling time"), unit="s",
                     required=False, default=0.0, min_value=0.0,
                 ),
                 ParameterSpec(
                     name="z_ctrl_time_s", type="float",
-                    description="Z 控制时间", unit="s",
+                    description=tr("Z 控制时间", "Z control time"), unit="s",
                     required=False, default=0.0, min_value=0.0,
                 ),
             ],
@@ -709,7 +1132,8 @@ class ConfigureSTSTiming(BaseSkill):
         )
 
     def execute(self, context, params: dict) -> SkillResult:
-        record = context.safe_call(
+        calls: list = []
+        record = _call_idempotent(calls, lambda: context.safe_call(
             "BiasSpectr_TimingSet",
             params["z_avg_time_s"],
             params.get("z_offset_m", 0.0),
@@ -719,13 +1143,13 @@ class ConfigureSTSTiming(BaseSkill):
             params["integration_s"],
             params.get("end_settling_s", 0.0),
             params.get("z_ctrl_time_s", 0.0),
-        )
+        ))
         if record.error:
             return SkillResult(
                 skill_name="ConfigureSTSTiming",
                 success=False,
                 error=record.error,
-                nanonis_calls=[record],
+                nanonis_calls=calls,
             )
         return SkillResult(
             skill_name="ConfigureSTSTiming",
@@ -735,7 +1159,7 @@ class ConfigureSTSTiming(BaseSkill):
                 "max_slew_rate_v_s", "settling_s", "integration_s",
                 "end_settling_s", "z_ctrl_time_s",
             ]},
-            nanonis_calls=[record],
+            nanonis_calls=calls,
         )
 
 
@@ -748,7 +1172,7 @@ class StopSTS(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
-            description="停止当前的 Bias Spectroscopy 测量。",
+            description=tr("停止当前的 Bias Spectroscopy 测量。", "Stop the Bias Spectroscopy measurement that is currently running."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["spectroscopy", "sts", "stop"],
@@ -776,7 +1200,7 @@ class StopZSpectr(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.AUTO,
-            description="停止当前的 Z Spectroscopy 测量。",
+            description=tr("停止当前的 Z Spectroscopy 测量。", "Stop the Z Spectroscopy measurement that is currently running."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["spectroscopy", "z", "stop"],
@@ -804,12 +1228,12 @@ class ConfigureSTSChannels(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置 Bias Spectroscopy 期间记录哪些通道。",
+            description=tr("设置 Bias Spectroscopy 期间记录哪些通道。", "Set which channels are recorded during Bias Spectroscopy."),
             parameters=[
                 ParameterSpec(
                     name="channel_indexes",
                     type="str",
-                    description="逗号分隔的通道索引（0-23）",
+                    description=tr("逗号分隔的通道索引（0-23）", "Comma-separated channel indexes (0-23)"),
                     required=True,
                 ),
             ],
@@ -821,15 +1245,16 @@ class ConfigureSTSChannels(BaseSkill):
     def execute(self, context, params: dict) -> SkillResult:
         idx_str = params["channel_indexes"]
         indexes = [int(x.strip()) for x in idx_str.split(",") if x.strip()]
-        record = context.safe_call("BiasSpectr_ChsSet", indexes)
+        calls: list = []
+        record = _call_idempotent(calls, lambda: context.safe_call("BiasSpectr_ChsSet", indexes))
         if record.error:
             return SkillResult(
                 skill_name="ConfigureSTSChannels", success=False,
-                error=record.error, nanonis_calls=[record],
+                error=record.error, nanonis_calls=calls,
             )
         return SkillResult(
             skill_name="ConfigureSTSChannels", success=True,
-            data={"channel_indexes": indexes}, nanonis_calls=[record],
+            data={"channel_indexes": indexes}, nanonis_calls=calls,
         )
 
 
@@ -842,41 +1267,41 @@ class ConfigureZSpectrTiming(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="配置 Z Spectroscopy 的时序参数。",
+            description=tr("配置 Z Spectroscopy 的时序参数。", "Configure the timing parameters of Z Spectroscopy."),
             parameters=[
                 ParameterSpec(
                     name="z_avg_time_s", type="float",
-                    description="Z 平均时间", unit="s",
+                    description=tr("Z 平均时间", "Z averaging time"), unit="s",
                     required=True, min_value=0.0,
                 ),
                 ParameterSpec(
                     name="init_settling_s", type="float",
-                    description="初始建立时间", unit="s",
+                    description=tr("初始建立时间", "Initial settling time"), unit="s",
                     required=True, min_value=0.0,
                 ),
                 ParameterSpec(
                     name="max_slew_rate_v_s", type="float",
-                    description="最大压摆率", unit="V/s",
+                    description=tr("最大压摆率", "Maximum slew rate"), unit="V/s",
                     required=True, min_value=0.0,
                 ),
                 ParameterSpec(
                     name="settling_s", type="float",
-                    description="每点的建立时间", unit="s",
+                    description=tr("每点的建立时间", "Settling time per point"), unit="s",
                     required=True, min_value=0.0,
                 ),
                 ParameterSpec(
                     name="integration_s", type="float",
-                    description="每点的积分时间", unit="s",
+                    description=tr("每点的积分时间", "Integration time per point"), unit="s",
                     required=True, min_value=0.0,
                 ),
                 ParameterSpec(
                     name="end_settling_s", type="float",
-                    description="结束时的建立时间", unit="s",
+                    description=tr("结束时的建立时间", "End settling time"), unit="s",
                     required=False, default=0.0, min_value=0.0,
                 ),
                 ParameterSpec(
                     name="z_ctrl_time_s", type="float",
-                    description="Z 控制时间", unit="s",
+                    description=tr("Z 控制时间", "Z control time"), unit="s",
                     required=False, default=0.0, min_value=0.0,
                 ),
             ],
@@ -886,7 +1311,8 @@ class ConfigureZSpectrTiming(BaseSkill):
         )
 
     def execute(self, context, params: dict) -> SkillResult:
-        record = context.safe_call(
+        calls: list = []
+        record = _call_idempotent(calls, lambda: context.safe_call(
             "ZSpectr_TimingSet",
             params["z_avg_time_s"],
             params["init_settling_s"],
@@ -895,13 +1321,13 @@ class ConfigureZSpectrTiming(BaseSkill):
             params["integration_s"],
             params.get("end_settling_s", 0.0),
             params.get("z_ctrl_time_s", 0.0),
-        )
+        ))
         if record.error:
             return SkillResult(
                 skill_name="ConfigureZSpectrTiming",
                 success=False,
                 error=record.error,
-                nanonis_calls=[record],
+                nanonis_calls=calls,
             )
         return SkillResult(
             skill_name="ConfigureZSpectrTiming",
@@ -910,7 +1336,7 @@ class ConfigureZSpectrTiming(BaseSkill):
                 "z_avg_time_s", "init_settling_s", "max_slew_rate_v_s",
                 "settling_s", "integration_s", "end_settling_s", "z_ctrl_time_s",
             ]},
-            nanonis_calls=[record],
+            nanonis_calls=calls,
         )
 
 
@@ -923,7 +1349,7 @@ class GetSTSChannels(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="取 Bias Spectroscopy 记录的通道列表。",
+            description=tr("取 Bias Spectroscopy 记录的通道列表。", "Get the list of channels recorded by Bias Spectroscopy."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["spectroscopy", "sts", "channels", "read"],
@@ -966,7 +1392,7 @@ class SetSTSChannels(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置 Bias Spectroscopy 记录的通道。",
+            description=tr("设置 Bias Spectroscopy 记录的通道。", "Set the channels recorded by Bias Spectroscopy."),
             parameters=[
                 ParameterSpec(
                     name="channel_indexes",
@@ -974,7 +1400,7 @@ class SetSTSChannels(BaseSkill):
                     # schema builder has no list type — execute() coerces to a
                     # real list. See _coerce_int_list.
                     type="str",
-                    description="通道索引（0-127），逗号分隔，例如 '0, 1, 2'",
+                    description=tr("通道索引（0-127），逗号分隔，例如 '0, 1, 2'", "Channel indexes (0-127), comma-separated, e.g. '0, 1, 2'"),
                     required=True,
                 ),
             ],
@@ -1011,7 +1437,7 @@ class GetSTSLimits(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="取 Bias Spectroscopy 的 bias 电压范围。",
+            description=tr("取 Bias Spectroscopy 的 bias 电压范围。", "Get the bias voltage range of Bias Spectroscopy."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["spectroscopy", "sts", "limits", "read"],
@@ -1050,26 +1476,26 @@ class SetSTSAdvancedProps(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置 Bias Spectroscopy 的高级属性。",
+            description=tr("设置 Bias Spectroscopy 的高级属性。", "Set the advanced properties of Bias Spectroscopy."),
             parameters=[
                 ParameterSpec(
                     name="reset_bias", type="int",
-                    description="扫描后复位 bias（0=不改，1=On，2=Off）",
+                    description=tr("扫描后复位 bias（0=不改，1=On，2=Off）", "Reset bias after the sweep (0=no change, 1=On, 2=Off)"),
                     required=True, min_value=0, max_value=2,
                 ),
                 ParameterSpec(
                     name="z_controller_hold", type="int",
-                    description="扫描期间保持 Z 控制器（0=不改，1=On，2=Off）",
+                    description=tr("扫描期间保持 Z 控制器（0=不改，1=On，2=Off）", "Hold the Z controller during the sweep (0=no change, 1=On, 2=Off)"),
                     required=True, min_value=0, max_value=2,
                 ),
                 ParameterSpec(
                     name="record_final_z", type="int",
-                    description="记录最终的 Z（0=不改，1=On，2=Off）",
+                    description=tr("记录最终的 Z（0=不改，1=On，2=Off）", "Record the final Z (0=no change, 1=On, 2=Off)"),
                     required=True, min_value=0, max_value=2,
                 ),
                 ParameterSpec(
                     name="lockin_run", type="int",
-                    description="扫描期间运行 Lock-In（0=不改，1=On，2=Off）",
+                    description=tr("扫描期间运行 Lock-In（0=不改，1=On，2=Off）", "Run the Lock-In during the sweep (0=no change, 1=On, 2=Off)"),
                     required=True, min_value=0, max_value=2,
                 ),
             ],
@@ -1112,7 +1538,7 @@ class GetSTSTiming(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="取 Bias Spectroscopy 的时序参数。",
+            description=tr("取 Bias Spectroscopy 的时序参数。", "Get the timing parameters of Bias Spectroscopy."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["spectroscopy", "sts", "timing", "read"],
@@ -1155,7 +1581,7 @@ class GetSTSAltZCtrl(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="取 Bias Spectroscopy 的备用 Z 控制器设置。",
+            description=tr("取 Bias Spectroscopy 的备用 Z 控制器设置。", "Get the alternate Z controller settings of Bias Spectroscopy."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["spectroscopy", "sts", "zctrl", "read"],
@@ -1199,7 +1625,7 @@ class GetZSpectrChannels(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="取 Z Spectroscopy 记录的通道列表。",
+            description=tr("取 Z Spectroscopy 记录的通道列表。", "Get the list of channels recorded by Z Spectroscopy."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["spectroscopy", "z", "channels", "read"],
@@ -1242,14 +1668,14 @@ class SetZSpectrChannels(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置 Z Spectroscopy 记录的通道。",
+            description=tr("设置 Z Spectroscopy 记录的通道。", "Set the channels recorded by Z Spectroscopy."),
             parameters=[
                 ParameterSpec(
                     name="channel_indexes",
                     # declared str (comma-separated); execute() coerces — agent
                     # schema has no list type. See _coerce_int_list.
                     type="str",
-                    description="通道索引（0-127），逗号分隔，例如 '0, 1, 2'",
+                    description=tr("通道索引（0-127），逗号分隔，例如 '0, 1, 2'", "Channel indexes (0-127), comma-separated, e.g. '0, 1, 2'"),
                     required=True,
                 ),
             ],
@@ -1284,7 +1710,7 @@ class GetZSpectrRange(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="取 Z Spectroscopy 的量程设置。",
+            description=tr("取 Z Spectroscopy 的量程设置。", "Get the range settings of Z Spectroscopy."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["spectroscopy", "z", "range", "read"],
@@ -1322,16 +1748,16 @@ class SetZSpectrRange(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置 Z Spectroscopy 的量程。",
+            description=tr("设置 Z Spectroscopy 的量程。", "Set the range of Z Spectroscopy."),
             parameters=[
                 ParameterSpec(
                     name="z_offset_m", type="float",
-                    description="Z 偏移，单位米", unit="m",
+                    description=tr("Z 偏移，单位米", "Z offset, in metres"), unit="m",
                     required=True,
                 ),
                 ParameterSpec(
                     name="z_sweep_distance_m", type="float",
-                    description="Z 扫描距离，单位米", unit="m",
+                    description=tr("Z 扫描距离，单位米", "Z sweep distance, in metres"), unit="m",
                     required=True, min_value=0.0,
                 ),
             ],
@@ -1370,7 +1796,7 @@ class GetZSpectrRetract(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="取 Z Spectroscopy 的自动退针配置。",
+            description=tr("取 Z Spectroscopy 的自动退针配置。", "Get the automatic withdraw configuration of Z Spectroscopy."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["spectroscopy", "z", "retract", "read"],
@@ -1418,26 +1844,26 @@ class SetZSpectrRetract(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置 Z Spectroscopy 的自动退针条件。",
+            description=tr("设置 Z Spectroscopy 的自动退针条件。", "Set the automatic withdraw condition of Z Spectroscopy."),
             parameters=[
                 ParameterSpec(
                     name="enabled", type="int",
-                    description="启用退针（0=不改，1=On，2=Off）",
+                    description=tr("启用退针（0=不改，1=On，2=Off）", "Enable withdraw (0=no change, 1=On, 2=Off)"),
                     required=True, min_value=0, max_value=2,
                 ),
                 ParameterSpec(
                     name="threshold", type="float",
-                    description="退针的阈值",
+                    description=tr("退针的阈值", "Withdraw threshold"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="signal_index", type="int",
-                    description="阈值所用的信号索引（-1=不改）",
+                    description=tr("阈值所用的信号索引（-1=不改）", "Signal index used for the threshold (-1 = no change)"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="comparison", type="int",
-                    description="比较运算符（0=>，1=<，2=不改）",
+                    description=tr("比较运算符（0=>，1=<，2=不改）", "Comparison operator (0=>, 1=<, 2=no change)"),
                     required=True, min_value=0, max_value=2,
                 ),
             ],
@@ -1480,7 +1906,7 @@ class GetSTSDigSync(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="取 Bias Spectroscopy 的数字同步模式（Off/TTL/PulseSeq）。",
+            description=tr("取 Bias Spectroscopy 的数字同步模式（Off/TTL/PulseSeq）。", "Get the digital sync mode of Bias Spectroscopy (Off/TTL/PulseSeq)."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["spectroscopy", "sts", "digsync", "read"],
@@ -1517,7 +1943,7 @@ class GetSTSTTLSync(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="取 Bias Spectroscopy 的 TTL 同步配置。",
+            description=tr("取 Bias Spectroscopy 的 TTL 同步配置。", "Get the TTL sync configuration of Bias Spectroscopy."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["spectroscopy", "sts", "ttlsync", "read"],
@@ -1565,7 +1991,7 @@ class GetSTSPulseSeqSync(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="取 Bias Spectroscopy 的脉冲序列同步配置。",
+            description=tr("取 Bias Spectroscopy 的脉冲序列同步配置。", "Get the pulse sequence sync configuration of Bias Spectroscopy."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["spectroscopy", "sts", "pulseseq", "read"],
@@ -1603,7 +2029,7 @@ class GetSTSZOffRevert(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="取 Bias Spectroscopy 的 Z Offset Revert 标志。",
+            description=tr("取 Bias Spectroscopy 的 Z Offset Revert 标志。", "Get the Z Offset Revert flag of Bias Spectroscopy."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["spectroscopy", "sts", "zoffrevert", "read"],
@@ -1639,7 +2065,7 @@ class GetSTSMLSLockinPerSeg(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="取 MLS 模式下的 Lock-In per Segment 标志。",
+            description=tr("取 MLS 模式下的 Lock-In per Segment 标志。", "Get the Lock-In per Segment flag in MLS mode."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["spectroscopy", "sts", "mls", "lockin", "read"],
@@ -1675,12 +2101,12 @@ class SetSTSMLSMode(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置 Bias Spectroscopy 的扫描模式：Linear 或 MLS。",
+            description=tr("设置 Bias Spectroscopy 的扫描模式：Linear 或 MLS。", "Set the sweep mode of Bias Spectroscopy: Linear or MLS."),
             parameters=[
                 ParameterSpec(
                     name="mode",
                     type="str",
-                    description="'Linear' 或 'MLS'",
+                    description=tr("'Linear' 或 'MLS'", "'Linear' or 'MLS'"),
                     required=True,
                     allowed_values=["Linear", "MLS"],
                 ),
@@ -1717,7 +2143,7 @@ class SetSTSMLSVals(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置 Bias Spectroscopy MLS 模式的多线段配置。",
+            description=tr("设置 Bias Spectroscopy MLS 模式的多线段配置。", "Set the multi-line-segment configuration of Bias Spectroscopy MLS mode."),
             # NOTE: all per-segment arrays are declared as str (comma-separated)
             # because the agent schema builder has no list type — execute()
             # coerces each via _coerce_float_list / _coerce_int_list. Programmatic
@@ -1726,43 +2152,43 @@ class SetSTSMLSVals(BaseSkill):
                 ParameterSpec(
                     name="bias_start_v",
                     type="str",
-                    description="每段的起始 bias（V），逗号分隔，例如 '-1.0, 0.5'",
+                    description=tr("每段的起始 bias（V），逗号分隔，例如 '-1.0, 0.5'", "Start bias of each segment (V), comma-separated, e.g. '-1.0, 0.5'"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="bias_end_v",
                     type="str",
-                    description="每段的终止 bias（V），逗号分隔",
+                    description=tr("每段的终止 bias（V），逗号分隔", "End bias of each segment (V), comma-separated"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="initial_settling_s",
                     type="str",
-                    description="每段的初始建立时间（s），逗号分隔",
+                    description=tr("每段的初始建立时间（s），逗号分隔", "Initial settling time of each segment (s), comma-separated"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="settling_s",
                     type="str",
-                    description="每段的建立时间（s），逗号分隔",
+                    description=tr("每段的建立时间（s），逗号分隔", "Settling time of each segment (s), comma-separated"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="integration_s",
                     type="str",
-                    description="每段的积分时间（s），逗号分隔",
+                    description=tr("每段的积分时间（s），逗号分隔", "Integration time of each segment (s), comma-separated"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="steps",
                     type="str",
-                    description="每段的步数，逗号分隔的整数",
+                    description=tr("每段的步数，逗号分隔的整数", "Number of steps of each segment, comma-separated integers"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="lockin_run",
                     type="str",
-                    description="每段的 Lock-In 运行标志（0=Off，1=On），逗号分隔",
+                    description=tr("每段的 Lock-In 运行标志（0=Off，1=On），逗号分隔", "Lock-In run flag of each segment (0=Off, 1=On), comma-separated"),
                     required=True,
                 ),
             ],
@@ -1850,29 +2276,29 @@ class SetSTSSafeCond1(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "[DEPRECATED —— Nanonis 里 Bias Spectroscopy 没有 safe-condition API；它总是失败。"
+                tr("[DEPRECATED —— Nanonis 里 Bias Spectroscopy 没有 safe-condition API；它总是失败。"
                 "请改用 Z 谱学的 SetZSpectrRetract。] 设置 Bias Spectroscopy 的第一条 safe "
-                "condition。"
+                "condition。", "[DEPRECATED - Bias Spectroscopy has no safe-condition API in Nanonis; it always fails. Use SetZSpectrRetract of Z spectroscopy instead.] Set the first safe condition of Bias Spectroscopy.")
             ),
             parameters=[
                 ParameterSpec(
                     name="condition", type="int",
-                    description="动作：0=不改，1=Off，2=Reverse，3=Stop",
+                    description=tr("动作：0=不改，1=Off，2=Reverse，3=Stop", "Action: 0=no change, 1=Off, 2=Reverse, 3=Stop"),
                     required=True, min_value=0, max_value=3,
                 ),
                 ParameterSpec(
                     name="threshold", type="float",
-                    description="阈值（NaN=不改）",
+                    description=tr("阈值（NaN=不改）", "Threshold (NaN = no change)"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="signal_index", type="int",
-                    description="信号索引（0-127，-1=不改）",
+                    description=tr("信号索引（0-127，-1=不改）", "Signal index (0-127, -1 = no change)"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="comparison", type="int",
-                    description="0=高于，1=低于，2=不改",
+                    description=tr("0=高于，1=低于，2=不改", "0=above, 1=below, 2=no change"),
                     required=True, min_value=0, max_value=2,
                 ),
             ],
@@ -1913,8 +2339,8 @@ class GetSTSSafeCond1(BaseSkill):
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "[DEPRECATED —— Nanonis 里 Bias Spectroscopy 没有 safe-condition API；它总是失败。"
-                "请改用 Z 谱学的 GetZSpectrRetract。] 取 Bias Spectroscopy 的第一条 safe condition。"
+                tr("[DEPRECATED —— Nanonis 里 Bias Spectroscopy 没有 safe-condition API；它总是失败。"
+                "请改用 Z 谱学的 GetZSpectrRetract。] 取 Bias Spectroscopy 的第一条 safe condition。", "[DEPRECATED - Bias Spectroscopy has no safe-condition API in Nanonis; it always fails. Use GetZSpectrRetract of Z spectroscopy instead.] Get the first safe condition of Bias Spectroscopy.")
             ),
             estimated_duration_s=0.5,
             composition_level=0,
@@ -1948,29 +2374,29 @@ class SetSTSSafeCond2(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "[DEPRECATED —— Nanonis 里 Bias Spectroscopy 没有 safe-condition API；它总是失败。"
+                tr("[DEPRECATED —— Nanonis 里 Bias Spectroscopy 没有 safe-condition API；它总是失败。"
                 "请改用 Z 谱学的第二条 retract（GetZSpectrRetract2nd）。] 设置 Bias Spectroscopy "
-                "的第二条 safe condition。"
+                "的第二条 safe condition。", "[DEPRECATED - Bias Spectroscopy has no safe-condition API in Nanonis; it always fails. Use the second retract of Z spectroscopy (GetZSpectrRetract2nd) of Z spectroscopy instead.] Set the second safe condition of Bias Spectroscopy.")
             ),
             parameters=[
                 ParameterSpec(
                     name="condition", type="int",
-                    description="逻辑：-1=不改，0=Off，1=OR，2=AND，3=THEN",
+                    description=tr("逻辑：-1=不改，0=Off，1=OR，2=AND，3=THEN", "Logic: -1=no change, 0=Off, 1=OR, 2=AND, 3=THEN"),
                     required=True, min_value=-1, max_value=3,
                 ),
                 ParameterSpec(
                     name="threshold", type="float",
-                    description="阈值（NaN=不改）",
+                    description=tr("阈值（NaN=不改）", "Threshold (NaN = no change)"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="signal_index", type="int",
-                    description="信号索引（0-127，-1=不改）",
+                    description=tr("信号索引（0-127，-1=不改）", "Signal index (0-127, -1 = no change)"),
                     required=True,
                 ),
                 ParameterSpec(
                     name="comparison", type="int",
-                    description="0=高于，1=低于，2=不改",
+                    description=tr("0=高于，1=低于，2=不改", "0=above, 1=below, 2=no change"),
                     required=True, min_value=0, max_value=2,
                 ),
             ],
@@ -2006,26 +2432,26 @@ class SetZSpectrAdvProps(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置 Z Spectroscopy 的高级属性。",
+            description=tr("设置 Z Spectroscopy 的高级属性。", "Set the advanced properties of Z Spectroscopy."),
             parameters=[
                 ParameterSpec(
                     name="time_between_sweeps_s", type="float",
-                    description="正扫与反扫之间的时间（s）",
+                    description=tr("正扫与反扫之间的时间（s）", "Time between forward and backward sweep (s)"),
                     unit="s", required=True, min_value=0.0,
                 ),
                 ParameterSpec(
                     name="record_final_z", type="int",
-                    description="记录最终的 Z（0=不改，1=On，2=Off）",
+                    description=tr("记录最终的 Z（0=不改，1=On，2=Off）", "Record the final Z (0=no change, 1=On, 2=Off)"),
                     required=True, min_value=0, max_value=2,
                 ),
                 ParameterSpec(
                     name="lockin_run", type="int",
-                    description="运行 Lock-In（0=不改，1=On，2=Off）",
+                    description=tr("运行 Lock-In（0=不改，1=On，2=Off）", "Run the Lock-In (0=no change, 1=On, 2=Off)"),
                     required=True, min_value=0, max_value=2,
                 ),
                 ParameterSpec(
                     name="reset_z", type="int",
-                    description="扫描后复位 Z（0=不改，1=On，2=Off）",
+                    description=tr("扫描后复位 Z（0=不改，1=On，2=Off）", "Reset Z after the sweep (0=no change, 1=On, 2=Off)"),
                     required=True, min_value=0, max_value=2,
                 ),
             ],
@@ -2068,7 +2494,7 @@ class GetZSpectrDigSync(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="取 Z Spectroscopy 的数字同步模式（Off/TTL/PulseSeq）。",
+            description=tr("取 Z Spectroscopy 的数字同步模式（Off/TTL/PulseSeq）。", "Get the digital sync mode of Z Spectroscopy (Off/TTL/PulseSeq)."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["spectroscopy", "z", "digsync", "read"],
@@ -2105,7 +2531,7 @@ class GetZSpectrPulseSeqSync(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="取 Z Spectroscopy 的脉冲序列同步配置。",
+            description=tr("取 Z Spectroscopy 的脉冲序列同步配置。", "Get the pulse sequence sync configuration of Z Spectroscopy."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["spectroscopy", "z", "pulseseq", "read"],
@@ -2143,7 +2569,7 @@ class GetZSpectrRetract2nd(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="取 Z Spectroscopy 的第二条自动退针条件。",
+            description=tr("取 Z Spectroscopy 的第二条自动退针条件。", "Get the second automatic withdraw condition of Z Spectroscopy."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["spectroscopy", "z", "retract", "read"],
@@ -2194,11 +2620,11 @@ class SetZSpectrRetractDelay(BaseSkill):
             version="1.0.0",
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
-            description="设置 Z Spectroscopy 中正扫与反扫之间的退针延迟（s）。",
+            description=tr("设置 Z Spectroscopy 中正扫与反扫之间的退针延迟（s）。", "Set the withdraw delay between forward and backward sweep in Z Spectroscopy (s)."),
             parameters=[
                 ParameterSpec(
                     name="retract_delay_s", type="float",
-                    description="退针延迟，单位秒",
+                    description=tr("退针延迟，单位秒", "Withdraw delay, in seconds"),
                     unit="s", required=True, min_value=0.0,
                 ),
             ],
@@ -2232,7 +2658,7 @@ class GetZSpectrTTLSync(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="取 Z Spectroscopy 的 TTL 同步配置。",
+            description=tr("取 Z Spectroscopy 的 TTL 同步配置。", "Get the TTL sync configuration of Z Spectroscopy."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["spectroscopy", "z", "ttlsync", "read"],
@@ -2280,7 +2706,7 @@ class GetZSpectrTiming(BaseSkill):
             version="1.0.0",
             category=SkillCategory.READ,
             safety_level=SafetyLevel.AUTO,
-            description="取 Z Spectroscopy 的时序参数。",
+            description=tr("取 Z Spectroscopy 的时序参数。", "Get the timing parameters of Z Spectroscopy."),
             estimated_duration_s=0.5,
             composition_level=0,
             tags=["spectroscopy", "z", "timing", "read"],

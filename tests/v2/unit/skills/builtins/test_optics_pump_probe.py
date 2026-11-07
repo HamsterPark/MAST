@@ -274,7 +274,10 @@ class TestPumpProbeScan:
         assert Path(result.data["path"]).is_file()   # partial CSV still written
 
     def test_operator_abort_keeps_partial_data(self, rig):
-        ctx = FakeCtx(abort_after=2)
+        # The delay-line move also checks abort (pre-check + one
+        # settle poll), so one point costs 3 checks. 6 checks = two complete
+        # points; the 7th (sweep loop, point 3) fires the abort.
+        ctx = FakeCtx(abort_after=6)
         result = PumpProbeScan().execute(ctx, {
             "delay_start_ps": 0.0, "delay_stop_ps": 10.0, "points": 5, **_FAST,
         })
@@ -362,14 +365,24 @@ class TestPumpProbeEnhancements:
         result = PumpProbeScan().execute(ctx, {
             "delay_start_ps": 0.0, "delay_stop_ps": 5.0, "points": 3,
             "read_lockin": False, "trigger_enable": True,
-            "trigger_port": 0, "trigger_line": 2, **_FAST,
+            "trigger_port": 1, "trigger_line": 2, **_FAST,
         })
         assert result.success
         assert sum(1 for m, _ in ctx.calls if m == "DigLines_PropsSet") == 1
         pulses = [a for m, a in ctx.calls if m == "DigLines_Pulse"]
         assert len(pulses) == 3                       # one per delay point
-        assert pulses[0][0] == 0 and pulses[0][1] == [2]   # port, [line]
-        assert result.data["triggered_line"] == {"port": 0, "line": 2}
+        assert pulses[0][0] == 1 and pulses[0][1] == [2]   # port, [line]
+        assert result.data["triggered_line"] == {"port": 1, "line": 2}
+
+    def test_trigger_on_port_a_is_refused(self, rig):
+        """Port A is the PMD4 control link on a PMD4 rig."""
+        ctx = FakeCtx()
+        result = PumpProbeScan().execute(ctx, {
+            "delay_start_ps": 0.0, "delay_stop_ps": 5.0, "points": 3,
+            "read_lockin": False, "trigger_enable": True, "trigger_port": 0, **_FAST,
+        })
+        assert not result.success and "Port A" in result.error
+        assert not [m for m, _ in ctx.calls if m.startswith("DigLines")]
 
     def test_trigger_config_failure_aborts_cleanly(self, rig):
         ctx = FakeCtx(fail_method="DigLines_PropsSet")

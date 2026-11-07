@@ -9,7 +9,7 @@
 只挂在 GUI 的 builder 页上。于是仪器控制 agent 面对「这一串八步我今天要做三遍」
 时,唯一的办法是把八步重打三遍,而它明明有能力把它们组合起来。
 
-## 官方技能优先(2026-08-21 定案)
+## 官方技能优先
 
 优先序是**三级阶梯,不跳级**:
 
@@ -188,6 +188,25 @@ def _disabled_names() -> frozenset[str]:
     return frozenset(out)
 
 
+def _disabled_names_for(registry) -> frozenset[str]:
+    """:func:`_disabled_names` 再加上站点画像(第四道门)对**这份**注册表收起的技能。
+
+    ``_disabled_names`` 只是硬件模块 ∪ 高级能力两道门,不认站点画像。于是技能工坊的三处
+    (目录 ``skill_catalog``、起草期检查、``run_composite``)在光学站上照样列出、放行约
+    500 个 STM 技能,在 STM 站上照样列出光学站自己的技能 —— 工具表是封住的,agent 读到的
+    目录却不是。外部门 / 工具装配用的是 ``tool_face.compute``(站点画像并在 ``hardware``
+    里),这里补上同一个答案。注册表是这三处手里本来就有的那一份,显式传,不靠全局绑定。
+    读不出来就不加(一道读不出来的门不是一道门),并记一条。"""
+    out = set(_disabled_names())
+    try:
+        from mast.skills import station_face
+
+        out |= set(station_face.hidden_names(registry))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("技能工坊:站点画像门读不出来(%s)——本次不按它拒绝", exc)
+    return frozenset(out)
+
+
 def _origin_of(registry, name: str) -> str:
     """一个已注册技能的来源标签;取不到回 ``"other"``(**不是**「官方」)。"""
     try:
@@ -280,12 +299,27 @@ def agent_track_lint(spec_dict: dict, registry, *, store=None) -> list[str]:
             + "。" + ";".join(why.get(t, "") for t in bad if t in why)
             + "。仪器动作请用 step 节点逐个技能写出来。")
 
+    # ── 1b. 保留的补救标签 ───────────────────────────────────────────
+    #
+    # retract / emergency / withdraw 是「补救」身份：带它们的技能不取仪器令牌，7.0 里
+    # 也不过观测令牌（停止 / 退针必须在别人占着仪器时照样能跑）。agent 写的组合技能
+    # 若能给自己贴上它们，一个驱动仪器的流程就同时绕过了仪器锁和一动一观。补救身份只认
+    # 内置技能与人做的技能。
+    from mast.core.instrument_lock import BYPASS_TAGS
+    tags = {str(t).strip().lower() for t in (spec_dict.get("tags") or [])}
+    reserved = sorted(tags & {t.lower() for t in BYPASS_TAGS})
+    if reserved:
+        problems.append(
+            "agent 写的组合技能不能带这些保留标签:" + "、".join(reserved)
+            + "。它们标记停止 / 退针这类补救技能,会让技能绕过仪器锁与观测令牌;"
+            "停止与退针请直接调用内置技能(StopScan、WithdrawTip 等)。")
+
     # ── 2. 纯别名:给官方技能套壳 ──────────────────────────────────────
     #
     # 「官方优先」在这一层是结构性的:一个只有单个 step、没有任何控制流的 spec
     # 不产生新能力,只产生一个新名字 —— 而多一个名字意味着下一次有人(或有模型)
     # 会去调那个壳而不是本体,于是本体的参数说明、单位提示、包络文案全都绕过去了。
-    # 本仓的原话:同一个动作的 N 份实现往往只有一份是对的。
+    # 经验:同一个动作的 N 份实现往往只有一份是对的。
     #
     # 只在类型这一关过了之后才判:否则一个 [step, llm] 的草稿会同时收到「不许用
     # llm」和「这是套壳」两条,而后者是前者的副作用,读起来像两个独立的问题。
@@ -328,12 +362,12 @@ def agent_track_lint(spec_dict: dict, registry, *, store=None) -> list[str]:
                 f"[1, {AGENT_HW_LOOP_MAX_ITER}]")
 
     # ── 4. 被关掉的技能不许经 spec 洗白 ──────────────────────────────
-    disabled = _disabled_names()
+    disabled = _disabled_names_for(registry)
     used = _step_skills(nodes)
     blocked = sorted(used & disabled)
     if blocked:
         problems.append(
-            "这些技能在本机是**关闭**的(没有对应硬件,或那条高级能力没有被授予):"
+            "这些技能在本机是**关闭**的(没有对应硬件、那条高级能力没有被授予,或不属于这个站点画像):"
             + "、".join(blocked)
             + "。把它们包进 composite 也不会打开 —— 关闭是用户的决定,"
             "要用请他到【高级】页开。")
@@ -488,7 +522,8 @@ def _validate(spec_dict: dict, registry, *, store=None) -> dict:
         logger.debug("技能工坊:缺失技能兜底检查失败(%s)", exc)
 
     steps = report.get("steps") or []
-    hard = [p for p in problems if not str(p).startswith("警告：")]
+    from mast.webui.builder_api import is_advisory
+    hard = [p for p in problems if not is_advisory(p)]
     step_errs = [(s.get("id"), e) for s in steps for e in (s.get("errors") or [])]
     # 把逐步错误**也**汇总进 problems。不汇总的话 `problems` 会是空列表而
     # `ok=False` —— 一个「不行,但没说哪儿不行」的回执,模型下一步只能瞎猜。
@@ -562,7 +597,7 @@ def make_skill_forge_tools(
             return _j({"ok": False, "reason": f"没有叫 {detail!r} 的技能",
                        "did_you_mean": near})
 
-        disabled = _disabled_names()
+        disabled = _disabled_names_for(registry)
         q = (query or "").strip().lower()
         rows: list[dict] = []
         for m in metas:
@@ -698,9 +733,9 @@ def make_skill_forge_tools(
                 return f"无法判定 {name!r} 的类型({exc})——拒绝执行"
 
             # 关闭名单:名字本身,以及它**引用到的**每一个技能。
-            disabled = _disabled_names()
+            disabled = _disabled_names_for(registry)
             if name in disabled:
-                return f"{name!r} 在本机是关闭的(硬件不存在或该能力未授予)。"
+                return f"{name!r} 在本机是关闭的(硬件不存在、该能力未授予,或不属于这个站点画像)。"
             used = _spec_step_skills_of(cls)
             blocked = sorted(used & disabled)
             if blocked:

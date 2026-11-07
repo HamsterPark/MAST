@@ -5,7 +5,7 @@ The multi-agent orchestrator is one checkpointed graph, so LangGraph's super-ste
 supervisor dispatches again. That is correct BSP semantics, not a defect — but it
 means a long, independent task (a literature survey) run inside the foreground
 batch blocks the operator from interacting with instrument_control until it ends
-("文献 agent 查文献时仪器 agent 收不到消息", ).
+(e.g. the instrument agent cannot receive messages while the literature agent is searching).
 
 This manager breaks that WITHOUT touching the graph: a long/independent task is
 run as a SEPARATE orchestrator invocation — its OWN ``thread_id`` and its OWN
@@ -54,6 +54,7 @@ Dependency-light + boundary-clean: imports only the stdlib.
 from __future__ import annotations
 
 import logging
+from mast.i18n import tr
 import threading
 import time
 import uuid
@@ -64,7 +65,7 @@ logger = logging.getLogger(__name__)
 
 # Tag every background transcript row so the operator (and the UI) can tell a
 # background contribution from a foreground one at a glance.
-BG_TAG = "「后台」"
+BG_TAG = tr("「后台」", "[Background] ")
 
 _TERMINAL = frozenset({"done", "failed", "aborted"})
 _PRIORITIES = ("normal", "high")
@@ -422,7 +423,7 @@ class BackgroundRunManager:
     def _execute(self, rec: BackgroundRun) -> None:
         """Run rec's run_fn, streaming its messages into the transcript + tracking
         progress. Runs OUTSIDE the admission lock (it is slow / blocking)."""
-        self._emit_status(rec, f"{BG_TAG}后台任务启动:{rec.instruction}")
+        self._emit_status(rec, tr(f"{BG_TAG}后台任务启动:{rec.instruction}", f"{BG_TAG}Background task started: {rec.instruction}"))
 
         def emit(agent_id: str, role: str, text: str) -> None:
             # Tag every background message so it is distinguishable in the merged
@@ -451,7 +452,7 @@ class BackgroundRunManager:
         def _compaction(agent_id: str, text: str) -> None:
             """Record that the context middleware rewrote this run's history.
 
-            a background run merges into the SAME group
+            A background run merges into the SAME group
             transcript the operator reads, so a compaction inside one is the same
             silent rewrite — it has to leave a marker there too. Written as a
             ``compaction`` row (not a ``message``) so the panel renders the same
@@ -482,19 +483,19 @@ class BackgroundRunManager:
             rec.final_text = (final or "").strip()
             if rec._abort.is_set():
                 rec.status = "aborted"
-                self._emit_status(rec, f"{BG_TAG}后台任务已中止")
+                self._emit_status(rec, tr(f"{BG_TAG}后台任务已中止", f"{BG_TAG}Background task aborted"))
             else:
                 rec.status = "done"
                 rec.progress = 100
                 self._emit_status(
-                    rec, f"{BG_TAG}后台任务完成:{rec.final_text[:200]}"
-                    if rec.final_text else f"{BG_TAG}后台任务完成")
+                    rec, tr(f"{BG_TAG}后台任务完成:{rec.final_text[:200]}", f"{BG_TAG}Background task finished: {rec.final_text[:200]}")
+                    if rec.final_text else tr(f"{BG_TAG}后台任务完成", f"{BG_TAG}Background task finished"))
         except Exception as exc:  # noqa: BLE001 — a background failure must be
             # recorded, never crash the manager thread pool silently.
             rec.status = "failed"
             rec.error = f"{type(exc).__name__}: {exc}"
             logger.warning("background run %s failed: %s", rec.run_id, exc, exc_info=True)
-            self._emit_status(rec, f"{BG_TAG}后台任务失败:{rec.error}")
+            self._emit_status(rec, tr(f"{BG_TAG}后台任务失败:{rec.error}", f"{BG_TAG}Background task failed: {rec.error}"))
 
     # ── transcript merge (best-effort; never breaks a run) ──────────────────
     def _append(self, rec: BackgroundRun, kind: str, agent_id: str,

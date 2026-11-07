@@ -141,3 +141,13 @@ def test_relocate_is_refused_by_its_own_preconditions_with_no_gauge():
     assert not any("Cannot verify" in u for u in unmet), (
         "it must be REFUSED with a reason, not reported as unrecognised"
     )
+
+
+@pytest.fixture(autouse=True)
+def _vacuum_interlock_enabled():
+    # The profile default is "off"; the vacuum tests here guard the enabled interlock.
+    from mast.core import instrument_profile as ip
+    prof_before = ip.get_profile()
+    ip.set_profile({**prof_before, "vacuum_interlock_mode": "gauge_or_attest"})
+    yield
+    ip.set_profile(prof_before)

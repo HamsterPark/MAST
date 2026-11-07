@@ -41,6 +41,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -56,20 +57,20 @@ def _profile_params() -> list[ParameterSpec]:
         ParameterSpec(
             name="threshold_profile", type="str",
             description=(
-                "阈值 profile = 这套阈值是在**哪个样品体系**上标定的。"
+                tr("阈值 profile = 这套阈值是在**哪个样品体系**上标定的。"
                 "留空则用当前生效的那个。公开版默认 generic-uncommissioned 未标定，"
                 "仅供合成示例；用于实际数据前，请先跑 "
                 "`python -m mast.vision.scan_prep_commission <folder>`，"
-                "再根据观察到的分布定义一个新的 profile。"),
+                "再根据观察到的分布定义一个新的 profile。", "Threshold profile = the **sample system** this set of thresholds was calibrated on. Empty uses the one currently in effect. The public default is generic-uncommissioned (not calibrated) and is for synthetic examples only; before using it on real data, first run `python -m mast.vision.scan_prep_commission <folder>`, then define a new profile from the observed distributions.")),
             required=False, default=""),
         ParameterSpec(
             name="channel", type="str",
-            description="通道名（默认 'Z'）。",
+            description=tr("通道名（默认 'Z'）。", "Channel name (default 'Z')."),
             required=False, default="Z"),
         ParameterSpec(
             name="flatten", type="str",
-            description=("覆盖自动的 flattening 选择。'auto'"
-                         "（默认）让测量结果自己决定。"),
+            description=(tr("覆盖自动的 flattening 选择。'auto'"
+                         "（默认）让测量结果自己决定。", "Override the automatic flattening choice. 'auto' (default) lets the measurements decide.")),
             required=False, default="auto", allowed_values=list(_FLATTEN_CHOICES)),
     ]
 
@@ -80,15 +81,15 @@ def _load_frame(scan_path: str, channel: str):
 
     p = Path(str(scan_path))
     if not p.exists():
-        return None, f"文件不存在: {p}"
+        return None, tr(f"文件不存在: {p}", f"File does not exist: {p}")
     try:
         scan = read_sxm(str(p))
     except Exception as exc:  # noqa: BLE001
-        return None, f"读不动 .sxm: {type(exc).__name__}: {exc}"
+        return None, tr(f"读不动 .sxm: {type(exc).__name__}: {exc}", f"Cannot read .sxm: {type(exc).__name__}: {exc}")
     fr = sxm_oriented_frames(scan, channel)
     if fr.get("forward") is None:
         have = list((scan.get("channels") or {}).keys())
-        return None, f"没有 {channel!r} 通道(这个文件里有: {have})"
+        return None, tr(f"没有 {channel!r} 通道(这个文件里有: {have})", f"No {channel!r} channel (this file has: {have})")
     try:
         from mast.core.scan_registry import record_scan_path
 
@@ -140,7 +141,7 @@ class AnalyzeScanImage(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "测量**一帧**已保存的 .sxm，并决定它该怎么处理："
+                tr("测量**一帧**已保存的 .sxm，并决定它该怎么处理："
                 "用哪种 flattening（平面 / 2nd-order 曲面 / "
                 "逐行 / 在主导 terrace 上拟合行）、色标该收多紧 —— "
                 "每一个选择都附上实测的理由。它只读，不碰硬件。它还会"
@@ -148,20 +149,20 @@ class AnalyzeScanImage(BaseSkill):
                 "扫描中途的针尖变化（mast.vision.tip_change）、正反扫一致性、"
                 "坏扫描行。它绝不自己宣称看到了晶格 —— 那个断言来自 "
                 "atomic_phase，而后者还能回答「在这个像素尺寸下判不了」，"
-                "这跟「没有晶格」是两回事。"
+                "这跟「没有晶格」是两回事。", "Measure **one** saved .sxm frame and decide how it should be processed: which flattening (plane / 2nd-order surface / line-by-line / fit lines on the dominant terrace) and how tight the color scale should be - every choice comes with the measured reason. It is read-only and does not touch hardware. It also **relays** existing verdicts: atomic phase (mast.vision.atomic_phase), tip change mid-scan (mast.vision.tip_change), forward/backward consistency, bad scan lines. It never claims by itself to see a lattice - that assertion comes from atomic_phase, which can also answer \"cannot tell at this pixel size\", which is not the same as \"no lattice\".")
             ),
             parameters=[
                 ParameterSpec(name="scan_path", type="str",
-                              description="已保存的那一帧 .sxm 的路径。",
+                              description=tr("已保存的那一帧 .sxm 的路径。", "Path of the saved .sxm frame."),
                               required=True),
                 *_profile_params(),
                 ParameterSpec(
                     name="save_png", type="bool",
-                    description=("顺便把 flatten 之后的帧，按所选色标"
-                                 "渲染成一张 PNG。"),
+                    description=(tr("顺便把 flatten 之后的帧，按所选色标"
+                                 "渲染成一张 PNG。", "Also render the flattened frame to a PNG using the chosen color scale.")),
                     required=False, default=False),
                 ParameterSpec(name="output_dir", type="str",
-                              description="PNG 放到哪里（默认：figures 目录）。",
+                              description=tr("PNG 放到哪里（默认：figures 目录）。", "Where to put the PNG (default: the figures directory)."),
                               required=False, default=""),
             ],
             estimated_duration_s=3.0,
@@ -182,7 +183,7 @@ class AnalyzeScanImage(BaseSkill):
             from mast.vision.scan_prep_thresholds import resolve
         except ImportError as exc:
             return SkillResult(skill_name=name, success=False,
-                               error=f"依赖缺席: {exc}")
+                               error=tr(f"依赖缺席: {exc}", f"Dependency missing: {exc}"))
 
         fr, err = _load_frame(scan_path, channel)
         if err:
@@ -195,7 +196,7 @@ class AnalyzeScanImage(BaseSkill):
             plan = plan_for(m, th, override=flatten)
         except Exception as exc:  # noqa: BLE001
             return SkillResult(skill_name=name, success=False,
-                               error=f"分析失败: {type(exc).__name__}: {exc}")
+                               error=tr(f"分析失败: {type(exc).__name__}: {exc}", f"Analysis failed: {type(exc).__name__}: {exc}"))
 
         png = ""
         if save_png:
@@ -216,13 +217,13 @@ class AnalyzeScanImage(BaseSkill):
             "png_path": png,
         }
         summary = (
-            f"{Path(scan_path).name} [{channel}] → {plan.method}"
+            tr(f"{Path(scan_path).name} [{channel}] → {plan.method}"
             f"({METHOD_LABEL.get(plan.method, plan.method)}), 色阶 "
             f"{plan.clip[0]}–{plan.clip[1]} 百分位 | line_gain {m.line_gain:.2f} "
             f"bow_gain {m.bow_gain:.2f} 行相关 {m.rowcorr_median:.2f}"
-            f"\n依据: " + " / ".join(plan.why)
-            + ("\n注意: " + " / ".join(plan.notes) if plan.notes else "")
-            + f"\n阈值 profile `{plan.profile}` — {plan.provenance}")
+            f"\n依据: ", f"{Path(scan_path).name} [{channel}] -> {plan.method} ({METHOD_LABEL.get(plan.method, plan.method)}), color scale {plan.clip[0]}-{plan.clip[1]} percentile | line_gain {m.line_gain:.2f} bow_gain {m.bow_gain:.2f} row correlation {m.rowcorr_median:.2f}\nbasis: ") + " / ".join(plan.why)
+            + (tr("\n注意: ", "\nNote: ") + " / ".join(plan.notes) if plan.notes else "")
+            + tr(f"\n阈值 profile `{plan.profile}` — {plan.provenance}", f"\nThreshold profile `{plan.profile}` - {plan.provenance}"))
         # 图像通道:这张 PNG 已经带了自动平场 + 选好的色阶,正是本技能算出来的那张
         # 「该怎么看」的图 —— 比原始 .sxm 缩略图更有信息量。给模型看这一张。
         # 只放路径(SkillResult.images 的契约);像素由 vision_mw 在出站时 materialize。
@@ -240,30 +241,30 @@ class AutoProcessScanBatch(BaseSkill):
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
             description=(
-                "测量一个文件夹里的**每一个** .sxm，逐帧挑好 flattening 与色标，"
+                tr("测量一个文件夹里的**每一个** .sxm，逐帧挑好 flattening 与色标，"
                 "然后把扫描尺寸与偏压相同的那些帧**统一**起来 —— 好让其中两帧"
                 "之间的对比度差异只可能来自样品，绝不可能来自处理过程"
                 "（含有真实台阶的帧保留各自的保护性处理，不参与统一）。"
                 "它会渲染出这些 PNG，并写一份 _report.md，里面有每一个实测"
-                "数字、以及每一个决定的理由。它只读，不碰硬件。"
+                "数字、以及每一个决定的理由。它只读，不碰硬件。", "Measure **every** .sxm in a folder, pick the flattening and color scale frame by frame, then **unify** the frames with the same scan size and bias - so that a contrast difference between any two of them can only come from the sample, never from the processing (frames containing real steps keep their own protective processing and are not unified). It renders these PNGs and writes a _report.md with every measured number and the reason for every decision. It is read-only and does not touch hardware.")
             ),
             parameters=[
                 ParameterSpec(name="folder", type="str",
-                              description="存放这些 .sxm 文件的文件夹。",
+                              description=tr("存放这些 .sxm 文件的文件夹。", "Folder holding the .sxm files."),
                               required=True),
                 *_profile_params(),
                 ParameterSpec(name="render", type="bool",
-                              description="每帧渲染一张 PNG（默认 true）。",
+                              description=tr("每帧渲染一张 PNG（默认 true）。", "Render one PNG per frame (default true)."),
                               required=False, default=True),
                 ParameterSpec(name="write_report", type="bool",
-                              description="写出 _report.md（默认 true）。",
+                              description=tr("写出 _report.md（默认 true）。", "Write _report.md (default true)."),
                               required=False, default=True),
                 ParameterSpec(name="output_dir", type="str",
-                              description=("PNG 和这份报告放到哪里"
-                                           "（默认：figures 目录）。"),
+                              description=(tr("PNG 和这份报告放到哪里"
+                                           "（默认：figures 目录）。", "Where to put the PNGs and this report (default: the figures directory).")),
                               required=False, default=""),
                 ParameterSpec(name="max_files", type="int",
-                              description=f"处理文件数的上限（最多 {_MAX_BATCH}）。",
+                              description=tr(f"处理文件数的上限（最多 {_MAX_BATCH}）。", f"Upper limit on the number of files processed (at most {_MAX_BATCH})."),
                               required=False, default=_MAX_BATCH,
                               min_value=1, max_value=_MAX_BATCH),
             ],
@@ -289,15 +290,15 @@ class AutoProcessScanBatch(BaseSkill):
             from mast.vision.scan_prep_thresholds import resolve
         except ImportError as exc:
             return SkillResult(skill_name=name, success=False,
-                               error=f"依赖缺席: {exc}")
+                               error=tr(f"依赖缺席: {exc}", f"Dependency missing: {exc}"))
 
         if not folder.is_dir():
             return SkillResult(skill_name=name, success=False,
-                               error=f"不是一个目录: {folder}")
+                               error=tr(f"不是一个目录: {folder}", f"Not a directory: {folder}"))
         files = sorted(folder.glob("*.sxm"))[:max(1, min(max_files, _MAX_BATCH))]
         if not files:
             return SkillResult(skill_name=name, success=False,
-                               error=f"{folder} 里没有 .sxm 文件")
+                               error=tr(f"{folder} 里没有 .sxm 文件", f"No .sxm files in {folder}"))
 
         th = resolve(profile or None)
         items: list[dict] = []
@@ -318,7 +319,7 @@ class AutoProcessScanBatch(BaseSkill):
 
         if not items:
             return SkillResult(skill_name=name, success=False,
-                               error=("这个目录里没有一张读得动的 .sxm。"
+                               error=(tr("这个目录里没有一张读得动的 .sxm。", "No readable .sxm in this directory.")
                                       + " | ".join(skipped[:5])))
 
         # ── 批次一致性(只在 auto 模式下;调用方指定了方式就没有票可投) ──
@@ -371,12 +372,12 @@ class AutoProcessScanBatch(BaseSkill):
                 "method_counts": counts, "skipped": skipped, "frames": rows,
                 "threshold_profile": th.name}
         summary = (
-            f"{len(rows)} 张 [{channel}] → "
+            tr(f"{len(rows)} 张 [{channel}] → ", f"{len(rows)} frames [{channel}] -> ")
             + ", ".join(f"{k} × {v}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1]))
-            + (f";{len(skipped)} 张读不动" if skipped else "")
-            + (f"\n报告(每张图测了什么、为什么这么处理): {report_path}" if report_path else "")
+            + (tr(f";{len(skipped)} 张读不动", f"; {len(skipped)} unreadable") if skipped else "")
+            + (tr(f"\n报告(每张图测了什么、为什么这么处理): {report_path}", f"\nReport (what was measured on each image and why it was processed this way): {report_path}") if report_path else "")
             + (f"\nPNG: {out}" if do_render else "")
-            + f"\n阈值 profile `{th.name}` — {th.provenance}")
+            + tr(f"\n阈值 profile `{th.name}` — {th.provenance}", f"\nThreshold profile `{th.name}` - {th.provenance}"))
         # 同 AnalyzeScanImage:批次里每张都渲染了 PNG,路径一并交出去。带几张由
         # vision_mw 的 MAX_IMAGES_PER_REQUEST 封顶(它取最近的几张),所以这里不必
         # 自己截断 —— 截断规则只该有一处。
@@ -403,13 +404,13 @@ def _write_report(out: Path, channel: str, th, items: list[dict],
     path = out / "_report.md"
     try:
         L: list[str] = []
-        L.append("# 扫描图自动预处理报告\n")
-        L.append(f"通道 `{channel}`,共 {len(items)} 个文件。"
-                 f"下表是每张图测到的量,以及据此选择的处理方式。\n")
-        L.append(f"**阈值 profile**:`{th.name}` —— {th.provenance}\n")
-        L.append("| 文件 | 视野 | 偏压 | NaN | line_gain | bow_gain | "
+        L.append(tr("# 扫描图自动预处理报告\n", "# Scan image auto-preprocessing report\n"))
+        L.append(tr(f"通道 `{channel}`,共 {len(items)} 个文件。"
+                 f"下表是每张图测到的量,以及据此选择的处理方式。\n", f"Channel `{channel}`, {len(items)} files in total. The table below gives the quantities measured on each image and the processing chosen from them.\n"))
+        L.append(tr(f"**阈值 profile**:`{th.name}` —— {th.provenance}\n", f"**Threshold profile**: `{th.name}` - {th.provenance}\n"))
+        L.append(tr("| 文件 | 视野 | 偏压 | NaN | line_gain | bow_gain | "
                  "峰数/间距比/行纯度 | 精细SNR/周期 | 行相关 | 正反扫不稳 | "
-                 "原子相 | 针尖突变 | 处理 |")
+                 "原子相 | 针尖突变 | 处理 |", "| File | Field of view | Bias | NaN | line_gain | bow_gain | peaks/spacing ratio/row purity | fine SNR/period | row correlation | fwd/bwd instability | atomic phase | tip change | processing |"))
         L.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
         for it in items:
             m, plan, fr = it["m"], it["plan"], it["fr"]
@@ -417,12 +418,12 @@ def _write_report(out: Path, channel: str, th, items: list[dict],
             fine = (f"**{m.fine_periodic_snr:.0f} / {m.fine_period_nm:.3f}nm**"
                     if plan.fine_structure else f"{m.fine_periodic_snr:.0f} / –")
             a = m.atomic or {}
-            atom = ("**通过**" if a.get("passed")
-                    else ("判不了" if "scale_gate" in (a.get("reasons") or [])
-                          else "未通过"))
+            atom = (tr("**通过**", "**pass**") if a.get("passed")
+                    else (tr("判不了", "cannot tell") if "scale_gate" in (a.get("reasons") or [])
+                          else tr("未通过", "fail")))
             tc = m.tip_change or {}
-            tcs = (f"**是**@{tc.get('change_row')}" if tc.get("changed")
-                   else (f"否(z {tc.get('score', float('nan')):.1f})" if tc else "–"))
+            tcs = (tr(f"**是**@{tc.get('change_row')}", f"**yes**@{tc.get('change_row')}") if tc.get("changed")
+                   else (tr(f"否(z {tc.get('score', float('nan')):.1f})", f"no (z {tc.get('score', float('nan')):.1f})") if tc else "–"))
             fb = (f"{m.fb_instability:.2f}" if m.fb_instability is not None else "–")
             L.append(
                 f"| {it['path'].stem[-4:]} | {_g(fr['width_nm'], ' nm')} | "
@@ -432,23 +433,23 @@ def _write_report(out: Path, channel: str, th, items: list[dict],
                 f"{m.rowcorr_median:+.2f} | {fb} | {atom} | {tcs} | "
                 f"`{plan.method}` |")
         L.append("")
-        L.append("判据阈值:" + ", ".join(
+        L.append(tr("判据阈值:", "Criterion thresholds:") + ", ".join(
             f"`{k}`={v:g}" for k, v in sorted(th.numeric_mapping().items())))
         L.append("")
-        L.append("> 「原子相」「针尖突变」「正反扫不稳」三列**不是本模块自己判的**,"
+        L.append(tr("> 「原子相」「针尖突变」「正反扫不稳」三列**不是本模块自己判的**,"
                  "分别转发 `mast.vision.atomic_phase` / `mast.vision.tip_change` / "
                  "`mast.vision.tip_metrics`。"
                  "「精细SNR」只用来决定色阶,不是「有没有晶格」的结论 —— "
                  "峰强度分不开针尖抖动造出的准周期条纹。详见 "
-                 "`docs/v2/design/scan_prep_auto_flatten.md`。")
+                 "`docs/v2/design/scan_prep_auto_flatten.md`。", "> The three columns \"atomic phase\", \"tip change\" and \"fwd/bwd instability\" are **not judged by this module itself**, they are relayed from `mast.vision.atomic_phase` / `mast.vision.tip_change` / `mast.vision.tip_metrics` respectively. \"fine SNR\" is only used to decide the color scale, it is not a conclusion about \"is there a lattice\" - peak strength cannot separate quasi-periodic stripes produced by tip jitter. See `docs/v2/design/scan_prep_auto_flatten.md` for details."))
         L.append("")
         if skipped:
-            L.append("## 读不动的文件\n")
+            L.append(tr("## 读不动的文件\n", "## Unreadable files\n"))
             for s in skipped:
                 L.append(f"- {s}")
             L.append("")
         L.append("---\n")
-        L.append("## 逐张说明\n")
+        L.append(tr("## 逐张说明\n", "## Per-image notes\n"))
         for it in items:
             m, plan, fr = it["m"], it["plan"], it["fr"]
             L.append(f"### {it['path'].stem}\n")
@@ -456,13 +457,13 @@ def _write_report(out: Path, channel: str, th, items: list[dict],
                      f"{_g(fr['height_nm'] or fr['width_nm'])} nm, "
                      f"V = {_g(fr['bias_v'])} V, {fr['rec_time']}, "
                      f"{m.shape[0]}×{m.shape[1]} px ({(m.nm_per_px or 0):.4f} nm/px)\n")
-            L.append(f"**处理**:{METHOD_LABEL.get(plan.method, plan.method)};"
-                     f"色阶 {plan.clip[0]}–{plan.clip[1]} 百分位\n")
-            L.append("**依据**:")
+            L.append(tr(f"**处理**:{METHOD_LABEL.get(plan.method, plan.method)};"
+                     f"色阶 {plan.clip[0]}–{plan.clip[1]} 百分位\n", f"**Processing**: {METHOD_LABEL.get(plan.method, plan.method)}; color scale {plan.clip[0]}-{plan.clip[1]} percentile\n"))
+            L.append(tr("**依据**:", "**Basis**: "))
             for w in plan.why:
                 L.append(f"- {w}")
             if plan.notes:
-                L.append("\n**注意**:")
+                L.append(tr("\n**注意**:", "\n**Note**: "))
                 for n in plan.notes:
                     L.append(f"- {n}")
             L.append("")

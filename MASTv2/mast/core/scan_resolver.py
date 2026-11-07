@@ -5,7 +5,7 @@
 这是「LLM 不填数字」这条设计原则的落点。分工:
 
   * **意图层**(LLM / 用户):扫哪(center)、多大(size)、什么目的(purpose)、
-    以及**用户逐字点名过的**物理参数(bias / setpoint / angle)。
+    以及**用户明确给出的**物理参数(bias / setpoint / angle)。
   * **策略层**(本模块 + :mod:`mast.core.scan_policy`):速度、像素、PI 增益、
     setpoint 缺省 —— 从尺度推导的执行细节。
 
@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from mast.core import scan_policy
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -67,11 +68,11 @@ _DEFAULT_V_TIP_MAX = 2e-6
 #: ``purpose`` 的保留值:按尺寸自动定档。其余合法值是档名。
 PURPOSE_AUTO = "auto"
 
-#: 显式点名这些档 = 一句「我要看原子」的物理意图，足以决定工作点。
+#: 显式指定这些档 = 一句「我要看原子」的物理意图，足以决定工作点。
 _ATOMIC_TIERS = frozenset({"atomic", "atomic_verify"})
 
 #: trace 里 source 的全部取值。UI 与测试都按这个枚举断言。
-SOURCE_EXPLICIT = "explicit"              # 用户逐字点名(经 LLM 转述)
+SOURCE_EXPLICIT = "explicit"              # 用户明确给出(经 LLM 转述)
 SOURCE_TIER_OPERATOR = "tier-operator"    # 用户的档位表
 SOURCE_TIER_FACTORY = "tier-factory"      # 出厂档位表
 SOURCE_PREFS = "prefs"                    # 实验默认参数偏好
@@ -85,7 +86,7 @@ SOURCE_INTENT = "intent"                  # 由 purpose 表达的物理意图（
 class ScanIntent:
     """LLM / 用户唯一能表达的东西。
 
-    ``explicit`` 只装**用户逐字点名过的**值。它与「模型自己觉得合适的值」在
+    ``explicit`` 只装**用户明确给出的**值。它与「模型自己觉得合适的值」在
     结构上无法区分 —— 这一点老实承认,所以每个 explicit 值都会进 trace 并显示
     给用户看:一个标着『用户显式』、而用户并没有给过的 line_time,是一眼能看出来的。
     """
@@ -118,13 +119,13 @@ class ResolvedScan:
     def summary_lines(self) -> list[str]:
         """供用户核对参数来源的可读表，SI 值与人类单位并列显示。"""
         label = {
-            SOURCE_EXPLICIT: "用户显式指定",
-            SOURCE_TIER_OPERATOR: "档位表(用户)",
-            SOURCE_TIER_FACTORY: "档位表(出厂)",
-            SOURCE_PREFS: "实验默认偏好",
-            SOURCE_PREFS_DERIVED: "实验默认偏好(推导)",
-            SOURCE_DEFAULT: "内建默认",
-            SOURCE_KEEP: "保持硬件现值",
+            SOURCE_EXPLICIT: tr("用户显式指定", "explicitly specified"),
+            SOURCE_TIER_OPERATOR: tr("档位表(用户)", "tier table (user)"),
+            SOURCE_TIER_FACTORY: tr("档位表(出厂)", "tier table (factory)"),
+            SOURCE_PREFS: tr("实验默认偏好", "experiment default preference"),
+            SOURCE_PREFS_DERIVED: tr("实验默认偏好(推导)", "experiment default preference (derived)"),
+            SOURCE_DEFAULT: tr("内建默认", "built-in default"),
+            SOURCE_KEEP: tr("保持硬件现值", "keep current hardware value"),
         }
         out: list[str] = []
         for name, rec in self.trace.items():
@@ -165,7 +166,9 @@ def _clamp(name: str, value: Any, warnings: list[str], kind: type = float) -> An
     if val < lo or val > hi:
         clamped = max(lo, min(hi, val))
         warnings.append(
-            f"{name}={val:.6g} 超出可用范围 [{lo:.6g}, {hi:.6g}],已修剪为 {clamped:.6g}"
+            tr(f"{name}={val:.6g} 超出可用范围 [{lo:.6g}, {hi:.6g}],已修剪为 {clamped:.6g}",
+               f"{name}={val:.6g} is outside the usable range [{lo:.6g}, {hi:.6g}], "
+               f"clamped to {clamped:.6g}")
         )
         val = clamped
     return int(val) if kind is int else float(val)
@@ -221,7 +224,7 @@ def resolve_scan(
 
     优先级链(**逐字段独立**走,不是整组切换):
 
-    1. ``explicit`` —— 用户单次显式指定(「XD 定的」,最高优先)
+    1. ``explicit`` —— 用户单次显式指定(最高优先)
     2. 档位表里用户覆写过的值
     3. ``experiment_prefs`` 对应字段
     4. 档位表出厂默认
@@ -250,19 +253,23 @@ def resolve_scan(
     raw_size = _num(intent.size_m)
     if raw_size is None or raw_size <= 0:
         raise ValueError(
-            f"size_m 无效: {intent.size_m!r}(扫描边长必须是正数;"
-            "不替用户发明尺寸)"
+            tr(f"size_m 无效: {intent.size_m!r}(扫描边长必须是正数;"
+               "不替用户发明尺寸)",
+               f"Invalid size_m: {intent.size_m!r} (the scan edge length must be positive; "
+               "a size is never invented for the user)")
         )
     size_m = _clamp("size_m", raw_size, warnings)
     if size_m is None:                      # pragma: no cover - 上面已挡住
-        raise ValueError(f"size_m 无效: {intent.size_m!r}")
+        raise ValueError(tr(f"size_m 无效: {intent.size_m!r}",
+                            f"Invalid size_m: {intent.size_m!r}"))
     note("size_m", size_m, SOURCE_EXPLICIT, human=f"{size_m * 1e9:.4g} nm")
 
     center_x = _num(intent.center_x_m)
     center_y = _num(intent.center_y_m)
     if center_x is None or center_y is None:
         raise ValueError(
-            f"扫描中心无效: ({intent.center_x_m!r}, {intent.center_y_m!r})"
+            tr(f"扫描中心无效: ({intent.center_x_m!r}, {intent.center_y_m!r})",
+               f"Invalid scan center: ({intent.center_x_m!r}, {intent.center_y_m!r})")
         )
     note("center_x_m", center_x, SOURCE_EXPLICIT, human=f"{center_x * 1e9:.4g} nm")
     note("center_y_m", center_y, SOURCE_EXPLICIT, human=f"{center_y * 1e9:.4g} nm")
@@ -274,22 +281,26 @@ def resolve_scan(
         tier = lookup.get_tier_by_name(purpose)
         if tier is None:
             warnings.append(
-                f"purpose='{intent.purpose}' 不是已知档名"
-                f"(可用: {', '.join(lookup.tier_names())}),按尺寸自动定档"
+                tr(f"purpose='{intent.purpose}' 不是已知档名"
+                   f"(可用: {', '.join(lookup.tier_names())}),按尺寸自动定档",
+                   f"purpose='{intent.purpose}' is not a known tier name "
+                   f"(available: {', '.join(lookup.tier_names())}); tier chosen by size")
             )
             tier = lookup.get_tier_for_size(size_m)
         else:
             auto_tier = lookup.get_tier_for_size(size_m)
             if auto_tier.get("name") != tier.get("name"):
                 warnings.append(
-                    f"purpose='{tier.get('name')}' 强制换档:"
-                    f"{size_m * 1e9:.4g} nm 按尺寸本应属 '{auto_tier.get('name')}' 档"
+                    tr(f"purpose='{tier.get('name')}' 强制换档:"
+                       f"{size_m * 1e9:.4g} nm 按尺寸本应属 '{auto_tier.get('name')}' 档",
+                       f"purpose='{tier.get('name')}' forces the tier: "
+                       f"{size_m * 1e9:.4g} nm would belong to tier '{auto_tier.get('name')}' by size")
                 )
     else:
         tier = lookup.get_tier_for_size(size_m)
     tier_name = str(tier.get("name", "?"))
 
-    # 「档位是被**显式点名**的」与「按尺寸碰巧定到这一档」是两件事。
+    # 「档位是被**显式指定**的」与「按尺寸碰巧定到这一档」是两件事。
     # 前者是一句物理意图（"我要看原子"），后者只是尺度巧合 —— 只有前者
     # 才有资格决定工作点（见下面 bias/setpoint 那两段）。
     purpose_named = bool(purpose and purpose != PURPOSE_AUTO
@@ -320,14 +331,16 @@ def resolve_scan(
     # ── line_time_s ────────────────────────────────────────────────────────
     if explicit.get("line_time_s") is not None:
         line_time = _clamp("line_time_s", explicit["line_time_s"], warnings)
-        note("line_time_s", line_time, SOURCE_EXPLICIT, human=f"{line_time:.4g} s/线")
+        note("line_time_s", line_time, SOURCE_EXPLICIT,
+             human=tr(f"{line_time:.4g} s/线", f"{line_time:.4g} s/line"))
     else:
         tier_src = _tier_source(tier, "line_time_s")
         pref_lt = prefs.get("line_time_s")
         pref_speed = prefs.get("scan_speed_nm_s")
         if tier_src == SOURCE_TIER_FACTORY and pref_lt is not None:
             line_time = _clamp("line_time_s", pref_lt, warnings)
-            note("line_time_s", line_time, SOURCE_PREFS, human=f"{line_time:.4g} s/线")
+            note("line_time_s", line_time, SOURCE_PREFS,
+                 human=tr(f"{line_time:.4g} s/线", f"{line_time:.4g} s/line"))
         elif tier_src == SOURCE_TIER_FACTORY and pref_speed:
             # 用户设的是「扫描速度」而不是「每线时间」—— 两者由帧宽换算。
             # 表里只存 line_time(单一真源),所以这里把速度折算过去。
@@ -335,11 +348,12 @@ def resolve_scan(
             derived = size_m / (speed_m_s * 1e-9) if speed_m_s else None
             line_time = _clamp("line_time_s", derived, warnings)
             note("line_time_s", line_time, SOURCE_PREFS_DERIVED,
-                 human=f"由 {speed_m_s:.4g} nm/s 与 {size_m * 1e9:.4g} nm 帧宽推导")
+                 human=tr(f"由 {speed_m_s:.4g} nm/s 与 {size_m * 1e9:.4g} nm 帧宽推导",
+                          f"derived from {speed_m_s:.4g} nm/s and the {size_m * 1e9:.4g} nm frame width"))
         else:
             line_time = _clamp("line_time_s", tier.get("line_time_s"), warnings)
             note("line_time_s", line_time, tier_src, tier_name,
-                 human=f"{line_time:.4g} s/线")
+                 human=tr(f"{line_time:.4g} s/线", f"{line_time:.4g} s/line"))
     if line_time is None:                    # pragma: no cover
         line_time = 0.5
         note("line_time_s", line_time, SOURCE_DEFAULT)
@@ -351,14 +365,18 @@ def resolve_scan(
     if speed > v_tip_max:
         needed = size_m / v_tip_max
         warnings.append(
-            f"针尖横向速度 {speed * 1e9:.4g} nm/s 超过上限 "
-            f"{v_tip_max * 1e9:.4g} nm/s,每线时间由 {line_time:.4g} s "
-            f"放慢到 {needed:.4g} s"
+            tr(f"针尖横向速度 {speed * 1e9:.4g} nm/s 超过上限 "
+               f"{v_tip_max * 1e9:.4g} nm/s,每线时间由 {line_time:.4g} s "
+               f"放慢到 {needed:.4g} s",
+               f"Tip lateral speed {speed * 1e9:.4g} nm/s exceeds the limit "
+               f"{v_tip_max * 1e9:.4g} nm/s; line time slowed from {line_time:.4g} s "
+               f"to {needed:.4g} s")
         )
         line_time = _clamp("line_time_s", needed, warnings) or needed
         rec = trace.get("line_time_s", {})
         rec["value"] = line_time
-        rec["human"] = f"{line_time:.4g} s/线(受针尖速度上限限制)"
+        rec["human"] = tr(f"{line_time:.4g} s/线(受针尖速度上限限制)",
+                          f"{line_time:.4g} s/line (limited by the tip speed limit)")
         trace["line_time_s"] = rec
 
     # ── angle_deg ──────────────────────────────────────────────────────────
@@ -403,7 +421,8 @@ def resolve_scan(
         if intent_wp is not None and intent_wp.get("setpoint_a") is not None:
             setpoint = _clamp("setpoint_a", intent_wp["setpoint_a"], warnings)
             note("setpoint_a", setpoint, SOURCE_INTENT,
-                 human=f"{setpoint * 1e12:.4g} pA（purpose='{tier_name}'）")
+                 human=tr(f"{setpoint * 1e12:.4g} pA（purpose='{tier_name}'）",
+                          f"{setpoint * 1e12:.4g} pA (purpose='{tier_name}')"))
         else:
             note("setpoint_a", None, SOURCE_KEEP)
 
@@ -419,12 +438,25 @@ def resolve_scan(
         bias = _clamp("bias_v", prefs["bias_v"], warnings)
         note("bias_v", bias, SOURCE_PREFS, human=f"{bias:.4g} V")
     elif intent_wp is not None and intent_wp.get("bias_v") is not None:
-        # 扫描尺寸本身不能决定偏压，但 purpose=atomic 明确给出了用途。
-        # 此时从 MakeAtomicResolutionTip.eval_bias_v 取得工作点，避免沿用
-        # 上一个技能留下的偏压；数值来源仍是流程表而不是 resolver 的猜测。
+        # **这一环来自一次实际事故的教训。**
+        #
+        # 上面那句「resolver 永远不为 bias 发明数值」对的是**按尺寸自动定档**的
+        # 情形 —— 同一个 50 nm 的框，看形貌用 50 mV、看分子态用 1 V，尺度确实
+        # 决定不了意图。但 ``purpose='atomic'`` **本身就是那句意图**：说「我要
+        # 原子分辨」就等于说了要什么偏压。这里取的不是发明的数，是流程表里
+        # ``MakeAtomicResolutionTip.eval_bias_v`` 的 0.02 V。
+        #
+        # 缺了这一环的后果：工作点一路 keep-current，于是**沿用上一个 skill
+        # 留下的值**。修针流程若把偏压留在 1 V，之后每帧 FFT 给出的周期会
+        # 明显偏离、散布很大，读起来像「针尖极其糟糕」⇒ 打脉冲 ⇒
+        # 可能把一根好针尖打坏。
+        #
+        # 原则：**每一个 skill 在一开始制定自己的工作点，
+        # 而不是依赖上一个 skill**。
         bias = _clamp("bias_v", intent_wp["bias_v"], warnings)
         note("bias_v", bias, SOURCE_INTENT,
-             human=f"{bias:.4g} V（purpose='{tier_name}' 的意图默认）")
+             human=tr(f"{bias:.4g} V（purpose='{tier_name}' 的意图默认）",
+                      f"{bias:.4g} V (intent default for purpose='{tier_name}')"))
     else:
         note("bias_v", None, SOURCE_KEEP)
 
@@ -466,14 +498,19 @@ def resolve_scan(
             }
         else:
             warnings.append(
-                f"档位 '{tier_name}' 的时间常数为 0,无法导出积分增益(I = P/T),"
-                "本次不下发 PI 设置"
+                tr(f"档位 '{tier_name}' 的时间常数为 0,无法导出积分增益(I = P/T),"
+                   "本次不下发 PI 设置",
+                   f"Tier '{tier_name}' has a time constant of 0, so the integral gain "
+                   "(I = P/T) cannot be derived; PI settings are not sent this time")
             )
     elif p_gain is not None or t_const is not None:
         missing = "time_constant_s" if p_gain is not None else "p_gain"
         warnings.append(
-            f"档位 '{tier_name}' 的 PI 配置不完整(缺 {missing}),"
-            "Z 反馈需要 P 与时间常数成对设置,本次不下发 PI 设置"
+            tr(f"档位 '{tier_name}' 的 PI 配置不完整(缺 {missing}),"
+               "Z 反馈需要 P 与时间常数成对设置,本次不下发 PI 设置",
+               f"Tier '{tier_name}' has an incomplete PI configuration (missing {missing}); "
+               "the Z feedback needs P and the time constant set together, so PI settings "
+               "are not sent this time")
         )
 
     return ResolvedScan(

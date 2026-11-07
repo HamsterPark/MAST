@@ -18,6 +18,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.skills.base import BaseSkill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -37,24 +38,30 @@ class ReconcileSafetyEnvelope(BaseSkill):
             # 真值。放宽被硬拒，所以最坏结果是「更保守」，不是「没有限制」。
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "把配置里的安全包络（SafetyLimits）与**实测**压电行程对账，并"
+                tr("把配置里的安全包络（SafetyLimits）与**实测**压电行程对账，并"
                 "**只收紧地**更新它。默认 apply=False 只报告不写。配置比硬件宽 ⇒ "
                 "收紧到实测值（那条上限本来什么都没拦住）；配置比硬件窄 ⇒ "
                 "**拒绝并报出来**，放宽是人的决定，不是自动化的。换制冷剂、换扫描器、"
-                "重标定压电之后都该跑一次。它不碰仪器的任何设置，只改 MAST 这一侧。"
+                "重标定压电之后都该跑一次。它不碰仪器的任何设置，只改 MAST 这一侧。", "Reconcile the safety envelope in the config (SafetyLimits) with the **measured** piezo range and "
+"update it **tighten-only**. By default apply=False only reports and writes nothing. Config wider than hardware => "
+"tighten to the measured value (that limit was not stopping anything anyway); config narrower than hardware => "
+"**refuse and report it**: loosening is a human decision, not an automated one. Run it once after changing the cryogen, "
+"the scanner, or recalibrating the piezo. It changes no instrument setting, only MAST's own side.")
             ),
             parameters=[
                 ParameterSpec(
                     name="apply", type="bool", required=False, default=False,
                     description=(
-                        "True 才真的写。默认 False = 只报告 —— 先看清楚要改什么，"
-                        "再决定改不改。"),
+                        tr("True 才真的写。默认 False = 只报告 —— 先看清楚要改什么，"
+                        "再决定改不改。", "True actually writes. Default False = report only: see what would change first, "
+"then decide whether to change it.")),
                 ),
                 ParameterSpec(
                     name="fields", type="str", required=False, default="",
                     description=(
-                        "只处理这几个字段，逗号分隔（如 xy_max_m,xy_min_m）。"
-                        "留空 = 全部对得上账的字段。"),
+                        tr("只处理这几个字段，逗号分隔（如 xy_max_m,xy_min_m）。"
+                        "留空 = 全部对得上账的字段。", "Only handle these fields, comma separated (e.g. xy_max_m,xy_min_m). "
+"Empty = all fields that reconcile.")),
                 ),
             ],
             preconditions=[],
@@ -76,7 +83,7 @@ class ReconcileSafetyEnvelope(BaseSkill):
         except Exception as exc:  # noqa: BLE001
             return SkillResult(
                 skill_name="ReconcileSafetyEnvelope", success=False,
-                error="依赖缺席: %s: %s" % (type(exc).__name__, exc),
+                error=tr("依赖缺席: %s: %s", "Dependency missing: %s: %s") % (type(exc).__name__, exc),
                 data={"verdict": "unknown"})
 
         try:
@@ -85,7 +92,7 @@ class ReconcileSafetyEnvelope(BaseSkill):
         except Exception as exc:  # noqa: BLE001
             return SkillResult(
                 skill_name="ReconcileSafetyEnvelope", success=False,
-                error="对账失败: %s: %s" % (type(exc).__name__, exc),
+                error=tr("对账失败: %s: %s", "Reconciliation failed: %s: %s") % (type(exc).__name__, exc),
                 data={"verdict": "unknown"})
 
         findings = [f for f in rec.findings if not only or f.field_name in only]
@@ -97,8 +104,9 @@ class ReconcileSafetyEnvelope(BaseSkill):
         refused = [
             {"field": f.field_name, "configured": f.configured,
              "measured": f.measured, "ratio": f.ratio,
-             "reason": ("配置比实测**窄** —— 改它是**放宽**包络，本技能只收紧。"
-                        "要放宽请人去初始化页确认。")}
+             "reason": (tr("配置比实测**窄** —— 改它是**放宽**包络，本技能只收紧。"
+                        "要放宽请人去初始化页确认。", "Config is **narrower** than measured -- changing it would **loosen** the envelope, and this skill only tightens. "
+"Ask a person to confirm on the initialisation page to loosen it."))}
             for f in narrower
         ]
 
@@ -123,7 +131,7 @@ class ReconcileSafetyEnvelope(BaseSkill):
         }
 
         if not do_apply:
-            note = "只报告未写（apply=False）。" if plan else "没有需要收紧的项。"
+            note = tr("只报告未写（apply=False）。", "Reported only, nothing written (apply=False).") if plan else tr("没有需要收紧的项。", "Nothing to tighten.")
             return SkillResult(
                 skill_name="ReconcileSafetyEnvelope", success=True,
                 data=data, summary=note + rec.summary())
@@ -131,7 +139,7 @@ class ReconcileSafetyEnvelope(BaseSkill):
         if not plan:
             return SkillResult(
                 skill_name="ReconcileSafetyEnvelope", success=True, data=data,
-                summary="没有需要收紧的项，什么都没写。" + rec.summary())
+                summary=tr("没有需要收紧的项，什么都没写。", "Nothing to tighten, nothing written.") + rec.summary())
 
         # ── 写入：整份合并再存（覆写文件是整份替换）────────────────────────
         try:
@@ -145,7 +153,7 @@ class ReconcileSafetyEnvelope(BaseSkill):
             data["error"] = "%s: %s" % (type(exc).__name__, exc)
             return SkillResult(
                 skill_name="ReconcileSafetyEnvelope", success=False,
-                error="写入失败: %s: %s" % (type(exc).__name__, exc), data=data)
+                error=tr("写入失败: %s: %s", "Write failed: %s: %s") % (type(exc).__name__, exc), data=data)
 
         # ── 回读比对：说「写进去了」之前先看一眼 ───────────────────────────
         readback: dict = {}
@@ -166,10 +174,10 @@ class ReconcileSafetyEnvelope(BaseSkill):
         return SkillResult(
             skill_name="ReconcileSafetyEnvelope",
             success=not bad,
-            error=("回读对不上: " + ", ".join(bad)) if bad else "",
+            error=(tr("回读对不上: ", "Readback mismatch: ") + ", ".join(bad)) if bad else "",
             data=data,
-            summary=("收紧了 %d 项%s；拒绝放宽 %d 项。"
+            summary=(tr("收紧了 %d 项%s；拒绝放宽 %d 项。", "Tightened %d item(s)%s; refused to loosen %d item(s).")
                      % (len(plan),
-                        "（回读全部一致）" if not bad else "（**回读对不上**）",
+                        tr("（回读全部一致）", " (readback all consistent)") if not bad else tr("（**回读对不上**）", " (**readback mismatch**)"),
                         len(refused))),
         )

@@ -19,6 +19,7 @@ from typing import Any, Optional, Sequence
 
 import numpy as np
 
+from mast.i18n import tr
 from mast.monitoring.features import _as_1d, _detrend_linear
 
 logger = logging.getLogger(__name__)
@@ -459,25 +460,31 @@ def compare(sigma_a: float | None, i_a: float | None,
                         conditions_match=conditions_match,
                         condition_diff=list(condition_diff))
     if model is None:
-        v.reason = "没有可用基线 —— 先跑一次 CharacteriseCurrentNoise"
+        v.reason = tr("没有可用基线 —— 先跑一次 CharacteriseCurrentNoise",
+                      "No usable baseline: run CharacteriseCurrentNoise first")
         return v
     if sigma_a is None or not math.isfinite(float(sigma_a)):
-        v.reason = "本段的噪声 RMS 读不到"
+        v.reason = tr("本段的噪声 RMS 读不到", "Noise RMS of this segment is unreadable")
         return v
     if i_a is None or not math.isfinite(float(i_a)) or abs(float(i_a)) <= 0:
-        v.reason = "本段的电流读不到,无从选取基线上的对应点"
+        v.reason = tr("本段的电流读不到,无从选取基线上的对应点",
+                      "Current of this segment is unreadable, so the matching baseline point cannot be chosen")
         return v
     v.sigma_a = float(sigma_a)
     v.in_range = model.in_range(i_a)
     v.extrapolation = model.extrapolation_factor(i_a)
     if v.extrapolation > EXTRAPOLATION_LIMIT:
-        v.reason = ("电流 %.3g A 距基线标定区间 [%.3g, %.3g] A 太远(%.1f 倍),"
-                    "不外推" % (abs(float(i_a)), model.i_lo_a, model.i_hi_a,
-                                v.extrapolation))
+        v.reason = tr("电流 %.3g A 距基线标定区间 [%.3g, %.3g] A 太远(%.1f 倍),"
+                      "不外推",
+                      "Current %.3g A is too far from the baseline calibrated range "
+                      "[%.3g, %.3g] A (%.1fx), not extrapolating"
+                      ) % (abs(float(i_a)), model.i_lo_a, model.i_hi_a,
+                           v.extrapolation)
         return v
     exp = model.expected(i_a)
     if not exp or exp <= 0:
-        v.reason = "基线模型在这个电流上给不出正数"
+        v.reason = tr("基线模型在这个电流上给不出正数",
+                      "The baseline model gives no positive value at this current")
         return v
     v.expected_a = exp
     v.ratio = float(sigma_a) / exp
@@ -560,15 +567,20 @@ def z_current_coupling(z_runs: Sequence, i_runs: Sequence, fs_hz: float,
     out: dict = {"available": False}
     cs = cross_spectra(z_runs, i_runs, fs_hz)
     if cs is None:
-        out["detail"] = "同步段不足，算不了 Z-电流耦合"
+        out["detail"] = tr("同步段不足，算不了 Z-电流耦合",
+                           "Too few synchronised segments to compute Z-current coupling")
         return out
     freqs, Pzz, Pii, Pzi, k = cs
     out["n_pairs"] = k
     if k < _MIN_COHERENCE_SEGMENTS:
         # Report the spectra, refuse the coherence: with too few averages the
         # number is biased towards 1 and would read as "perfectly coupled".
-        out["detail"] = (f"只有 {k} 对同步段（需要 ≥{_MIN_COHERENCE_SEGMENTS}）"
-                         "——段数太少时相干性会偏向 1，那是平均不足的假象，不是耦合")
+        out["detail"] = tr(
+            f"只有 {k} 对同步段（需要 ≥{_MIN_COHERENCE_SEGMENTS}）"
+            "——段数太少时相干性会偏向 1，那是平均不足的假象，不是耦合",
+            f"Only {k} synchronised segment pairs (need >={_MIN_COHERENCE_SEGMENTS}): "
+            "with too few segments the coherence is biased towards 1, which is an "
+            "artefact of insufficient averaging, not coupling")
         out["available"] = False
         return out
 
@@ -613,10 +625,14 @@ def z_current_coupling(z_runs: Sequence, i_runs: Sequence, fs_hz: float,
         out["kappa_n_bins"] = int(strong.sum())
     else:
         out["kappa_per_m"] = None
-        out["detail"] = (
+        out["detail"] = tr(
             f"没有足够的频点相干性超过 {_KAPPA_MIN_COHERENCE} —— "
             "这一段里电流噪声与 Z 的运动不是同一件事，不给传递函数。"
-            "（相干频段占比另报，那问的是另一个问题）")
+            "（相干频段占比另报，那问的是另一个问题）",
+            f"Not enough frequency bins have coherence above {_KAPPA_MIN_COHERENCE}: "
+            "in this segment the current noise and the Z motion are not the same "
+            "thing, so no transfer function is given. (The coherent-band fraction is "
+            "reported separately; that is a different question.)")
     return out
 
 
@@ -641,7 +657,8 @@ def z_stats(z_runs: Sequence, fs_hz: float):
     runs = [np.asarray(a, dtype=np.float64).reshape(-1) for a in (z_runs or [])]
     runs = [a for a in runs if a.size >= 64]
     if not runs or fs_hz <= 0:
-        return {"available": False, "detail": "没有可用的 Z 数据"}, None, None
+        return {"available": False,
+                "detail": tr("没有可用的 Z 数据", "No usable Z data")}, None, None
     from mast.monitoring.features import psd_of_runs
 
     allz = np.concatenate(runs)
@@ -709,8 +726,10 @@ def polarity_check(points: Sequence[dict]) -> Optional[dict]:
         "n_pairs": len(pairs), "pairs": pairs,
         "ratio_mean": float(r.mean()),
         "ratio_max_dev": float(np.max(np.abs(r - 1.0))),
-        "note": ("与 1.0 的偏离要拿 repeatability.relative_sd 去比 —— "
-                 "小于它的差异是重复性，不是极性"),
+        "note": tr("与 1.0 的偏离要拿 repeatability.relative_sd 去比 —— "
+                   "小于它的差异是重复性，不是极性",
+                   "Compare the deviation from 1.0 with repeatability.relative_sd: "
+                   "differences smaller than that are repeatability, not polarity"),
     }
 
 
@@ -776,10 +795,15 @@ def bias_magnitude_check(points: Sequence[dict]) -> Optional[dict]:
         # 两支斜率差得多 ⇒ 极性的影响本身随幅度变，只报一个极性比值不够
         out["polarity_effect_is_bias_dependent"] = bool(
             abs(out["slope_difference"]) > 0.3)
-    out["note"] = (
+    out["note"] = tr(
         "斜率是 log10(σ/|I|) 对 log10(|V|) 的。≈0 与偏压无关（距离调制）；"
         "<0 是电压耦合的签名；正负两支要分开看 —— 合起来拟合会让相反的趋势"
-        "互相抵消成一条平坦的假线。要判显著，拿它跟 repeatability.relative_sd 比。")
+        "互相抵消成一条平坦的假线。要判显著，拿它跟 repeatability.relative_sd 比。",
+        "The slope is of log10(σ/|I|) against log10(|V|). ~0 means independent of "
+        "bias (distance modulation); <0 is the signature of voltage coupling; look at "
+        "the positive and negative branches separately, since fitting them together "
+        "lets opposite trends cancel into a flat false line. To judge significance, "
+        "compare it with repeatability.relative_sd.")
     return out
 
 def build_models(points: Sequence[dict]) -> dict:
@@ -885,10 +909,14 @@ def build_models(points: Sequence[dict]) -> dict:
             pol["std_error"] = se
             pol["sigma"] = dev / se if se > 0 else None
             pol["significant"] = bool(se > 0 and dev / se >= 2.0)
-            pol["scale_note"] = (
+            pol["scale_note"] = tr(
                 "标准误用的是**跨整场表征**的重复散布（%.1f%%）。配对点若只隔一两个"
-                "工况，真实的短时散布更小、显著性更高 —— 这个数是保守的下界。"
-                % (float(rsd) * 100))
+                "工况，真实的短时散布更小、显著性更高 —— 这个数是保守的下界。",
+                "The standard error uses the repeatability scatter **across the whole "
+                "characterisation** (%.1f%%). If the paired points are only one or two "
+                "operating points apart, the true short-term scatter is smaller and the "
+                "significance higher: this number is a conservative lower bound."
+                ) % (float(rsd) * 100)
         rep = {**(rep or {}), "polarity": pol}
     return {"sigma_model": sigma_model, "white_model": white_model,
             "lines": lines, "repeatability": rep, "polarity": pol,
@@ -903,13 +931,13 @@ def build_models(points: Sequence[dict]) -> dict:
 #: Deliberately does NOT include bias or setpoint — the whole point of the
 #: model is that it covers a range of those.
 CONDITION_KEYS: tuple[tuple[str, str], ...] = (
-    ("tip_id", "针尖"),
-    ("sample_id", "样品"),
-    ("scan_position", "扫描位"),
-    ("magnet_on", "磁场"),
-    ("pump_stm", "STM 腔分子泵"),
-    ("pump_mbe", "MBE 腔分子泵"),
-    ("fs_hz", "采样率"),
+    ("tip_id", tr("针尖", "tip")),
+    ("sample_id", tr("样品", "sample")),
+    ("scan_position", tr("扫描位", "scan position")),
+    ("magnet_on", tr("磁场", "magnet")),
+    ("pump_stm", tr("STM 腔分子泵", "STM chamber turbo pump")),
+    ("pump_mbe", tr("MBE 腔分子泵", "MBE chamber turbo pump")),
+    ("fs_hz", tr("采样率", "sampling rate")),
 )
 
 
@@ -922,7 +950,7 @@ def condition_diff(stored: dict | None, current: dict | None) -> list[str]:
         a, b = s.get(key), c.get(key)
         if a is None or b is None:
             if a != b:
-                out.append("%s(未知)" % label)
+                out.append(tr("%s(未知)", "%s (unknown)") % label)
             continue
         if isinstance(a, float) or isinstance(b, float):
             try:

@@ -133,7 +133,8 @@ def test_an_unknown_skill_is_404_with_suggestions(world):
 def test_a_disabled_skill_is_refused_at_the_door(world, monkeypatch):
     import mast.skills.tool_face as tf
 
-    monkeypatch.setattr(tf, "compute", lambda all_names=None: tf.FaceSkip(
+    # the double follows the signature of the function it stands in for (compute takes registry=)
+    monkeypatch.setattr(tf, "compute", lambda all_names=None, registry=None: tf.FaceSkip(
         hardware=frozenset({"ExtWrite"})))
     r = world.client.post("/jobs", json={"skill": "ExtWrite"}, headers=H())
     assert r.status_code == 422 and r.json()["error"] == "skill_disabled"

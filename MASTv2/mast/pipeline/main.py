@@ -22,6 +22,8 @@ import logging
 import sys
 from pathlib import Path
 
+from mast.i18n import tr
+
 logger = logging.getLogger(__name__)
 
 
@@ -45,6 +47,15 @@ def _build_minimal_environment(
     registry = SkillRegistry()
     registry.discover("mast.skills.builtins")
     logger.info("Discovered %d skills from mast.skills.builtins", len(registry.list_skills()))
+    # 这条路不走 CoreRuntime.setup，没人替它绑定工具面的注册表。站点画像门（第四道）要按
+    # 技能类分类：装配处已经显式传 registry=，这里再绑一次是给同一进程里任何不带参数的
+    # tool_face.compute() 调用方一道保险。
+    try:
+        from mast.skills import tool_face
+
+        tool_face.bind_registry(registry)
+    except Exception as exc:  # noqa: BLE001 — 绑不上不能让 CLI 起不来；装配处仍然显式传
+        logger.warning("tool-face registry binding failed: %s", exc)
 
     # ConnectionPool: real Nanonis or fake
     if no_hardware:
@@ -333,10 +344,14 @@ def _launch_gui(no_hardware: bool) -> int:
     是另一个选择，但那会让照着旧文档敲命令的人得到「unrecognized arguments」，
     比现在这句话更难懂。
     """
-    print("--gui 已失效：Gradio 界面随 UI 的 TypeScript 重写一并删除了。\n"
-          "现在的服务入口是：\n"
-          "  .venv-v2-py313/Scripts/python.exe -m mast.api      # FastAPI + WS 后端\n"
-          "前端在仓库根 frontend/（npm run dev）。")
+    print(tr("--gui 已失效：Gradio 界面随 UI 的 TypeScript 重写一并删除了。\n"
+             "现在的服务入口是：\n"
+             "  .venv-v2-py313/Scripts/python.exe -m mast.api      # FastAPI + WS 后端\n"
+             "前端在仓库根 frontend/（npm run dev）。",
+             "--gui is obsolete: the Gradio UI was removed together with the TypeScript rewrite of the UI.\n"
+             "The service entry point is now:\n"
+             "  .venv-v2-py313/Scripts/python.exe -m mast.api      # FastAPI + WS backend\n"
+             "The frontend lives in frontend/ at the repository root (npm run dev)."))
     return 2
 
 
@@ -344,7 +359,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="mast", description="MAST entry point")
     parser.add_argument("--instruction", "-i", help="Single instruction to run (no GUI)")
     parser.add_argument("--gui", action="store_true",
-                        help="（已失效：Gradio 界面已删除，见 mast.api）")
+                        help=tr("（已失效：Gradio 界面已删除，见 mast.api）",
+                                "(obsolete: the Gradio UI was removed, see mast.api)"))
     parser.add_argument(
         "--no-hardware",
         action="store_true",
@@ -361,6 +377,12 @@ def main(argv: list[str] | None = None) -> int:
         return _launch_gui(no_hardware=args.no_hardware)
 
     if args.instruction:
+        # The instruction runs the built-in agents on the internal LLM, which is
+        # disabled while legacy features are off: say so, exit 2.
+        from mast.legacy_gate import internal_llm_enabled, refusal_message
+        if not internal_llm_enabled():
+            print(refusal_message("CLI --instruction"), file=sys.stderr)
+            return 2
         if _v2_cli_enabled():
             try:
                 print(asyncio.run(_run_instruction_v2(
@@ -371,7 +393,8 @@ def main(argv: list[str] | None = None) -> int:
                 #   一模一样 —— 那正是这次迁移要根除的形状。
                 logger.warning("v2 CLI 引擎失败，已回退旧图：%s: %s",
                                type(exc).__name__, exc)
-                print(f"（v2 引擎失败已回退：{type(exc).__name__}: {exc}）",
+                print(tr(f"（v2 引擎失败已回退：{type(exc).__name__}: {exc}）",
+                         f"(v2 engine failed, fell back to the old graph: {type(exc).__name__}: {exc})"),
                       file=sys.stderr)
 
         result = asyncio.run(_run_instruction_async(args.instruction, no_hardware=args.no_hardware))

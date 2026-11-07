@@ -31,6 +31,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from mast.i18n import tr
+
 #: 覆盖层加载出来的模块都在这个命名空间下 —— 判 origin 只看它。
 OVERLAY_NAMESPACE = "mast.skills._overlay"
 
@@ -65,16 +67,17 @@ class SkillProvenance:
     def describe(self) -> str:
         """给日志和 UI 的一行话。"""
         if not self.is_overlay:
-            return f"{self.origin}（{self.module}）"
-        bits = [f"覆盖层 {self.source_path}"]
+            return tr(f"{self.origin}（{self.module}）", f"{self.origin} ({self.module})")
+        bits = [tr(f"覆盖层 {self.source_path}", f"overlay {self.source_path}")]
         if self.short_sha:
             bits.append(f"sha {self.short_sha}")
         if self.displaced_module:
-            bits.append(f"顶掉 {self.displaced_module}")
+            bits.append(tr(f"顶掉 {self.displaced_module}", f"replaces {self.displaced_module}"))
         if self.pack_id:
-            bits.append(f"包 {self.pack_id}")
-        bits.append("已签名" if self.signature.startswith("verified") else "本机未签名")
-        return "，".join(bits)
+            bits.append(tr(f"包 {self.pack_id}", f"pack {self.pack_id}"))
+        bits.append(tr("已签名", "signed") if self.signature.startswith("verified")
+                    else tr("本机未签名", "unsigned (local)"))
+        return tr("，", ", ").join(bits)
 
     def to_dict(self) -> dict:
         return {

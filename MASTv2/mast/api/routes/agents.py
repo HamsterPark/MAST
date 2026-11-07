@@ -24,6 +24,7 @@ at integration time at integration.
 
 from __future__ import annotations
 
+from mast.i18n import tr
 import logging
 
 from fastapi import APIRouter, Request
@@ -114,7 +115,7 @@ def _to_conversation(row: dict) -> Conversation:
         conversation_id=str(row.get("conversation_id")),
         agent_id=str(row.get("agent_id", "")),
         thread_id=str(row.get("thread_id", "")),
-        title=row.get("title") or "新对话",
+        title=row.get("title") or tr("新对话", "New chat"),
         kind=row.get("kind") or "private",
         created_at=str(row["created_at"]) if row.get("created_at") is not None else None,
         updated_at=str(row["updated_at"]) if row.get("updated_at") is not None else None,
@@ -244,7 +245,7 @@ def create_conversation(
             kind=body.kind,
             title=body.title,
             # Default to whatever the operator is working in, so the chat lands in
-            # the right 实验 → 样品 slot without them having to say so . Still
+            # the right 实验 → 样品 slot without them having to say so. Still
             # only a tag: the chat spans experiments and outlives the sample.
             experiment_id=body.experiment_id or _current_experiment_id(),
             sample_id=body.sample_id or _current_sample_id(),
@@ -420,7 +421,7 @@ def _stop_caveat() -> str:
 
         return SOFT_STOP_CAVEAT
     except Exception:  # noqa: BLE001 — 一句提示文案绝不能让停止端点 500
-        return "停止信号已送达。仪器写命令即刻被拒；需要立刻让针停下请用紧急停止。"
+        return tr("停止信号已送达。仪器写命令即刻被拒；需要立刻让针停下请用紧急停止。", "Stop signal delivered. Instrument write commands are refused immediately; use the emergency stop if the tip must stop right now.")
 
 
 @router.post("/agents/{agent_id}/chat/abort", response_model=ChatAbortResult)
@@ -451,7 +452,7 @@ def abort_chat(agent_id: str, request: Request,
     if not callable(abort_hook):
         return ChatAbortResult(
             ok=False, degraded=True,
-            reason="后端未接入停止通道（独立开发模式）—— **无法判断有没有东西在跑**。")
+            reason=tr("后端未接入停止通道（独立开发模式）—— **无法判断有没有东西在跑**。", "The backend has no stop channel attached (standalone dev mode) - **cannot tell whether anything is running**."))
     cid = body.conversation_id if body is not None else None
     try:
         try:
@@ -462,12 +463,12 @@ def abort_chat(agent_id: str, request: Request,
             if cid:
                 return ChatAbortResult(
                     ok=False, degraded=True,
-                    reason="当前停止通道不支持按会话点名停止，已拒绝（避免连带停掉并发的另一条会话）。")
+                    reason=tr("当前停止通道不支持按会话点名停止，已拒绝（避免连带停掉并发的另一条会话）。", "The current stop channel cannot stop a named conversation, so the request was refused (to avoid also stopping another concurrent conversation)."))
             out = abort_hook(agent_id)
     except Exception as exc:
         logger.warning("chat abort failed for %s: %s", agent_id, exc)
         return ChatAbortResult(ok=False, degraded=True,
-                               reason=f"停止调用出错：{type(exc).__name__}: {exc}")
+                               reason=tr(f"停止调用出错：{type(exc).__name__}: {exc}", f"Stop call failed: {type(exc).__name__}: {exc}"))
     if not isinstance(out, dict):
         # 老式 bool hook：它答不出「有没有一轮在跑」，所以这里也不许把它翻译成
         # 一个确定的 ok —— 说明它是个不带证据的回答。
@@ -475,7 +476,7 @@ def abort_chat(agent_id: str, request: Request,
         return ChatAbortResult(
             ok=ok, degraded=not ok,
             signalled=1 if ok else 0,
-            reason="" if ok else "停止通道未报告任何正在进行的回合。",
+            reason="" if ok else tr("停止通道未报告任何正在进行的回合。", "The stop channel reported no turn in progress."),
             caveat=_stop_caveat() if ok else "")
     n = int(out.get("signalled", 0) or 0)
     return ChatAbortResult(

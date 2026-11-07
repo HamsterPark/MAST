@@ -43,6 +43,15 @@ _DASHSCOPE_ENDPOINT = (
 TTS_VOICES: tuple[str, ...] = ("Cherry", "Ethan", "Chelsie", "Serena", "Dylan")
 
 
+def _require_voice_allowed() -> None:
+    """Voice is part of the built-in chat (legacy features). While those are off
+    the internal LLM — and the provider calls that serve it — are disabled
+    (``mast/legacy_gate.py``); refuse before any request."""
+    from mast.legacy_gate import internal_llm_enabled, refusal_message
+    if not internal_llm_enabled():
+        raise VoiceProviderError(refusal_message("voice"))
+
+
 class VoiceProviderError(RuntimeError):
     """Raised when DashScope returns a non-200 response or unexpected payload."""
 
@@ -145,8 +154,10 @@ class DashScopeVoiceClient:
         the TTS engine reads them naturally to a Chinese listener.
 
         Raises:
-            VoiceProviderError on API failure or unparseable response.
+            VoiceProviderError on API failure or unparseable response, or while
+            legacy features are off.
         """
+        _require_voice_allowed()
         if not text or not text.strip():
             raise VoiceProviderError("synthesize: empty text.")
         v = voice or self._default_voice
@@ -233,8 +244,10 @@ class DashScopeVoiceClient:
                    URL is passed.
 
         Raises:
-            VoiceProviderError on API failure or unparseable response.
+            VoiceProviderError on API failure or unparseable response, or while
+            legacy features are off.
         """
+        _require_voice_allowed()
         audio_field = self._build_audio_field(audio, mime)
         body = {
             "model": self._asr_model,

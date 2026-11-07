@@ -30,6 +30,7 @@ time. No business logic or safety checks live in this API layer.
 from __future__ import annotations
 
 import logging
+from mast.i18n import tr
 
 from fastapi import APIRouter, Request
 
@@ -85,7 +86,7 @@ def _card_from_raw(raw: dict) -> SkillCard:
         source=raw.get("source", "other") or "other",
         source_zh=raw.get("source_zh", "") or "",
         tags=list(raw.get("tags") or []),
-        domain=raw.get("domain", "其他") or "其他",
+        domain=raw.get("domain", tr("其他", "Other")) or tr("其他", "Other"),
         version=str(raw.get("version", "") or ""),
         description=raw.get("description", "") or "",
         description_zh=raw.get("description_zh", "") or "",
@@ -102,8 +103,13 @@ def _card_from_raw(raw: dict) -> SkillCard:
 
 
 def _versions(store, name: str) -> list[CompositeVersionEntry]:
+    # Factory-built composites carry Chinese text that is part of their stored,
+    # fingerprinted spec; it is translated on the way out, never in the store.
+    from mast.skills.composite.builtin_composites_i18n import localize_composite_dict
+
     out: list[CompositeVersionEntry] = []
     for v in store.list_versions(name) or []:
+        v = localize_composite_dict(v)
         out.append(
             CompositeVersionEntry(
                 version=int(v.get("version", 0) or 0),
@@ -145,9 +151,10 @@ def get_skill_card(name: str, request: Request) -> SkillCard:
 def list_composites(request: Request) -> CompositesResponse:
     """Every stored composite (file-backed; works standalone)."""
     try:
+        from mast.skills.composite.builtin_composites_i18n import localize_composite_dict
         from mast.webui.composite_panel import composite_store
 
-        rows = composite_store().list_specs() or []
+        rows = [localize_composite_dict(r) for r in composite_store().list_specs() or []]
         composites = [
             CompositeSummary(
                 name=str(r.get("name", "")),
@@ -180,9 +187,11 @@ def get_composite(name: str, request: Request) -> CompositeDetailResponse:
             spec = store.load(name)
         except VersionStoreError:
             return CompositeDetailResponse(name=name, found=False, degraded=False)
+        from mast.skills.composite.builtin_composites_i18n import localize_composite_dict
+
         return CompositeDetailResponse(
             name=name,
-            spec=spec.to_dict(),
+            spec=localize_composite_dict(spec.to_dict()),
             versions=_versions(store, name),
             found=True,
             degraded=False,
@@ -250,7 +259,7 @@ async def validate_composite(
         logger.warning("composite validate failed for %s: %s", name, exc)
         return ValidateResponse(
             ok=False,
-            problems=[f"校验后端不可用：{exc}"],
+            problems=[tr(f"校验后端不可用：{exc}", f"Validation backend unavailable: {exc}")],
             degraded=True,
         )
 
@@ -285,7 +294,7 @@ async def clone_composite(
             ok=True,
             name=cloned.name,
             version=cloned.version,
-            message=f"已克隆 {name} → {cloned.name}（v{cloned.version}）。",
+            message=tr(f"已克隆 {name} → {cloned.name}（v{cloned.version}）。", f"Cloned {name} -> {cloned.name} (v{cloned.version})."),
             degraded=False,
         )
     except VersionStoreError as exc:
@@ -315,7 +324,7 @@ async def restore_composite(
             ok=True,
             name=saved.name,
             version=saved.version,
-            message=f"已回滚 {name} 到 v{version}（写为新版本 v{saved.version}）。",
+            message=tr(f"已回滚 {name} 到 v{version}（写为新版本 v{saved.version}）。", f"Rolled {name} back to v{version} (saved as new version v{saved.version})."),
             degraded=False,
         )
     except VersionStoreError as exc:

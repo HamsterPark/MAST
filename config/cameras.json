@@ -1,0 +1,16 @@
+{
+  "_readme": "对光相机清单模板（契约 docs/v2/design/ters_satellite_integration.md §13.1「相机」；代码 MASTv2/mast/instruments/camera.py）。放到 <数据根>/config/cameras.json 生效，改了不用重启 MAST（连着的相机断开之后才换上新配置）。enabled 缺省 false：MAST 启动时从不打开相机，只有按「连接相机」（ConnectCamera）才打开；同一时刻只有一个程序能用这台相机，ThorImageCAM 开着时连接会失败并点名，MAST 不会替人关它；「断开相机」后 ThorImageCAM 可以重新打开。backend：tsi = Thorlabs Scientific Camera SDK（ThorImageCAM 自带的 thorlabs_tsi_camera_sdk.dll，运行时载入）；fake = 可控高斯光斑的替身（无硬件演示/测试，fake 里可设 width、height、mosaic、max_fps、spot{x,y,sigma_x,sigma_y,peak,background,noise}）。serial 留 null = 用 SDK 发现的第一台；dll_dir 缺省就是 ThorImageCAM 的安装目录。真机启用前先在维护窗口里逐项核对。",
+  "cameras": [
+    {
+      "camera_id": "zelux",
+      "label": "对光相机",
+      "backend": "tsi",
+      "enabled": false,
+      "vendor": "Thorlabs",
+      "model": "Zelux CS165CU",
+      "serial": null,
+      "dll_dir": "C:\\Program Files\\Thorlabs\\ThorImageCAM\\Bin",
+      "poll_timeout_ms": 100
+    }
+  ]
+}

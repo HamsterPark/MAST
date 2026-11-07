@@ -18,6 +18,7 @@ from mast.core.types import (
     SkillMetadata,
     SkillResult,
 )
+from mast.i18n import tr
 from mast.skills.composite._base import CompositeSkillGraph
 from mast.skills.composite.graph_executor import (
     CompositeProgress,
@@ -111,23 +112,30 @@ REASON_VERDICT: dict[str, tuple[str, str | None]] = {
 #: 两者混在一句里会让「判不了」读起来像「已经判了」。
 REASON_ZH: dict[str, str] = {
     # ── 判据性:这一帧上没有原子分辨 ──
-    "no_lattice_peak": "原子带里没有显著谱峰",
-    "not_a_lattice": "谱是弥散的,不是离散的布拉格点",
-    "fft_not_sharp": "布拉格峰不够锐",
-    "fast_axis_no_peak": "逐行谱看不到这个周期(只有慢轴有 ⇒ 是行噪声不是晶格)",
-    "period_below_lattice": "周期比这个晶格的还小",
-    "period_far_above_lattice": "周期远大于这个晶格的",
-    "peaks_not_one_lattice": "峰不在同一个半径上(不是同一个晶格)",
-    "peaks_are_ridges": "候选峰全是脊上的点,剔完一个一阶峰都不剩",
-    "radial_fast_axis_disagree": "二维谱与逐行谱给的周期对不上",
+    "no_lattice_peak": tr("原子带里没有显著谱峰", "no significant spectral peak in the atomic band"),
+    "not_a_lattice": tr("谱是弥散的,不是离散的布拉格点", "the spectrum is diffuse, not discrete Bragg spots"),
+    "fft_not_sharp": tr("布拉格峰不够锐", "the Bragg peaks are not sharp enough"),
+    "fast_axis_no_peak": tr("逐行谱看不到这个周期(只有慢轴有 ⇒ 是行噪声不是晶格)",
+                            "the row-by-row spectrum does not show this period "
+                            "(present only along the slow axis => row noise, not a lattice)"),
+    "period_below_lattice": tr("周期比这个晶格的还小", "the period is smaller than this lattice's"),
+    "period_far_above_lattice": tr("周期远大于这个晶格的", "the period is much larger than this lattice's"),
+    "peaks_not_one_lattice": tr("峰不在同一个半径上(不是同一个晶格)",
+                                "the peaks do not lie on one radius (not one lattice)"),
+    "peaks_are_ridges": tr("候选峰全是脊上的点,剔完一个一阶峰都不剩",
+                           "all candidate peaks are points on ridges; after removing them no first-order "
+                           "peak is left"),
+    "radial_fast_axis_disagree": tr("二维谱与逐行谱给的周期对不上",
+                                    "the periods from the 2D spectrum and the row-by-row spectrum do not match"),
     # ── 判不了:证据不足,不是「没有」──
-    "too_few_periods": "视野里装不下足够多的周期",
-    "scale_gate": "像素太粗,这个尺度上判不了",
-    "scale_reduced": "证据强度撑不住一次针尖验收",
-    "unknown_pixel_size": "读不到像素尺度",
-    "insufficient_data": "扫到的行太少",
-    "dead_flat": "这一帧是平的,没有起伏",
-    "dependency_unavailable": "判据的依赖缺席",
+    "too_few_periods": tr("视野里装不下足够多的周期", "the field of view cannot hold enough periods"),
+    "scale_gate": tr("像素太粗,这个尺度上判不了", "the pixels are too coarse to decide at this scale"),
+    "scale_reduced": tr("证据强度撑不住一次针尖验收",
+                        "the evidence is too weak to support a tip acceptance decision"),
+    "unknown_pixel_size": tr("读不到像素尺度", "the pixel size cannot be read"),
+    "insufficient_data": tr("扫到的行太少", "too few rows were scanned"),
+    "dead_flat": tr("这一帧是平的,没有起伏", "this frame is flat, with no corrugation"),
+    "dependency_unavailable": tr("判据的依赖缺席", "a dependency of the criterion is unavailable"),
 }
 
 
@@ -236,19 +244,23 @@ def atomic_scale_reject(size_m: float, pixels: int) -> "dict[str, Any] | None":
     alternatives: list[str] = []
     need_px = min_pixels_for_scale(size_m)
     if need_px:
-        alternatives.append(
+        alternatives.append(tr(
             f"这个视野({(size_m or 0.0) * 1e9:g} nm)要 {need_px} px 以上"
-            f"(线时必须同比加大,守住每像素驻留)")
+            f"(线时必须同比加大,守住每像素驻留)",
+            f"This field of view ({(size_m or 0.0) * 1e9:g} nm) needs at least {need_px} px "
+            "(the line time must be increased in proportion to keep the dwell per pixel)"))
     try:
         px = int(pixels)
     except (TypeError, ValueError):
         px = 0
     if px > 0:
         max_nm = px * SCALE_FULL_NMPP
-        alternatives.append(f"保持 {px} px 的话,视野要小于 {max_nm:g} nm")
+        alternatives.append(tr(f"保持 {px} px 的话,视野要小于 {max_nm:g} nm",
+                               f"To keep {px} px, the field of view must be smaller than {max_nm:g} nm"))
     return {
         "code": "atomic_scale_unreachable",
-        "detail": problem or "这组帧参数进不了原子判据的满权重档",
+        "detail": problem or tr("这组帧参数进不了原子判据的满权重档",
+                                "These frame parameters do not reach the full-weight tier of the atomic criterion"),
         "alternatives": alternatives,
         "nm_per_px": nmpp,
         "scale": scale,
@@ -280,7 +292,7 @@ def evaluate_frame_admission(metrics: "dict | None",
     闸在裁决**之前**。理由:一张残帧 / 噪声帧上的「没有原子分辨」,是在自己刚制造
     的坑上做判定 —— 那个结论说的是这一帧坏了,不是这个偏压上没有原子对比度。
 
-    三项(设计 D1 逐条点名):NaN 占比、行相关中位数、正反扫不稳定度。
+    三项(设计 D1 列出):NaN 占比、行相关中位数、正反扫不稳定度。
 
     **``bad_row_frac`` 报数但不设闸**:它的阈值叫 ``bad_row_frac_annotate``,
     出厂值是 **0.0** —— 那是一条「有一行坏就标注一下」的**标注**线,不是准入线。
@@ -302,7 +314,8 @@ def evaluate_frame_admission(metrics: "dict | None",
             "unreadable": ["frame_metrics"],
             "rowcorr_median": None, "nan_frac": None,
             "fb_instability": None, "bad_row_frac": None,
-            "why": "帧准入指标读不到 —— 读不到不是通过",
+            "why": tr("帧准入指标读不到 —— 读不到不是通过",
+                      "Frame admission metrics cannot be read - unreadable is not a pass"),
         }
 
     artifacts = metrics.get("artifacts")
@@ -342,11 +355,13 @@ def evaluate_frame_admission(metrics: "dict | None",
     failed = [e["name"] for e in gated if e["passed"] is False]
     passed = not failed and not unreadable
     if passed:
-        why = "帧准入通过"
+        why = tr("帧准入通过", "Frame admission passed")
     elif failed:
-        why = "帧质量不合格: " + "、".join(failed)
+        why = tr("帧质量不合格: " + "、".join(failed), "Frame quality is not acceptable: " + ", ".join(failed))
     else:
-        why = "帧准入指标读不到(" + "、".join(unreadable) + ") —— 读不到不是通过"
+        why = tr("帧准入指标读不到(" + "、".join(unreadable) + ") —— 读不到不是通过",
+                 "Frame admission metrics cannot be read (" + ", ".join(unreadable)
+                 + ") - unreadable is not a pass")
     return {
         "passed": passed,
         "measured": True,
@@ -404,7 +419,7 @@ class VerifyAtomicResolution(CompositeSkillGraph):
             version="1.0.0",
             category=SkillCategory.ANALYSIS,
             safety_level=SafetyLevel.AUTO,
-            description=(
+            description=tr(
                 "对**一帧**已存盘的 .sxm 判断它有没有原子分辨 —— 并且说清是"
                 "**三个答案里的哪一个**：'atomic_resolved'、'atomic_absent'、"
                 "'undecidable'。"
@@ -414,57 +429,91 @@ class VerifyAtomicResolution(CompositeSkillGraph):
                 "（shrink_field / widen_field / fix_pixel_scale / rescan_frame / "
                 "move_site / fix_environment）。"
                 "只读，不碰硬件。输入**必须（MUST）**是已存盘的 .sxm 路径 —— 不接受"
-                "实时扫描缓冲区，因为无法保证与保存帧同源。"
+                "实时扫描缓冲区（它与文件里装的是不同的"
+                "数据）。"
                 "帧质量在晶格判据**之前**检查，这样一帧坏图就不会因为它没造成的"
-                "损伤而被判。"
+                "损伤而被判。",
+                "Decides whether a **single** saved .sxm frame shows atomic resolution, and states "
+                "clearly **which of three answers** it is: 'atomic_resolved', 'atomic_absent', "
+                "'undecidable'. "
+                "**The third is the point**: a frame too coarse to resolve the lattice, a frame whose "
+                "pixel size cannot be read, a dead-flat frame or one that was only half acquired "
+                "**cannot support the statement 'there are no atoms here'** - reporting 'absent' on "
+                "such a frame is a false statement that sends the workflow off to disturb a tip that "
+                "was perfectly fine. Every 'undecidable' comes with a remedy action "
+                "(shrink_field / widen_field / fix_pixel_scale / rescan_frame / "
+                "move_site / fix_environment). "
+                "Read-only, does not touch the hardware. The input **MUST** be the path of a saved "
+                ".sxm file - the live scan buffer is not accepted (it "
+                "holds different data from the file). "
+                "Frame quality is checked **before** the lattice criterion, so a bad image is not "
+                "judged for damage it did not cause."
             ),
             parameters=[
                 ParameterSpec(
                     name="scan_path", type="str",
-                    description=("**已存盘**的 .sxm 帧路径。实时缓冲区 / 数组"
-                                 "一律不接受。"),
+                    description=tr("**已存盘**的 .sxm 帧路径。实时缓冲区 / 数组"
+                                   "一律不接受。",
+                                   "Path of a **saved** .sxm frame. The live buffer / arrays are "
+                                   "never accepted."),
                     required=True),
                 ParameterSpec(
                     name="channel", type="str",
-                    description="形貌通道（标准是 'Z'）。",
+                    description=tr("形貌通道（标准是 'Z'）。", "Topography channel (the standard is 'Z')."),
                     required=False, default="Z"),
                 ParameterSpec(
                     name="threshold_profile", type="str",
-                    description=("帧准入阈值档（它们是在**哪个样品体系**上"
-                                 "标定的）。留空 = 当前生效的那一档。"),
+                    description=tr("帧准入阈值档（它们是在**哪个样品体系**上"
+                                   "标定的）。留空 = 当前生效的那一档。",
+                                   "Frame admission threshold profile (which **sample system** they "
+                                   "were calibrated on). Empty = the profile currently in effect."),
                     required=False, default=""),
                 ParameterSpec(
                     name="expected_a_nm", type="float", unit="nm",
-                    description=(
+                    description=tr(
                         "用来比对的**原子行间距**期望值。留空则这项比对**关闭**"
                         "（默认）。这道检查的**下界是硬的、而且不对称**：填小了"
                         "会把真的原子分辨判掉，上界则很松。**不要拿文献上的猜测"
-                        "去填它。**"),
+                        "去填它。**",
+                        "Expected **atomic row spacing** to compare against. If left empty this "
+                        "comparison is **off** (default). The **lower bound of this check is hard "
+                        "and asymmetric**: setting it too small rejects real atomic resolution, "
+                        "while the upper bound is very loose. **Do not fill it with a guess from "
+                        "the literature.**"),
                     required=False, min_value=0.0, max_value=10.0),
                 ParameterSpec(
                     name="snr_min", type="float",
-                    description="带内谱峰的最低信噪比。",
+                    description=tr("带内谱峰的最低信噪比。",
+                                   "Minimum signal-to-noise ratio of the in-band spectral peak."),
                     required=False, default=4.0, min_value=1.0, max_value=1e6),
                 ParameterSpec(
                     name="concentration_min", type="float",
-                    description=("最低角向集中度（分立的 Bragg 斑点 vs 弥散的"
-                                 "环）—— **唯一**能把真晶格与针尖振铃分开的"
-                                 "那条判据。"),
+                    description=tr("最低角向集中度（分立的 Bragg 斑点 vs 弥散的"
+                                   "环）—— **唯一**能把真晶格与针尖振铃分开的"
+                                   "那条判据。",
+                                   "Minimum angular concentration (discrete Bragg spots vs a diffuse "
+                                   "ring) - the **only** criterion that separates a real lattice from "
+                                   "tip ringing."),
                     required=False, default=20.0, min_value=1.0, max_value=1e9),
                 ParameterSpec(
                     name="sharpness_min", type="float",
-                    description="FFT 谱峰的最低突出度。",
+                    description=tr("FFT 谱峰的最低突出度。", "Minimum prominence of the FFT spectral peak."),
                     required=False, default=8.0, min_value=1.0, max_value=1e6),
                 ParameterSpec(
                     name="allow_reduced_scale", type="bool",
-                    description=("允许在 0.02-0.05 nm/px 的过渡带里给出肯定"
-                                 "判定。默认 false —— 那一段的证据强度撑不住"
-                                 "一次验收决定。打开它这件事会被记录。"),
+                    description=tr("允许在 0.02-0.05 nm/px 的过渡带里给出肯定"
+                                   "判定。默认 false —— 那一段的证据强度撑不住"
+                                   "一次验收决定。打开它这件事会被记录。",
+                                   "Allow a positive verdict in the 0.02-0.05 nm/px transition band. "
+                                   "Default false - the evidence in that band is too weak to support "
+                                   "an acceptance decision. Turning it on is recorded."),
                     required=False, default=False),
                 ParameterSpec(
                     name="require_frame_admission", type="bool",
-                    description=("质量闸门没过的帧，拒绝对它下判定"
-                                 "（默认 true）。"),
+                    description=tr("质量闸门没过的帧，拒绝对它下判定"
+                                   "（默认 true）。",
+                                   "Refuse to give a verdict on a frame that did not pass the quality "
+                                   "gate (default true)."),
                     required=False, default=True),
             ],
             estimated_duration_s=6.0,
@@ -489,8 +538,10 @@ class VerifyAtomicResolution(CompositeSkillGraph):
         if not scan_path or not scan_path.lower().endswith(".sxm"):
             # 输入使用已保存的 .sxm；缓冲来源不确定时不得作同源数据判断。
             self._finish(executor, VERDICT_UNDECIDABLE, REMEDY_RESCAN_FRAME,
-                         why=(f"要一个已保存的 .sxm 路径,收到 {scan_path!r}。"
-                              f"实时缓冲不接受(它装的可能不是这一帧)。"))
+                         why=tr(f"要一个已保存的 .sxm 路径,收到 {scan_path!r}。"
+                                f"实时缓冲不接受(它装的可能不是这一帧)。",
+                                f"A saved .sxm path is required, got {scan_path!r}. "
+                                "The live buffer is not accepted (it may not hold this frame)."))
             return
 
         # ── 1) 帧准入 + 对照(只准入不裁决)──
@@ -534,9 +585,10 @@ class VerifyAtomicResolution(CompositeSkillGraph):
 
         assess_result = executor.sub_results.get("assess")
         if assess_result is None or not getattr(assess_result, "success", False):
-            err = getattr(assess_result, "error", None) or "判据没有返回结果"
+            err = (getattr(assess_result, "error", None)
+                   or tr("判据没有返回结果", "The criterion returned no result"))
             self._finish(executor, VERDICT_UNDECIDABLE, REMEDY_RESCAN_FRAME,
-                         why=f"判据跑不起来: {err}")
+                         why=tr(f"判据跑不起来: {err}", f"The criterion could not run: {err}"))
             return
 
         # ── 3) 三态映射 ──
@@ -615,21 +667,34 @@ class VerifyAtomicResolution(CompositeSkillGraph):
                           "out_word": "period_below_lattice"})
         ungated = [
             {"name": "order_ratio", "value": data.get("order_ratio"),
-             "why_not_gated": ("自相关角向最大值 —— 合成实测分不开准周期抖动"
-                               "(与 6 pm 噪声下的真晶格完全重叠),只作诊断")},
+             "why_not_gated": tr("自相关角向最大值 —— 合成实测分不开准周期抖动"
+                                 "(与 6 pm 噪声下的真晶格完全重叠),只作诊断",
+                                 "Autocorrelation angular maximum - synthetic tests cannot separate "
+                                 "quasi-periodic jitter from it (it fully overlaps a real lattice "
+                                 "under 6 pm noise), diagnostic only")},
             {"name": "period_radial_nm", "value": data.get("period_nm"),
-             "why_not_gated": "二维谱的径向周期会被慢轴漂移拉偏,引用晶格常数只能用快轴"},
+             "why_not_gated": tr("二维谱的径向周期会被慢轴漂移拉偏,引用晶格常数只能用快轴",
+                                 "The radial period of the 2D spectrum is skewed by slow-axis drift; "
+                                 "only the fast axis may be used to quote a lattice constant")},
             {"name": "slow_axis_trusted", "value": data.get("slow_axis_trusted"),
-             "why_not_gated": "帧法下恒为假 —— 慢轴方向的数不可信"},
+             "why_not_gated": tr("帧法下恒为假 —— 慢轴方向的数不可信",
+                                 "Always false in the frame method - numbers along the slow axis "
+                                 "cannot be trusted")},
             {"name": "bad_row_frac", "value": None,
-             "why_not_gated": ("它的阈值是**标注**线(出厂 0.0),不是准入线;"
-                               "拿它当硬闸会让几乎每张真实帧都过不了准入")},
+             "why_not_gated": tr("它的阈值是**标注**线(出厂 0.0),不是准入线;"
+                                 "拿它当硬闸会让几乎每张真实帧都过不了准入",
+                                 "Its threshold is an **annotation** line (factory 0.0), not an "
+                                 "admission line; using it as a hard gate would make almost every "
+                                 "real frame fail admission")},
         ]
         if not expected:
             ungated.append({
                 "name": "expected_a_nm_comparison", "value": None,
-                "why_not_gated": ("比对默认关闭 —— 下界是硬闸且代价不对称,"
-                                  "宁可不填也不用一个猜测值当闸"),
+                "why_not_gated": tr("比对默认关闭 —— 下界是硬闸且代价不对称,"
+                                    "宁可不填也不用一个猜测值当闸",
+                                    "The comparison is off by default - the lower bound is a hard gate "
+                                    "with an asymmetric cost, better to leave it empty than to gate on "
+                                    "a guessed value"),
             })
         return gated, ungated
 
@@ -639,23 +704,24 @@ class VerifyAtomicResolution(CompositeSkillGraph):
         if verdict == VERDICT_RESOLVED:
             per = data.get("period_fast_axis_nm")
             conc = data.get("angular_concentration")
-            out = "有原子分辨"
+            out = tr("有原子分辨", "Atomic resolution present")
             if per:
-                out += f"(快扫方向周期 {float(per):.3f} nm"
-                out += (f",角向集中度 {float(conc):.0f})" if conc else ")")
+                out += tr(f"(快扫方向周期 {float(per):.3f} nm", f" (fast-scan period {float(per):.3f} nm")
+                out += (tr(f",角向集中度 {float(conc):.0f})", f", angular concentration {float(conc):.0f})")
+                        if conc else ")")
             return out
         if verdict == VERDICT_ABSENT:
-            return ("这一帧上没有原子分辨: "
-                    + "、".join(reason_zh(w) for w in cls["absent_reasons"]))
+            return (tr("这一帧上没有原子分辨: ", "No atomic resolution on this frame: ")
+                    + tr("、", "; ").join(reason_zh(w) for w in cls["absent_reasons"]))
         # ``unmapped_reasons`` 按定义查不到中文 —— ``reason_zh`` 会原样返回，
         # 而那正是我们想要的:一个没见过的词露出来,比被翻译成一句像样的话好。
         words = cls["undecidable_reasons"] or cls["unmapped_reasons"]
         nmpp = data.get("nm_per_px")
-        detail = ("、".join(reason_zh(w) for w in words) if words
-                  else "判据没有给出可用结论")
+        detail = (tr("、", "; ").join(reason_zh(w) for w in words) if words
+                  else tr("判据没有给出可用结论", "The criterion gave no usable conclusion"))
         if nmpp:
-            detail += f"(这一帧 {float(nmpp):.4f} nm/px)"
-        return f"判不了(不等于没有): {detail}"
+            detail += tr(f"(这一帧 {float(nmpp):.4f} nm/px)", f" (this frame: {float(nmpp):.4f} nm/px)")
+        return tr(f"判不了(不等于没有): {detail}", f"Undecidable (not the same as absent): {detail}")
 
     def _finish(self, executor: GraphExecutor, verdict: str,
                 remedy: "str | None", *, why: str,
@@ -686,7 +752,9 @@ class VerifyAtomicResolution(CompositeSkillGraph):
         atomic = (metrics or {}).get("atomic") if isinstance(metrics, dict) else None
         if not isinstance(atomic, dict):
             return {"analyze_scan_image_passed": None, "agrees": None,
-                    "note": "对照路没有给出原子相结论(不等于不一致)"}
+                    "note": tr("对照路没有给出原子相结论(不等于不一致)",
+                               "The cross-check path gave no atomic-phase conclusion "
+                               "(not the same as inconsistent)")}
         return {
             "analyze_scan_image_passed": bool(atomic.get("passed")),
             "analyze_scan_image_reasons": list(atomic.get("reasons") or ()),
@@ -710,7 +778,7 @@ class VerifyAtomicResolution(CompositeSkillGraph):
         out = dict(self._verdict_out or {})
         out.setdefault("verdict", VERDICT_UNDECIDABLE)
         out.setdefault("remedy", REMEDY_RESCAN_FRAME)
-        out.setdefault("why", "没有走到裁决")
+        out.setdefault("why", tr("没有走到裁决", "No verdict was reached"))
         out.setdefault("reasons", [])
         out.setdefault("warnings", [])
 
@@ -777,38 +845,50 @@ class VerifyAtomicResolution(CompositeSkillGraph):
     def _summary(data: dict) -> str:
         verdict = data.get("verdict")
         head = {
-            VERDICT_RESOLVED: "✔ 有原子分辨",
-            VERDICT_ABSENT: "✘ 这一帧上没有原子分辨",
-            VERDICT_UNDECIDABLE: "? 判不了（**不等于**没有）",
+            VERDICT_RESOLVED: tr("✔ 有原子分辨", "✔ Atomic resolution present"),
+            VERDICT_ABSENT: tr("✘ 这一帧上没有原子分辨", "✘ No atomic resolution on this frame"),
+            VERDICT_UNDECIDABLE: tr("? 判不了（**不等于**没有）", "? Undecidable (**not the same as** absent)"),
         }.get(verdict, f"? {verdict}")
+        fname = Path(str(data.get("frame_path") or "")).name
         lines = [f"{head} — {data.get('why') or ''}",
-                 f"帧: {Path(str(data.get('frame_path') or '')).name or '(无)'}"]
+                 tr(f"帧: {fname or '(无)'}", f"Frame: {fname or '(none)'}")]
         if data.get("remedy"):
-            lines.append(f"下一步: {data['remedy']}")
+            lines.append(tr(f"下一步: {data['remedy']}", f"Next step: {data['remedy']}"))
         adm = data.get("frame_admission") or {}
         if adm:
-            lines.append(f"帧准入: {adm.get('why')}")
+            lines.append(tr(f"帧准入: {adm.get('why')}", f"Frame admission: {adm.get('why')}"))
         cross = data.get("cross_check") or {}
         if cross.get("agrees") is False:
-            lines.append(
+            lines.append(tr(
                 "⚠️ 两条预处理给出不同结论(裁决以 AssessAtomicPhase 为准;"
-                "这只是一条自检信号,不改判)")
+                "这只是一条自检信号,不改判)",
+                "⚠️ The two preprocessing paths give different conclusions (the verdict follows "
+                "AssessAtomicPhase; this is only a self-check signal and does not change the verdict)"))
         elif cross.get("agrees") is None:
-            lines.append("对照路没有结论 —— 无从对账(不等于一致)")
+            lines.append(tr("对照路没有结论 —— 无从对账(不等于一致)",
+                            "The cross-check path has no conclusion - nothing to reconcile "
+                            "(not the same as consistent)"))
         if data.get("sample_pointer_agrees") is False:
-            lines.append(
+            lines.append(tr(
                 f"⚠️ 阈值 profile `{data.get('profile_name')}` 与当前登记样品 "
                 f"`{(data.get('sample_pointer') or {}).get('sample_name')}` 对不上"
-                f"(提示,不阻断)")
+                f"(提示,不阻断)",
+                f"⚠️ Threshold profile `{data.get('profile_name')}` does not match the currently "
+                f"registered sample `{(data.get('sample_pointer') or {}).get('sample_name')}` "
+                "(hint only, not blocking)"))
         prov = data.get("profile_provenance")
-        lines.append(f"阈值 profile `{data.get('profile_name')}` — {prov or '未标定'}")
+        lines.append(tr(f"阈值 profile `{data.get('profile_name')}` — {prov or '未标定'}",
+                        f"Threshold profile `{data.get('profile_name')}` - {prov or 'uncalibrated'}"))
         if data.get("warnings"):
-            lines.append("注意: " + "、".join(data["warnings"]))
+            lines.append(tr("注意: " + "、".join(data["warnings"]), "Note: " + "; ".join(data["warnings"])))
         per = data.get("period_fast_axis_nm")
         if per:
-            lines.append(
+            lines.append(tr(
                 f"快扫方向周期 {float(per):.3f} nm（引用晶格常数只能用这个数;"
-                f"慢轴不可信,且它直接吃 xy 标定误差）")
+                f"慢轴不可信,且它直接吃 xy 标定误差）",
+                f"Fast-scan period {float(per):.3f} nm (this is the only number to use when quoting a "
+                "lattice constant; the slow axis cannot be trusted, and it feeds directly on the xy "
+                "calibration error)"))
         return "\n".join(lines)
 
 

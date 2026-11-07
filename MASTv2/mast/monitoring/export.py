@@ -40,6 +40,8 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+from mast.i18n import tr
+
 logger = logging.getLogger(__name__)
 
 #: Epoch-millisecond stamp embedded in frame filenames by the repo's convention.
@@ -329,14 +331,19 @@ def _write_dataset(out_dir: Path, rows: list[dict], fmt: str) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="python -m mast.monitoring.export",
-        description="导出隧道电流监控语料(段波形 + 特征 + 标签)")
-    ap.add_argument("--out", help="输出目录(默认 artifacts/current_corpus/<时间戳>)")
-    ap.add_argument("--since", type=float, help="起始 unix 时间戳")
-    ap.add_argument("--until", type=float, help="结束 unix 时间戳")
+        description=tr("导出隧道电流监控语料(段波形 + 特征 + 标签)",
+                       "Export the tunnelling-current monitor corpus (segment waveforms + features + labels)"))
+    ap.add_argument("--out", help=tr("输出目录(默认 artifacts/current_corpus/<时间戳>)",
+                                     "Output directory (default artifacts/current_corpus/<timestamp>)"))
+    ap.add_argument("--since", type=float, help=tr("起始 unix 时间戳", "Start unix timestamp"))
+    ap.add_argument("--until", type=float, help=tr("结束 unix 时间戳", "End unix timestamp"))
     ap.add_argument("--all", action="store_true",
-                    help="导出全部段,而不仅是钉住的")
+                    help=tr("导出全部段,而不仅是钉住的",
+                          "Export all segments, not only the pinned ones"))
     ap.add_argument("--weak-labels", action="store_true",
-                    help="尝试用视觉针尖判定做弱标签(需要墙钟锚点,详见模块文档)")
+                    help=tr("尝试用视觉针尖判定做弱标签(需要墙钟锚点,详见模块文档)",
+                          "Try to make weak labels from the visual tip verdict "
+                          "(needs a wall-clock anchor, see the module docs)"))
     ap.add_argument("--format", choices=("parquet", "jsonl"), default="parquet")
     args = ap.parse_args(argv)
 
@@ -347,13 +354,19 @@ def main(argv: list[str] | None = None) -> int:
     manifest = export_corpus(out_dir=out, since=args.since, until=args.until,
                              pinned_only=not args.all,
                              weak_labels=args.weak_labels, fmt=args.format)
-    print(f"导出完成:{out}")
-    print(f"  段数 {manifest['segments']}  波形 {manifest['waveforms_copied']}"
-          f"(缺失 {manifest['waveforms_missing']})")
-    print(f"  人工标签 {manifest['human_labels']}"
-          f"  弱标签 {manifest['weak_labels_attached']}")
+    print(tr(f"导出完成:{out}", f"Export done: {out}"))
+    print(tr(f"  段数 {manifest['segments']}  波形 {manifest['waveforms_copied']}"
+             f"(缺失 {manifest['waveforms_missing']})",
+             f"  Segments {manifest['segments']}  waveforms {manifest['waveforms_copied']}"
+             f" (missing {manifest['waveforms_missing']})"))
+    print(tr(f"  人工标签 {manifest['human_labels']}"
+             f"  弱标签 {manifest['weak_labels_attached']}",
+             f"  Human labels {manifest['human_labels']}"
+             f"  weak labels {manifest['weak_labels_attached']}"))
     if args.weak_labels and manifest["weak_label_rows_available"] == 0:
-        print("  注意:视觉判定无法定位到墙钟(其时间戳是单调钟),未附弱标签。")
+        print(tr("  注意:视觉判定无法定位到墙钟(其时间戳是单调钟),未附弱标签。",
+                 "  Note: the visual verdicts cannot be located on the wall clock "
+                 "(their timestamps are monotonic), so no weak labels were attached."))
     return 0
 
 

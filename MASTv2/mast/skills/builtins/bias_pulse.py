@@ -6,6 +6,7 @@ vendored from v1 mast/skills/builtins/bias_pulse.py 2026-04-23. Zero behavioural
 
 from __future__ import annotations
 
+from mast.i18n import tr
 from mast.core.types import (
     ParameterSpec,
     SafetyLevel,
@@ -33,12 +34,12 @@ class BiasPulse(BaseSkill):
             # range plus the global ±10 V SafetyGate cap, so it cannot damage
             # hardware — it runs autonomously, no HITL gate.
             safety_level=SafetyLevel.AUTO,
-            description="由硬件计时发出单个偏压脉冲。",
+            description=tr("由硬件计时发出单个偏压脉冲。", "Fire a single hardware-timed bias pulse."),
             parameters=[
                 ParameterSpec(
                     name="width_s",
                     type="float",
-                    description="脉冲宽度，单位秒",
+                    description=tr("脉冲宽度，单位秒", "Pulse width, in seconds"),
                     unit="s",
                     required=True,
                     min_value=1e-6,
@@ -47,7 +48,7 @@ class BiasPulse(BaseSkill):
                 ParameterSpec(
                     name="bias_v",
                     type="float",
-                    description="脉冲期间的偏压",
+                    description=tr("脉冲期间的偏压", "Bias during the pulse"),
                     unit="V",
                     required=True,
                     min_value=-10.0,
@@ -56,7 +57,7 @@ class BiasPulse(BaseSkill):
                 ParameterSpec(
                     name="z_hold",
                     type="int",
-                    description="Z controller 的保持方式：0=不变，1=保持，2=不保持",
+                    description=tr("Z controller 的保持方式：0=不变，1=保持，2=不保持", "Z controller hold mode: 0=unchanged, 1=hold, 2=do not hold"),
                     required=False,
                     default=1,
                     allowed_values=[0, 1, 2],
@@ -64,7 +65,7 @@ class BiasPulse(BaseSkill):
                 ParameterSpec(
                     name="absolute",
                     type="bool",
-                    description="True=绝对偏压，False=相对当前值",
+                    description=tr("True=绝对偏压，False=相对当前值", "True=absolute bias, False=relative to the current value"),
                     required=False,
                     default=True,
                 ),

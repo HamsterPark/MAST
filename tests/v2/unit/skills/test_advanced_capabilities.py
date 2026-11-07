@@ -245,7 +245,8 @@ def test_guarded_keys_are_exactly_the_known_set():
     overrule — see docs/v2/design/forge_scan_working_point.md §八."""
     from mast.api.admin_pin import GUARDED_KEYS
     assert GUARDED_KEYS == {"advanced_capabilities", "hardware_modules",
-                            "coarse_drive", "tip_conditioning_overrides"}, (
+                            "coarse_drive", "tip_conditioning_overrides",
+                            "station_profile"}, (
         f"受 PIN 保护的键变了：{sorted(GUARDED_KEYS)}。"
         "少一个就等于那个开关/声明不再需要 PIN。"
     )

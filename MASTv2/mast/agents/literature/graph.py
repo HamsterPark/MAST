@@ -7,7 +7,7 @@ stack per compass §4.6. The build() signature mirrors data_processing:
           max_model_calls=40, max_tool_calls=120) -> CompiledStateGraph
 
 `model` defaults to make_chat_model("literature"), i.e. AGENT_MODEL["literature"]
-(Kimi K3 per operator request 2026-07-18 — served via the OpenAI-compatible
+(Kimi K3, served via the OpenAI-compatible
 ChatOpenAI subclass, NOT ChatAnthropic). Pass a GenericFakeChatModel in tests, or
 an explicit ChatAnthropic instance to run on Claude.
 

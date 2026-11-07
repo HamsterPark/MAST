@@ -54,6 +54,7 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from mast.i18n import tr
 from mast.documents import paths as dpaths
 from mast.documents.model import (
     DOC_JSON,
@@ -236,7 +237,8 @@ def read_versions(doc_dir: Path) -> list[VersionMeta]:
             rows[v] = VersionMeta(
                 v=v, file=p.name, sha256=sha256_text(text), words=count_words(text),
                 created_at=_mtime_iso(p), created_by="unknown",
-                note="从目录扫描恢复（versions.jsonl 缺这一行）",
+                note=tr("从目录扫描恢复（versions.jsonl 缺这一行）",
+                        "Recovered from a directory scan (versions.jsonl is missing this row)"),
             )
     except OSError:
         pass
@@ -343,7 +345,8 @@ def _recover_meta(doc_dir: Path, versions: list[VersionMeta]) -> DocMeta:
     return DocMeta(
         doc_id=f"recovered:{doc_dir.name}",
         kind=kind,
-        title=f"[元数据损坏，正文完好] {title.replace('_', ' ')}",
+        title=tr(f"[元数据损坏，正文完好] {title.replace('_', ' ')}",
+                 f"[metadata damaged, body intact] {title.replace('_', ' ')}"),
         created_at=first.created_at,
         created_by=first.created_by or "unknown",
         updated_at=last.created_at,
@@ -519,7 +522,7 @@ class DocumentStore:
         """
         body = (text or "")
         if not body.strip():
-            return SaveResult(ok=False, error="内容为空，拒绝保存。")
+            return SaveResult(ok=False, error=tr("内容为空，拒绝保存。", "Content is empty; save refused."))
 
         kind = normalize_kind(kind)
         conv_id, rid = conversation_id, run_id
@@ -566,7 +569,7 @@ class DocumentStore:
         try:
             home, root_kind = dpaths.doc_home(kind, experiment_id, create=True, st=self._st)
         except OSError as exc:
-            return SaveResult(ok=False, error=f"创建文档目录失败：{type(exc).__name__}: {exc}")
+            return SaveResult(ok=False, error=tr(f"创建文档目录失败：{type(exc).__name__}: {exc}", f"Failed to create the document directory: {type(exc).__name__}: {exc}"))
         if root_kind == "unfiled":
             experiment_id = None
             sample_id = None
@@ -577,8 +580,11 @@ class DocumentStore:
         if doc_dir is None:
             return SaveResult(
                 ok=False,
-                error=("创建文档目录失败（路径超出系统上限，连最短的名字也放不下）。"
-                       f"实验根 {home} 太深 —— 请把 MAST_EXPERIMENT_ROOT 指到更浅的路径。"))
+                error=tr("创建文档目录失败（路径超出系统上限，连最短的名字也放不下）。"
+                         f"实验根 {home} 太深 —— 请把 MAST_EXPERIMENT_ROOT 指到更浅的路径。",
+                         "Failed to create the document directory (the path exceeds the system "
+                         f"limit, even the shortest name does not fit). The experiment root {home} "
+                         "is too deep -- point MAST_EXPERIMENT_ROOT to a shallower path."))
 
         meta = DocMeta(
             doc_id=did, kind=kind, title=(title or "未命名").strip(),
@@ -656,15 +662,15 @@ class DocumentStore:
                     v += 1
                 except OSError as exc:
                     return SaveResult(ok=False, doc_id=meta.doc_id,
-                                      error=f"占位失败：{type(exc).__name__}: {exc}")
+                                      error=tr(f"占位失败：{type(exc).__name__}: {exc}", f"Reserving the slot failed: {type(exc).__name__}: {exc}"))
             if path is None:
                 return SaveResult(ok=False, doc_id=meta.doc_id,
-                                  error="连续 64 个版本号都被占用，放弃（这不该发生）。")
+                                  error=tr("连续 64 个版本号都被占用，放弃（这不该发生）。", "64 consecutive version numbers were all taken; giving up (this should not happen)."))
             try:
                 _write_atomic(path, text)
             except OSError as exc:
                 return SaveResult(ok=False, doc_id=meta.doc_id,
-                                  error=f"写入失败：{type(exc).__name__}: {exc}")
+                                  error=tr(f"写入失败：{type(exc).__name__}: {exc}", f"Write failed: {type(exc).__name__}: {exc}"))
 
             vm = VersionMeta(
                 v=v, file=path.name, sha256=sha256_text(text), words=count_words(text),
@@ -718,7 +724,7 @@ class DocumentStore:
         """改可变头部。**不动目录名** —— 目录名是创建时冻结的（陷阱：改目录等于改身份）。"""
         entry = self.get(doc_id)
         if entry is None:
-            return SaveResult(ok=False, error=f"找不到文档 {doc_id!r}。")
+            return SaveResult(ok=False, error=tr(f"找不到文档 {doc_id!r}。", f"Document {doc_id!r} not found."))
         meta = entry.meta
         with _lock_for(meta.doc_id):
             if title is not None and title.strip() and title.strip() != meta.title:
@@ -756,10 +762,10 @@ class DocumentStore:
         """
         entry = self.get(doc_id)
         if entry is None:
-            return SaveResult(ok=False, error=f"找不到文档 {doc_id!r}。")
+            return SaveResult(ok=False, error=tr(f"找不到文档 {doc_id!r}。", f"Document {doc_id!r} not found."))
         eid = str(experiment_id or "").strip()
         if not eid:
-            return SaveResult(ok=False, error="claim 需要一个实验 id。")
+            return SaveResult(ok=False, error=tr("claim 需要一个实验 id。", "claim needs an experiment id."))
         if entry.meta.experiment_id == eid and entry.meta.root_kind == "experiment":
             return SaveResult(ok=True, doc_id=entry.doc_id, kind=entry.meta.kind,
                               title=entry.meta.title, experiment_id=eid,
@@ -767,17 +773,17 @@ class DocumentStore:
                               version=entry.latest_version)
         target_home, root_kind = dpaths.doc_home(entry.meta.kind, eid, create=True, st=self._st)
         if root_kind != "experiment":
-            return SaveResult(ok=False, error=f"实验 {eid} 不存在或目录无法创建。")
+            return SaveResult(ok=False, error=tr(f"实验 {eid} 不存在或目录无法创建。", f"Experiment {eid} does not exist or its directory cannot be created."))
         dest = target_home / entry.dir.name
         if dest.exists():
-            return SaveResult(ok=False, error=f"目标位置已存在同名目录：{dest}")
+            return SaveResult(ok=False, error=tr(f"目标位置已存在同名目录：{dest}", f"A directory with the same name already exists at the destination: {dest}"))
 
         src_assets = dpaths.assets_dir_for(entry.dir.parent, entry.meta.root_kind, create=False)
         with _lock_for(entry.doc_id):
             try:
                 shutil.move(str(entry.dir), str(dest))
             except OSError as exc:
-                return SaveResult(ok=False, error=f"搬移失败：{type(exc).__name__}: {exc}")
+                return SaveResult(ok=False, error=tr(f"搬移失败：{type(exc).__name__}: {exc}", f"Move failed: {type(exc).__name__}: {exc}"))
             copied = _copy_referenced_assets(dest, src_assets,
                                              dpaths.assets_dir_for(target_home, "experiment", create=True))
             meta = entry.meta
@@ -818,7 +824,7 @@ class DocumentStore:
         """
         entry = self.get(doc_id)
         if entry is None:
-            return SaveResult(ok=False, error=f"找不到文档 {doc_id!r}。")
+            return SaveResult(ok=False, error=tr(f"找不到文档 {doc_id!r}。", f"Document {doc_id!r} not found."))
         if entry.meta.root_kind == "discarded":
             return SaveResult(ok=True, doc_id=entry.doc_id, kind=entry.meta.kind,
                               title=entry.meta.title, root_kind="discarded",
@@ -830,7 +836,7 @@ class DocumentStore:
             dest_home = dpaths.discarded_home_for(entry.meta.experiment_id,
                                                   create=True, st=self._st)
         except OSError as exc:
-            return SaveResult(ok=False, error=f"无法创建废弃区：{exc}")
+            return SaveResult(ok=False, error=tr(f"无法创建废弃区：{exc}", f"Cannot create the trash area: {exc}"))
         return self._move_zone(entry, dest_home, "discarded",
                                {"op": "discard", "reason": reason,
                                 "from_experiment_id": entry.meta.experiment_id})
@@ -847,7 +853,7 @@ class DocumentStore:
         """
         entry = self.get(doc_id)
         if entry is None:
-            return SaveResult(ok=False, error=f"找不到文档 {doc_id!r}。")
+            return SaveResult(ok=False, error=tr(f"找不到文档 {doc_id!r}。", f"Document {doc_id!r} not found."))
         eid = str(experiment_id or "").strip() or str(entry.meta.experiment_id or "").strip()
         if eid:
             res = self.claim(doc_id, eid)
@@ -868,7 +874,7 @@ class DocumentStore:
         try:
             dest_home = dpaths.unfiled_docs_dir(create=True)
         except OSError as exc:
-            return SaveResult(ok=False, error=f"无法创建未归属区：{exc}")
+            return SaveResult(ok=False, error=tr(f"无法创建未归属区：{exc}", f"Cannot create the unfiled area: {exc}"))
         return self._move_zone(entry, dest_home, "unfiled", {"op": "restore"})
 
     def _move_zone(self, entry: DocEntry, dest_home: Path, root_kind: str,
@@ -876,12 +882,12 @@ class DocumentStore:
         """在区之间搬一个文档目录。``moves.jsonl`` 留痕（只追加）。"""
         dest = dest_home / entry.dir.name
         if dest.exists():
-            return SaveResult(ok=False, error=f"目标位置已存在同名目录：{dest}")
+            return SaveResult(ok=False, error=tr(f"目标位置已存在同名目录：{dest}", f"A directory with the same name already exists at the destination: {dest}"))
         with _lock_for(entry.doc_id):
             try:
                 shutil.move(str(entry.dir), str(dest))
             except OSError as exc:
-                return SaveResult(ok=False, error=f"搬移失败：{type(exc).__name__}: {exc}")
+                return SaveResult(ok=False, error=tr(f"搬移失败：{type(exc).__name__}: {exc}", f"Move failed: {type(exc).__name__}: {exc}"))
             meta = entry.meta
             meta.root_kind = root_kind
             # 搬进 ``_discarded`` **保留**主归属：区由路径表达，不必靠清空归属来说

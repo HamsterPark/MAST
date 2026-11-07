@@ -22,6 +22,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, Optional
 
+from mast.i18n import tr
+
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -76,6 +78,28 @@ _BUSY_BACKOFF_MAX_S = 8.0
 
 #: Consecutive malformed replies before we re-probe the module configuration.
 _BAD_REPLY_LIMIT = 10
+
+#: 回包持续不可用时，重配的最短间隔每重配一次翻倍，封顶于此。
+#:
+#: 曾出现过连续数天每一份 DataGet 都不可用，而重配固定
+#: 30 s 一次 —— 数千次，没有一次修好。每次重配都往**共享的**示波器里写
+#: 通道、时基、触发：操作员开着示波器面板看别的信号，每半分钟被改回去一次。
+#: 重试本身没错，错在它从不放慢。
+_RECONFIG_MAX_INTERVAL_S = 600.0
+
+#: 仪器明说「示波器模块没在运行」时重配的起始间隔（同样翻倍，同样封顶）。
+#:
+#: 实测：模块没运行时 DataGet 回 ``Cannot access the Oscilloscope.
+#: Please make sure it is running.``，发一次 ``Osci1T.Run`` 后 0.2 s 内就有数据。解药是
+#: 已知的，而且模块没运行就没人在用这台示波器，没必要排在通用的 30 s 退避后面。
+_SCOPE_STOPPED_RETRY_S = 5.0
+
+#: 连续不可用满 :data:`_BAD_REPLY_LIMIT` 份之后，轮询从 0.1 s 放慢到这个间隔。
+#: 刚 Run 完缓冲没满是正常的，几次 0.1 s 重试就过去；十次都不行就不是那回事了。
+_BAD_REPLY_SLOW_POLL_S = 1.0
+
+#: 同一句不可用原因多久重复写一次 WARNING。原因一变立即写。
+_BAD_REPLY_RELOG_S = 3600.0
 
 #: Consecutive duplicate buffers before we suspect the scope stopped re-arming
 #: (trigger changed, module stopped, front panel closed) and re-configure.
@@ -172,6 +196,64 @@ def _array(v) -> np.ndarray:
     return np.asarray(v, dtype=np.float64)
 
 
+def scope_not_running(text: str) -> bool:
+    """这段仪器原话是不是在说「示波器模块没在运行」（``*.Run`` 能解决）。"""
+    t = str(text or "").lower()
+    return "make sure it is running" in t or "cannot access the oscilloscope" in t
+
+
+def _raw_body(rec) -> bytes:
+    """一次调用记录里的原始回包体；没有就是 ``b""``。"""
+    rv = getattr(rec, "return_value", None)
+    if isinstance(rv, (list, tuple)) and len(rv) >= 2 and isinstance(rv[1], (bytes, bytearray)):
+        return bytes(rv[1])
+    return b""
+
+
+def _instrument_tail(rec) -> str:
+    """回包末尾错误段里仪器说的话（``status=… '描述'``）；什么都没说就是 ``""``。
+
+    解析器认得的拒绝会进 ``rec.error``；但 status=0 却带描述的那种，解析器当成
+    「无错误」，描述就此丢失 —— 只有回到原始字节才读得到。
+    """
+    raw = _raw_body(rec)
+    if not raw:
+        return ""
+    from mast.core.nanonis_patch import trailing_error_section
+    tail = trailing_error_section(raw)
+    if tail is None:
+        return ""
+    status, text = tail[0], tail[1].strip()
+    if text:
+        return f"status={status} {text[:300]!r}"
+    return f"status={status}" if status else ""
+
+
+def _raw_head(rec, n: int = 48) -> str:
+    """原始回包的长度与开头若干字节，给日志用。不认识的布局要靠它反推。"""
+    raw = _raw_body(rec)
+    if not raw:
+        return ""
+    more = " …" if len(raw) > n else ""
+    return f" [raw {len(raw)} B: {raw[:n].hex(' ')}{more}]"
+
+
+def _fields_summary(d: list) -> str:
+    """解码字段的紧凑描述：标量给值，数组给长度。"""
+    if not d:
+        return "no fields"
+    out: list[str] = []
+    for v in d[:8]:
+        if isinstance(v, np.ndarray) or (isinstance(v, (list, tuple)) and len(v) != 1):
+            out.append(f"[{len(v)}]")
+            continue
+        try:
+            out.append(f"{_scalar(v):.6g}")
+        except (TypeError, ValueError, IndexError):
+            out.append(type(v).__name__)
+    return f"{len(d)} fields ({', '.join(out)})"
+
+
 def _int_or_none(v) -> Optional[int]:
     """整数,读不出来就是 ``None``。
 
@@ -191,30 +273,55 @@ def _int_or_none(v) -> Optional[int]:
 def check_timebase_table(current_index: Optional[int],
                          declared_count: Optional[int],
                          values: np.ndarray) -> str:
-    """核对仪器自报的时基表，返回 ok、unverified 或 mismatch 说明。
-    
-    检查声明档数与数组长度、当前索引是否在表内、时基是否为有限正数。
-    越界索引可能影响恢复仪器设置，因此诊断必须清楚区分未知与不一致。
-    
-    这些检查是诊断性的，当前实现不会据此否决整张表。若要改成阻断策略，
-    需先验证目标协议的字段布局与兼容性；不能把未确认的字段解释当成已标定事实。"""
+    """把仪器自报的时基表跟它自己对账。返回 ``"ok"`` / ``"unverified: …"`` /
+    ``"mismatch: …"``。
+
+    ``Osci1T/2T.TimebaseGet`` 的回包是 **(当前档位索引, 档数, 时基表)**,而这里曾只取第三项 —— 仪器自己报的「我有几档」解出来就丢了,
+    **数组长度与它从不对账**。于是「这张表完整吗」这个问题只能靠人在外部推导
+    (可以这么做:拿六个值去除以最小值,对上手册记载的 50/20/10/5/2/1
+    平均阶梯)。人能推一次,机器该每次都验。
+
+    三条独立的断言,各自守着不同的东西:
+
+    1. **档数 vs 数组长度** —— 有一个已知的 nanonis
+       回包解析坑(数组元素被裹成 1-元组),而这条路径上还叠着
+       ``nanonis_patch`` 对 ``TimebaseGet`` 的命令名修复。任何一处再出问题,
+       最可能的表现就是「表短了 / 长了」,而不是抛异常。
+    2. **当前档位索引落在表内** —— 不需要任何新假设:``d[0]`` 我们本来就在用
+       (``_remember_prior`` 拿它当停机时要还回去的值)。索引越界说明这份回包
+       根本没对齐,而**一个越界的索引会在停机时被写回仪器**。所以这一条不只是
+       诊断,它直接挡住一次错误的写入。
+    3. **每个时基都是有限正数** —— 0 或 NaN 不是时基。
+
+    **判不通过时不 fail-closed**:照样用这张表。理由是这条路上的证据不对称 ——
+    数组本身有外部佐证(六个值逐个对得上手册的平均阶梯),而
+    ``declared_count`` 这个字段**未曾在真机上被确认过**(此前读回的只有
+    ``timebases_s``)。拿一个没见过的字段去否决一个已被佐证的数组,是让校验方比
+    被校验方更不可靠。它值钱的地方在于**说出来**,不在于替人做决定。
+    —— 要推翻这个决定,需要:在真机上抓一次 ``Osci1T_TimebaseGet`` 的原始
+    回包,确认 ``d[1]`` 确实是档数。那之后 fail-closed 才是安全的。
+    """
     problems: list[str] = []
     unknown: list[str] = []
     n = int(values.size)
 
     if declared_count is None:
-        unknown.append("仪器没报档数(回包第 2 个字段读不出来)")
+        unknown.append(tr("仪器没报档数(回包第 2 个字段读不出来)",
+                          "The instrument did not report the step count (2nd reply field unreadable)"))
     elif int(declared_count) != n:
-        problems.append(f"仪器自报 {int(declared_count)} 档,数组里有 {n} 个值")
+        problems.append(tr(f"仪器自报 {int(declared_count)} 档,数组里有 {n} 个值",
+                           f"The instrument reports {int(declared_count)} steps but the array has {n} values"))
 
     if current_index is None:
-        unknown.append("当前档位索引读不出来")
+        unknown.append(tr("当前档位索引读不出来", "Current step index unreadable"))
     elif not (0 <= int(current_index) < n):
-        problems.append(f"当前档位索引 {int(current_index)} 落在 [0,{n}) 之外")
+        problems.append(tr(f"当前档位索引 {int(current_index)} 落在 [0,{n}) 之外",
+                           f"Current step index {int(current_index)} is outside [0,{n})"))
 
     bad = int(np.count_nonzero(~np.isfinite(values) | (values <= 0)))
     if bad:
-        problems.append(f"{bad}/{n} 个时基不是有限正数")
+        problems.append(tr(f"{bad}/{n} 个时基不是有限正数",
+                           f"{bad}/{n} timebases are not finite positive numbers"))
 
     if problems:
         return "mismatch: " + ";".join(problems)
@@ -258,6 +365,16 @@ class _ScopePump:
         self._cfg: dict = {}
         self._last_reconfig = 0.0
         self._bad_replies = 0
+        #: 最近一次「回包不可用」的原因：仪器的错误原文，或解出来的形状。
+        #: 在此之前只有一个计数 —— 连续数天每一份回包都不可用时，日志只有
+        #: 「repeated malformed replies」，仪器自己说了什么一个字都没留下。
+        self.last_bad_reply: str = ""
+        #: 连续不可用的份数。与 ``_bad_replies`` 不同，重配不清零，只有一份好回包才清。
+        self._bad_streak = 0
+        #: 因回包不可用而重配的连续次数，决定下一次重配要等多久（见 _malformed_backoff_s）。
+        self._malformed_reconfigs = 0
+        self._logged_bad_reply = ""
+        self._logged_bad_reply_at = 0.0
         self.last_busy = False
         self._timebases: list[float] = []
         self._timebase_index = -1
@@ -567,7 +684,9 @@ class _ScopePump:
             d = _decoded(rec.return_value)
             values = _array(d[2]) if len(d) >= 3 else np.empty(0)
             if values.size == 0:
-                self._timebase_check = "unverified: 时基表没读到,无从对账"
+                self._timebase_check = tr(
+                    "unverified: 时基表没读到,无从对账",
+                    "unverified: timebase table not read, nothing to reconcile")
                 return 0.0
             # 回包序是 (当前时基索引, 时基个数, 时基表)。趁这一次读取把「我们动手前
             # 用的是哪一档」留下 —— 不需要额外的 TCP 往返。
@@ -603,10 +722,13 @@ class _ScopePump:
                          exc_info=True)
             return 0.0
 
-    def _maybe_reconfigure(self, why: str) -> None:
+    def _maybe_reconfigure(self, why: str, min_interval: Optional[float] = None,
+                           floor_s: float = _RECONFIG_MIN_INTERVAL_S) -> bool:
+        """节流之后重配一次。真的动手了返回 True。"""
         now = time.monotonic()
-        if now - self._last_reconfig < _RECONFIG_MIN_INTERVAL_S:
-            return
+        interval = floor_s if min_interval is None else max(floor_s, float(min_interval))
+        if now - self._last_reconfig < interval:
+            return False
         logger.info("current monitor: re-configuring %s (%s)", self.STRATEGY, why)
         try:
             self.configure()
@@ -615,6 +737,45 @@ class _ScopePump:
         except Exception:  # noqa: BLE001
             logger.debug("re-configure failed", exc_info=True)
             self._last_reconfig = now
+        return True
+
+    def _malformed_backoff_s(self, start_s: float = _RECONFIG_MIN_INTERVAL_S) -> float:
+        """因回包不可用而重配的最短间隔：从 ``start_s`` 起，每重配一次翻倍，封顶 10 min。"""
+        return min(_RECONFIG_MAX_INTERVAL_S,
+                   start_s * (2 ** min(self._malformed_reconfigs, 16)))
+
+    @property
+    def trouble(self) -> str:
+        """回包正持续不可用时的原因；没有持续故障时为 ``""``。"""
+        return self.last_bad_reply if self._bad_streak >= _BAD_REPLY_LIMIT else ""
+
+    def _note_bad_reply(self, rec, reason: str) -> None:
+        """记下一份不可用的回包。**持续**不可用时才写日志，同一原因一小时一次。"""
+        tail = _instrument_tail(rec)
+        if tail and tail not in reason:
+            reason = f"{reason}; instrument: {tail}"
+        self._bad_replies += 1
+        self._bad_streak += 1
+        self.stats["bad_reply"] += 1
+        self.last_bad_reply = reason
+        if self._bad_streak < _BAD_REPLY_LIMIT:
+            return            # 刚 Run 完缓冲没满是正常的，持续了才算数
+        now = time.monotonic()
+        if (reason == self._logged_bad_reply
+                and now - self._logged_bad_reply_at < _BAD_REPLY_RELOG_S):
+            return
+        self._logged_bad_reply, self._logged_bad_reply_at = reason, now
+        logger.warning("current monitor: %s 回包连续 %d 份不可用 —— %s%s",
+                       self.STRATEGY, self._bad_streak, reason, _raw_head(rec))
+
+    def _note_good_reply(self) -> None:
+        if self._bad_streak >= _BAD_REPLY_LIMIT:
+            logger.info("current monitor: %s 回包恢复可用（此前连续 %d 份不可用，"
+                        "最后一次：%s）", self.STRATEGY, self._bad_streak,
+                        self.last_bad_reply)
+        self._bad_replies = 0
+        self._bad_streak = 0
+        self._malformed_reconfigs = 0
 
     # ── polling ─────────────────────────────────────────────────────────────
 
@@ -662,20 +823,21 @@ class _ScopePump:
     def poll_once(self) -> Optional[TraceChunk]:
         """One ``DataGet(0)``. Returns None on an unusable reply."""
         rec = self._guard(self._call_data_get())
-        if getattr(rec, "error", ""):
-            self._bad_replies += 1
+        err = getattr(rec, "error", "") or ""
+        if err:
+            self._note_bad_reply(rec, f"error: {str(err).strip()[:300]}")
             return None
         d = _decoded(rec.return_value)
         decoded = self._decode_chunk(d)
         if decoded is None:
-            self._bad_replies += 1
+            self._note_bad_reply(rec, f"undecodable: {_fields_summary(d)}")
             return None
         t0, dt, y = decoded
         if dt <= 0 or y.size == 0:
             # The scope was just started and the buffer has not filled yet.
-            self._bad_replies += 1
+            self._note_bad_reply(rec, f"empty buffer (dt={dt:.6g}, n={y.size})")
             return None
-        self._bad_replies = 0
+        self._note_good_reply()
         if not self._cfg.get("n_buffer"):
             self._cfg["n_buffer"] = int(y.size)
         # dt / fs 的**唯一权威来源**就是这里：回包自己说的。configure() 里那张时基表
@@ -728,10 +890,21 @@ class _ScopePump:
                 continue
 
             if chunk is None:
-                if self._bad_replies >= _BAD_REPLY_LIMIT:
+                if scope_not_running(self.last_bad_reply):
+                    # 不用等攒满 10 份：仪器已经说清楚了，再问 10 遍也是同一句。
+                    if self._maybe_reconfigure(
+                            f"scope module not running: {self.last_bad_reply}",
+                            min_interval=self._malformed_backoff_s(_SCOPE_STOPPED_RETRY_S),
+                            floor_s=_SCOPE_STOPPED_RETRY_S):
+                        self._malformed_reconfigs += 1
+                elif self._bad_replies >= _BAD_REPLY_LIMIT:
                     self._bad_replies = 0
-                    self._maybe_reconfigure("repeated malformed replies")
-                if _sleep_interruptible(stop, 0.1):
+                    if self._maybe_reconfigure(
+                            f"repeated malformed replies: {self.last_bad_reply}",
+                            min_interval=self._malformed_backoff_s()):
+                        self._malformed_reconfigs += 1
+                if _sleep_interruptible(stop, 0.1 if self._bad_streak < _BAD_REPLY_LIMIT
+                                        else _BAD_REPLY_SLOW_POLL_S):
                     break
                 continue
 
@@ -1169,36 +1342,63 @@ class Osci2TProbe:
         传输层 salvage 已区分错误状态和有效但布局不符的回包，此处如实解释，
         不能让代码解码问题变成要求用户操作仪器的建议。"""
         if pool is None:
-            return False, "尚未连接 Nanonis"
+            return False, tr("尚未连接 Nanonis", "Nanonis not connected yet")
         try:
             rec = pool.safe_call("Osci2T_TimebaseGet", role=DATA_ROLE,
                                  count_health=False)
         except Exception as exc:  # noqa: BLE001
-            return False, f"探测失败:{exc}"
+            return False, tr(f"探测失败:{exc}", f"Probe failed: {exc}")
         err = getattr(rec, "error", "") or ""
         if not err:
             return True, ""
         if "NeedModule" in err:
-            return False, "Osci2T 模块未加载(许可证有,但前面板没开)"
+            return False, tr("Osci2T 模块未加载(许可证有,但前面板没开)",
+                             "Osci2T module not loaded (licensed, but not opened in the front panel)")
         from mast.core.nanonis_patch import LAYOUT_MISMATCH_PREFIX
         if LAYOUT_MISMATCH_PREFIX in err:
             # 仪器**正常回答了**,是我们读不懂 —— 这是代码缺陷,不是现场状态,
             # 所以措辞里不能出现「模块没开」那种让人去动仪器的暗示。
-            return False, f"Osci2T 回包解不开(解码规格与实际布局不符):{err}"
+            return False, tr(f"Osci2T 回包解不开(解码规格与实际布局不符):{err}",
+                             f"Osci2T reply cannot be decoded (decode spec does not match "
+                             f"the actual layout): {err}")
         if "unpack requires" in err or "struct.error" in err:
             # 兜底:万一还有哪条路绕过了 salvage,至少不要把它说成模块没加载。
-            return False, f"Osci2T 回包解析失败(原因未分诊):{err}"
+            return False, tr(f"Osci2T 回包解析失败(原因未分诊):{err}",
+                             f"Osci2T reply parsing failed (cause not triaged): {err}")
         return False, err
 
 
 def make_pump(pool_getter: Callable[[], Any], *, segment_s: float = 1.0,
               target_fs_hz: float = 0.0, strategy: str = "osci1t",
               window_target_s: float = 0.0) -> _ScopePump:
-    """选择采集策略，并探测目标仪器的 HR 可用性。
-    
-    ``strategy`` 是期望值：请求 2T 时先检查模块，不可用则回退 1T 并记录原因。
-    状态中的策略取自最终泵实例。``hr_available`` 只是能力探测结果；此处尚无
-    HR 采集实现，不会因探测成功而宣称正在使用 HR。
+    """选择采集策略：探一次 OsciHR，探不到就用 Osci1T。
+
+    ``strategy`` 是**期望值**，不是结论：请求 ``osci2t`` 时先探一次模块在不在，
+    不在就退回 ``osci1t`` 并写日志。返回的泵自己的 ``STRATEGY`` 才是事实
+    ——``service.status()`` 从实例上读它，所以 ``/api/monitoring/status`` 里的
+    ``strategy`` 现在真的会跟着变。在此之前那个字段是一个**写死的字面量**
+    ``"osci1t"``：它看起来是动态的，而任何时候都只会是那一个值。
+
+    在此之前
+    这里**没有任何分支** —— docstring 写着「Osci1T today; OsciHR when licensed」，
+    实际无条件返回 Osci1T，而 ``OsciHRProbe`` 全仓零调用方。于是「这台机器有没有
+    HR」这个问题**在运行时从来没有被问过一次**，代码注释里那句「licence 不含
+    OsciHR」也就从来没被验证过。
+
+    现在每次建泵都真的探一次，结果记进 ``hr_available`` 并写日志。
+
+    ⚠️ **这句话曾经是假的**，而它写在这里像个已完成的事实：
+    「``/api/monitoring/status`` 因此能如实回答这台机器有没有 HR」。探测确实跑了、
+    日志确实写了、``service.status()`` 也确实把值放进了字典 —— 但
+    ``MonitoringStatus`` 没声明这个字段，FastAPI 的 ``response_model`` 于是把它
+    过滤掉，返回里根本没有这个 key。
+    现在补上了 schema 字段**和**逐字段映射那一行，所以这句话才成立；
+    ``tests/v2/unit/api/test_monitoring.py::test_every_declared_status_field_survives_the_mapping``
+    守着它 —— 要让它再变成假话，得先把那条闸门弄红。
+
+    ⚠️ **探到了也仍然返回 Osci1T 泵** —— ``OsciHRPump`` 还不存在，不要臆造它。
+    探测的价值是把事实摆出来：若某台机器报 ``hr_available=True``，那就值得为它
+    实现 HR 泵。在那之前 Osci1T 是唯一的路，而实测它给到 2 kHz，够用。
     """
     cls: type[_ScopePump] = Osci1TPump
     note = ""
@@ -1207,11 +1407,12 @@ def make_pump(pool_getter: Callable[[], Any], *, segment_s: float = 1.0,
             ok, why = Osci2TProbe.available(pool_getter())
         except Exception as exc:  # noqa: BLE001 — 探测失败绝不能挡住采集
             logger.debug("Osci2T probe failed", exc_info=True)
-            ok, why = False, f"探测异常:{exc}"
+            ok, why = False, tr(f"探测异常:{exc}", f"Probe error: {exc}")
         if ok:
             cls = Osci2TPump
         else:
-            note = f"(要的是 osci2t,退回 osci1t:{why})"
+            note = tr(f"(要的是 osci2t,退回 osci1t:{why})",
+                      f"(osci2t was requested, falling back to osci1t: {why})")
             logger.warning("current monitor: 请求的 Osci2T 用不上 —— %s。"
                            "退回 Osci1T,采集照常,只是每次往返拿回来的数据少 50 倍。",
                            why)

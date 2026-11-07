@@ -1,10 +1,11 @@
+import { tr } from "@/lib/i18n";
 import { PIPELINE, SUP_ID, agentColorVar, agentDef } from "./registry";
 
 // ════════════════════════════════════════════════════════════════════════════
-// 调度拓扑 · DISPATCH BUS
+// Dispatch topology (DISPATCH BUS)
 //
-// Redrawn 2026-07-11. The old graph was an org-chart of phase bands — it could
-// not say the one thing that now matters most: SEVERAL AGENTS RUN AT ONCE.
+// The graph has to show that SEVERAL AGENTS CAN RUN AT ONCE, which an org-chart
+// of phase bands cannot.
 //
 // The metaphor here is the instrument's own signal chain, which is what this
 // system actually is: the supervisor is a dispatch BUS, each agent hangs off it
@@ -42,14 +43,12 @@ const modX = (i: number) => ROW_X + i * (MOD_W + MOD_GAP);
 const modCx = (i: number) => modX(i) + MOD_W / 2;
 
 // The canvas width is DERIVED from how many modules there are — never a magic
-// number. It used to be a literal `1120`, which fitted exactly six; adding
-// research_director (2026-08-21) pushed paper_review's right edge to 1244 and
-// the seventh module was **silently clipped off the viewBox**. Nothing errored,
-// nothing warned: an SVG just doesn't paint what falls outside its coordinate
-// box, so the only symptom was an operator saying「拓扑图有一部分被遮住了」.
+// number. A fixed width fits only a fixed module count: with a literal 1120 the
+// seventh module fell outside the viewBox and was silently clipped (an SVG does
+// not paint outside its coordinate box, and nothing errors).
 //
-// A hard-coded canvas makes every future agent a layout regression, and the
-// registry is the one place people DO remember to edit. Pinned by
+// A hard-coded canvas turns every new agent into a layout regression, while the
+// registry is the one place that is reliably edited. Pinned by
 // frontend/test/topologyCanvas.test.ts.
 const RIGHT_PAD = 20;
 const W = Math.max(1120, modX(PIPELINE.length - 1) + MOD_W + RIGHT_PAD);
@@ -69,7 +68,7 @@ export function TopologyGraph({
   selected: string | null;
   live: Record<string, AgentLive>;
   onPick: (id: string) => void;
-  /** Optional 暂停/恢复 toggle (LIVE-only; parent owns the mutation + toast). */
+  /** Optional pause/resume toggle (LIVE-only; parent owns the mutation + toast). */
   onToggleHold?: (id: string, held: boolean) => void;
 }) {
   const activeIdx = PIPELINE.map((id, i) => (live[id]?.active ? i : -1)).filter((i) => i >= 0);
@@ -83,7 +82,7 @@ export function TopologyGraph({
         viewBox={`0 0 ${W} ${H}`}
         style={{ display: "block", minWidth: 860 }}
         role="img"
-        aria-label="多智能体调度拓扑"
+        aria-label={tr("多智能体调度拓扑", "Multi-agent dispatch topology")}
       >
         <defs>
           {/* graph-paper ground — the blueprint the traces are etched on */}
@@ -153,7 +152,7 @@ export function TopologyGraph({
               letterSpacing="0.6"
               fill="var(--mast-auto)"
             >
-              ‖ 并行 ×{activeIdx.length}
+              {tr(`‖ 并行 ×${activeIdx.length}`, `‖ Parallel ×${activeIdx.length}`)}
             </text>
           </g>
         )}
@@ -194,7 +193,7 @@ export function TopologyGraph({
 
         {/* ── supervisor module ────────────────────────────────────────── */}
         <g onClick={() => onPick(SUP_ID)} style={{ cursor: "pointer" }}>
-          <title>编排与协调 · 任务分解 / 并行下发 / 异常处理</title>
+          <title>{tr("编排与协调 · 任务分解 / 并行下发 / 异常处理", "Orchestration · task decomposition / parallel dispatch / error handling")}</title>
           {selected === SUP_ID && (
             <rect x={SUP_BOX.x - 4} y={SUP_BOX.y - 4} width={SUP_BOX.w + 8}
                   height={SUP_BOX.h + 8} rx={10} fill="none" stroke={SUP_HUE}
@@ -212,7 +211,7 @@ export function TopologyGraph({
           </text>
           <text x={SUP_BOX.x + 12} y={SUP_BOX.y + 41} fontFamily={SANS} fontSize={10.5}
                 className="fill-mast-muted">
-            编排与协调
+            {tr("编排与协调", "Orchestration")}
           </text>
           {supLive.model && (
             <text x={SUP_BOX.x + 12} y={SUP_BOX.y + 54} fontFamily={MONO} fontSize={8.5}
@@ -241,15 +240,15 @@ export function TopologyGraph({
         <g transform={`translate(${ROW_X} ${H - 16})`} fontFamily={MONO} fontSize={9}>
           <line x1={0} y1={-3} x2={16} y2={-3} stroke="var(--mast-border)"
                 strokeWidth={1} strokeDasharray="1 5" />
-          <text x={22} y={0} className="fill-mast-muted">空闲</text>
+          <text x={22} y={0} className="fill-mast-muted">{tr("空闲", "Idle")}</text>
           <line x1={58} y1={-3} x2={74} y2={-3} stroke="var(--mast-auto)" strokeWidth={1.8}
                 strokeDasharray="7 5" />
-          <text x={80} y={0} className="fill-mast-muted">运行中（通电）</text>
+          <text x={80} y={0} className="fill-mast-muted">{tr("运行中（通电）", "Running")}</text>
           <line x1={170} y1={-3} x2={186} y2={-3} stroke="var(--mast-warn)"
                 strokeWidth={1.4} strokeDasharray="2 3" />
-          <text x={192} y={0} className="fill-mast-muted">已暂停</text>
+          <text x={192} y={0} className="fill-mast-muted">{tr("已暂停", "Paused")}</text>
           <text x={252} y={0} className="fill-mast-muted" opacity={0.75}>
-            · 仪器控制独占硬件，与其它智能体并行安全
+            {tr("· 仪器控制独占硬件，与其它智能体并行安全", "· Instrument control owns the hardware; safe to run alongside other agents")}
           </text>
         </g>
       </svg>
@@ -368,7 +367,7 @@ function AgentModule({
           <text x={(MOD_W - 22) / 2} y={9.6} textAnchor="middle" fontFamily={MONO}
                 fontSize={8.5} letterSpacing="0.8" fontWeight={600}
                 fill={held ? "var(--mast-auto)" : "var(--mast-muted)"}>
-            {held ? "RESUME 恢复" : "HOLD 暂停"}
+            {held ? tr("RESUME 恢复", "RESUME") : tr("HOLD 暂停", "HOLD")}
           </text>
         </g>
       )}

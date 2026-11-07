@@ -32,6 +32,8 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from mast.i18n import tr
+
 from mast.update import skillpack as SP
 
 logger = logging.getLogger(__name__)
@@ -51,18 +53,25 @@ class InstallResult:
 
     def describe(self) -> str:
         if not self.ok:
-            return "技能包没有装上：" + "；".join(self.reasons or ("原因不明",))
-        bits = [f"{self.pack_id} v{self.version} 已装入 {len(self.installed)} 个文件"]
+            return (tr("技能包没有装上：", "Skill pack was not installed: ")
+                    + tr("；", "; ").join(self.reasons or (tr("原因不明", "reason unknown"),)))
+        bits = [tr(f"{self.pack_id} v{self.version} 已装入 {len(self.installed)} 个文件",
+                   f"{self.pack_id} v{self.version} installed, {len(self.installed)} files")]
         if self.replaced_version:
-            bits.append(f"（替换 v{self.replaced_version}）")
+            bits.append(tr(f"（替换 v{self.replaced_version}）",
+                           f" (replaced v{self.replaced_version})"))
         if self.enabled:
-            bits.append(f"，自动启用 {len(self.enabled)} 个")
+            bits.append(tr(f"，自动启用 {len(self.enabled)} 个",
+                           f", {len(self.enabled)} auto-enabled"))
         else:
-            bits.append("，未自动启用（本机关掉了 auto_enable_packs）")
+            bits.append(tr("，未自动启用（本机关掉了 auto_enable_packs）",
+                           ", not auto-enabled (`auto_enable_packs` is off on this machine)"))
         if self.shadowed:
-            bits.append(f"；{len(self.shadowed)} 个被本机同名文件遮盖")
+            bits.append(tr(f"；{len(self.shadowed)} 个被本机同名文件遮盖",
+                           f"; {len(self.shadowed)} shadowed by local files of the same name"))
         if self.needs_reload:
-            bits.append(" —— 尚未生效，需要重载技能")
+            bits.append(tr(" —— 尚未生效，需要重载技能",
+                           " - not in effect yet, skills need a reload"))
         return "".join(bits)
 
     def as_dict(self) -> dict:
@@ -102,7 +111,7 @@ def install_pack_file(zip_path: Path | str, *, public_key_hex: str = "",
     v = SP.verify_pack(zp, public_key_hex=public_key_hex,
                        app_version=app_version or get_version())
     if not v.ok or v.manifest is None:
-        res.reasons = list(v.reasons) or ["验证失败，原因不明"]
+        res.reasons = list(v.reasons) or [tr("验证失败，原因不明", "Verification failed, reason unknown")]
         logger.warning("技能包被拒（%s）：%s", zp.name, "；".join(res.reasons))
         return res
 
@@ -129,7 +138,7 @@ def install_pack_file(zip_path: Path | str, *, public_key_hex: str = "",
                 # 纵深防御，同 client.py 那条 "download target escaped" 检查。
                 target = (staging / f.path).resolve()
                 if not str(target).startswith(str(staging.resolve())):
-                    raise ValueError(f"落点跑出了 staging 目录：{f.path}")
+                    raise ValueError(tr(f"落点跑出了 staging 目录：{f.path}", f"Target escaped the staging directory: {f.path}"))
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(zf.read(SP.FILES_PREFIX + f.path))
         SP.write_installed_manifest(staging, man, v.signature)
@@ -137,7 +146,7 @@ def install_pack_file(zip_path: Path | str, *, public_key_hex: str = "",
         # 落位前再验一遍**磁盘上**这份 —— 写盘可能截断，zip 里对不代表盘上对
         chk = SP.verify_installed(staging, public_key_hex=public_key_hex)
         if not chk.ok:
-            raise ValueError("解出来之后自检不过：" + "；".join(chk.reasons))
+            raise ValueError(tr("解出来之后自检不过：", "Self-check failed after extraction: ") + tr("；", "; ").join(chk.reasons))
 
         if dest.exists():
             shutil.rmtree(dest)
@@ -159,9 +168,11 @@ def install_pack_file(zip_path: Path | str, *, public_key_hex: str = "",
     if mani.unreadable:
         # 「读不到」不能当成「空的」：当成空的写回去，就把用户已启用的条目
         # 全抹掉了，而界面上什么都不会说。
-        res.reasons.append(
+        res.reasons.append(tr(
             f"包已装入，但覆盖层清单读不出来（{mani.unreadable}），"
-            "所以没有自动启用 —— 修好 overlay.json 再手工启用。")
+            "所以没有自动启用 —— 修好 overlay.json 再手工启用。",
+            f"The pack was installed, but the overlay manifest cannot be read ({mani.unreadable}), "
+            "so it was not auto-enabled; fix overlay.json and enable it by hand."))
         res.needs_reload = False
         logger.warning("技能包 %s 已装入但清单读不出来：%s", man.pack_id,
                        mani.unreadable)
@@ -171,7 +182,8 @@ def install_pack_file(zip_path: Path | str, *, public_key_hex: str = "",
     if want:
         for rel in rels:
             mani.upsert(M.Entry(path=rel, enabled=True,
-                                note=f"签名包 {man.pack_id} v{man.version}"))
+                                note=tr(f"签名包 {man.pack_id} v{man.version}",
+                                        f"signed pack {man.pack_id} v{man.version}")))
         M.save(mani)
         res.enabled = list(rels)
         res.needs_reload = True
@@ -209,13 +221,13 @@ def fetch_and_install(server_url: str, token: str, pack_id: str, *,
         res.reasons.append(tls)
         return res
     if not SP.is_valid_pack_id(pack_id):
-        res.reasons.append(f"pack_id {pack_id!r} 不合法")
+        res.reasons.append(tr(f"pack_id {pack_id!r} 不合法", f"pack_id {pack_id!r} is invalid"))
         return res
 
     try:
         import httpx
     except ImportError as exc:
-        res.reasons.append(f"httpx 不可用：{exc}")
+        res.reasons.append(tr(f"httpx 不可用：{exc}", f"httpx is unavailable: {exc}"))
         return res
 
     from mast._runtime_paths import project_root
@@ -230,16 +242,18 @@ def fetch_and_install(server_url: str, token: str, pack_id: str, *,
                           server_url.rstrip("/") + "/skills/pack/download/" + pack_id,
                           headers={"Authorization": f"Bearer {token}"}) as r:
                 if r.status_code != 200:
-                    res.reasons.append(f"下载 HTTP {r.status_code}")
+                    res.reasons.append(tr(f"下载 HTTP {r.status_code}", f"Download failed with HTTP {r.status_code}"))
                     return res
                 n = 0
                 with open(tmp, "wb") as f:
                     for chunk in r.iter_bytes(1 << 18):
                         n += len(chunk)
                         if n > SP.MAX_PACK_BYTES:
-                            res.reasons.append(
+                            res.reasons.append(tr(
                                 f"服务器发来的东西超过 {SP.MAX_PACK_BYTES / 1e6:.0f} MB "
-                                "上限，已中断下载")
+                                "上限，已中断下载",
+                                f"The server sent more than {SP.MAX_PACK_BYTES / 1e6:.0f} MB; "
+                                "download aborted"))
                             return res
                         f.write(chunk)
     except Exception as exc:                                # noqa: BLE001
@@ -298,14 +312,14 @@ def remove_pack(pack_id: str) -> tuple[bool, str]:
     from mast.skills.overlay import manifest as M, paths as P
 
     if not SP.is_valid_pack_id(pack_id):
-        return False, f"pack_id {pack_id!r} 不合法"
+        return False, tr(f"pack_id {pack_id!r} 不合法", f"pack_id {pack_id!r} is invalid")
     d = P.packs_dir() / pack_id
     if not d.is_dir():
-        return False, f"没有装过 {pack_id}"
+        return False, tr(f"没有装过 {pack_id}", f"{pack_id} is not installed")
     try:
         shutil.rmtree(d)
     except OSError as exc:
-        return False, f"删不掉：{exc}"
+        return False, tr(f"删不掉：{exc}", f"Cannot delete: {exc}")
     mani = M.load()
     if not mani.unreadable:
         prefix = f"{P.PACKS_DIR}/{pack_id}/"
@@ -314,7 +328,7 @@ def remove_pack(pack_id: str) -> tuple[bool, str]:
             mani.entries = keep
             M.save(mani)
     logger.warning("签名技能包已移除：%s —— 尚未生效，等一次技能重载。", pack_id)
-    return True, f"{pack_id} 已移除 —— 尚未生效，需要重载技能"
+    return True, tr(f"{pack_id} 已移除 —— 尚未生效，需要重载技能", f"{pack_id} removed - not in effect yet, skills need a reload")
 
 
 __all__ = ["InstallResult", "fetch_and_install", "install_pack_file",

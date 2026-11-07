@@ -4,14 +4,14 @@ import { api } from "@/api/client";
 import { Badge, Card, DegradedNote, EmptyNote, ErrorNote, Spinner } from "@/components/ui";
 import { Button, Field, SubTabs, TextField, useToast } from "@/components/controls";
 import { JsonSectionEditor } from "@/components/admin/JsonSectionEditor";
+import { tr } from "@/lib/i18n";
 
-/** 技能指导 — per-skill expert annotations (SKILL_EXTRA), mirroring the old
- *  guidance/annotations.py sub-tab: when_use / when_not / related / nanonis /
- *  example. Read+write via GET/POST /api/admin/guidance/{skill}. The skill list
- *  comes from /api/skills/catalog. Empty payload ⇒ reset to code default.
+/** Skill guidance: per-skill expert annotations (SKILL_EXTRA): when_use / when_not /
+ *  related / nanonis / example. Read+write via GET/POST /api/admin/guidance/{skill}.
+ *  The skill list comes from /api/skills/catalog. Empty payload ⇒ reset to code default.
  *
- *  Plus the three whole-section guidance kinds the old guidance sub-tabs edited —
- *  decision_trees / recipes / templates — via GET/POST
+ *  Plus the three whole-section guidance kinds: decision_trees / recipes / templates,
+ *  via GET/POST
  *  /api/admin/guidance-extra/{kind} (effective default⊕override + override JSON
  *  editor, reusing JsonSectionEditor). A top mode-switch picks between the
  *  per-skill annotations and the section editors. */
@@ -27,14 +27,35 @@ type GuidanceFields = {
 type GuidanceMode = "annotations" | "extra";
 
 const GUIDANCE_MODES: { id: GuidanceMode; label: string }[] = [
-  { id: "annotations", label: "逐技能标注" },
-  { id: "extra", label: "决策树 / 配方 / 模板" },
+  { id: "annotations", label: tr("逐技能标注", "Per-skill annotations") },
+  { id: "extra", label: tr("决策树 / 配方 / 模板", "Decision trees / recipes / templates") },
 ];
 
 const EXTRA_KINDS: { id: string; label: string; desc: string }[] = [
-  { id: "decision_trees", label: "决策树 (decision_trees)", desc: "分诊决策树（DECISION_TREES）——按 kind 整段覆盖；留空=恢复代码默认。" },
-  { id: "recipes", label: "配方 (recipes)", desc: "实验配方列表（RECIPES）——按 kind 整段覆盖；留空=恢复代码默认。" },
-  { id: "templates", label: "模板 (templates)", desc: "指导模板（TEMPLATES）——按 kind 整段覆盖；留空=恢复代码默认。" },
+  {
+    id: "decision_trees",
+    label: tr("决策树 (decision_trees)", "Decision trees"),
+    desc: tr(
+      "分诊决策树（DECISION_TREES）——按 kind 整段覆盖；留空=恢复代码默认。",
+      "Triage decision trees (DECISION_TREES). The whole kind is overridden at once; empty = restore the code default.",
+    ),
+  },
+  {
+    id: "recipes",
+    label: tr("配方 (recipes)", "Recipes"),
+    desc: tr(
+      "实验配方列表（RECIPES）——按 kind 整段覆盖；留空=恢复代码默认。",
+      "Experiment recipes (RECIPES). The whole kind is overridden at once; empty = restore the code default.",
+    ),
+  },
+  {
+    id: "templates",
+    label: tr("模板 (templates)", "Templates"),
+    desc: tr(
+      "指导模板（TEMPLATES）——按 kind 整段覆盖；留空=恢复代码默认。",
+      "Guidance templates (TEMPLATES). The whole kind is overridden at once; empty = restore the code default.",
+    ),
+  },
 ];
 
 function TextArea({ value, onChange, rows = 3, mono }: { value: string; onChange: (v: string) => void; rows?: number; mono?: boolean }) {
@@ -63,7 +84,7 @@ export function GuidanceEditor() {
   );
 }
 
-// ── 决策树 / 配方 / 模板 — whole-section override editors ─────────────────────
+// ── Decision trees / recipes / templates: whole-section override editors ──────
 function GuidanceExtraEditor() {
   const [kind, setKind] = useState(EXTRA_KINDS[0]!.id);
   const cur = EXTRA_KINDS.find((k) => k.id === kind)!;
@@ -87,7 +108,7 @@ function GuidanceExtraEditor() {
       </div>
       <JsonSectionEditor
         key={kind}
-        title={`技能指导 · ${cur.label}`}
+        title={`${tr("技能指导", "Skill guidance")} · ${cur.label}`}
         description={cur.desc}
         getPath="/api/admin/guidance-extra/{kind}"
         postPath="/api/admin/guidance-extra/{kind}"
@@ -98,7 +119,7 @@ function GuidanceExtraEditor() {
   );
 }
 
-// ── 逐技能专家标注 (SKILL_EXTRA) ─────────────────────────────────────────────
+// ── Per-skill expert annotations (SKILL_EXTRA) ────────────────────────────────
 function AnnotationsEditor() {
   const queryClient = useQueryClient();
   const { toast, node } = useToast();
@@ -156,21 +177,21 @@ function AnnotationsEditor() {
     onSuccess: (res) => {
       setDraft(null);
       queryClient.invalidateQueries({ queryKey: ["guidance", skill] });
-      res?.degraded ? toast("写入未生效（内核未接入）。", "err") : toast("已保存技能指导。", "ok");
+      res?.degraded ? toast(tr("写入未生效（内核未接入）。", "Write not applied (core not attached)."), "err") : toast(tr("已保存技能指导。", "Skill guidance saved."), "ok");
     },
-    onError: (e) => toast(`保存失败：${String((e as Error)?.message ?? e)}`, "err"),
+    onError: (e) => toast(`${tr("保存失败：", "Save failed: ")}${String((e as Error)?.message ?? e)}`, "err"),
   });
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
       <Card>
-        <div className="mb-2 text-sm font-medium text-mast-text">选择技能</div>
-        <TextField value={filter} onChange={setFilter} placeholder="搜索技能…" />
+        <div className="mb-2 text-sm font-medium text-mast-text">{tr("选择技能", "Select a skill")}</div>
+        <TextField value={filter} onChange={setFilter} placeholder={tr("搜索技能…", "Search skills…")} />
         {catQ.isPending && <Spinner />}
         {catQ.error && <ErrorNote error={catQ.error} />}
-        {catQ.data?.degraded && <DegradedNote what="技能目录" />}
+        {catQ.data?.degraded && <DegradedNote what={tr("技能目录", "Skill catalog")} />}
         {catQ.data && !catQ.data.degraded && (
-          names.length === 0 ? <EmptyNote label="无匹配技能" /> : (
+          names.length === 0 ? <EmptyNote label={tr("无匹配技能", "No matching skills")} /> : (
             <ul className="mt-2 max-h-[60vh] space-y-0.5 overflow-auto pr-1">
               {names.map((n) => (
                 <li key={n}>
@@ -191,38 +212,38 @@ function AnnotationsEditor() {
       </Card>
 
       <Card>
-        {!skill && <EmptyNote label="从左侧选择一个技能编辑其指导信息。" />}
+        {!skill && <EmptyNote label={tr("从左侧选择一个技能编辑其指导信息。", "Select a skill on the left to edit its guidance.")} />}
         {skill && guidQ.isPending && <Spinner />}
         {skill && guidQ.error && <ErrorNote error={guidQ.error} />}
-        {skill && guidQ.data?.degraded && <DegradedNote what="技能指导" />}
+        {skill && guidQ.data?.degraded && <DegradedNote what={tr("技能指导", "Skill guidance")} />}
         {skill && guidQ.data && !guidQ.data.degraded && (
           <div className="space-y-3">
             <div className="flex items-center gap-2">
               <h3 className="font-mono text-sm font-semibold text-mast-text">{skill}</h3>
-              {guidQ.data.has_override ? <Badge tone="INFO">已覆盖</Badge> : <Badge tone="AUTO">默认</Badge>}
+              {guidQ.data.has_override ? <Badge tone="INFO">{tr("已覆盖", "Overridden")}</Badge> : <Badge tone="AUTO">{tr("默认", "Default")}</Badge>}
             </div>
-            <Field label="何时使用 (when_use)">
+            <Field label={tr("何时使用 (when_use)", "When to use (when_use)")}>
               <TextArea value={view.when_use} onChange={(v) => setDraft({ ...view, when_use: v })} />
             </Field>
-            <Field label="何时不使用 (when_not)">
+            <Field label={tr("何时不使用 (when_not)", "When not to use (when_not)")}>
               <TextArea value={view.when_not} onChange={(v) => setDraft({ ...view, when_not: v })} />
             </Field>
-            <Field label="关联技能 (related)">
+            <Field label={tr("关联技能 (related)", "Related skills (related)")}>
               <TextField value={view.related} onChange={(v) => setDraft({ ...view, related: v })} />
             </Field>
-            <Field label="底层 Nanonis TCP 方法 (nanonis)">
+            <Field label={tr("底层 Nanonis TCP 方法 (nanonis)", "Underlying Nanonis TCP methods (nanonis)")}>
               <TextField value={view.nanonis} mono onChange={(v) => setDraft({ ...view, nanonis: v })} />
             </Field>
-            <Field label="示例 JSON 调用 (example)">
+            <Field label={tr("示例 JSON 调用 (example)", "Example JSON call (example)")}>
               <TextArea value={view.example} rows={5} mono onChange={(v) => setDraft({ ...view, example: v })} />
             </Field>
             <div className="flex flex-wrap items-center gap-2">
               <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate(view)}>
-                {save.isPending ? "保存中…" : "保存"}
+                {save.isPending ? tr("保存中…", "Saving…") : tr("保存", "Save")}
               </Button>
-              {draft && <Button variant="ghost" onClick={() => setDraft(null)}>撤销编辑</Button>}
+              {draft && <Button variant="ghost" onClick={() => setDraft(null)}>{tr("撤销编辑", "Discard edits")}</Button>}
               <Button variant="danger" disabled={save.isPending} onClick={() => save.mutate({})}>
-                重置为默认值
+                {tr("重置为默认值", "Reset to default")}
               </Button>
             </div>
           </div>

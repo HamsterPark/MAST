@@ -92,8 +92,8 @@ def _find_repo_root() -> Path:
     """The install/index base — NOT the user-data root.
 
     Kept as a named function because the ``api key/`` probe below wants this base
-    and only this base (see ``ingest._load_dashscope_key`` for the field
-    report on probing the wrong one).
+    and only this base (see ``ingest._load_dashscope_key`` for why probing the
+    wrong one fails).
     """
     from mast.knowledge.paths import base_dir
     return base_dir()

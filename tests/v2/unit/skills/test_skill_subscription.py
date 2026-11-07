@@ -38,6 +38,18 @@ def _isolated(subscription_store):
     yield
 
 
+@pytest.fixture
+def station_gate_is_off(monkeypatch):
+    """The zero-regression nail below compares the face with and without the *subscription* gate.
+    The station gate (fourth gate, ``mast.skills.station_face``) is another feature: on an STM
+    profile it withholds the skills of the optical station's own modules, and the "without the
+    subscription gate" arithmetic below knows only the original two gates. Switch it off, so the
+    nail compares the subscription gate and nothing else."""
+    from mast.skills import station_face
+
+    monkeypatch.setattr(station_face, "STATION_ONLY_MODULES", ())
+
+
 def _ctx():
     return None
 
@@ -56,7 +68,7 @@ def test_absent_means_everything_subscribed():
     assert sub.unloaded_skill_names(["A", "B"]) == frozenset()
 
 
-def test_zero_regression_wrap_fingerprint_is_unchanged(registry):
+def test_zero_regression_wrap_fingerprint_is_unchanged(registry, station_gate_is_off):
     """未定制态下，工具面与「这个功能不存在」时**逐位相同**。
 
     比的是 wrap 指纹（名字+模块+版本的全集哈希），不是计数 —— 计数相等而内容不同

@@ -470,7 +470,7 @@ class SafetyWatchdog(threading.Thread):
         before the disable window are stale. If monitoring was disabled during
         an intentionally high-current operation (e.g. tip conditioning), those
         leftover readings could make the very first post-enable poll satisfy
-        ``all(v > threshold)`` and falsely fire SafeRetract ().
+        ``all(v > threshold)`` and falsely fire SafeRetract.
         """
         self._buffer.clear()
         self._disabled_until = None
@@ -500,7 +500,7 @@ class SafetyWatchdog(threading.Thread):
         这里是给不持令牌的显式调用方留的逃生门。
 
         清空滑动窗口:停判之前刚采到的读数不能跨过这段窗口活下来,否则恢复后第一
-        次轮询就可能凑满 ``all(v > threshold)`` 而误退针()。
+        次轮询就可能凑满 ``all(v > threshold)`` 而误退针。
         """
         # ⚠️ ``for_s <= 0`` **不是**「用默认值」。``_pos()`` 那个「v<=0 → 出厂默认」
         # 语义不适用于安全网的关闭时长：「关 0 秒」若被读成正的默认时长，

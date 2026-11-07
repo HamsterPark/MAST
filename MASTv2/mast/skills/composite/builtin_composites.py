@@ -74,7 +74,7 @@ def _full_scan() -> CompositeSpec:
             #   这条路的扫描仍然拿不到档位表的速度。
             #
             # **要对齐需要先做什么**:让 spec 的表达式层能解析「留空 → 查
-            #   scan_policy.resolve_line_time(尺寸)」。那是功能改动,得有人拍板。
+            #   scan_policy.resolve_line_time(尺寸)」。那是功能改动,需单独评审。
             ParamSpec("line_time_s", "number", 0.1, "每行时间 (s)", False),
             ParamSpec("channels", "string", "Z,Current", "采集通道", False),
             # Authoring default floored at the runtime FullScan floor (300 s). The
@@ -441,7 +441,7 @@ def _survey_surface() -> CompositeSpec:
             #   这条路的扫描仍然拿不到档位表的速度。
             #
             # **要对齐需要先做什么**:让 spec 的表达式层能解析「留空 → 查
-            #   scan_policy.resolve_line_time(尺寸)」。那是功能改动,得有人拍板。
+            #   scan_policy.resolve_line_time(尺寸)」。那是功能改动,需单独评审。
             ParamSpec("line_time_s", "number", 0.1, "每行时间 (s)", False),
             ParamSpec("channels", "string", "Z,Current", "采集通道", False),
             ParamSpec("wait_timeout_s", "number", 180.0, "每瓦等扫超时 (s)", False),
@@ -521,7 +521,7 @@ def _batch_regions() -> CompositeSpec:
             #   这条路的扫描仍然拿不到档位表的速度。
             #
             # **要对齐需要先做什么**:让 spec 的表达式层能解析「留空 → 查
-            #   scan_policy.resolve_line_time(尺寸)」。那是功能改动,得有人拍板。
+            #   scan_policy.resolve_line_time(尺寸)」。那是功能改动,需单独评审。
             ParamSpec("line_time_s", "number", 0.1, "每行时间 (s)", False),
             ParamSpec("wait_timeout_s", "number", 180.0, "每区等扫超时 (s)", False),
             ParamSpec("save_each", "bool", True, "每区存盘", False),
@@ -632,8 +632,26 @@ def _prescan_check() -> CompositeSpec:
                       "声明式流程无法查询档位表，不提供默认值。", True),
         ],
         nodes=[
-            # 缺失或为零的每线时间必须在任何硬件调用前拒绝。
-            # safe_eval 不支持 is；此处的布尔检查同时拒绝 None 和零。
+            # ⭐⭐ 这道闸挡的是**继承来的刮针速度**。
+            #
+            # 这个孪生体若把 `fwd_line_time`/`bwd_line_time` 写成字面量 `0.1`,
+            # 就与真身(查档位表)不一致 —— 因为 0.1 s/线在 50 nm
+            # 的图上 = **488 nm/s**,会刮坏针尖(50 nm 的图 50 s 扫完)。档位表给这一档的是
+            # 1.0 s/线 = 50 nm/s,**差 10 倍**。
+            #
+            # ## 为什么这里是「必填」而不是抄一个安全常数进来
+            #
+            # 档位表(`core/scan_policy._FACTORY_TIERS`)**不是线性的**:
+            # ≤2 nm→1.75 s、≤10 nm→1.2 s、≤100 nm→1.0 s。任何写死在这里的常数
+            # 或公式都是**第二份真源**,会与表漂移;而 `safe_eval` 只认白名单纯函数,
+            # 声明式这一侧根本调不到 `get_tier_for_size`(全仓查表的都在 Python 侧,
+            # 没有任何技能把它暴露出来 —— 已 grep 确认)。
+            # ⇒ 三条路里只有一条是诚实的:**不猜,让人说**。
+            # (「移除发明数字的诱因,别在提示词里说服模型」——同一条教训。)
+            #
+            # 用 `not line_time_s` 而不是 `== None`:`safe_eval` 的比较白名单里
+            # **没有 `is`**,而 0 和 None 在这里都是必须拒绝的输入(0 会除零),
+            # 两者折叠掉不会丢信息 —— 下面的话把两种都说了。
             {"type": "if", "id": "need_line_time", "cond": "not line_time_s", "then": [
                 {"type": "fail", "reason":
                     "'PreScanCheck(声明式)必须显式给 line_time_s。"
@@ -642,7 +660,13 @@ def _prescan_check() -> CompositeSpec:
             {"type": "step", "id": "configure", "skill": "ConfigureScan", "params": {
                 "center_x_m": {"$expr": "center_x_m"}, "center_y_m": {"$expr": "center_y_m"},
                 "width_m": {"$expr": "width_m"},
-                # 使用方形扫描区域。帧时由行数与每线时间决定，无需压缩高度。
+                # ⭐ **方图,不是细长条**(与真身对齐)。
+                # 原文是 `max(width_m * 0.05, 1e-9)`:50 nm 宽 × 2.5 nm 高,
+                # 256 行挤在 2.5 nm 里、行距 9.8 pm ⇒ 把同一条线量了 256 遍。
+                # verify 图不应设计成细条,细条图看不出任何信息。真身用方图并有测试钉住,孪生体若沿用细条 ——
+                # fork 出去的每一份都会继承细条。
+                # 改成方图是**免费**的:帧时 = 行数 × 每线时间 × 2,**高度不进这个
+                # 式子**,而本流程从不设行数。细条没换来速度,只换掉了图。
                 "height_m": {"$expr": "width_m"}, "set_scan_speed": False}},
             # 扫描速度和每线时间由同一个输入派生，保持正反向设置一致。
             {"type": "step", "id": "speed", "skill": "SetScanSpeed", "optional": True, "params": {
@@ -718,7 +742,7 @@ def reconstructed_composites() -> list[CompositeSpec]:
     ]
 
 
-#: 出厂内容指纹的写法 —— 与 ``version_store.save`` 里那一份**逐字同一个配方**
+#: 出厂内容指纹的写法 —— 与 ``version_store.save`` 里那一份**完全相同的配方**
 #: (``to_dict()`` 去掉 version 之后按键排序的规范 JSON 的 sha256)。
 #: 两份配方一旦分家,守卫就会把每一条都判成「被改过」而永不重播,**而且不报错**。
 KEY_FACTORY_MARKER = "_factory_sha256"

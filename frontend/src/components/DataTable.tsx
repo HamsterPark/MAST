@@ -8,14 +8,14 @@ import {
   type SortingState,
   useReactTable,
 } from "@tanstack/react-table";
+import { tr } from "@/lib/i18n";
 
-/** Generic sortable/filterable table — the typed replacement for Gradio's
- *  freeze-prone gr.Dataframe. Virtualization can be layered on for huge sets. */
+/** Generic sortable/filterable table. Virtualization can be layered on for huge sets. */
 export function DataTable<T>({
   data,
   columns,
   globalFilter,
-  empty = "暂无数据",
+  empty,
 }: {
   data: T[];
   columns: ColumnDef<T, any>[];
@@ -50,7 +50,7 @@ export function DataTable<T>({
           <path d="M22 12h-6l-2 3h-4l-2-3H2" />
           <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
         </svg>
-        {empty}
+        {empty ?? tr("暂无数据", "No data")}
       </div>
     );
 

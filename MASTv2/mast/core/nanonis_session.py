@@ -29,6 +29,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from mast.i18n import tr
+
 logger = logging.getLogger(__name__)
 
 
@@ -94,20 +96,24 @@ def plan_repoint(current_session_path: str | None, exp_dir: Path | None,
         "warnings": [], "reason": "",
     }
     if exp_dir is None or not sample_dir_name:
-        out["reason"] = "当前没有活跃样品——请先选择或新建一个样品。"
+        out["reason"] = tr("当前没有活跃样品——请先选择或新建一个样品。",
+                           "There is no active sample. Select or create a sample first.")
         return out
 
     try:
         target = target_session_dir(exp_dir, sample_dir_name, create=False)
     except Exception as exc:  # noqa: BLE001
-        out["reason"] = f"无法计算目标路径：{exc}"
+        out["reason"] = tr(f"无法计算目标路径：{exc}",
+                           f"Could not compute the target path: {exc}")
         return out
 
     out["ok"] = True
     out["target"] = str(target)
 
     if is_inplace_active(current_session_path, exp_dir, sample_dir_name):
-        out["reason"] = "Nanonis 已经指向当前样品的目录，无需改动。"
+        out["reason"] = tr("Nanonis 已经指向当前样品的目录，无需改动。",
+                           "Nanonis already points at the current sample's folder; "
+                           "nothing to change.")
         return out
     out["needs_change"] = True
 
@@ -117,35 +123,54 @@ def plan_repoint(current_session_path: str | None, exp_dir: Path | None,
     try:
         if not fits_path_budget(experiment_root(), Path(exp_dir).name,
                                 sample_dir_name, inplace=True):
-            out["warnings"].append(
+            out["warnings"].append(tr(
                 "实验名或样品名较长，原位保存的完整路径接近 Windows 260 字符上限；"
-                "Nanonis 保存长文件名时可能失败。建议改用默认的复制模式。")
+                "Nanonis 保存长文件名时可能失败。建议改用默认的复制模式。",
+                "The experiment or sample name is long, so the full in-place save path is "
+                "close to the Windows 260-character limit; Nanonis may fail when saving long "
+                "file names. Consider using the default copy mode."))
     except Exception:  # noqa: BLE001
         pass
 
     if current_session_path:
-        out["warnings"].append(
+        out["warnings"].append(tr(
             f"Nanonis 当前的保存目录是 {current_session_path} —— 改动后可随时"
-            f"用「恢复原保存目录」退回。")
+            f"用「恢复原保存目录」退回。",
+            f"The current Nanonis save folder is {current_session_path}; after the change "
+            f"you can go back at any time with \"Restore original save folder\"."))
     else:
-        out["warnings"].append(
+        out["warnings"].append(tr(
             "读不到 Nanonis 当前的保存目录，因此无法提供一键恢复；"
-            "请自行记下它现在的设置。")
+            "请自行记下它现在的设置。",
+            "Could not read the current Nanonis save folder, so one-click restore is "
+            "unavailable; please note its current setting yourself."))
 
-    out["reason"] = (
+    out["reason"] = tr(
         f"把 Nanonis 的保存目录指向"
         f"{('实验「' + experiment_title + '」的') if experiment_title else ''}"
         f"样品「{sample_name or sample_dir_name}」的 raw/nanonis/ 目录。"
-        f"之后 Nanonis 直接写进实验文件夹，MAST 只登记不再复制。")
+        f"之后 Nanonis 直接写进实验文件夹，MAST 只登记不再复制。",
+        f"Point the Nanonis save folder at the raw/nanonis/ folder of sample "
+        f"{sample_name or sample_dir_name!r}"
+        f"{(' in experiment ' + repr(experiment_title)) if experiment_title else ''}. "
+        f"From then on Nanonis writes straight into the experiment folder, and MAST only "
+        f"registers the files instead of copying them.")
     return out
 
 
 def stale_warning(session_sample_dir: str, current_sample_dir: str,
                   *, current_sample_name: str = "") -> str:
     """「Nanonis 还指着上一个样品」的告警文案。"""
-    return (
+    return tr(
         f"Nanonis 的保存目录仍指向样品目录 {session_sample_dir}，"
         f"而当前样品是 {current_sample_name or current_sample_dir}。\n"
         f"数据不会记错——归属以当前样品为准，副本已经落到当前样品下——但"
         f"Nanonis 那边的原始文件还堆在旧样品的文件夹里。"
-        f"建议把 Nanonis 的保存目录重新指向当前样品，或改回你自己的目录。")
+        f"建议把 Nanonis 的保存目录重新指向当前样品，或改回你自己的目录。",
+        f"The Nanonis save folder still points at sample folder {session_sample_dir}, "
+        f"but the current sample is {current_sample_name or current_sample_dir}.\n"
+        f"Your data will not be misfiled (ownership follows the current sample, and the "
+        f"copies already land under it), but the original files on the Nanonis side are "
+        f"still piling up in the old sample's folder. "
+        f"Point the Nanonis save folder at the current sample again, or back at your "
+        f"own folder.")

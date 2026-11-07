@@ -30,6 +30,7 @@ from mast.core.types import (
     SkillResult,
 )
 from mast.agents._shared.skill_adapter import wrap_skill
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -51,27 +52,27 @@ class TrackDrift_ReferenceScan(CompositeSkillGraph):
             category=SkillCategory.COMPOSITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                "与参考扫描比对来跟踪样品漂移，并按测得的漂移补偿扫描框位置。"
+                tr("与参考扫描比对来跟踪样品漂移，并按测得的漂移补偿扫描框位置。", "Track sample drift by comparing against a reference scan, and compensate the scan frame position by the measured drift.")
             ),
             parameters=[
                 ParameterSpec(
                     name="ref_x_m",
                     type="float",
-                    description="参考扫描中心 X",
+                    description=tr("参考扫描中心 X", "Reference scan center X"),
                     unit="m",
                     required=True,
                 ),
                 ParameterSpec(
                     name="ref_y_m",
                     type="float",
-                    description="参考扫描中心 Y",
+                    description=tr("参考扫描中心 Y", "Reference scan center Y"),
                     unit="m",
                     required=True,
                 ),
                 ParameterSpec(
                     name="ref_width_m",
                     type="float",
-                    description="参考扫描宽度",
+                    description=tr("参考扫描宽度", "Reference scan width"),
                     unit="m",
                     required=False,
                     default=20e-9,
@@ -80,7 +81,7 @@ class TrackDrift_ReferenceScan(CompositeSkillGraph):
                 ParameterSpec(
                     name="bias_v",
                     type="float",
-                    description="参考扫描用的偏压",
+                    description=tr("参考扫描用的偏压", "Bias used for the reference scan"),
                     unit="V",
                     required=False,
                     default=-0.5,
@@ -90,7 +91,7 @@ class TrackDrift_ReferenceScan(CompositeSkillGraph):
                 ParameterSpec(
                     name="ref_image_path",
                     type="str",
-                    description="参考图路径（.npy）。留空则现采一张新的参考图。",
+                    description=tr("参考图路径（.npy）。留空则现采一张新的参考图。", "Reference image path (.npy). Empty = acquire a new reference image now."),
                     required=False,
                     default="",
                 ),

@@ -1,7 +1,7 @@
 """谱学采集的**条件表** —— 一条谱的全部数字住在这里,按**组名**取用。
 
 设计文档:``docs/v2/design/`` 的「S4 STS」设计,D18/D19/§3.1(文件名按「S4 STS」
-检索;通用层注释不写样品名前缀 —— ``stm_capability_vs_sample_layer.md`` 拍板④)。
+检索;通用层注释不写样品名前缀)。
 
 形状照 :mod:`mast.core.special_tip_workflow`:frozen dataclass 出厂基线 +
 ``_BOUNDS`` 越界**拒绝不夹紧** + ``resolve_*(overrides)``。
@@ -75,6 +75,7 @@ import logging
 import re
 from dataclasses import dataclass, fields, replace
 from typing import Any
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -148,8 +149,12 @@ class STSConditionSpec:
         if self.start_v is None or self.end_v is None:
             return ""            # 缺字段由 missing_fields 负责,不在这里重复报
         if float(self.start_v) == float(self.end_v):
-            return (f"扫描窗口起止相同({float(self.start_v):g} V)—— 零宽窗口不是"
-                    f"一次扫描,它会正常落盘、正常被判据吃掉,只是一个点都没扫过。")
+            return tr(f"扫描窗口起止相同({float(self.start_v):g} V)—— 零宽窗口不是"
+                      f"一次扫描,它会正常落盘、正常被判据吃掉,只是一个点都没扫过。",
+                      f"The sweep window starts and ends at the same value "
+                      f"({float(self.start_v):g} V) -- a zero-width window is not a sweep: "
+                      "it is saved normally and consumed by the criteria normally, but "
+                      "not a single point was swept.")
         return ""
 
     def problems(self) -> tuple[str, ...]:
@@ -157,10 +162,16 @@ class STSConditionSpec:
         out: list[str] = []
         if self.missing_fields:
             out.append(
-                f"条件组缺少样品事实 {list(self.missing_fields)} —— 它们没有出厂值,"
-                f"而且刻意没有:稳定条件与扫描窗口取决于这块样品,编一组数出来"
-                f"流程会照跑不误、每条谱都「成功」,测的却是一个没人给过的假设。"
-                f"由 conduct spec 或用户显式给出。")
+                tr(f"条件组缺少样品事实 {list(self.missing_fields)} —— 它们没有出厂值,"
+                   f"而且刻意没有:稳定条件与扫描窗口取决于这块样品,编一组数出来"
+                   f"流程会照跑不误、每条谱都「成功」,测的却是一个没人给过的假设。"
+                   f"由 conduct spec 或用户显式给出。",
+                   f"The condition group is missing sample facts {list(self.missing_fields)} "
+                   "-- they have no factory values, deliberately: the stabilisation "
+                   "conditions and sweep window depend on this sample, and inventing "
+                   "numbers would let the workflow run on regardless, every spectrum "
+                   "'succeeding' while measuring an assumption nobody gave. "
+                   "They must come from the conduct spec or be given explicitly by the user."))
         wp = self.window_problem()
         if wp:
             out.append(wp)
@@ -223,22 +234,26 @@ class STSConditionSpec:
     def describe(self) -> str:
         """一行人话,进 summary 与逐条记录。未标定的字段说「未标定」,不说 0。"""
         def _v(x, unit, scale=1.0, fmt="{:g}"):
-            return "未标定" if x is None else fmt.format(float(x) * scale) + unit
+            return tr("未标定", "uncalibrated") if x is None else fmt.format(float(x) * scale) + unit
 
         bits = [
-            f"稳定 {_v(self.stab_bias_v, ' V')} / "
-            f"{_v(self.stab_setpoint_a, ' pA', 1e12, '{:.0f}')}",
-            f"窗口 {_v(self.start_v, '')}..{_v(self.end_v, ' V')} × {self.num_points} 点",
+            tr(f"稳定 {_v(self.stab_bias_v, ' V')} / "
+               f"{_v(self.stab_setpoint_a, ' pA', 1e12, '{:.0f}')}",
+               f"stabilise {_v(self.stab_bias_v, ' V')} / "
+               f"{_v(self.stab_setpoint_a, ' pA', 1e12, '{:.0f}')}"),
+            tr(f"窗口 {_v(self.start_v, '')}..{_v(self.end_v, ' V')} × {self.num_points} 点",
+               f"window {_v(self.start_v, '')}..{_v(self.end_v, ' V')} x {self.num_points} points"),
         ]
         if self.mod_on:
-            bits.append(f"调制 {self.mod_amp_v * 1e3:g} mV @ {self.mod_freq_hz:g} Hz")
+            bits.append(tr(f"调制 {self.mod_amp_v * 1e3:g} mV @ {self.mod_freq_hz:g} Hz",
+                           f"modulation {self.mod_amp_v * 1e3:g} mV @ {self.mod_freq_hz:g} Hz"))
         else:
-            bits.append("调制关")
+            bits.append(tr("调制关", "modulation off"))
         if self.mls_segments:
-            bits.append(f"MLS {len(self.mls_segments)} 段")
+            bits.append(tr(f"MLS {len(self.mls_segments)} 段", f"MLS {len(self.mls_segments)} segments"))
         if self.label:
-            bits.append(f"「{self.label}」")
-        return "，".join(bits)
+            bits.append(tr(f"「{self.label}」", f'"{self.label}"'))
+        return tr("，", ", ").join(bits)
 
 
 # ── 出厂表 ────────────────────────────────────────────────────────────────────
@@ -346,8 +361,11 @@ def _coerce(field: str, value: Any) -> "tuple[Any, dict | None]":
         except (TypeError, ValueError):
             return None, _reject(
                 field, value, REJECT_NOT_A_NUMBER,
-                f"{field} 不是一串逐段配置,忽略不了也用不了 —— MLS 段要的是"
-                f"[{{bias_start_v, bias_end_v, ...}}, ...] 这个形状。")
+                tr(f"{field} 不是一串逐段配置,忽略不了也用不了 —— MLS 段要的是"
+                   f"[{{bias_start_v, bias_end_v, ...}}, ...] 这个形状。",
+                   f"{field} is not a list of per-segment configs, and can neither be "
+                   "ignored nor used -- MLS segments need the shape "
+                   f"[{{bias_start_v, bias_end_v, ...}}, ...]."))
     if field in _STR_FIELDS:
         return str(value), None
     if field in _BOOL_FIELDS:
@@ -356,17 +374,23 @@ def _coerce(field: str, value: Any) -> "tuple[Any, dict | None]":
         num = float(value)
     except (TypeError, ValueError):
         return None, _reject(field, value, REJECT_NOT_A_NUMBER,
-                             f"{field}={value!r} 不是一个数。")
+                             tr(f"{field}={value!r} 不是一个数。",
+                                f"{field}={value!r} is not a number."))
     if num != num or num in (float("inf"), float("-inf")):
         return None, _reject(field, value, REJECT_NOT_A_NUMBER,
-                             f"{field}={value!r} 不是一个有限的数。")
+                             tr(f"{field}={value!r} 不是一个有限的数。",
+                                f"{field}={value!r} is not a finite number."))
     lo, hi = _BOUNDS.get(field, (float("-inf"), float("inf")))
     if not (lo <= num <= hi):
         return None, _reject(
             field, num, REJECT_OUT_OF_BOUNDS,
-            f"{field}={num:g} 超出 [{lo:g}, {hi:g}] —— **拒绝,不夹紧也不丢弃**:"
-            f"夹紧会让调用方以为自己设的是 {num:g} 而实际跑的是别的数,"
-            f"而丢弃连「你设过一个越界值」都不会告诉任何人。")
+            tr(f"{field}={num:g} 超出 [{lo:g}, {hi:g}] —— **拒绝,不夹紧也不丢弃**:"
+               f"夹紧会让调用方以为自己设的是 {num:g} 而实际跑的是别的数,"
+               f"而丢弃连「你设过一个越界值」都不会告诉任何人。",
+               f"{field}={num:g} is outside [{lo:g}, {hi:g}] -- **rejected, neither "
+               f"clamped nor dropped**: clamping would let the caller think they set "
+               f"{num:g} while something else runs, and dropping would not tell anyone "
+               "that an out-of-range value was ever set."))
     return (int(round(num)) if field in _INT_FIELDS else num), None
 
 
@@ -389,10 +413,15 @@ def resolve_condition(name: "str | None" = None,
     if base is None:
         return ConditionResolution(
             name=key, spec=None, known_names=known,
-            problem=(f"没有名为 {key!r} 的谱学条件组。已知的组:"
-                     f"{list(known) or '一个都没有'}。条件组是**流程表**里的一项,"
-                     f"由 conduct spec 或用户定义 —— 认不出来的名字不会被"
-                     f"就近匹配到一个相似的组,那会让一次跑错条件的运行看上去完全正常。"))
+            problem=tr(f"没有名为 {key!r} 的谱学条件组。已知的组:"
+                       f"{list(known) or '一个都没有'}。条件组是**流程表**里的一项,"
+                       f"由 conduct spec 或用户定义 —— 认不出来的名字不会被"
+                       f"就近匹配到一个相似的组,那会让一次跑错条件的运行看上去完全正常。",
+                       f"There is no spectroscopy condition group named {key!r}. Known groups: "
+                       f"{list(known) or 'none'}. A condition group is an entry in the "
+                       "**workflow table**, defined by the conduct spec or the user -- an "
+                       "unrecognised name is not matched to a similar group, which would "
+                       "make a run with the wrong conditions look entirely normal."))
 
     if not overrides:
         return ConditionResolution(name=key, spec=base, known_names=known)
@@ -406,9 +435,12 @@ def resolve_condition(name: "str | None" = None,
         if field not in known_fields:
             rejects.append(_reject(
                 field, value, REJECT_UNKNOWN_FIELD,
-                f"条件组没有 {field!r} 这个字段 —— 认不出来的键**不会被安静地丢掉**:"
-                f"「我明明设了它」和「它根本没收到」长得一模一样。"
-                f"已知字段:{sorted(known_fields)}。"))
+                tr(f"条件组没有 {field!r} 这个字段 —— 认不出来的键**不会被安静地丢掉**:"
+                   f"「我明明设了它」和「它根本没收到」长得一模一样。"
+                   f"已知字段:{sorted(known_fields)}。",
+                   f"The condition group has no field {field!r} -- an unrecognised key is "
+                   "**not silently dropped**: 'I did set it' and 'it was never received' "
+                   f"look exactly alike. Known fields: {sorted(known_fields)}.")))
             continue
         coerced, bad = _coerce(field, value)
         if bad is not None:

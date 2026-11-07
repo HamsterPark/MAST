@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Iterator
 
+from mast.i18n import tr
 from mast.skills.composite._base import CompositeSkillGraph
 from mast.skills.composite.graph_executor import (
     CompositeProgress,
@@ -43,28 +44,30 @@ class GridSTS(CompositeSkillGraph):
             version="1.0.0",
             category=SkillCategory.COMPOSITE,
             safety_level=SafetyLevel.CONFIRM,
-            description=(
-                "在 NxN 栅格上采 STS 谱：逐点移动，每点采一条谱。"
+            description=tr(
+                "在 NxN 栅格上采 STS 谱：逐点移动，每点采一条谱。",
+                "Acquire STS spectra on an NxN grid: move point by point, one "
+                "spectrum per point.",
             ),
             parameters=[
                 ParameterSpec(
                     name="center_x_m",
                     type="float",
-                    description="栅格中心 X",
+                    description=tr("栅格中心 X", "Grid centre X"),
                     unit="m",
                     required=True,
                 ),
                 ParameterSpec(
                     name="center_y_m",
                     type="float",
-                    description="栅格中心 Y",
+                    description=tr("栅格中心 Y", "Grid centre Y"),
                     unit="m",
                     required=True,
                 ),
                 ParameterSpec(
                     name="nx",
                     type="int",
-                    description="X 方向的栅格点数",
+                    description=tr("X 方向的栅格点数", "Number of grid points along X"),
                     required=False,
                     default=3,
                     min_value=1,
@@ -73,7 +76,7 @@ class GridSTS(CompositeSkillGraph):
                 ParameterSpec(
                     name="ny",
                     type="int",
-                    description="Y 方向的栅格点数",
+                    description=tr("Y 方向的栅格点数", "Number of grid points along Y"),
                     required=False,
                     default=3,
                     min_value=1,
@@ -82,7 +85,7 @@ class GridSTS(CompositeSkillGraph):
                 ParameterSpec(
                     name="spacing_m",
                     type="float",
-                    description="栅格点间距",
+                    description=tr("栅格点间距", "Grid point spacing"),
                     unit="m",
                     required=True,
                     min_value=1e-10,
@@ -90,7 +93,7 @@ class GridSTS(CompositeSkillGraph):
                 ParameterSpec(
                     name="start_v",
                     type="float",
-                    description="STS 起始偏压",
+                    description=tr("STS 起始偏压", "STS start bias"),
                     unit="V",
                     required=False,
                     default=-2.0,
@@ -100,7 +103,7 @@ class GridSTS(CompositeSkillGraph):
                 ParameterSpec(
                     name="end_v",
                     type="float",
-                    description="STS 终止偏压",
+                    description=tr("STS 终止偏压", "STS end bias"),
                     unit="V",
                     required=False,
                     default=2.0,
@@ -110,7 +113,7 @@ class GridSTS(CompositeSkillGraph):
                 ParameterSpec(
                     name="num_points",
                     type="int",
-                    description="谱的采样点数",
+                    description=tr("谱的采样点数", "Number of points per spectrum"),
                     required=False,
                     default=40,
                     min_value=10,
@@ -280,13 +283,15 @@ class GridSTS(CompositeSkillGraph):
                     "x_m": float(cx) + (ix - (nx - 1) / 2.0) * float(spacing),
                     "y_m": float(cy) + (iy - (ny - 1) / 2.0) * float(spacing),
                     "index": iy * nx + ix + 1,
-                    "label": f"网格谱 ({ix},{iy})",
+                    "label": tr(f"网格谱 ({ix},{iy})", f"Grid spectrum ({ix},{iy})"),
                     # A spectrum taken after a failed move sits at the WRONG
                     # place, so it is not a good point — same judgement the
                     # counters make.
                     "success": st == "ok",
                     "error": None if st == "ok" else (
-                        "移动失败,谱点位置不可信" if st == "suspect" else "失败"),
+                        tr("移动失败,谱点位置不可信",
+                           "Move failed; the spectrum position is not trustworthy")
+                        if st == "suspect" else tr("失败", "Failed")),
                 })
         return out
 
@@ -323,7 +328,7 @@ class GridSTS(CompositeSkillGraph):
         # This override bypasses _base._graph_execute, whose success path is
         # the ONLY place the step sidecar was cleared — so a finished grid's
         # sidecar lived forever and the NEXT same-size grid resume-skipped its
-        # leading points ("第5个点扫描不到", 2026-07-10 #95). Any run that
+        # leading points (e.g. point 5 never scanned). Any run that
         # reached its end (success or non-aborted partial) must never seed a
         # future one; only an aborted/interrupted run keeps its sidecar for
         # the legitimate crash-resume window.

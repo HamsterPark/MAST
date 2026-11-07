@@ -96,7 +96,7 @@ def _resolve_agent_models() -> tuple[dict, dict]:
                 if callable(effective_thinking):
                     thinking[aid] = effective_thinking(model_id, None)
             # Emit the supervisor under the id the UI actually looks up too, so
-            # neither side has to know the other's naming .
+            # neither side has to know the other's naming.
             for ui_id, reg_id in _ID_ALIASES.items():
                 if reg_id in models:
                     models[ui_id] = models[reg_id]
@@ -250,7 +250,7 @@ def _compute_agent_tools() -> dict[str, list[dict]]:
         try:
             from mast.skills import tool_face
             _all = frozenset(m.name for m in reg.list_skills())
-            _face = tool_face.compute(_all)
+            _face = tool_face.compute(_all, registry=reg)    # 站点画像门按这份注册表的类分类
             _skip = _face.names
             if _face.unreadable:
                 logger.warning("agent-tools: 门读不出来（%s）—— 这部分未过滤",

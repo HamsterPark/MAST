@@ -65,6 +65,7 @@ from mast.api.schemas_instrument_init import (
 )
 from mast.api.schemas_settings_admin_write import SettingsWriteRequest
 from mast.core import instrument_init as ii
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -480,31 +481,43 @@ def _compare(requested: Any, stored: Any) -> tuple[str, str]:
     # 不区分这一种，用户每次清字段都会看到一条红色的「没被收下」。
     if requested is None or requested == "":
         if stored is None or stored == "":
-            return "match", "已清除（回到「未设置」）。"
+            return "match", tr("已清除（回到「未设置」）。", "Cleared (back to not set).")
         return ("clamped",
-                f"要求清除，但读回来仍是 {stored!r} —— 这个键没有被清掉。")
+                tr(f"要求清除，但读回来仍是 {stored!r} —— 这个键没有被清掉。",
+                   f"Clearing was requested, but the value read back is still {stored!r}; "
+                   "the key was not cleared."))
     if stored is None:
         return ("dropped",
-                "这个值**没有被收下** —— 通常是超出了允许范围，或者不是这个字段"
-                "接受的类型。它现在是「未设置」，不是你填的那个数。")
+                tr("这个值**没有被收下** —— 通常是超出了允许范围，或者不是这个字段"
+                   "接受的类型。它现在是「未设置」，不是你填的那个数。",
+                   "This value was **not accepted**: usually it is outside the allowed range, "
+                   "or not a type this field accepts. It is now not set, not the number "
+                   "you entered."))
     if isinstance(requested, (int, float)) and isinstance(stored, (int, float)) \
             and not isinstance(requested, bool) and not isinstance(stored, bool):
         r, s = float(requested), float(stored)
         if not (math.isfinite(r) and math.isfinite(s)):
-            return "dropped", "非有限数值，未被收下。"
+            return "dropped", tr("非有限数值，未被收下。", "Non-finite number; not accepted.")
         if math.isclose(r, s, rel_tol=_READBACK_REL_TOL, abs_tol=0.0) or (r == s):
             return "match", ""
         ratio = (s / r) if r else float("inf")
         return ("clamped",
-                f"存下来的是 {s:.6g}，不是你填的 {r:.6g}"
-                + (f"（差 {ratio:.4g} 倍）" if math.isfinite(ratio) else "")
-                + " —— 该值超出了允许区间，被夹到了边界上。"
-                  "**请按存下来的这个数理解系统的行为**，或者回去改一个区间内的值。")
+                tr(f"存下来的是 {s:.6g}，不是你填的 {r:.6g}"
+                   + (f"（差 {ratio:.4g} 倍）" if math.isfinite(ratio) else "")
+                   + " —— 该值超出了允许区间，被夹到了边界上。"
+                     "**请按存下来的这个数理解系统的行为**，或者回去改一个区间内的值。",
+                   f"Stored {s:.6g}, not the {r:.6g} you entered"
+                   + (f" (off by a factor of {ratio:.4g})" if math.isfinite(ratio) else "")
+                   + ": the value was outside the allowed range and was clamped to the boundary. "
+                     "**Read the system's behaviour from the stored number**, or go back and "
+                     "enter a value inside the range."))
     if str(requested) == str(stored):
         return "match", ""
     return ("clamped",
-            f"存下来的是 {stored!r}，不是你填的 {requested!r} —— "
-            "请核对是不是写法/取值不被接受。")
+            tr(f"存下来的是 {stored!r}，不是你填的 {requested!r} —— "
+               "请核对是不是写法/取值不被接受。",
+               f"Stored {stored!r}, not the {requested!r} you entered: "
+               "check whether the notation or value is not accepted."))
 
 
 @router.post("/instrument-init/apply", response_model=InitApplyResponse)
@@ -521,10 +534,13 @@ def apply_instrument_init(request: Request, body: InitApplyRequest) -> InitApply
     if store_name not in _SETTINGS_STORES and store_name not in _OVERRIDE_STORES:
         return InitApplyResponse(
             ok=False, store=store_name,
-            message=(f"不认识的存储 {store_name!r}。这一页只写既有真源："
-                     f"{', '.join(sorted(_SETTINGS_STORES | set(_OVERRIDE_STORES)))}。"))
+            message=tr(f"不认识的存储 {store_name!r}。这一页只写既有真源："
+                       f"{', '.join(sorted(_SETTINGS_STORES | set(_OVERRIDE_STORES)))}。",
+                       f"Unknown store {store_name!r}. This page only writes to the existing sources of truth: "
+                       f"{', '.join(sorted(_SETTINGS_STORES | set(_OVERRIDE_STORES)))}."))
     if not values:
-        return InitApplyResponse(ok=False, store=store_name, message="没有要写的值。")
+        return InitApplyResponse(ok=False, store=store_name,
+                                 message=tr("没有要写的值。", "No values to write."))
 
     restart_required = False
     try:
@@ -539,7 +555,8 @@ def apply_instrument_init(request: Request, body: InitApplyRequest) -> InitApply
                                  OverrideWriteRequest(data=merged))
             if not getattr(res, "ok", False):
                 return InitApplyResponse(ok=False, store=store_name, degraded=True,
-                                         message="覆写写入失败（没有可用的覆写目录）。")
+                                         message=tr("覆写写入失败（没有可用的覆写目录）。",
+                                                    "Override write failed (no override directory available)."))
             # KNOWN_ISSUES §1.1：热重载钩子零订阅者。**说实话** ——
             #「一个只对了一半的『已生效』，比诚实的『要重启』更危险。」
             restart_required = bool(getattr(res, "restart_required", False)
@@ -555,14 +572,15 @@ def apply_instrument_init(request: Request, body: InitApplyRequest) -> InitApply
                     ok=False, store=store_name, pin_required=True,
                     pin_reason=str(getattr(res, "pin_reason", "")),
                     message=str(getattr(res, "rebuild_note", "")
-                                or "这一项需要管理员 PIN。"))
+                                or tr("这一项需要管理员 PIN。", "This item requires the admin PIN.")))
             rejected = dict(getattr(res, "rejected", {}) or {})
             if rejected:
                 return InitApplyResponse(ok=False, store=store_name, rejected=rejected,
-                                         message="；".join(rejected.values()))
+                                         message=tr("；", "; ").join(rejected.values()))
             if not getattr(res, "ok", False):
                 return InitApplyResponse(ok=False, store=store_name, degraded=True,
-                                         message="设置写入失败（没有可用的设置存储）。")
+                                         message=tr("设置写入失败（没有可用的设置存储）。",
+                                                    "Settings write failed (no settings store available)."))
     except Exception as exc:  # noqa: BLE001 — 写入路径永不 500
         logger.warning("instrument-init apply(%s) failed: %s", store_name, exc)
         return InitApplyResponse(ok=False, store=store_name, degraded=True,
@@ -577,9 +595,10 @@ def apply_instrument_init(request: Request, body: InitApplyRequest) -> InitApply
             got = stored.get("tiers") if store_name == "scan_policy" else stored
             ok = bool(got)
             verdicts.append(ValueVerdict(
-                key=key, requested="(整表)", stored="(整表)" if ok else None,
+                key=key, requested=tr("(整表)", "(whole table)"),
+                stored=tr("(整表)", "(whole table)") if ok else None,
                 verdict="match" if ok else "dropped",
-                note="" if ok else "整张表没有被收下。"))
+                note="" if ok else tr("整张表没有被收下。", "The whole table was not accepted.")))
             break
         verdict, note = _compare(requested, stored.get(key))
         verdicts.append(ValueVerdict(key=key, requested=requested,
@@ -590,10 +609,13 @@ def apply_instrument_init(request: Request, body: InitApplyRequest) -> InitApply
     return InitApplyResponse(
         ok=not mismatched, store=store_name, verdicts=verdicts,
         mismatched=mismatched, restart_required=restart_required,
-        message=("回读与写入不一致 —— 请照上面每一行的说明核对。"
+        message=(tr("回读与写入不一致 —— 请照上面每一行的说明核对。",
+                    "The read-back does not match what was written; check the note on each row above.")
                  if mismatched else
-                 ("已保存。**安全包络覆写要重启才生效**（本进程仍在用旧值）。"
-                  if restart_required else "已保存并回读确认。")),
+                 (tr("已保存。**安全包络覆写要重启才生效**（本进程仍在用旧值）。",
+                     "Saved. **The safety-envelope override only takes effect after a restart** "
+                     "(this process is still using the old value).")
+                  if restart_required else tr("已保存并回读确认。", "Saved and confirmed by read-back."))),
     )
 
 
@@ -620,7 +642,8 @@ def acknowledge_items(request: Request, body: AcknowledgeRequest) -> InitRecordR
         rig_fingerprint=rec.get("rig_fingerprint"),
         rig_label=str(rec.get("rig_label") or ""),
         degraded=not ok,
-        message="" if ok else "没有可用的设置存储，核对状态未能保存。")
+        message="" if ok else tr("没有可用的设置存储，核对状态未能保存。",
+                                 "No settings store available; the acknowledgement state could not be saved."))
 
 
 @router.post("/instrument-init/complete", response_model=InitRecordResponse)
@@ -649,7 +672,8 @@ def complete_init(request: Request, body: CompleteRequest) -> InitRecordResponse
         rig_fingerprint=rec.get("rig_fingerprint"),
         rig_label=str(rec.get("rig_label") or ""),
         degraded=not ok,
-        message="" if ok else "没有可用的设置存储，完成记录未能保存。")
+        message="" if ok else tr("没有可用的设置存储，完成记录未能保存。",
+                                 "No settings store available; the completion record could not be saved."))
 
 
 @router.post("/instrument-init/reopen", response_model=InitRecordResponse)
@@ -664,7 +688,7 @@ def reopen_init(request: Request) -> InitRecordResponse:
         completed_at=None, rig_fingerprint=rec.get("rig_fingerprint"),
         rig_label=str(rec.get("rig_label") or ""),
         degraded=not ok,
-        message="" if ok else "没有可用的设置存储。")
+        message="" if ok else tr("没有可用的设置存储。", "No settings store available."))
 
 
 # ── 导出 / 导入 ─────────────────────────────────────────────────────────────
@@ -822,19 +846,26 @@ def _envelope_fields(ctx: Any, warnings: list[str]) -> list[ProbeField]:
         rows.append(ProbeField(
             key=f"safety_limits.{f.field_name}", label=f.field_name,
             read=f.measured, configured=f.configured, verdict="mismatch",
-            note=f.describe() + "（对账只报告，不自动改；若要改，只往收紧的方向改是安全的。）"))
+            note=f.describe() + tr("（对账只报告，不自动改；若要改，只往收紧的方向改是安全的。）",
+                                   " (Reconciliation only reports and never changes anything; "
+                                   "if you do change it, only tightening is safe.)")))
     for name in result.unreadable:
         rows.append(ProbeField(key=f"probe.{name}", label=name, read=None,
                                configured=None, verdict="unread",
-                               note="这次没能从仪器读到这个量。"))
+                               note=tr("这次没能从仪器读到这个量。",
+                                       "This quantity could not be read from the instrument this time.")))
     if result.wider:
         warnings.append(
-            f"⚠ 有 {len(result.wider)} 项配置比硬件**更宽** —— 那些上限没有在拦"
-            "任何东西，它们不是安全网，是一句关于安全网的假话。")
+            tr(f"⚠ 有 {len(result.wider)} 项配置比硬件**更宽** —— 那些上限没有在拦"
+               "任何东西，它们不是安全网，是一句关于安全网的假话。",
+               f"⚠ {len(result.wider)} configured limit(s) are **wider** than the hardware: "
+               "those limits block nothing, so they are not a safety net, only a false claim "
+               "about one."))
     if not result.findings and not result.unreadable:
         rows.append(ProbeField(
-            key="safety_limits", label="安全包络", read="—", configured="—",
-            verdict="match", note="配置的包络与实测行程一致。"))
+            key="safety_limits", label=tr("安全包络", "Safety envelope"), read="—", configured="—",
+            verdict="match", note=tr("配置的包络与实测行程一致。",
+                                     "The configured envelope matches the measured travel.")))
     return rows
 
 
@@ -855,7 +886,9 @@ def probe_rig(request: Request) -> InitProbeResponse:
     if ec is None:
         return InitProbeResponse(
             ok=False, degraded=True,
-            message="内核单例未接线（见服务日志），与 Nanonis 连接状态无关。")
+            message=tr("内核单例未接线（见服务日志），与 Nanonis 连接状态无关。",
+                       "The kernel singleton is not wired (see the service log); unrelated to the "
+                       "Nanonis connection state."))
 
     readings: dict[str, Any] = {}
     warnings: list[str] = []
@@ -866,9 +899,11 @@ def probe_rig(request: Request) -> InitProbeResponse:
             res = ec.run(skill, {})
             if getattr(res, "success", False):
                 return dict(getattr(res, "data", {}) or {})
-            warnings.append(f"{skill} 读取失败：{getattr(res, 'error', '未知错误')}")
+            warnings.append(tr(f"{skill} 读取失败：{getattr(res, 'error', '未知错误')}",
+                               f"{skill} read failed: {getattr(res, 'error', 'unknown error')}"))
         except Exception as exc:  # noqa: BLE001
-            warnings.append(f"{skill} 读取异常：{type(exc).__name__}: {exc}")
+            warnings.append(tr(f"{skill} 读取异常：{type(exc).__name__}: {exc}",
+                               f"{skill} read error: {type(exc).__name__}: {exc}"))
         return {}
 
     piezo = _run("GetPiezoConfig")
@@ -891,10 +926,15 @@ def probe_rig(request: Request) -> InitProbeResponse:
         if not z_limits_enabled:
             # KNOWN_ISSUES §1.3 —— 这条一直埋在回包里，没有任何地方在看它。
             warnings.append(
-                "⚠ Nanonis 的 Z 软限位**没有启用**。现在不是活的风险（限位值恰好"
-                "等于压电全量程），但只要有人为了安全把它收窄，设下去、回读也对、"
-                "**却不会生效** —— 而 MAST 整套安全论证依赖的正是「Nanonis 会兜底」"
-                "这一条。")
+                tr("⚠ Nanonis 的 Z 软限位**没有启用**。现在不是活的风险（限位值恰好"
+                   "等于压电全量程），但只要有人为了安全把它收窄，设下去、回读也对、"
+                   "**却不会生效** —— 而 MAST 整套安全论证依赖的正是「Nanonis 会兜底」"
+                   "这一条。",
+                   "⚠ The Nanonis Z soft limit is **not enabled**. It is not a live risk today "
+                   "(the limit value happens to equal the full piezo range), but as soon as "
+                   "someone narrows it for safety, the value is set and reads back correctly "
+                   "yet **has no effect**, and the whole MAST safety argument relies on "
+                   "Nanonis acting as the backstop."))
 
     values = _stored_values(ctx)
     fields: list[ProbeField] = []
@@ -904,13 +944,15 @@ def probe_rig(request: Request) -> InitProbeResponse:
         if read is None:
             fields.append(ProbeField(key=key, label=label, read=None,
                                      configured=configured, verdict="unread",
-                                     note="这次没能从仪器读到这个量。"))
+                                     note=tr("这次没能从仪器读到这个量。",
+                                             "This quantity could not be read from the instrument this time.")))
             return
         if configured is None:
             fields.append(ProbeField(
                 key=key, label=label, read=read, configured=None,
                 verdict="not_configured",
-                note="仪器上读到了，但 MAST 这边还没登记 —— 填上它。"))
+                note=tr("仪器上读到了，但 MAST 这边还没登记 —— 填上它。",
+                        "Read from the instrument, but MAST has no registered value yet; fill it in.")))
             return
         try:
             same = math.isclose(float(read), float(configured),
@@ -921,9 +963,12 @@ def probe_rig(request: Request) -> InitProbeResponse:
             key=key, label=label, read=read, configured=configured,
             verdict="match" if same else "mismatch",
             note=note_ok if same else
-            (f"仪器说 {read!r}，MAST 登记的是 {configured!r}。"
-             "**对账只报告，不自动改** —— 哪个对由你定；"
-             "若要改，只往收紧的方向改是安全的。")))
+            tr(f"仪器说 {read!r}，MAST 登记的是 {configured!r}。"
+               "**对账只报告，不自动改** —— 哪个对由你定；"
+               "若要改，只往收紧的方向改是安全的。",
+               f"The instrument says {read!r}; MAST has {configured!r} registered. "
+               "**Reconciliation only reports and never changes anything**: you decide which "
+               "one is right; if you do change it, only tightening is safe.")))
 
     # ── 安全包络的比对**复用开机对账那一份实现** ────────────────────────────
     # `mast.core.envelope_reconcile` 是纯函数，与启动时那次自动对账用的是同一段
@@ -936,12 +981,12 @@ def probe_rig(request: Request) -> InitProbeResponse:
     # （不是 SafetyLimits 字段），bias_range 也不在开机对账读的三条里。
     rng = _numbers(piezo.get("range"))
     if len(rng) >= 3:
-        _cmp_field("instrument_profile.z_range_m", "Z 压电总量程",
+        _cmp_field("instrument_profile.z_range_m", tr("Z 压电总量程", "Z piezo total range"),
                    rng[2], values.get("instrument_profile.z_range_m"))
 
     br = _numbers(misc.get("bias_range"))
     if br:
-        _cmp_field("safety_limits.bias_max_v", "偏压上限",
+        _cmp_field("safety_limits.bias_max_v", tr("偏压上限", "Bias limit"),
                    max(abs(x) for x in br), values.get("safety_limits.bias_max_v"))
 
     fp = ii.rig_fingerprint(readings)
@@ -953,12 +998,16 @@ def probe_rig(request: Request) -> InitProbeResponse:
     changed = ii.fingerprint_changed(_record(ctx), fp)
     if changed:
         warnings.append(
-            "⚠ 硬件指纹与上次完成初始化时不同 —— 要么换了机器，要么有人重做了"
-            "压电/增益标定。两种情况都值得把这份清单重新过一遍。")
+            tr("⚠ 硬件指纹与上次完成初始化时不同 —— 要么换了机器，要么有人重做了"
+               "压电/增益标定。两种情况都值得把这份清单重新过一遍。",
+               "⚠ The hardware fingerprint differs from the one at the last completed "
+               "initialisation: either the machine was replaced or someone redid the "
+               "piezo/gain calibration. Either way, go through this checklist again."))
 
     return InitProbeResponse(
         ok=bool(fields) or bool(readings), fields=fields, rig_fingerprint=fp,
         fingerprint_changed=changed, z_limits_enabled=z_limits_enabled,
         warnings=warnings,
-        message=("" if readings else "一个量都没读到 —— 检查 Nanonis 连接。"),
+        message=("" if readings else tr("一个量都没读到 —— 检查 Nanonis 连接。",
+                                         "Nothing could be read; check the Nanonis connection.")),
     )

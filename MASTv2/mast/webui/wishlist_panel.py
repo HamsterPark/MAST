@@ -9,15 +9,17 @@ import datetime as _dt
 import html as _html
 from typing import Any
 
+from mast.i18n import tr
+
 _WISH_STATUS = {
-    "queued": ("待发送", "#d97706"),
-    "sent":   ("已上报", "#16a34a"),
-    "failed": ("上报失败", "#dc2626"),
+    "queued": (tr("待发送", "Queued"), "#d97706"),
+    "sent":   (tr("已上报", "Sent"), "#16a34a"),
+    "failed": (tr("上报失败", "Failed"), "#dc2626"),
 }
 _REQ_STATUS = {
-    "pending":   ("待处理", "#d97706"),
-    "done":      ("已完成", "#16a34a"),
-    "dismissed": ("已忽略", "#6b7280"),
+    "pending":   (tr("待处理", "Pending"), "#d97706"),
+    "done":      (tr("已完成", "Done"), "#16a34a"),
+    "dismissed": (tr("已忽略", "Dismissed"), "#6b7280"),
 }
 
 
@@ -36,8 +38,10 @@ def _badge(label: str, color: str) -> str:
 def render_wishes_html(wishes: list[dict] | None) -> str:
     wishes = wishes or []
     if not wishes:
-        return ('<div style="padding:16px;color:#94a3b8;">尚无愿望/反馈。'
-                '在上方提交,会自动上报到更新服务器。</div>')
+        return ('<div style="padding:16px;color:#94a3b8;">'
+                + tr("尚无愿望/反馈。在上方提交,会自动上报到更新服务器。",
+                     "No wishes or feedback yet. Submit above; it is reported to the update server automatically.")
+                + '</div>')
     rows = []
     for w in wishes:
         label, color = _WISH_STATUS.get(w.get("status", ""), (w.get("status", "?"), "#6b7280"))
@@ -61,8 +65,10 @@ def render_wishes_html(wishes: list[dict] | None) -> str:
 def render_requests_html(requests: list[dict] | None) -> str:
     requests = requests or []
     if not requests:
-        return ('<div style="padding:16px;color:#94a3b8;">暂无来自 agent 的请求。'
-                'agent 需要你配合时(如上传全文、操作硬件),会出现在这里。</div>')
+        return ('<div style="padding:16px;color:#94a3b8;">'
+                + tr("暂无来自 agent 的请求。agent 需要你配合时(如上传全文、操作硬件),会出现在这里。",
+                     "No requests from agents. When an agent needs your help (e.g. uploading a full text, operating hardware), it appears here.")
+                + '</div>')
     rows = []
     for r in requests:
         label, color = _REQ_STATUS.get(r.get("status", ""), (r.get("status", "?"), "#6b7280"))
@@ -70,7 +76,7 @@ def render_requests_html(requests: list[dict] | None) -> str:
         kind = _html.escape(str(r.get("kind", "")))
         msg = _html.escape(str(r.get("message", "")))
         note = r.get("note")
-        note_html = (f'<div style="color:#16a34a;font-size:11px;margin-top:2px;">备注: '
+        note_html = (f'<div style="color:#16a34a;font-size:11px;margin-top:2px;">{tr("备注: ", "Note: ")}'
                      f'{_html.escape(str(note))}</div>') if note else ""
         rows.append(
             f'<div style="padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;'

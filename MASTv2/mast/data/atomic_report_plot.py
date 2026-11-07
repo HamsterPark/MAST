@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import Any
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +129,7 @@ def _render(scan_path: Path, save_path: Path, channel: str, stats: dict) -> str:
     im = ax.imshow(flat_pm, cmap="afmhot", origin="upper",
                    extent=(0.0, width_nm, 0.0, height_nm),
                    vmin=vmin, vmax=vmax, interpolation="nearest")
-    ax.set_title("形貌（已扣平面）", fontsize=11)
+    ax.set_title(tr("形貌（已扣平面）", "Topography (plane-subtracted)"), fontsize=11)
     ax.set_xlabel("nm", fontsize=9)
     ax.set_ylabel("nm", fontsize=9)
     ax.tick_params(labelsize=8)
@@ -172,9 +173,9 @@ def _render(scan_path: Path, save_path: Path, channel: str, stats: dict) -> str:
     ax2.imshow(spec[y0:y1, x0:x1], cmap="magma", origin="lower",
                extent=(x0 - cx, x1 - cx, y0 - cy, y1 - cy),
                interpolation="nearest")
-    ax2.set_title("二维功率谱（对数）", fontsize=11)
-    ax2.set_xlabel("k$_x$（像素$^{-1}$）", fontsize=9)
-    ax2.set_ylabel("k$_y$（像素$^{-1}$）", fontsize=9)
+    ax2.set_title(tr("二维功率谱（对数）", "2D power spectrum (log)"), fontsize=11)
+    ax2.set_xlabel(tr("k$_x$（像素$^{-1}$）", "k$_x$ (pixel$^{-1}$)"), fontsize=9)
+    ax2.set_ylabel(tr("k$_y$（像素$^{-1}$）", "k$_y$ (pixel$^{-1}$)"), fontsize=9)
     ax2.tick_params(labelsize=8)
     if lat.ok and lat.peaks:
         for pk in lat.peaks:
@@ -185,11 +186,14 @@ def _render(scan_path: Path, save_path: Path, channel: str, stats: dict) -> str:
             ax2.annotate("%.3f nm" % pk.period_nm, (pk.kx, pk.ky),
                          textcoords="offset points", xytext=(6, 6),
                          color="#38bdf8", fontsize=7.5)
-        ax2.text(0.02, 0.97, "一阶峰 %d 个%s" % (
+        ax2.text(0.02, 0.97, tr("一阶峰 %d 个%s" % (
             lat.n_peaks, "（六重）" if lat.hexagonal else ""),
+            "%d first-order peaks%s" % (
+            lat.n_peaks, " (sixfold)" if lat.hexagonal else "")),
             transform=ax2.transAxes, va="top", fontsize=8, color="#e2e8f0")
     else:
-        ax2.text(0.5, 0.5, "没找到一阶峰\n（%s）" % (lat.reason or "—"),
+        ax2.text(0.5, 0.5, tr("没找到一阶峰\n（%s）" % (lat.reason or "—"),
+                              "No first-order peaks found\n(%s)" % (lat.reason or "—")),
                  transform=ax2.transAxes, ha="center", va="center",
                  fontsize=9, color="#e2e8f0")
 
@@ -200,9 +204,10 @@ def _render(scan_path: Path, save_path: Path, channel: str, stats: dict) -> str:
     prof = np.nanmean(flat_pm[lo:lo + _PROFILE_ROWS], axis=0)
     xs = np.arange(prof.size) * nmpp
     ax3.plot(xs, prof, lw=1.0, color="#0f172a")
-    ax3.set_title("快轴剖面（中间 %d 行平均）" % _PROFILE_ROWS, fontsize=11)
+    ax3.set_title(tr("快轴剖面（中间 %d 行平均）" % _PROFILE_ROWS,
+                     "Fast-axis profile (mean of the middle %d rows)" % _PROFILE_ROWS), fontsize=11)
     ax3.set_xlabel("nm", fontsize=9)
-    ax3.set_ylabel("起伏 pm", fontsize=9)
+    ax3.set_ylabel(tr("起伏 pm", "Height pm"), fontsize=9)
     ax3.tick_params(labelsize=8)
     ax3.grid(alpha=0.25, lw=0.5)
     if period_nm and period_nm > 0:
@@ -210,38 +215,43 @@ def _render(scan_path: Path, save_path: Path, channel: str, stats: dict) -> str:
         n_mark = int(min(12, xs[-1] / float(period_nm))) if xs.size else 0
         for i in range(1, n_mark + 1):
             ax3.axvline(i * float(period_nm), color="#38bdf8", lw=0.6, alpha=0.55)
-        ax3.text(0.98, 0.03, "竖线间隔 = 量到的周期 %.3f nm" % period_nm,
+        ax3.text(0.98, 0.03, tr("竖线间隔 = 量到的周期 %.3f nm" % period_nm,
+                                "line spacing = measured period %.3f nm" % period_nm),
                  transform=ax3.transAxes, ha="right", va="bottom", fontsize=7.5,
                  color="#0369a1")
 
     # ── 数字块 ──────────────────────────────────────────────────────────
     halves = res_f.half_concentrations
     lines = [
-        "角向集中度  正扫 %s   反扫 %s        （真晶格 97–7645；针尖抖动 1.8–3.3）"
+        tr("角向集中度  正扫 %s   反扫 %s        （真晶格 97–7645；针尖抖动 1.8–3.3）",
+           "Angular concentration  trace %s   retrace %s        (true lattice 97-7645; tip jitter 1.8-3.3)")
         % (_fmt(res_f.angular_concentration, ".1f"),
            _fmt(getattr(res_b, "angular_concentration", None), ".1f")),
         # ⚠️ 百分号要自己拼，别写进格式串：``format(f, ".0f%%")`` 不是合法格式符，
         # 会抛 ValueError 被 _fmt 吞成破折号 —— 一个「读不到」冒充「没有」的小例子。
-        "帧内两半    %s / %s        周期 %s nm（三向散布 %s）"
+        tr("帧内两半    %s / %s        周期 %s nm（三向散布 %s）",
+           "Frame halves    %s / %s        period %s nm (three-direction spread %s)")
         % (_fmt(halves[0] if halves else None, ".1f"),
            _fmt(halves[1] if halves else None, ".1f"),
            _fmt(period_nm, ".4f"),
            (_fmt(lat.period_spread * 100.0, ".0f") + "%")
            if lat.period_spread is not None else "—"),
-        "成像条件    视野 %.2f × %.2f nm   %d px   %.5f nm/px   偏压 %s V   setpoint %s pA"
+        tr("成像条件    视野 %.2f × %.2f nm   %d px   %.5f nm/px   偏压 %s V   setpoint %s pA",
+           "Imaging    field %.2f x %.2f nm   %d px   %.5f nm/px   bias %s V   setpoint %s pA")
         % (width_nm, height_nm, flat.shape[1], nmpp,
            _fmt(fr.get("bias_v"), ".4f"),
            _fmt((fr.get("setpoint_a") or 0) * 1e12, ".0f")),
     ]
     if not res_f.passed:
-        lines.append("判据未通过：%s" % ", ".join(res_f.reasons or ("—",)))
+        lines.append(tr("判据未通过：%s", "Criterion not passed: %s")
+                     % ", ".join(res_f.reasons or ("—",)))
     # ⚠️ 这里**不能**指定 ``family="monospace"``：它解析到 DejaVu Sans Mono，
     # 而那个字体没有中文字形，可能使中文标签显示为缺字方框。
     # 用 rcParams 里选好的那个中文字体 —— 中文本来就是等宽的，数字对齐够用。
     fig.text(0.05, 0.145, "\n".join(lines), fontsize=8.6,
              va="top", linespacing=1.7)
 
-    title = "原子分辨 · %s" % Path(scan_path).name
+    title = tr("原子分辨 · %s", "Atomic resolution · %s") % Path(scan_path).name
     if fr.get("rec_time"):
         title += "    %s" % fr.get("rec_time")
     fig.suptitle(title, fontsize=12.5, y=0.975)

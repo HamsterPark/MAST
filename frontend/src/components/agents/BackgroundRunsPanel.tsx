@@ -4,16 +4,17 @@ import { api } from "@/api/client";
 import { Badge, Card, DegradedNote, EmptyNote, ErrorNote, Spinner } from "@/components/ui";
 import { Button, Field, SelectField, Toggle, useToast } from "@/components/controls";
 import { agentLabel } from "@/components/agents/registry";
+import { langTag, tr } from "@/lib/i18n";
 import { settingsWriteProblem } from "@/lib/settingsWrite";
 
 // ════════════════════════════════════════════════════════════════════════════
-// 后台任务 — true-parallel background runs.
+// Background tasks: true-parallel background runs.
 //
 // A long/independent task (a literature survey, offline analysis) runs as a
 // DETACHED orchestrator invocation (its own thread_id + isolated checkpointer)
 // so the FOREGROUND supervisor + instrument_control stay responsive — it breaks
 // the LangGraph super-step barrier WITHOUT changing graph semantics. Results
-// merge back into the group transcript, tagged 「后台」.
+// merge back into the group transcript, tagged as background.
 //
 // This panel is a thin client over the relay endpoints:
 //   POST /api/agents/run-task/background           — launch
@@ -41,11 +42,11 @@ const STATUS_TONE: Record<string, string> = {
   aborted: "WARN",
 };
 const STATUS_LABEL: Record<string, string> = {
-  queued: "排队中",
-  running: "运行中",
-  done: "已完成",
-  failed: "失败",
-  aborted: "已中止",
+  queued: tr("排队中", "Queued"),
+  running: tr("运行中", "Running"),
+  done: tr("已完成", "Done"),
+  failed: tr("失败", "Failed"),
+  aborted: tr("已中止", "Aborted"),
 };
 const ACTIVE = new Set(["queued", "running"]);
 
@@ -63,7 +64,7 @@ type BgRun = {
   final_text: string;
   error: string;
   thread_id: string;
-  // fine-grained progress (resource-governance ①)
+  // fine-grained progress
   steps?: number;
   progress?: number | null;
   last_activity?: string;
@@ -71,7 +72,7 @@ type BgRun = {
 
 function fmtTime(t?: number | null): string {
   if (!t) return "—";
-  return new Date(t * 1000).toLocaleTimeString();
+  return new Date(t * 1000).toLocaleTimeString(langTag());
 }
 
 function elapsed(r: BgRun): string {
@@ -128,11 +129,11 @@ export function BackgroundRunsPanel({ conversationId }: { conversationId?: strin
       return data;
     },
     onSuccess: (d, v) => {
-      // 这句话以前无条件说出口。下面 spawn 那个 mutation 查了 `ok`，这个没查 ——
-      // 同一个文件里一个查一个不查，正是「每一页各自记得」那种接线的样子。
+      // Check the write result before announcing success, as the spawn mutation
+      // below does with `ok`.
       const problem = settingsWriteProblem(d);
       if (problem) { toast(problem, "err"); return; }
-      toast(v ? "已开启自动后台化（保守：仅文献综述搭配仪器时）" : "已关闭自动后台化", "ok");
+      toast(v ? tr("已开启自动后台化（保守：仅文献综述搭配仪器时）", "Auto-background enabled (conservative: only for a literature survey paired with instrument work)") : tr("已关闭自动后台化", "Auto-background disabled"), "ok");
       qc.invalidateQueries({ queryKey: ["settings"] });
     },
     onError: (e) => toast(String((e as Error)?.message ?? e), "err"),
@@ -152,11 +153,11 @@ export function BackgroundRunsPanel({ conversationId }: { conversationId?: strin
     },
     onSuccess: (data) => {
       if (data?.ok && !data.degraded) {
-        toast(`已在后台启动（${agentLabel(agent)}）`, "ok");
+        toast(tr(`已在后台启动（${agentLabel(agent)}）`, `Started in the background (${agentLabel(agent)})`), "ok");
         setInstruction("");
         qc.invalidateQueries({ queryKey: ["agents", "background-runs"] });
       } else {
-        toast(`未启动：${data?.detail ?? "后端降级 / 无可用模型"}`, "err");
+        toast(tr(`未启动：${data?.detail ?? "后端降级 / 无可用模型"}`, `Not started: ${data?.detail ?? "backend degraded / no model available"}`), "err");
       }
     },
     onError: (e) => toast(String((e as Error)?.message ?? e), "err"),
@@ -171,8 +172,8 @@ export function BackgroundRunsPanel({ conversationId }: { conversationId?: strin
       return data;
     },
     onSuccess: (data) => {
-      if (data?.ok && data.aborted) toast("已发出中止信号", "ok");
-      else toast(`未中止（${data?.detail ?? "可能已结束"}）`, "err");
+      if (data?.ok && data.aborted) toast(tr("已发出中止信号", "Abort signal sent"), "ok");
+      else toast(tr(`未中止（${data?.detail ?? "可能已结束"}）`, `Not aborted (${data?.detail ?? "it may have already finished"})`), "err");
       qc.invalidateQueries({ queryKey: ["agents", "background-runs"] });
     },
     onError: (e) => toast(String((e as Error)?.message ?? e), "err"),
@@ -190,28 +191,31 @@ export function BackgroundRunsPanel({ conversationId }: { conversationId?: strin
       {/* what this is */}
       <Card className="space-y-1 px-4 py-3">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium">后台任务 · 真并行</span>
+          <span className="text-sm font-medium">{tr("后台任务 · 真并行", "Background tasks · true parallel")}</span>
           <Badge tone={activeCount > 0 ? "AUTO" : "INFO"}>
-            {activeCount > 0 ? `${activeCount} 个进行中` : "空闲"}
+            {activeCount > 0 ? tr(`${activeCount} 个进行中`, `${activeCount} running`) : tr("空闲", "Idle")}
           </Badge>
         </div>
         <p className="text-xs text-mast-muted">
-          把独立的长任务（文献综述 / 离线分析 / 起草报告）甩到后台异步运行，前台仪器对话不被阻塞；
-          结果会带回当前群聊并标注「后台」。仪器控制（instrument_control）留在前台，不能后台化。
+          {tr(
+            "把独立的长任务（文献综述 / 离线分析 / 起草报告）甩到后台异步运行，前台仪器对话不被阻塞；结果会带回当前群聊并标注「后台」。仪器控制（instrument_control）留在前台，不能后台化。",
+            "Run independent long tasks (literature survey / offline analysis / report drafting) asynchronously in the background so the foreground instrument conversation is not blocked. Results are returned to the current group chat and tagged \"background\". Instrument control (instrument_control) stays in the foreground and cannot be backgrounded.",
+          )}
         </p>
         <div className="flex items-center justify-between gap-3 border-t border-mast-border pt-2">
           <div className="min-w-0">
-            <div className="text-xs font-medium text-mast-text">自动后台化（保守 · 实验性）</div>
+            <div className="text-xs font-medium text-mast-text">{tr("自动后台化（保守 · 实验性）", "Auto-background (conservative · experimental)")}</div>
             <div className="text-[11px] text-mast-muted">
-              开启后：当编排器把「文献综述」和「仪器操作」放到同一批时，自动把文献综述转入后台，
-              让仪器前台不被阻塞。仅限文献（其它分析依赖前台产物，不自动后台）；默认关。
-              想强制某次留前台？在对话里 @文献 直接点名即可（定向永不自动后台）。
+              {tr(
+                "开启后：当编排器把「文献综述」和「仪器操作」放到同一批时，自动把文献综述转入后台，让仪器前台不被阻塞。仅限文献（其它分析依赖前台产物，不自动后台）；默认关。想强制某次留前台？在对话里 @文献 直接点名即可（定向永不自动后台）。",
+                "When on: if the orchestrator puts a literature survey and instrument operations in the same batch, the survey is moved to the background so the instrument foreground is not blocked. Literature only (other analyses depend on foreground artifacts and are never auto-backgrounded); off by default. To force a run to stay in the foreground, address the literature agent by name in the conversation (targeted requests are never auto-backgrounded).",
+              )}
             </div>
           </div>
           <Toggle
             checked={!!autoOn}
             onChange={(v) => saveAuto.mutate(v)}
-            label={autoOn ? "已开启" : "已关闭"}
+            label={autoOn ? tr("已开启", "On") : tr("已关闭", "Off")}
           />
         </div>
       </Card>
@@ -219,8 +223,8 @@ export function BackgroundRunsPanel({ conversationId }: { conversationId?: strin
       {/* launcher */}
       <Card className="space-y-3 px-4 py-3">
         <Field
-          label="启动后台任务"
-          hint="选一个非仪器智能体，描述一个不依赖当前硬件步骤、又比较耗时的独立任务。"
+          label={tr("启动后台任务", "Start a background task")}
+          hint={tr("选一个非仪器智能体，描述一个不依赖当前硬件步骤、又比较耗时的独立任务。", "Pick a non-instrument agent and describe a time-consuming task that does not depend on the current hardware step.")}
         >
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
             <textarea
@@ -232,7 +236,7 @@ export function BackgroundRunsPanel({ conversationId }: { conversationId?: strin
                   submitSpawn();
                 }
               }}
-              placeholder="例：综述 Au(111) 上单分子磁体的 STM/STS 研究进展"
+              placeholder={tr("例：综述 Au(111) 上单分子磁体的 STM/STS 研究进展", "e.g. Survey STM/STS studies of single-molecule magnets on Au(111)")}
               rows={2}
               disabled={spawn.isPending}
               className="flex-1 resize-none rounded-md border border-mast-border bg-mast-bg px-3 py-2 text-sm text-mast-text outline-none focus:border-mast-accent disabled:opacity-50"
@@ -250,7 +254,7 @@ export function BackgroundRunsPanel({ conversationId }: { conversationId?: strin
                 onClick={submitSpawn}
                 disabled={!instruction.trim() || spawn.isPending}
               >
-                {spawn.isPending ? "启动中…" : "后台启动"}
+                {spawn.isPending ? tr("启动中…", "Starting…") : tr("后台启动", "Run in background")}
               </Button>
             </div>
           </div>
@@ -261,15 +265,15 @@ export function BackgroundRunsPanel({ conversationId }: { conversationId?: strin
       <div>
         <div className="mb-2 flex items-center gap-3">
           <h4 className="text-sm font-medium">
-            后台运行
-            <span className="ml-2 text-xs text-mast-muted">共 {runs.length} 个</span>
+            {tr("后台运行", "Background runs")}
+            <span className="ml-2 text-xs text-mast-muted">{tr(`共 ${runs.length} 个`, `${runs.length} total`)}</span>
           </h4>
         </div>
         {runsQuery.isPending && <Spinner />}
         {runsQuery.isError && <ErrorNote error={runsQuery.error} />}
-        {runsQuery.data?.degraded && <DegradedNote what="后台任务列表" />}
+        {runsQuery.data?.degraded && <DegradedNote what={tr("后台任务列表", "Background task list")} />}
         {runsQuery.data && !runsQuery.data.degraded && runs.length === 0 && (
-          <EmptyNote label="暂无后台任务。用上方表单启动一个，或让仪器智能体在对话中自行甩到后台。" />
+          <EmptyNote label={tr("暂无后台任务。用上方表单启动一个，或让仪器智能体在对话中自行甩到后台。", "No background tasks yet. Start one with the form above, or let an agent detach one during a conversation.")} />
         )}
         {runs.length > 0 && (
           <div className="space-y-2">
@@ -281,7 +285,7 @@ export function BackgroundRunsPanel({ conversationId }: { conversationId?: strin
                       <Badge tone={STATUS_TONE[r.status] ?? "INFO"}>
                         {STATUS_LABEL[r.status] ?? r.status}
                       </Badge>
-                      {r.priority === "high" && <Badge tone="WARN">高优先</Badge>}
+                      {r.priority === "high" && <Badge tone="WARN">{tr("高优先", "High priority")}</Badge>}
                       {r.agents.map((a) => (
                         <span
                           key={a}
@@ -297,8 +301,8 @@ export function BackgroundRunsPanel({ conversationId }: { conversationId?: strin
                     <div className="truncate text-sm text-mast-text" title={r.instruction}>
                       {r.title || r.instruction}
                     </div>
-                    {/* live progress bar (item ①) — only while active, when the
-                        backend has published a percent. */}
+                    {/* live progress bar: only while active, when the backend has
+                        published a percent. */}
                     {ACTIVE.has(r.status) && typeof r.progress === "number" && (
                       <div className="space-y-0.5">
                         <div className="flex items-center gap-2">
@@ -333,9 +337,9 @@ export function BackgroundRunsPanel({ conversationId }: { conversationId?: strin
                       </p>
                     )}
                     <div className="flex flex-wrap gap-3 font-mono text-[10px] text-mast-muted/80">
-                      <span>启动 {fmtTime(r.started_at ?? r.created_at)}</span>
-                      {r.finished_at && <span>结束 {fmtTime(r.finished_at)}</span>}
-                      {r.conversation_id && <span className="truncate">会话 {r.conversation_id.slice(0, 8)}</span>}
+                      <span>{tr(`启动 ${fmtTime(r.started_at ?? r.created_at)}`, `Started ${fmtTime(r.started_at ?? r.created_at)}`)}</span>
+                      {r.finished_at && <span>{tr(`结束 ${fmtTime(r.finished_at)}`, `Finished ${fmtTime(r.finished_at)}`)}</span>}
+                      {r.conversation_id && <span className="truncate">{tr(`会话 ${r.conversation_id.slice(0, 8)}`, `Conversation ${r.conversation_id.slice(0, 8)}`)}</span>}
                     </div>
                   </div>
                   <div>
@@ -345,7 +349,7 @@ export function BackgroundRunsPanel({ conversationId }: { conversationId?: strin
                         onClick={() => abort.mutate(r.run_id)}
                         disabled={abort.isPending && abort.variables === r.run_id}
                       >
-                        {abort.isPending && abort.variables === r.run_id ? "中止中…" : "中止"}
+                        {abort.isPending && abort.variables === r.run_id ? tr("中止中…", "Aborting…") : tr("中止", "Abort")}
                       </Button>
                     )}
                   </div>

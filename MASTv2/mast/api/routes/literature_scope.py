@@ -44,6 +44,7 @@ from mast.api.schemas_literature import (
     CopyLibraryResponse,
     EnsureExperimentLibraryResponse,
 )
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,9 @@ def ensure_experiment_library(
     if not lib_id:
         return EnsureExperimentLibraryResponse(
             ok=False, experiment_id=eid,
-            message="无法为该实验解析出专属库 id（experiment_id 为空或无效）。")
+            message=tr("无法为该实验解析出专属库 id（experiment_id 为空或无效）。",
+                       "Cannot resolve a dedicated library id for this experiment "
+                       "(experiment_id is empty or invalid)."))
 
     path = expl.members_path(eid)
     members = expl.current_members(eid)
@@ -103,10 +106,14 @@ def ensure_experiment_library(
         # No experiment folder (the experiment row is gone / undreadable). The
         # library still exists in the registry, so curation is not blocked — say so
         # instead of implying the folder-authoritative bibliography is in place.
-        msg = (f"已就绪：{lib_id}（**仅 registry**；该实验的文件夹解析不到，"
-               f"书目暂时没有文件夹权威，实验行恢复后会自动补上）")
+        msg = tr(f"已就绪：{lib_id}（**仅 registry**；该实验的文件夹解析不到，"
+                 f"书目暂时没有文件夹权威，实验行恢复后会自动补上）",
+                 f"Ready: {lib_id} (**registry only**; the experiment's folder cannot be resolved, "
+                 f"so the bibliography has no folder authority for now; it is filled in "
+                 f"automatically once the experiment row is back)")
     else:
-        msg = f"已就绪：{lib_id}（书目权威：{path}）"
+        msg = tr(f"已就绪：{lib_id}（书目权威：{path}）",
+                 f"Ready: {lib_id} (bibliography authority: {path})")
     return EnsureExperimentLibraryResponse(
         ok=True, degraded=False, library_id=lib_id, experiment_id=eid,
         created=not existed, member_count=len(members),
@@ -157,13 +164,15 @@ def copy_library(
 
     copied = [str(x) for x in (res.get("copied") or [])]
     rejected = [str(x) for x in (res.get("rejected") or [])]
-    parts = [f"已复制 {len(copied)} 条到 {res.get('library_id', '')}"]
+    parts = [tr(f"已复制 {len(copied)} 条到 {res.get('library_id', '')}",
+                f"Copied {len(copied)} item(s) to {res.get('library_id', '')}")]
     if res.get("skipped"):
-        parts.append(f"{len(res['skipped'])} 条目标库里已有（未改动）")
+        parts.append(tr(f"{len(res['skipped'])} 条目标库里已有（未改动）",
+                        f"{len(res['skipped'])} already in the target library (unchanged)"))
     if rejected:
-        parts.append(f"{len(rejected)} 条未能加入")
+        parts.append(tr(f"{len(rejected)} 条未能加入", f"{len(rejected)} could not be added"))
     if res.get("at_cap"):
-        parts.append("目标库已到 500 成员上限")
+        parts.append(tr("目标库已到 500 成员上限", "The target library has reached the 500-member limit"))
     if res.get("note"):
         parts.append(str(res["note"]))
     return CopyLibraryResponse(
@@ -176,5 +185,5 @@ def copy_library(
         rejected=rejected,
         member_count=int(res.get("member_count", 0) or 0),
         at_cap=bool(res.get("at_cap", False)),
-        message="；".join(parts) + "。",
+        message=tr("；", "; ").join(parts) + tr("。", "."),
     )

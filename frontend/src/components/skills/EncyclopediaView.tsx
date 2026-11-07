@@ -10,21 +10,22 @@ import {
   EmptyNote,
 } from "@/components/ui";
 import { SubTabs } from "@/components/controls";
+import { IncompleteBadge } from "@/components/shell/LegacyOnly";
+import { tr } from "@/lib/i18n";
 
-// ── 百科 — domain groups + intent→skill mapping (decision-tree/recipe view) ──
-// Reproduces encyclopedia.py surfaces:
-//   领域分组（17 domains × skills, owning-agent badge）·
-//   intent 映射（keywords → skill 配方 + note）+ 客户端搜索过滤.
+// ── Encyclopedia — domain groups + intent→skill mapping (decision-tree/recipe view) ──
+//   Domain groups (17 domains × skills, owning-agent badge) and
+//   intent mapping (keywords → skill recipe + note) with client-side search.
 
 type EncyView = "domains" | "intent";
 
 const AGENT_LABEL: Record<string, string> = {
-  instrument_control: "仪器控制 IC",
-  data_processing: "数据处理 DP",
-  literature: "文献 LIT",
-  experiment_design: "实验设计 XD",
-  paper_writing: "论文写作 PW",
-  paper_review: "论文审稿 PR",
+  instrument_control: tr("仪器控制 IC", "Instrument control (IC)"),
+  data_processing: tr("数据处理 DP", "Data processing (DP)"),
+  literature: tr("文献 LIT", "Literature (LIT)"),
+  experiment_design: tr("实验设计 XD", "Experiment design (XD)"),
+  paper_writing: tr("论文写作 PW", "Paper writing (PW)"),
+  paper_review: tr("论文审稿 PR", "Paper review (PR)"),
 };
 
 function useDomains() {
@@ -75,8 +76,8 @@ function DomainsView() {
 
   if (q.isPending) return <Spinner />;
   if (q.isError) return <ErrorNote error={q.error} />;
-  if (q.data?.degraded) return <DegradedNote what="百科领域" />;
-  if (!domains.length) return <EmptyNote label="暂无领域数据" />;
+  if (q.data?.degraded) return <DegradedNote what={tr("百科领域", "Encyclopedia domains")} />;
+  if (!domains.length) return <EmptyNote label={tr("暂无领域数据", "No domain data")} />;
 
   const totalSkills = filtered.reduce((n, d) => n + (d.skills?.length ?? 0), 0);
 
@@ -86,24 +87,24 @@ function DomainsView() {
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="搜索领域 / 技能…"
+          placeholder={tr("搜索领域 / 技能…", "Search domains / skills…")}
           className="w-64 rounded border border-mast-border bg-mast-bg px-3 py-1.5 text-sm text-mast-text placeholder:text-mast-muted"
         />
         <label className="flex items-center gap-1 text-xs text-mast-muted">
-          归属 agent
+          {tr("归属 agent", "Owning agent")}
           <select
             value={agent}
             onChange={(e) => setAgent(e.target.value)}
             className="rounded border border-mast-border bg-mast-bg px-2 py-1 text-sm text-mast-text"
           >
-            <option value="all">全部</option>
+            <option value="all">{tr("全部", "All")}</option>
             {agents.map((a) => (
               <option key={a} value={a}>{AGENT_LABEL[a] ?? a}</option>
             ))}
           </select>
         </label>
         <span className="text-xs text-mast-muted">
-          {filtered.length} 个领域 · {totalSkills} 个技能
+          {tr(`${filtered.length} 个领域 · ${totalSkills} 个技能`, `${filtered.length} domains · ${totalSkills} skills`)}
         </span>
       </div>
 
@@ -122,7 +123,7 @@ function DomainsView() {
                     <span key={s} className="rounded bg-mast-bg px-1.5 py-0.5 text-xs text-mast-muted">{s}</span>
                   ))}
                 </div>
-                <p className="text-[11px] text-mast-muted/70">{d.skills.length} 个技能</p>
+                <p className="text-[11px] text-mast-muted/70">{tr(`${d.skills.length} 个技能`, `${d.skills.length} skills`)}</p>
               </>
             )}
           </Card>
@@ -151,8 +152,8 @@ function IntentView() {
 
   if (q.isPending) return <Spinner />;
   if (q.isError) return <ErrorNote error={q.error} />;
-  if (q.data?.degraded) return <DegradedNote what="意图映射" />;
-  if (!mapping.length) return <EmptyNote label="暂无意图映射数据" />;
+  if (q.data?.degraded) return <DegradedNote what={tr("意图映射", "Intent mapping")} />;
+  if (!mapping.length) return <EmptyNote label={tr("暂无意图映射数据", "No intent-mapping data")} />;
 
   return (
     <div className="space-y-4">
@@ -160,24 +161,26 @@ function IntentView() {
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="搜索意图关键词 / 技能…"
+          placeholder={tr("搜索意图关键词 / 技能…", "Search intent keywords / skills…")}
           className="w-64 rounded border border-mast-border bg-mast-bg px-3 py-1.5 text-sm text-mast-text placeholder:text-mast-muted"
         />
-        <span className="text-xs text-mast-muted">共 {filtered.length} 条配方</span>
+        <span className="text-xs text-mast-muted">{tr(`共 ${filtered.length} 条配方`, `${filtered.length} recipes`)}</span>
       </div>
 
       <Card>
         <p className="mb-3 text-xs text-mast-muted">
-          意图（自然语言关键词）→ 推荐技能/配方。这是技能选择的决策映射，"-&gt;"
-          表示分级升级或多步组合。
+          {tr(
+            "意图（自然语言关键词）→ 推荐技能/配方。这是技能选择的决策映射，\"->\" 表示分级升级或多步组合。",
+            "Intent (natural-language keywords) → recommended skill / recipe. This is the decision map for skill selection; \"->\" marks a tiered escalation or a multi-step combination.",
+          )}
         </p>
         <div className="overflow-auto rounded border border-mast-border">
           <table className="w-full text-sm">
             <thead className="bg-mast-bg text-mast-muted">
               <tr>
-                <th className="px-3 py-2 text-left">意图关键词</th>
-                <th className="px-3 py-2 text-left">技能 / 配方</th>
-                <th className="px-3 py-2 text-left">说明</th>
+                <th className="px-3 py-2 text-left">{tr("意图关键词", "Intent keywords")}</th>
+                <th className="px-3 py-2 text-left">{tr("技能 / 配方", "Skill / recipe")}</th>
+                <th className="px-3 py-2 text-left">{tr("说明", "Note")}</th>
               </tr>
             </thead>
             <tbody>
@@ -209,10 +212,17 @@ export function EncyclopediaView() {
   const [view, setView] = useState<EncyView>("domains");
   return (
     <div className="space-y-2">
+      <p className="text-xs text-mast-muted">
+        <IncompleteBadge />
+        {tr(
+          "此视图尚不完善，仍在开发中，内容可能不全。",
+          "This view is incomplete and still being developed; content may be partial.",
+        )}
+      </p>
       <SubTabs
         tabs={[
-          { id: "domains", label: "领域分组" },
-          { id: "intent", label: "意图映射 / 配方" },
+          { id: "domains", label: tr("领域分组", "Domain groups") },
+          { id: "intent", label: tr("意图映射 / 配方", "Intent mapping / recipes") },
         ]}
         value={view}
         onChange={setView}

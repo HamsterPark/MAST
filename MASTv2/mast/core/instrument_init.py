@@ -43,6 +43,7 @@ import math
 import time
 from dataclasses import dataclass
 from typing import Any, Iterable
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +78,8 @@ class InitGroup:
     intro: str
 
 
-# / #20 / #30（三轮）：「初始化页面的废话太多，删掉一些。代码注释中
-# 保留即可。」每条 intro 原来是两三段物理背景，装机时要先读几屏才见到第一个输入框。
+# 初始化页面的说明文字曾过多，已精简；被删内容保留在代码注释中。
+# 每条 intro 原来是两三段物理背景，装机时要先读几屏才见到第一个输入框。
 #
 # 现在每组只留**一句**。被删掉的段落原样搬到本文件的注释里 —— 它们没有蒸发，
 # 只是不再挡在填表的人和输入框之间。判断保留什么的规则只有一条：
@@ -89,8 +90,11 @@ GROUPS: tuple[InitGroup, ...] = (
     # 或者整套能态归属是反的。」
     InitGroup(
         id="signal_chain",
-        title="信号链（前置放大器 / 偏压极性）",
-        intro="填错不会报错：图照样出，只是每个电流值都错，或者能态归属整个反了。",
+        title=tr("信号链（前置放大器 / 偏压极性）", "Signal chain (preamplifier / bias polarity)"),
+        intro=tr(
+            "填错不会报错：图照样出，只是每个电流值都错，或者能态归属整个反了。",
+            "A wrong entry raises no error: images still come out, but every current "
+            "value is off, or the state assignment is entirely reversed."),
     ),
     # 删掉的原文：「MAST 拦截越界命令用的那条线。出厂默认是占位符——与任何一台
     # 真实机器都不对应：它可能比你的压电小（好用的表面白白够不着），也可能比你的
@@ -119,19 +123,28 @@ GROUPS: tuple[InitGroup, ...] = (
     #   "An agent that can widen its own limits has, in the strict sense, no limits."
     InitGroup(
         id="envelope",
-        title="安全包络（压电量程 / 设定点上限）",
-        intro="出厂默认是占位符，用下面的按钮从仪器读一次对账。",
+        title=tr("安全包络（压电量程 / 设定点上限）", "Safety envelope (piezo range / setpoint limits)"),
+        intro=tr(
+            "出厂默认是占位符，用下面的按钮从仪器读一次对账。",
+            "Factory defaults are placeholders; read them from the instrument once "
+            "with the button below to reconcile."),
     ),
     # 参数组由代码直接读取、写入并回读核对，避免模型再次转述数值。
     InitGroup(
         id="approach",
-        title="进针",
-        intro="进针那套 Z 反馈参数，以及这台机器进针会不会碰到样品。",
+        title=tr("进针", "Approach"),
+        intro=tr(
+            "进针那套 Z 反馈参数，以及这台机器进针会不会碰到样品。",
+            "The Z feedback parameters used for approach, and whether approach "
+            "on this machine damages the sample."),
     ),
     InitGroup(
         id="retract",
-        title="退针（粗动马达）",
-        intro="换样品 / 关机时怎么把针退开 —— **方向搞反就是把针往样品里送**。",
+        title=tr("退针（粗动马达）", "Retract (coarse motor)"),
+        intro=tr(
+            "换样品 / 关机时怎么把针退开 —— **方向搞反就是把针往样品里送**。",
+            "How the tip is backed off when changing samples or shutting down. "
+            "**A reversed direction drives the tip into the sample.**"),
     ),
     # 删掉的原文：「『有些 Nanonis 控制器支持 400 V，但是有时候 300 V 就烧坏了』，
     # 而没有任何读数、状态位或报错告诉你在哪一台机器上。未声明 = 拒绝一切粗动
@@ -140,8 +153,11 @@ GROUPS: tuple[InitGroup, ...] = (
     # —— 完整版留在 max_amplitude_v 那一项的 consequence 里（安全关键，不删）。
     InitGroup(
         id="coarse",
-        title="粗动与换区",
-        intro="驱动电压是整页里唯一一个填错了硬件当场报废的数（写入需管理员 PIN）。",
+        title=tr("粗动与换区", "Coarse motion and relocation"),
+        intro=tr(
+            "驱动电压是整页里唯一一个填错了硬件当场报废的数（写入需管理员 PIN）。",
+            "The drive voltage is the only number on this page that destroys hardware "
+            "on the spot if wrong (writing requires the admin PIN)."),
     ),
     # 删掉的原文：「在中间真空区（约 0.1–1000 Pa，Paschen 极小值附近）给粗动压电
     # 加几百伏会打火，电弧爬过绝缘层就把叠堆废了——抽气和放气途中正好穿过这个区间。
@@ -151,32 +167,45 @@ GROUPS: tuple[InitGroup, ...] = (
     # —— fail-open 那半段留在 vacuum_gauge_min_pa 的 consequence 里（不删）。
     InitGroup(
         id="vacuum",
-        title="粗动真空互锁",
-        intro="中间真空区（约 0.1–1000 Pa）给粗动加几百伏会打火，抽 / 放气途中正好穿过。",
+        title=tr("粗动真空互锁", "Coarse-motion vacuum interlock"),
+        intro=tr(
+            "中间真空区（约 0.1–1000 Pa）给粗动加几百伏会打火，抽 / 放气途中正好穿过。",
+            "Applying a few hundred volts to coarse motion in the intermediate "
+            "vacuum range (about 0.1-1000 Pa) causes arcing, and pumping down or "
+            "venting passes right through it."),
     ),
     # 删掉的原文：「Z 压电量程是自动调平判据的分母；扫描档位表是全系统扫图默认
     # 参数的单一真源（`ScanAt` 每帧都从那里下发）。出厂档位是从文献协议数值化来的
     # 起点，不是你这台机器的真值。」
     InitGroup(
         id="scan",
-        title="扫图",
-        intro="出厂档位是从文献协议数值化来的起点，不是你这台机器的真值。",
+        title=tr("扫图", "Scanning"),
+        intro=tr(
+            "出厂档位是从文献协议数值化来的起点，不是你这台机器的真值。",
+            "The factory presets are starting points derived from literature protocols, "
+            "not the true values for your machine."),
     ),
     # 删掉的原文：「修针尖的碎屑实际扩散多远，是这根针、这个样品、这个温度的属性
     # ——只有看过的人知道。默认值是起点不是测量值。填小了，地图会把针尖领回一片
     # 已经毁掉的表面；填大了只是少扫几张图。」
     InitGroup(
         id="damage",
-        title="破坏范围（避让半径）",
-        intro="碎屑扩散多远随针 / 样品 / 温度变，默认值是起点不是测量值。",
+        title=tr("破坏范围（避让半径）", "Damage range (avoidance radius)"),
+        intro=tr(
+            "碎屑扩散多远随针 / 样品 / 温度变，默认值是起点不是测量值。",
+            "How far debris spreads varies with tip, sample and temperature; defaults "
+            "are starting points, not measurements."),
     ),
     # 删掉的原文：「全部默认关闭是刻意的：为不存在的硬件保留技能比没有技能更糟——
     # agent 会看到它、调用它、拿到 Nanonis 报错、然后（如果它固执）再调一次；
     # 而工具表是模型每一轮都要读的菜单。」
     InitGroup(
         id="rig",
-        title="连接与硬件清单",
-        intro="这台机器实际装了哪些可选模块，**全部默认关闭**。",
+        title=tr("连接与硬件清单", "Connections and hardware inventory"),
+        intro=tr(
+            "这台机器实际装了哪些可选模块，**全部默认关闭**。",
+            "Which optional modules are actually installed on this machine; **all "
+            "are off by default**."),
     ),
 )
 
@@ -198,10 +227,10 @@ class InitItem:
     label: str
     #: 这一项在页面上的**全部**说明 —— 一句话：填什么 + 哪里读。
     #:
-    #: 这个字段是 ``what`` + ``where`` 合并来的。多轮删字之后字数总会长回来
-    #: —— 因为结构还在：只要页面上有「这是什么 / 哪里找 / 填错会怎样 /
+    #: 这个字段是 ``what`` + ``where`` 合并来的。只靠**删字**不行，字会
+    #: 长回来 —— 因为结构还在：只要页面上有「这是什么 / 哪里找 / 填错会怎样 /
     #: 可对账」四个格子，就总有理由把每个格子填满，而「加起来太长了」不属于任何
-    #: 一次改动。这一轮拆的是格子本身：**只剩一个格子，而且它只装得下一句话。**
+    #: 一次改动。最终拆的是格子本身：**只剩一个格子，而且它只装得下一句话。**
     #:
     #: 两条内容纪律，都由 ``tests/v2/unit/core/test_instrument_init.py`` 钉住：
     #: 一句（一个句号）、``_ONE_LINE`` 字以内；不许重复 ``label`` 已经说过的话
@@ -230,7 +259,7 @@ class InitItem:
     probe: str = ""
     #: 填错会**伤到硬件**（撞针 / 毁针尖 / 烧压电 / 让安全判据反向）。
     #:
-    #: 与 ``severity`` 是两件事，而它们的差别正是(内容冗长)的落点：
+    #: 与 ``severity`` 是两件事，而它们的差别正是页面内容冗长问题的落点：
     #: 23 项 required 每一项都把「填错会怎样」那一整段直接摊在页面上，而其中
     #: 只有 9 项的后果是硬件损伤。其余的后果是**测量不准**——一样重要，但读它
     #: 不必抢在填表之前，behind「说明」就够了。
@@ -249,11 +278,9 @@ class InitItem:
 # ``unit``。只有 ``safety_critical`` 的项多一条方向性警示，常显。
 #
 # 教学性、背景性、以及「我们为什么这么设计」的段落，全部在各项**上方的注释**里。
-# 五轮反馈（「废话略多」/ 「说明基本上可以删去」/ 「废话太多，代码注释中
-# 保留即可」/ #39 / 「这些废话还是没有清理？」）说的是同一件事：这一页是**填表**，
-# 不是读物。
+# 这一页是**填表**，不是读物。
 #
-# 前三轮都是删字，字每次都长回来。第四轮改的是**结构**：从前页面上有四个格子
+# 只删字不行，字会长回来。要改的是**结构**：页面上若有四个格子
 # （这是什么 / 哪里找 / 填错会怎样 / 可对账），于是总有理由把每个格子填满 ——
 # 而「加起来太长了」不属于任何一次改动。现在只有一个格子，且它只装得下一句话。
 #
@@ -268,14 +295,20 @@ CATALOG: tuple[InitItem, ...] = (
     # 后果展开版：错一个量级，MAST 报出去的每一个电流值就整体错一个量级，而且
     # 不会有任何报错：你会看到一张标着「100 pA」的图，实际是 100 nA。设定点、
     # 饱和判据、I(z) 势垒、dI/dV 标定全部跟着错。
-    # 后果（页面上已删，#39/#40）：错一个量级，MAST 报出去的每一个电流值都
+    # 后果（不在页面上显示）：错一个量级，MAST 报出去的每一个电流值都
     # 跟着错一个量级，且不报错。
     InitItem(
         key="preamp_gain_v_per_a", store="instrument_profile", group="signal_chain",
         severity=REQUIRED, unit="V/A", has_factory=False,
-        label="前置放大器跨阻增益",
-        hint="电流 = 读数电压 ÷ 此值；看前放铭牌 / 手册。",
-        probe="GetMiscInstrumentConfig.current_gains（只给索引与标签，用于交叉核对）",
+        label=tr("前置放大器跨阻增益", "Preamplifier transimpedance gain"),
+        hint=tr(
+            "电流 = 读数电压 ÷ 此值；看前放铭牌 / 手册。",
+            "Current = measured voltage / this value; see the preamp nameplate "
+            "or manual."),
+        probe=tr(
+            "GetMiscInstrumentConfig.current_gains（只给索引与标签，用于交叉核对）",
+            "GetMiscInstrumentConfig.current_gains (index and labels only, for "
+            "cross-checking)"),
     ),
     # 为什么单独再问一遍满量程：Nanonis 侧同样读不到，而你**记得住的是这个数**
     # （「±10 nA 档」），不是 1e9 V/A；两个都填还能互相验一次
@@ -283,37 +316,58 @@ CATALOG: tuple[InitItem, ...] = (
     InitItem(
         key="preamp_full_scale_a", store="instrument_profile", group="signal_chain",
         severity=REQUIRED, safety_critical=True, unit="A", has_factory=False,
-        label="前置放大器满量程电流",
-        hint="前放铭牌 / 手册上「±10 nA」那个数。",
+        label=tr("前置放大器满量程电流", "Preamplifier full-scale current"),
+        hint=tr(
+            "前放铭牌 / 手册上「±10 nA」那个数。",
+            "The \"±10 nA\" figure on the preamp nameplate or manual."),
         consequence=(
-            "**这一个数决定两条安全判据，而两条出厂默认都是错的方向。**\n\n"
-            "① **设定点上限** `setpoint_max_a`（出厂 100 nA）—— 设定点高于前放量程时"
-            "电流**恒小于**设定点，反馈环拿不到目标值，就会一路把 Z 推向样品直到撞针。"
-            "在一台 ±10 nA 的机器上，出厂值留了一条完整的撞针路径。\n\n"
-            "② **电流贴轨判据** `cm_sat_current_a`（出厂 90 nA）—— 前放在 10 nA 就"
-            "贴轨了，读数停在 10 nA，**永远够不到 90**。这条 CRITICAL 告警一直是"
-            "关着的，而它本来是「针已经扎进去了」最直接的证据之一。\n\n"
-            "两条都不会报错，只会安静地什么都不做。"),
+            tr(
+                "**这一个数决定两条安全判据，而两条出厂默认都是错的方向。**\n\n"
+                "① **设定点上限** `setpoint_max_a`（出厂 100 nA）—— 设定点高于前放量程时"
+                "电流**恒小于**设定点，反馈环拿不到目标值，就会一路把 Z 推向样品直到撞针。"
+                "在一台 ±10 nA 的机器上，出厂值留了一条完整的撞针路径。\n\n"
+                "② **电流贴轨判据** `cm_sat_current_a`（出厂 90 nA）—— 前放在 10 nA 就"
+                "贴轨了，读数停在 10 nA，**永远够不到 90**。这条 CRITICAL 告警一直是"
+                "关着的，而它本来是「针已经扎进去了」最直接的证据之一。\n\n"
+                "两条都不会报错，只会安静地什么都不做。",
+                "**This one number determines two safety criteria, and both factory "
+                "defaults point the wrong way.**\n"
+                "\n"
+                "1. **Setpoint limit** `setpoint_max_a` (factory 100 nA): if the setpoint "
+                "is above the preamp range, the current is **always below** the setpoint, "
+                "so the feedback loop never reaches its target and keeps driving Z "
+                "toward the sample until the tip crashes. On a ±10 nA machine the factory "
+                "value leaves a complete tip-crash path.\n"
+                "\n"
+                "2. **Current saturation criterion** `cm_sat_current_a` (factory 90 "
+                "nA): the preamp saturates at 10 nA, so the reading stalls at 10 nA "
+                "and **can never reach 90**. This CRITICAL alert stays permanently "
+                "disabled, although it is one of the most direct pieces of evidence "
+                "that \"the tip has punched in\".\n"
+                "\n"
+                "Neither raises an error; they quietly do nothing.")),
     ),
     # 为什么默认留在「未声明」而不是「样品」：虽然样品偏压是绝大多数机器的约定，
     # 但「按最常见约定默认下去」正是这类错误的来源。这是**接线**不是设置 ——
     # Nanonis 不知道线接在哪儿，任何读数里都没有这个信息。
     # 后果展开版：弄反了整套能态归属就是反的，而这种错在数据里完全看不出来：
     # 谱一样漂亮，结论一样自洽，只是把导带说成了价带。
-    # 后果（页面上已删，#39/#40）：决定 dI/dV 谱里正偏压对应占据态还是空
+    # 后果（不在页面上显示）：决定 dI/dV 谱里正偏压对应占据态还是空
     # 态；弄反了，数据上看不出来。
     InitItem(
         key="bias_applied_to", store="instrument_profile", group="signal_chain",
         severity=REQUIRED, unanswered_values=("unknown",),
-        label="偏压加在样品还是针尖",
-        hint="看接线；Nanonis 读数里没有这个信息。",
+        label=tr("偏压加在样品还是针尖", "Bias applied to sample or tip"),
+        hint=tr(
+            "看接线；Nanonis 读数里没有这个信息。",
+            "Check the wiring; Nanonis readings do not contain this information."),
     ),
-    # 后果（页面上已删，#39/#40）：缺了只影响「这份数据当时用的什么前放」这类事
+    # 后果（不在页面上显示）：缺了只影响「这份数据当时用的什么前放」这类事
     # 后追溯。
     InitItem(
         key="preamp_model", store="instrument_profile", group="signal_chain",
-        severity=OPTIONAL, label="前置放大器型号",
-        hint="铭牌上的字，只用于事后追溯。",
+        severity=OPTIONAL, label=tr("前置放大器型号", "Preamplifier model"),
+        hint=tr("铭牌上的字，只用于事后追溯。", "The text on the nameplate; used only for later traceability."),
     ),
 
     # ── ② 安全包络 ──────────────────────────────────────────────────────────
@@ -321,68 +375,92 @@ CATALOG: tuple[InitItem, ...] = (
     # 压电系数在低温下显著变小，所以还要知道那份标定是在什么温度下做的。
     # 后果展开版：填小了，一部分好用的表面永远够不着，而且扫描地图会在还剩几倍
     # 面积可用时就建议粗动换区（而粗动会让全部既有坐标失效）。
-    # 后果（页面上已删，#39/#40）：填小了够不着好表面、过早建议换区；填大了越界
+    # 后果（不在页面上显示）：填小了够不着好表面、过早建议换区；填大了越界
     # 命令拦不住。
     InitItem(
         key="xy_max_m", store="safety_limits", group="envelope",
         severity=REQUIRED, unit="m",
-        label="XY 压电半程",
-        hint="`Piezo_RangeGet` 全程 ÷ 2，从中心算起。",
-        probe="GetPiezoConfig.range（全程；除以 2 得半程）",
+        label=tr("XY 压电半程", "XY piezo half-range"),
+        hint=tr(
+            "`Piezo_RangeGet` 全程 ÷ 2，从中心算起。",
+            "`Piezo_RangeGet` full range / 2, measured from the center."),
+        probe=tr(
+            "GetPiezoConfig.range（全程；除以 2 得半程）",
+            "GetPiezoConfig.range (full range; divide by 2 for half-range)"),
     ),
     InitItem(
         key="z_min_m", store="safety_limits", group="envelope",
         severity=REQUIRED, safety_critical=True, unit="m",
-        label="Z 绝对位置下限",
-        hint="朝样品那一侧的最负位置；`ZCtrl_LimitsGet`。",
+        label=tr("Z 绝对位置下限", "Z absolute position lower limit"),
+        hint=tr(
+            "朝样品那一侧的最负位置；`ZCtrl_LimitsGet`。",
+            "Most negative position on the sample side; `ZCtrl_LimitsGet`."),
         consequence=(
-            "出厂默认 0.0 会把**隧穿侧那半个行程整个挡在门外**。它看起来像一条保守"
-            "的安全设计，其实不是：从退针位命令到 0.0 本身就已经是几百 nm 的下扎。"
-            "真正的撞针保护在 SafeTip、Z 控制器和进针逻辑里，从来不在这条包络上。"),
+            tr(
+                "出厂默认 0.0 会把**隧穿侧那半个行程整个挡在门外**。它看起来像一条保守"
+                "的安全设计，其实不是：从退针位命令到 0.0 本身就已经是几百 nm 的下扎。"
+                "真正的撞针保护在 SafeTip、Z 控制器和进针逻辑里，从来不在这条包络上。",
+                "The factory default of 0.0 **blocks the entire tunnelling-side half "
+                "of the travel**. It looks like a conservative safety design, but it "
+                "is not: commanding 0.0 from the retracted position is already a plunge "
+                "of several hundred nm. Real tip-crash protection lives in SafeTip, "
+                "the Z controller and the approach logic, never in this envelope.")),
         probe="GetZControllerState.z_limits / GetPiezoConfig.range",
     ),
-    # 后果（页面上已删，#39/#40）：填小了会让正常的退针位落在门外，退针动作被自
+    # 后果（不在页面上显示）：填小了会让正常的退针位落在门外，退针动作被自
     # 己的安全门拒绝。
     InitItem(
         key="z_max_m", store="safety_limits", group="envelope",
         severity=REQUIRED, unit="m",
-        label="Z 绝对位置上限",
-        hint="退针方向的最正位置；`ZCtrl_LimitsGet`。",
+        label=tr("Z 绝对位置上限", "Z absolute position upper limit"),
+        hint=tr(
+            "退针方向的最正位置；`ZCtrl_LimitsGet`。",
+            "Most positive position in the retract direction; `ZCtrl_LimitsGet`."),
         probe="GetZControllerState.z_limits",
     ),
-    # 后果（页面上已删，#39/#40）：填大了，一次「抬针 1 µm」的谱就能把针推
+    # 后果（不在页面上显示）：填大了，一次「抬针 1 µm」的谱就能把针推
     # 出量程或压进样品。
     InitItem(
         key="z_offset_max_m", store="safety_limits", group="envelope",
         severity=REQUIRED, unit="m",
-        label="Z 相对位移上限",
-        hint="STS 抬针这类**有符号位移**的上限，等于 Z 全程。",
+        label=tr("Z 相对位移上限", "Z relative displacement limit"),
+        hint=tr(
+            "STS 抬针这类**有符号位移**的上限，等于 Z 全程。",
+            "Limit for **signed displacements** such as the STS tip lift; equal "
+            "to the full Z range."),
     ),
-    # 后果（页面上已删，#39/#40）：没有它，一次 width_m=2（两米）的扫
+    # 后果（不在页面上显示）：没有它，一次 width_m=2（两米）的扫
     # 描请求会被放行——v0.3.5 真的发生过。
     InitItem(
         key="scan_size_max_m", store="safety_limits", group="envelope",
         severity=REQUIRED, unit="m",
-        label="扫描尺寸上限",
-        hint="单帧边长上限，等于 XY 全程。",
+        label=tr("扫描尺寸上限", "Scan size limit"),
+        hint=tr(
+            "单帧边长上限，等于 XY 全程。",
+            "Maximum side length of a single frame; equal to the full XY range."),
     ),
     # 它**不是**一个偏好，是前放的物理量程 —— 应当等于上面填的「前放满量程」，
     # 页面会用那个数给出建议值。
     InitItem(
         key="setpoint_max_a", store="safety_limits", group="envelope",
         severity=REQUIRED, safety_critical=True, unit="A",
-        label="电流设定点上限",
-        hint="等于上面的「前放满量程」。",
+        label=tr("电流设定点上限", "Current setpoint limit"),
+        hint=tr("等于上面的「前放满量程」。", "Equal to the \"preamp full scale\" above."),
         consequence=(
-            "高于前放量程的设定点**物理上达不到**：反馈环拿不到目标电流，就会一路"
-            "把 Z 推向样品，直到撞针。这是这一页里后果最直接的一条。"),
+            tr(
+                "高于前放量程的设定点**物理上达不到**：反馈环拿不到目标电流，就会一路"
+                "把 Z 推向样品，直到撞针。这是这一页里后果最直接的一条。",
+                "A setpoint above the preamp range is **physically unreachable**: the "
+                "feedback loop cannot reach the target current and keeps driving Z "
+                "toward the sample until the tip crashes. This is the most direct consequence "
+                "on this page.")),
     ),
-    # 后果（页面上已删，#39/#40）：填大了，一次写错小数点的偏压就直接送到结上。
+    # 后果（不在页面上显示）：填大了，一次写错小数点的偏压就直接送到结上。
     InitItem(
         key="bias_max_v", store="safety_limits", group="envelope",
         severity=RECOMMENDED, unit="V",
-        label="偏压上限",
-        hint="`Bias_RangeGet` 对账。",
+        label=tr("偏压上限", "Bias limit"),
+        hint=tr("`Bias_RangeGet` 对账。", "Reconcile with `Bias_RangeGet`."),
         probe="GetMiscInstrumentConfig.bias_range",
     ),
 
@@ -392,12 +470,20 @@ CATALOG: tuple[InitItem, ...] = (
     InitItem(
         key="approach_damages_surface", store="instrument_profile", group="approach",
         severity=REQUIRED, safety_critical=True, unanswered_values=("unknown",),
-        label="这台机器进针会不会碰伤表面",
-        hint="只有看过进针后那块地方的人知道。",
+        label=tr("这台机器进针会不会碰伤表面", "Whether approach damages the surface on this machine"),
+        hint=tr(
+            "只有看过进针后那块地方的人知道。",
+            "Only someone who has inspected the spot after approach knows."),
         consequence=(
-            "填「不会」而实际会：地图不设避让区，之后的扫描会挑到扎痕上——"
-            "浪费一张图，还可能把已经调好的针撞钝。填「会」而实际不会：只赔掉"
-            "进针点周围一两百纳米的表面。所以「未知」按保守（＝会）处理。"),
+            tr(
+                "填「不会」而实际会：地图不设避让区，之后的扫描会挑到扎痕上——"
+                "浪费一张图，还可能把已经调好的针撞钝。填「会」而实际不会：只赔掉"
+                "进针点周围一两百纳米的表面。所以「未知」按保守（＝会）处理。",
+                "Answering \"No\" when it does: the map sets no avoidance zone, later "
+                "scans pick spots on the punch marks, wasting a frame and possibly "
+                "blunting a well-tuned tip. Answering \"Yes\" when it does not: you only "
+                "give up the surface within a hundred or two nanometres of the approach "
+                "point. So \"unknown\" is treated conservatively (as \"Yes\").")),
     ),
     # 与上一项是两件事：上一项问的是会不会点伤**表面**（代价是一片表面），
     # 这一项问的是会不会毁掉**针尖**（代价是针，加之后几小时的修针）。
@@ -405,64 +491,90 @@ CATALOG: tuple[InitItem, ...] = (
     InitItem(
         key="approach_supervision", store="instrument_profile", group="approach",
         severity=REQUIRED, safety_critical=True, unanswered_values=("unknown",),
-        label="进针要不要有人在场",
-        hint="问的是会不会**扎针**（毁针尖，不是表面）。",
+        label=tr("进针要不要有人在场", "Whether approach needs an operator present"),
+        hint=tr(
+            "问的是会不会**扎针**（毁针尖，不是表面）。",
+            "Asks whether approach can **crash the tip** (destroy the tip, not "
+            "the surface)."),
         consequence=(
-            "它决定 **agent 敢不敢自己发起进针**。填「可无人值守」而这台机器其实"
-            "会扎针，自主流程就会在没人看着的时候把针送进去。\n\n"
-            "⚠ 老实说明这一项**目前只注入给模型，不是硬门**：HITL 审批门是在建图时"
-            "从技能的 safety_level 派生的（`AutoApproach` 现在是 AUTO），运行时"
-            "填的值改不了它。"),
+            tr(
+                "它决定 **agent 敢不敢自己发起进针**。填「可无人值守」而这台机器其实"
+                "会扎针，自主流程就会在没人看着的时候把针送进去。\n\n"
+                "⚠ 老实说明这一项**目前只注入给模型，不是硬门**：HITL 审批门是在建图时"
+                "从技能的 safety_level 派生的（`AutoApproach` 现在是 AUTO），运行时"
+                "填的值改不了它。",
+                "It decides **whether the agent may start an approach on its own**. "
+                "If you answer \"Unattended\" but this machine actually crashes the tip, "
+                "the autonomous flow will drive the tip in with nobody watching.\n"
+                "\n"
+                "⚠ To be clear: this item is **currently only injected into the model, "
+                "not a hard gate**: the HITL approval gate is derived from the skill's "
+                "safety_level when the graph is built (`AutoApproach` is currently "
+                "AUTO), and the value entered at run time cannot change it.")),
     ),
-    # 增益取决于仪器和针尖整定，没有普适值。面板的 SI 前缀必须正确解析；
-    # 参数由代码直接写入，避免模型转述时丢失指数。
+    # 增益是这台机器 + 这根针的整定结果，没有普适值。照抄面板上那个数即可：
+    # 面板显示的 `3.000p` 就是 `3e-12`。
+    # 「错十二个量级」的来历：模型转述数字时可能丢掉指数，`3e-12` 会变成
+    # `3`（＝3 米）。这一项由代码直接写入、不再经过模型转述数字，就是为了
+    # 关掉那条路径。
+    # 后果（不在页面上显示）：错一个量级，反馈要么慢到进不动、要么自激振荡
+    # ；错十二个量级就是 Z 直冲样品。
     InitItem(
         key="approach_p_gain_m", store="instrument_profile", group="approach",
         severity=REQUIRED, unit="m", has_factory=False,
-        label="进针 Z 比例增益 (P)",
-        hint="照抄面板的 Proportional：`3.000p` 就是 `3e-12`。",
+        label=tr("进针 Z 比例增益 (P)", "Approach Z proportional gain (P)"),
+        hint=tr(
+            "照抄面板的 Proportional：`3.000p` 就是 `3e-12`。",
+            "Copy the panel's Proportional value: `3.000p` means `3e-12`."),
     ),
-    # 后果（页面上已删，#39/#40）：**扫图前要改回扫图那一档**，否则会得到一
+    # 后果（不在页面上显示）：**扫图前要改回扫图那一档**，否则会得到一
     # 张带振铃的图（档位表填了就自动下发）。
     InitItem(
         key="approach_i_gain_m_per_s", store="instrument_profile", group="approach",
         severity=REQUIRED, unit="m/s", has_factory=False,
-        label="进针 Z 积分增益 (I)",
-        hint="照抄面板上的 Integral。",
+        label=tr("进针 Z 积分增益 (I)", "Approach Z integral gain (I)"),
+        hint=tr("照抄面板上的 Integral。", "Copy the Integral value from the panel."),
     ),
-    # 后果（页面上已删，#39/#40）：太大 = 建立隧道时电流冲得很猛；太小 = 
+    # 后果（不在页面上显示）：太大 = 建立隧道时电流冲得很猛；太小 = 
     # 判据在噪声里，进针停不下来。
     InitItem(
         key="approach_setpoint_a", store="instrument_profile", group="approach",
         severity=REQUIRED, unit="A", has_factory=False,
-        label="进针电流设定点",
-        hint="进针时的目标电流，越大进针越快。",
+        label=tr("进针电流设定点", "Approach current setpoint"),
+        hint=tr("进针时的目标电流，越大进针越快。", "Target current during approach; larger is faster."),
     ),
-    # 后果（页面上已删，#39/#40）：缺了只是无法在自检里核对面板配置与预期是否一
+    # 后果（不在页面上显示）：缺了只是无法在自检里核对面板配置与预期是否一
     # 致。
     InitItem(
         key="approach_steps_per_cycle", store="instrument_profile", group="approach",
-        severity=RECOMMENDED, unit="步", has_factory=False,
-        label="Auto Approach 每轮步数",
-        hint="面板上的 Number of Pulses，MAST 读不到。",
+        severity=RECOMMENDED, unit=tr("步", "steps"), has_factory=False,
+        label=tr("Auto Approach 每轮步数", "Auto Approach steps per cycle"),
+        hint=tr(
+            "面板上的 Number of Pulses，MAST 读不到。",
+            "The Number of Pulses on the panel; MAST cannot read it."),
     ),
-    # 后果（页面上已删，#39/#40）：缺了就判断不出「这次进针是不是异常」（走了三
+    # 后果（不在页面上显示）：缺了就判断不出「这次进针是不是异常」（走了三
     # 倍步数还没到通常是针掉了 / 空滑 / 方向反）。
     InitItem(
         key="approach_expected_steps", store="instrument_profile", group="approach",
-        severity=RECOMMENDED, unit="步", has_factory=False,
-        label="进针预计总步数",
-        hint="从退针位到建立隧道的经验步数。",
+        severity=RECOMMENDED, unit=tr("步", "steps"), has_factory=False,
+        label=tr("进针预计总步数", "Expected total approach steps"),
+        hint=tr(
+            "从退针位到建立隧道的经验步数。",
+            "Empirical step count from the retracted position to tunnelling."),
     ),
     # 信号槽分配是这台机器的接线，每台都可能不同；哪一路解调是 dI/dV、哪一路是
     # 二阶（IETS），也只有配这台机器的人知道。
-    # 后果（页面上已删，#39/#40）：缺了，**进针 dI/dV 测距整个不可用*
+    # 后果（不在页面上显示）：缺了，**进针 dI/dV 测距整个不可用*
     # *（会明说，不会静默失败）。
     InitItem(
         key="lockin_signal_index", store="instrument_profile", group="approach",
         severity=RECOMMENDED, has_factory=False,
-        label="dI/dV lock-in 信号索引",
-        hint="在下拉列表中按通道名选择所需信号。",
+        label=tr("dI/dV lock-in 信号索引", "dI/dV lock-in signal index"),
+        hint=tr(
+            "下拉里按通道名选，例如 `LI Demod 1 X (A)`。",
+            "Pick by channel name in the dropdown, e.g. `LI Demod "
+            "1 X (A)`."),
         probe="ListSignalChannels（Signals_NamesGet）",
     ),
     # 解调器可提供 X/Y 或 R/Amplitude，具体取决于通道配置。读数本身
@@ -475,67 +587,97 @@ CATALOG: tuple[InitItem, ...] = (
     InitItem(
         key="lockin_readout_form", store="instrument_profile", group="approach",
         severity=RECOMMENDED, safety_critical=True, unanswered_values=("unknown",),
-        label="lock-in 解调形式（上面那个信号是什么）",
-        hint="看 Nanonis 里这一路解调怎么配的；读数看不出来。",
+        label=tr("lock-in 解调形式（上面那个信号是什么）", "Lock-in demodulation form (what the signal above is)"),
+        hint=tr(
+            "看 Nanonis 里这一路解调怎么配的；读数看不出来。",
+            "Check how this demodulation channel is configured in Nanonis; the "
+            "readings do not show it."),
         consequence=(
-            "**它决定「越近越大」这条判据成不成立。** X 是带符号投影，接近途中"
-            "相位会转，|X| 扫过 90° 时穿零 —— 系统会把这次穿零播报成"
-            "「离样品变远了」，而用户据此继续进针。"
+            tr(
+                "**它决定「越近越大」这条判据成不成立。** X 是带符号投影，接近途中"
+                "相位会转，|X| 扫过 90° 时穿零 —— 系统会把这次穿零播报成"
+                "「离样品变远了」，而用户据此继续进针。",
+                "**It decides whether the \"larger when closer\" criterion holds.** X "
+                "is a signed projection; during approach the phase rotates, and |X| "
+                "crosses zero when it sweeps through 90 deg. The system would report "
+                "that crossing as \"moving away from the sample\", and the user would "
+                "keep approaching on that basis.")
         ),
     ),
-    # 后果（页面上已删，#39/#40）：缺了，独立于电流的那条撞针判据没有输入。
+    # 后果（不在页面上显示）：缺了，独立于电流的那条撞针判据没有输入。
     InitItem(
         key="qplus_amplitude_signal_index", store="instrument_profile", group="approach",
         severity=RECOMMENDED,
-        label="qPlus 振幅信号索引",
-        hint="下拉里按通道名选（−1 = 自动查找）。",
+        label=tr("qPlus 振幅信号索引", "qPlus amplitude signal index"),
+        hint=tr("下拉里按通道名选（−1 = 自动查找）。", "Pick by channel name in the dropdown (-1 = auto-detect)."),
         probe="ListSignalChannels（Signals_NamesGet）",
     ),
     # 它是这一支音叉、这一次装配的值。**换针即失效** —— MAST 会在登记新针尖时
     # 自动清掉它（先归档进退役针尖那一行）。
-    # 后果（页面上已删，#39/#40）：缺了判据没有分母，永远报不出撞针；拿上一根针
+    # 后果（不在页面上显示）：缺了判据没有分母，永远报不出撞针；拿上一根针
     # 的基线比，则要么恒报要么恒不报。
     InitItem(
         key="qplus_amplitude_baseline", store="instrument_profile", group="approach",
         severity=RECOMMENDED, has_factory=False,
-        label="qPlus 自由振荡振幅基线",
-        hint="针尖未接触时跑 `ReadTipOscillationAmplitude`。",
+        label=tr("qPlus 自由振荡振幅基线", "qPlus free-oscillation amplitude baseline"),
+        hint=tr(
+            "针尖未接触时跑 `ReadTipOscillationAmplitude`。",
+            "Run `ReadTipOscillationAmplitude` with the tip out of contact."),
     ),
 
     # ── ④ 退针 ──────────────────────────────────────────────────────────────
     InitItem(
         key="retract_motor_dir", store="instrument_profile", group="retract",
         severity=REQUIRED, safety_critical=True,
-        label="退针方向（粗动马达远离样品）",
-        hint="装置接线约定，多数 Nanonis 是 Z+ = 远离。",
+        label=tr("退针方向（粗动马达远离样品）", "Retract direction (coarse motor away from sample)"),
+        hint=tr(
+            "装置接线约定，多数 Nanonis 是 Z+ = 远离。",
+            "Depends on the wiring convention; on most Nanonis setups Z+ = away."),
         consequence=(
-            "搞反了，一次「退针 3000 步」就是往样品里送 3000 步。"
-            "**运行时有兜底**：退针分级进行，第一级只走 1 步就回读 Z 压电走向，"
-            "发现在逼近立刻停并撤针——所以填错最多赔 1 步。但请如实填。"),
+            tr(
+                "搞反了，一次「退针 3000 步」就是往样品里送 3000 步。"
+                "**运行时有兜底**：退针分级进行，第一级只走 1 步就回读 Z 压电走向，"
+                "发现在逼近立刻停并撤针——所以填错最多赔 1 步。但请如实填。",
+                "If reversed, a \"retract 3000 steps\" command drives the tip 3000 steps "
+                "into the sample. **There is a run-time safeguard**: retraction is "
+                "staged, the first stage moves only 1 step and reads back the Z piezo "
+                "trend, and if it sees the tip approaching it stops and withdraws immediately, "
+                "so a wrong entry costs at most 1 step. But please fill it in truthfully.")),
     ),
     InitItem(
         key="z_extend_sign", store="instrument_profile", group="retract",
         severity=REQUIRED, safety_critical=True,
-        label="压电伸长（趋向样品）对应 Z 读数符号",
-        hint="Nanonis 内部约定 + 接线，两种都见过。",
+        label=tr("压电伸长（趋向样品）对应 Z 读数符号", "Z reading sign for piezo extension (toward sample)"),
+        hint=tr(
+            "Nanonis 内部约定 + 接线，两种都见过。",
+            "Nanonis internal convention plus wiring; both signs have been seen."),
         consequence=(
-            "上面那条退针自检就是靠这个符号把「Z 在动」翻译成「在远离还是在靠近」。"
-            "符号错了，兜底判据本身会读反。"),
+            tr(
+                "上面那条退针自检就是靠这个符号把「Z 在动」翻译成「在远离还是在靠近」。"
+                "符号错了，兜底判据本身会读反。",
+                "The retract self-check above uses this sign to translate \"Z is moving\" "
+                "into \"moving away or approaching\". With the wrong sign, the safeguard "
+                "itself reads backwards.")),
     ),
-    # 后果（页面上已删，#39/#40）：退不够就拔样品，样品架会刮到针。
+    # 后果（不在页面上显示）：退不够就拔样品，样品架会刮到针。
     InitItem(
         key="retract_total_steps", store="instrument_profile", group="retract",
-        severity=RECOMMENDED, unit="步",
-        label="换样品退针总步数",
-        hint="取决于样品架几何与粗动步长。",
+        severity=RECOMMENDED, unit=tr("步", "steps"),
+        label=tr("换样品退针总步数", "Total retract steps for sample change"),
+        hint=tr(
+            "取决于样品架几何与粗动步长。",
+            "Depends on the sample holder geometry and the coarse step size."),
     ),
-    # 后果（页面上已删，#39/#40）：设太小会把噪声当成「在远离」；设太大会把正常
+    # 后果（不在页面上显示）：设太小会把噪声当成「在远离」；设太大会把正常
     # 退针误判成失败。
     InitItem(
         key="z_recede_min_nm", store="instrument_profile", group="retract",
         severity=RECOMMENDED, unit="nm",
-        label="退针自检阈值（Z 伸长超过此值判定为远离）",
-        hint="取决于本机的 Z 噪声与粗动步长。",
+        label=tr(
+            "退针自检阈值（Z 伸长超过此值判定为远离）",
+            "Retract self-check threshold (Z extension above this means moving "
+            "away)"),
+        hint=tr("取决于本机的 Z 噪声与粗动步长。", "Depends on this machine's Z noise and coarse step size."),
     ),
     # 不是固定等待 —— Z 一停就立刻读，这个数只决定「等到什么时候放弃」。
     # 反馈从退针位找到表面要多久是这台机器的性质（增益、温度、针尖都影响），
@@ -544,86 +686,116 @@ CATALOG: tuple[InitItem, ...] = (
     # 「等了多久」而不是「表面在哪」。超时应报未得出结论并停下，不会
     # 假装有答案，所以填短了是**慢+拒绝**，不是误判。太长则马达真卡住、或者粗逼近
     # 高压没开的时候，每一级都要把这个预算等满才肯拒绝，换区变慢。
-    # 后果（页面上已删，#39/#40）：太短会读到 Z 斜坡中段（会如实报「没得出结
+    # 后果（不在页面上显示）：太短会读到 Z 斜坡中段（会如实报「没得出结
     # 论」，不会误判）；太长则马达卡住时换区变慢。
     InitItem(
         key="z_settle_timeout_s", store="instrument_profile", group="retract",
         severity=RECOMMENDED, unit="s",
-        label="退针自检等 Z 稳定的时间预算",
-        hint="须在目标仪器上测量并设置，确保 Z 有足够时间稳定。",
+        label=tr("退针自检等 Z 稳定的时间预算", "Retract self-check time budget for Z to settle"),
+        hint=tr(
+            "只能实测。",
+            "Measure it on the real machine."),
     ),
 
     # ── ⑤ 粗动 ──────────────────────────────────────────────────────────────
     # 没有 XY 粗动的机器上，**当前压电范围内的表面就是「插拔样品之前你能看到的
     # 全部表面」** —— 修针尖的污染会不可逆地吃掉可用面积，所以选点策略必须省着来
     # （外圈→内圈）。
-    # 后果（页面上已删，#39/#40）：填成「有」而实际没有，MAST 会用坏了就打
+    # 后果（不在页面上显示）：填成「有」而实际没有，MAST 会用坏了就打
     # 算换区，而它根本换不了。
     InitItem(
         key="xy_coarse_motion", store="instrument_profile", group="coarse",
         severity=REQUIRED,
-        label="这台机器有没有 XY 粗动",
-        hint="机械配置。",
+        label=tr("这台机器有没有 XY 粗动", "Whether this machine has XY coarse motion"),
+        hint=tr("机械配置。", "Mechanical configuration."),
     ),
     InitItem(
         key="max_amplitude_v", store="coarse_drive", group="coarse",
         severity=REQUIRED, safety_critical=True, unit="V", has_factory=False,
-        label="粗动驱动幅度上限（本机声明）",
-        hint="叠堆能承受的电压，只有搭这台机器的人知道。",
+        label=tr("粗动驱动幅度上限（本机声明）", "Coarse drive amplitude limit (declared for this machine)"),
+        hint=tr(
+            "叠堆能承受的电压，只有搭这台机器的人知道。",
+            "The voltage the piezo stack can take; only the person who built this "
+            "machine knows."),
         consequence=(
-            "**这是整页里唯一一个填错了硬件当场报废的数**，而且软件救不回来。"
-            "控制器的上限和**叠堆**的上限是两个数，只有后者要紧：「有些 Nanonis "
-            "控制器支持 400 V，但是有时候 300 V 就烧坏了」。\n\n"
-            "所以未声明时 MAST 拒绝一切粗动写入——不知道叠堆能承受多少，是不动的"
-            "理由，不是回退到别人机器上那个数的理由。写入需要管理员 PIN。"),
-        probe="GetMiscInstrumentConfig.motor_freq_amp（读回当前值，用于移动前核对）",
+            tr(
+                "**这是整页里唯一一个填错了硬件当场报废的数**，而且软件救不回来。"
+                "控制器的上限和**叠堆**的上限是两个数，只有后者要紧：「有些 Nanonis "
+                "控制器支持 400 V，但是有时候 300 V 就烧坏了」。\n\n"
+                "所以未声明时 MAST 拒绝一切粗动写入——不知道叠堆能承受多少，是不动的"
+                "理由，不是回退到别人机器上那个数的理由。写入需要管理员 PIN。",
+                "**This is the only number on this page that destroys hardware on the "
+                "spot if wrong**, and software cannot undo it. The controller's limit "
+                "and the **stack's** limit are two different numbers, and only the "
+                "latter matters: \"some Nanonis controllers support 400 V, but sometimes "
+                "300 V already burns out the stack\".\n"
+                "\n"
+                "So while it is undeclared MAST refuses every coarse-motion write: "
+                "not knowing what the stack can take is a reason not to move, not a "
+                "reason to fall back to another machine's number. Writing requires "
+                "the admin PIN.")),
+        probe=tr(
+            "GetMiscInstrumentConfig.motor_freq_amp（读回当前值，用于移动前核对）",
+            "GetMiscInstrumentConfig.motor_freq_amp (reads back the current value, "
+            "for checking before a move)"),
     ),
-    # 后果（页面上已删，#39/#40）：声明的上限只约束 MAST **写**什么，
+    # 后果（不在页面上显示）：声明的上限只约束 MAST **写**什么，
     # 管不了驱动**实际**是多少——所以每次粗动前都读回来比一次，读不到就拒绝。
     InitItem(
         key="expected_frequency_hz", store="coarse_drive", group="coarse",
         severity=RECOMMENDED, unit="Hz", has_factory=False,
-        label="粗动驱动频率（移动前核对用）",
-        hint="本机整定值；留空 = 不核对频率。",
+        label=tr("粗动驱动频率（移动前核对用）", "Coarse drive frequency (checked before moves)"),
+        hint=tr(
+            "本机整定值；留空 = 不核对频率。",
+            "This machine's tuned value; leave empty = do not check frequency."),
     ),
     # 真值只能实机标：移一次、扫一张图、看有没有刮痕。取决于样品倾斜、台面跳动
     # 和针的长度。压电退针只有 1–2 µm 余量，而样品台侧滑时的垂直跳动、样品倾斜和
     # 针尖长度都远不止这个数。
-    # 后果（页面上已删，#39/#40）：退得不够，横移的时候针就在样品上犁过去（压电
+    # 后果（不在页面上显示）：退得不够，横移的时候针就在样品上犁过去（压电
     # 退针只有 1–2 µm 余量）。
     InitItem(
         key="xy_prewithdraw_steps", store="instrument_profile", group="coarse",
-        severity=RECOMMENDED, unit="步",
+        severity=RECOMMENDED, unit=tr("步", "steps"),
         depends_on=("instrument_profile.xy_coarse_motion",), depends_values=("yes",),
-        label="横向粗动前的退针步数（清障）",
-        hint="实机标：移一次、扫一张图、看有没有刮痕。",
+        label=tr("横向粗动前的退针步数（清障）", "Retract steps before lateral coarse motion (clearance)"),
+        hint=tr(
+            "实机标：移一次、扫一张图、看有没有刮痕。",
+            "Calibrate on the real machine: move once, scan a frame, look for scratches."),
     ),
-    # 后果（页面上已删，#39/#40）：不够远的话「换了区」只是把旧区域挪进视野，扫
+    # 后果（不在页面上显示）：不够远的话「换了区」只是把旧区域挪进视野，扫
     # 出来还是同一片被污染过的表面。
     InitItem(
         key="xy_site_spacing_steps", store="instrument_profile", group="coarse",
-        severity=RECOMMENDED, unit="步",
+        severity=RECOMMENDED, unit=tr("步", "steps"),
         depends_on=("instrument_profile.xy_coarse_motion",), depends_values=("yes",),
-        label="粗动站点最小间距",
-        hint="取决于本机粗动步长，只能实机标。",
+        label=tr("粗动站点最小间距", "Minimum spacing between coarse sites"),
+        hint=tr(
+            "取决于本机粗动步长，只能实机标。",
+            "Depends on this machine's coarse step size; calibrate on the real "
+            "machine."),
     ),
-    # 后果（页面上已删，#39/#40）：填太小，可能重叠的站点会被画成不重叠——好样
+    # 后果（不在页面上显示）：填太小，可能重叠的站点会被画成不重叠——好样
     # 品被判成用完，或在毁掉的区域上重新开工。
     InitItem(
         key="xy_step_uncertainty_frac", store="instrument_profile", group="coarse",
         severity=RECOMMENDED,
         depends_on=("instrument_profile.xy_coarse_motion",), depends_values=("yes",),
-        label="粗动单步位移的相对不确定度",
-        hint="随驱动幅度 / 温度 / 负载漂移，低温下更大。",
+        label=tr("粗动单步位移的相对不确定度", "Relative uncertainty of coarse step displacement"),
+        hint=tr(
+            "随驱动幅度 / 温度 / 负载漂移，低温下更大。",
+            "Drifts with drive amplitude, temperature and load; larger at low temperature."),
     ),
-    # 后果（页面上已删，#39/#40）：**缺了只是少一句注释**——粗动标记上不写
+    # 后果（不在页面上显示）：**缺了只是少一句注释**——粗动标记上不写
     # 「大约走了这么远」，而不是编一个数出来。
     InitItem(
         key="xy_motor_step_m", store="instrument_profile", group="coarse",
         severity=OPTIONAL, unit="m", has_factory=False,
         depends_on=("instrument_profile.xy_coarse_motion",), depends_values=("yes",),
-        label="XY 粗动单步位移标定",
-        hint="只能实测，且会漂；**仅供估算**。",
+        label=tr("XY 粗动单步位移标定", "XY coarse step displacement calibration"),
+        hint=tr(
+            "只能实测，且会漂；**仅供估算**。",
+            "Measure it on the real machine; it drifts; **for estimation only**."),
     ),
 
     # ── ⑥ 真空互锁 ──────────────────────────────────────────────────────────
@@ -631,116 +803,140 @@ CATALOG: tuple[InitItem, ...] = (
     InitItem(
         key="vacuum_gauge_min_pa", store="instrument_profile", group="vacuum",
         severity=REQUIRED, safety_critical=True, unit="Pa",
-        label="真空计量程下限",
-        hint="规的手册：冷阴极规约 5e-8 Pa，Pirani 只到 ~1 Pa。",
+        label=tr("真空计量程下限", "Vacuum gauge range lower limit"),
+        hint=tr(
+            "规的手册：冷阴极规约 5e-8 Pa，Pirani 只到 ~1 Pa。",
+            "From the gauge manual: a cold-cathode gauge reaches about 5e-8 Pa, "
+            "a Pirani only ~1 Pa."),
         consequence=(
-            "**fail-open 的入口。** 规触底时发出的数看起来正好像「真空非常好」。"
-            "填成 DL-7 的值而实际是 Pirani，触底只说明「低于 1 Pa」—— 那"
-            "**包含 0.5 Pa，正在放电区里**，互锁形同虚设。"
+            tr(
+                "**fail-open 的入口。** 规触底时发出的数看起来正好像「真空非常好」。"
+                "填成 DL-7 的值而实际是 Pirani，触底只说明「低于 1 Pa」—— 那"
+                "**包含 0.5 Pa，正在放电区里**，互锁形同虚设。",
+                "**An entry point for fail-open.** When the gauge hits its floor, the "
+                "reading looks exactly like \"excellent vacuum\". If you enter the DL-7 "
+                "value but the gauge is actually a Pirani, hitting the floor only means "
+                "\"below 1 Pa\", which **includes 0.5 Pa, inside the discharge region**, "
+                "and the interlock is effectively void.")
         ),
     ),
     InitItem(
         key="vacuum_gauge_full_scale_pa", store="instrument_profile", group="vacuum",
         severity=REQUIRED, safety_critical=True, unit="Pa",
-        label="真空计满量程",
-        hint="规的手册。",
+        label=tr("真空计满量程", "Vacuum gauge full scale"),
+        hint=tr("规的手册。", "From the gauge manual."),
         consequence=(
-            "超量程的读数不是数据是饱和。DL-7 的帧解析不校验指数位，超量程可能"
-            "解出一个**看着合理的小数** —— 把它当成有效读数就会在高压下放行粗动。"
+            tr(
+                "超量程的读数不是数据是饱和。DL-7 的帧解析不校验指数位，超量程可能"
+                "解出一个**看着合理的小数** —— 把它当成有效读数就会在高压下放行粗动。",
+                "An over-range reading is saturation, not data. The DL-7 frame parser "
+                "does not validate the exponent digit, so an over-range value may decode "
+                "to a **plausible-looking small number**; treating it as valid would "
+                "allow coarse motion at high voltage.")
         ),
     ),
-    # 后果（页面上已删，#39/#40）：设高了，抽 / 放气途中的粗动会在 Pasc
+    # 后果（不在页面上显示）：设高了，抽 / 放气途中的粗动会在 Pasc
     # hen 极小值附近打火。
     InitItem(
         key="coarse_motion_max_pressure_pa", store="instrument_profile", group="vacuum",
         severity=RECOMMENDED, unit="Pa",
-        label="允许粗动的压强上限",
-        hint="用出厂默认即可（比放电区下沿低一个量级）。",
+        label=tr("允许粗动的压强上限", "Pressure limit for allowing coarse motion"),
+        hint=tr(
+            "用出厂默认即可（比放电区下沿低一个量级）。",
+            "The factory default is fine (one order of magnitude below the lower "
+            "edge of the discharge region)."),
     ),
     # 选「关闭阻断」时仍然会计算并记录裁决 ——「我们选择不检查」要留得下痕迹，
     # 不能悄悄变成「没什么可检查的」。
-    # 后果（页面上已删，#39/#40）：没接真空计的机器如果选「只认真空计」，粗动会
+    # 后果（不在页面上显示）：没接真空计的机器如果选「只认真空计」，粗动会
     # 一直被拒绝。
     InitItem(
         key="vacuum_interlock_mode", store="instrument_profile", group="vacuum",
         severity=RECOMMENDED,
-        label="真空互锁模式",
-        hint="拿不到可信压强读数时怎么办。",
+        label=tr("真空互锁模式", "Vacuum interlock mode"),
+        hint=tr("拿不到可信压强读数时怎么办。", "What to do when no trustworthy pressure reading is available."),
     ),
 
     # ── ⑦ 扫图 ──────────────────────────────────────────────────────────────
     # 它是自动调平触发判据的**分母**：判据是「这一帧的斜坡吃掉多少 Z 量程」。
     # 填错了，同一个倾角在大图和小图上给出的紧迫程度就全错。
-    # 后果（页面上已删，#39/#40）：它是自动调平判据的分母：填错了，要么该调平时
+    # 后果（不在页面上显示）：它是自动调平判据的分母：填错了，要么该调平时
     # 不调，要么每一帧都嚷着要调平。
     InitItem(
         key="z_range_m", store="instrument_profile", group="scan",
         severity=REQUIRED, unit="m",
-        label="Z 压电总量程",
-        hint="`GetPiezoConfig.range` 的 Z 分量。",
-        probe="GetPiezoConfig.range（Z 分量）",
+        label=tr("Z 压电总量程", "Z piezo total range"),
+        hint=tr("`GetPiezoConfig.range` 的 Z 分量。", "The Z component of `GetPiezoConfig.range`."),
+        probe=tr("GetPiezoConfig.range（Z 分量）", "GetPiezoConfig.range (Z component)"),
     ),
-    # 后果（页面上已删，#39/#40）：像素数 / 每线时间 / 帧宽单独看都合法，
+    # 后果（不在页面上显示）：像素数 / 每线时间 / 帧宽单独看都合法，
     # **乘起来**才知道扫得多快——只有这条拦得住那个组合。
     InitItem(
         key="v_tip_max_m_s", store="instrument_profile", group="scan",
         severity=RECOMMENDED, unit="m/s",
-        label="针尖横向扫描速度上限",
-        hint="经验值：这根针、这个样品能扛多快。",
+        label=tr("针尖横向扫描速度上限", "Tip lateral scan speed limit"),
+        hint=tr("经验值：这根针、这个样品能扛多快。", "Empirical: how fast this tip and sample can go."),
     ),
-    # 后果（页面上已删，#39/#40）：转过头会吃掉 XY 行程，并让 Z 在帧角上
+    # 后果（不在页面上显示）：转过头会吃掉 XY 行程，并让 Z 在帧角上
     # 打满。
     InitItem(
         key="tilt_limit_deg", store="instrument_profile", group="scan",
         severity=RECOMMENDED, unit="°",
-        label="压电倾斜补偿上限（单轴）",
-        hint="本机压电与样品安装的失配角。",
+        label=tr("压电倾斜补偿上限（单轴）", "Piezo tilt compensation limit (per axis)"),
+        hint=tr(
+            "本机压电与样品安装的失配角。",
+            "The misalignment angle between this machine's piezo and the sample "
+            "mounting."),
     ),
     # 出厂 4 档是从文献协议数值化来的**起点**；增益一档出厂根本不敢给数
     # （强依赖仪器与针尖态）。把扫图那套 P / T 填进来之后，就不需要在进针和扫图
     # 之间手动切增益了 ——`ScanAt` 每帧都从这里下发。
-    # 后果（页面上已删，#39/#40）：不改也能跑（用出厂档），但每一帧都在用别人机
+    # 后果（不在页面上显示）：不改也能跑（用出厂档），但每一帧都在用别人机
     # 器的速度。
     InitItem(
         key="tiers", store="scan_policy", group="scan",
         severity=RECOMMENDED,
-        label="扫描参数档位表（扫图数值组）",
-        hint="在「设置 → 扫描参数档位」里编辑。",
+        label=tr("扫描参数档位表（扫图数值组）", "Scan parameter preset table (scan value sets)"),
+        hint=tr("在「设置 → 扫描参数档位」里编辑。", "Edit it under \"Settings > Scan parameter presets\"."),
     ),
 
     # ── ⑧ 破坏范围 ──────────────────────────────────────────────────────────
     # 碎屑实际扎出去多远，是**这根针、这个样品、这个温度**的属性 —— 只有看过修针
     # 后那一块的人知道。默认值是起点，不是测量值。
-    # 后果（页面上已删，#39/#40）：填小了，扫描地图会把针尖领回一片已经被自己毁
+    # 后果（不在页面上显示）：填小了，扫描地图会把针尖领回一片已经被自己毁
     # 掉的表面。
     InitItem(
         key="avoid_radius_tip_shape_nm", store="instrument_profile", group="damage",
         severity=RECOMMENDED, unit="nm",
-        label="修针尖避让半径",
-        hint="只有看过修针后那一块的人知道。",
+        label=tr("修针尖避让半径", "Tip conditioning avoidance radius"),
+        hint=tr(
+            "只有看过修针后那一块的人知道。",
+            "Only someone who has inspected the area after conditioning knows."),
     ),
-    # 后果（页面上已删，#39/#40）：同上。
+    # 后果（不在页面上显示）：同上。
     InitItem(
         key="avoid_radius_pulse_nm", store="instrument_profile", group="damage",
         severity=RECOMMENDED, unit="nm",
-        label="电脉冲避让半径",
-        hint="同上，取决于脉冲幅度与样品。",
+        label=tr("电脉冲避让半径", "Electrical pulse avoidance radius"),
+        hint=tr("同上，取决于脉冲幅度与样品。", "Same as above; depends on pulse amplitude and sample."),
     ),
-    # 后果（页面上已删，#39/#40）：同上。
+    # 后果（不在页面上显示）：同上。
     InitItem(
         key="avoid_radius_crash_nm", store="instrument_profile", group="damage",
         severity=RECOMMENDED, unit="nm",
-        label="撞针避让半径",
-        hint="同上。",
+        label=tr("撞针避让半径", "Tip crash avoidance radius"),
+        hint=tr("同上。", "Same as above."),
     ),
-    # 后果（页面上已删，#39/#40）：同上。上面那一项填「不会」时这一项不起作用。
+    # 后果（不在页面上显示）：同上。上面那一项填「不会」时这一项不起作用。
     InitItem(
         key="avoid_radius_approach_nm", store="instrument_profile", group="damage",
         severity=RECOMMENDED, unit="nm",
         depends_on=("instrument_profile.approach_damages_surface",),
         depends_values=("yes", "unknown"),
-        label="进针扎痕避让半径",
-        hint="同上；只在「进针会扎表面」时生效。",
+        label=tr("进针扎痕避让半径", "Approach punch-mark avoidance radius"),
+        hint=tr(
+            "同上；只在「进针会扎表面」时生效。",
+            "Same as above; only applies when \"approach damages the surface\"."),
     ),
 
     # ── ⑨ 连接与硬件清单 ────────────────────────────────────────────────────
@@ -748,24 +944,33 @@ CATALOG: tuple[InitItem, ...] = (
     # 它会看到、调用、拿到 Nanonis 报错、然后（如果固执）再调一次。而工具表是模型
     # 每一轮都要读的菜单 —— 为不存在的硬件付路由代价，会降低那些真的能用的工具的
     # 命中率。
-    # 后果（页面上已删，#39/#40）：打开一个不存在的模块，agent 的工具表里
+    # 后果（不在页面上显示）：打开一个不存在的模块，agent 的工具表里
     # 就多出几十个必然失败的工具，挤掉真能用的那些。
     InitItem(
         key="modules", store="hardware_modules", group="rig",
         severity=REQUIRED,
-        label="装了哪些可选硬件模块",
-        hint="只有站在机器旁边的人知道机箱里插了什么。",
+        label=tr("装了哪些可选硬件模块", "Which optional hardware modules are installed"),
+        hint=tr(
+            "只有站在机器旁边的人知道机箱里插了什么。",
+            "Only someone standing at the machine knows what is plugged into the "
+            "rack."),
     ),
     InitItem(
         key="cm_sat_current_a", store="current_monitor", group="rig",
         severity=REQUIRED, safety_critical=True, unit="A",
-        label="电流贴轨判据的饱和值",
-        hint="等于前放满量程。",
+        label=tr("电流贴轨判据的饱和值", "Saturation value for the current-at-rail criterion"),
+        hint=tr("等于前放满量程。", "Equal to the preamp full scale."),
         consequence=(
-            "出厂 90 nA 是按 100 nA 量程的前放定的。**在一台 ±10 nA 的机器上，"
-            "读数贴轨后就停在 10 nA，永远够不到 90** —— 这条 CRITICAL 告警等于"
-            "一直关着，而贴轨恰恰是「针已经扎进去了」最直接的证据之一。"
-            "它不会报错，只会安静地什么都不做。"),
+            tr(
+                "出厂 90 nA 是按 100 nA 量程的前放定的。**在一台 ±10 nA 的机器上，"
+                "读数贴轨后就停在 10 nA，永远够不到 90** —— 这条 CRITICAL 告警等于"
+                "一直关着，而贴轨恰恰是「针已经扎进去了」最直接的证据之一。"
+                "它不会报错，只会安静地什么都不做。",
+                "The factory 90 nA was set for a preamp with a 100 nA range. **On a "
+                "±10 nA machine the reading stalls at 10 nA once it rails and can never "
+                "reach 90**; this CRITICAL alert is effectively disabled forever, although "
+                "railing is one of the most direct pieces of evidence that \"the tip "
+                "has punched in\". It raises no error; it quietly does nothing.")),
     ),
 )
 
@@ -888,15 +1093,15 @@ def _applicable(it: InitItem, values: dict[str, Any]) -> bool:
 #:
 #: 回显**原始值**而不是猜一个说法：这段话的用处就是让人能回到上面那一项去改，
 #: 而一个和选项框里写的不一样的词会让人找不到该改哪个。
-_CHOICE_LABEL: dict[str, str] = {"yes": "是", "no": "否", "unknown": "未声明"}
+_CHOICE_LABEL: dict[str, str] = {"yes": tr("是", "Yes"), "no": tr("否", "No"), "unknown": tr("未声明", "Not declared")}
 
 
 def na_reason(it: InitItem, values: dict[str, Any]) -> str:
     """这一项为什么不适用 —— 指名是**哪一项的哪个回答**让它失去意义。
 
     界面原来只说「这台机器不适用（上面某一项的回答让它失去
-    意义）」。那句话把读者留在一道谜题前 —— 48 项里是哪一项？改了它这一项会
-    不会回来？正确的措辞是：「直接写明上面已经选择了这台机器
+    意义）」。那句话让读者无从判断 —— 48 项里是哪一项？改了它这一项会
+    不会回来？正确的措辞是直接写明所依据的回答，例如「上面已经选择了这台机器
     进针不扎」。
 
     依赖信息（``depends_on`` / ``depends_values``）本来就在目录里、也本来就随
@@ -910,9 +1115,11 @@ def na_reason(it: InitItem, values: dict[str, Any]) -> str:
             continue
         if it.depends_values and str(raw).strip() not in it.depends_values:
             answer = str(raw).strip()
-            shown = _CHOICE_LABEL.get(answer, answer or "（空）")
+            shown = _CHOICE_LABEL.get(answer, answer or tr("（空）", "(empty)"))
             label = dep.label if dep is not None else dep_id
-            return f"上面「{label}」已答「{shown}」，所以这一项不适用。"
+            return tr(
+                f"上面「{label}」已答「{shown}」，所以这一项不适用。",
+                f"The answer \"{shown}\" to \"{label}\" above makes this item not applicable.")
     return ""
 
 
@@ -1143,25 +1350,41 @@ def preamp_consistency(gain_v_per_a: Any, full_scale_a: Any,
         full = float(full_scale_a)
     except (TypeError, ValueError):
         return {"expected_full_scale_a": None, "ratio": None,
-                "consistent": None, "note": "两个数都填了才能互相核对。"}
+                "consistent": None, "note": tr(
+                    "两个数都填了才能互相核对。",
+                    "Both numbers must be filled in to cross-check them.")}
     if not (math.isfinite(gain) and math.isfinite(full)) or gain <= 0 or full <= 0:
         return {"expected_full_scale_a": None, "ratio": None,
-                "consistent": None, "note": "两个数都填了才能互相核对。"}
+                "consistent": None, "note": tr(
+                    "两个数都填了才能互相核对。",
+                    "Both numbers must be filled in to cross-check them.")}
     expected = adc_range_v / gain
     ratio = full / expected
     consistent = abs(ratio - 1.0) <= PREAMP_CONSISTENCY_REL_TOL
     if consistent:
-        note = (f"一致：{gain:.3g} V/A 对应满量程 ±{expected:.3g} A "
-                f"(= ±{expected * 1e9:.4g} nA)。")
+        note = (tr(
+            f"一致：{gain:.3g} V/A 对应满量程 ±{expected:.3g} A "
+                    f"(= ±{expected * 1e9:.4g} nA)。",
+            f"Consistent: {gain:.3g} V/A corresponds to a full scale of ±{expected:.3g} "
+            f"A (= ±{expected * 1e9:.4g} nA)."))
     else:
         decades = abs(math.log10(ratio)) if ratio > 0 else 0.0
         note = (
-            f"⚠ 对不上：按增益 {gain:.3g} V/A 算，满量程应当是 ±{expected:.3g} A "
-            f"(= ±{expected * 1e9:.4g} nA)，你填的是 ±{full:.3g} A "
-            f"(= ±{full * 1e9:.4g} nA)，差 {ratio:.3g} 倍"
-            + (f"（约 {decades:.1f} 个数量级）" if decades >= 0.5 else "")
-            + "。请核对是哪一个填错了 —— 这两个数错任何一个，"
-              "MAST 报出去的电流都会整体错同样的倍数。")
+            tr(
+                f"⚠ 对不上：按增益 {gain:.3g} V/A 算，满量程应当是 ±{expected:.3g} A "
+                f"(= ±{expected * 1e9:.4g} nA)，你填的是 ±{full:.3g} A "
+                f"(= ±{full * 1e9:.4g} nA)，差 {ratio:.3g} 倍",
+                f"⚠ Mismatch: a gain of {gain:.3g} V/A implies a full scale of ±{expected:.3g} "
+                f"A (= ±{expected * 1e9:.4g} nA), but you entered ±{full:.3g} A (= ±{full * 1e9:.4g} "
+                f"nA), off by a factor of {ratio:.3g}")
+            + (tr(
+                f"（约 {decades:.1f} 个数量级）",
+                f" (about {decades:.1f} orders of magnitude)") if decades >= 0.5 else "")
+            + tr(
+                "。请核对是哪一个填错了 —— 这两个数错任何一个，"
+                  "MAST 报出去的电流都会整体错同样的倍数。",
+                ". Check which one is wrong: an error in either number makes every "
+                "current MAST reports wrong by the same factor."))
     return {"expected_full_scale_a": expected, "ratio": ratio,
             "consistent": consistent, "note": note}
 
@@ -1183,12 +1406,19 @@ def derived_from_preamp(full_scale_a: Any) -> dict[str, Any]:
     return {
         "safety_limits.setpoint_max_a": {
             "value": full,
-            "why": ("设定点上限应当等于前放量程：高于它的设定点物理上达不到，"
-                    "反馈环会一路把 Z 推向样品直到撞针。"),
+            "why": (tr(
+                "设定点上限应当等于前放量程：高于它的设定点物理上达不到，"
+                        "反馈环会一路把 Z 推向样品直到撞针。",
+                "The setpoint limit should equal the preamp range: a setpoint above "
+                "it is physically unreachable, and the feedback loop would keep driving "
+                "Z toward the sample until the tip crashes.")),
         },
         "current_monitor.cm_sat_current_a": {
             "value": full,
-            "why": "超过前放满量程的读数不是测量值，是贴轨。",
+            "why": tr(
+                "超过前放满量程的读数不是测量值，是贴轨。",
+                "A reading beyond the preamp full scale is not a measurement; it is "
+                "railing."),
         },
     }
 
@@ -1238,22 +1468,32 @@ def parse_bundle(raw: Any) -> dict[str, Any]:
         try:
             raw = json.loads(raw)
         except (ValueError, TypeError) as exc:
-            raise BundleRejected(f"不是合法的 JSON：{exc}") from exc
+            raise BundleRejected(tr(f"不是合法的 JSON：{exc}", f"Not valid JSON: {exc}")) from exc
     if not isinstance(raw, dict):
-        raise BundleRejected("导入内容必须是一个 JSON 对象。")
+        raise BundleRejected(tr(
+            "导入内容必须是一个 JSON 对象。",
+            "The imported content must be a JSON object."))
     schema = str(raw.get("schema") or "")
     if schema != BUNDLE_SCHEMA:
         raise BundleRejected(
-            f"不认识的格式标识 {schema!r}（期望 {BUNDLE_SCHEMA!r}）。"
-            "这个文件不是 MAST 的仪器初始化导出包 —— 拒绝导入，"
-            "而不是猜着把它灌进仪器档案。")
+            tr(
+                f"不认识的格式标识 {schema!r}（期望 {BUNDLE_SCHEMA!r}）。"
+                "这个文件不是 MAST 的仪器初始化导出包 —— 拒绝导入，"
+                "而不是猜着把它灌进仪器档案。",
+                f"Unrecognised format identifier {schema!r} (expected {BUNDLE_SCHEMA!r}). "
+                "This file is not a MAST instrument-initialisation export; the import "
+                "is refused rather than guessing and loading it into the instrument "
+                "profile."))
     stores = raw.get("stores")
     if not isinstance(stores, dict) or not stores:
-        raise BundleRejected("导入包里没有任何配置内容。")
+        raise BundleRejected(tr("导入包里没有任何配置内容。", "The import bundle contains no configuration."))
     kept = {k: v for k, v in stores.items() if k in BUNDLE_STORES and v}
     if not kept:
         raise BundleRejected(
-            f"导入包里没有可识别的配置段（认识的有：{', '.join(BUNDLE_STORES)}）。")
+            tr(
+                f"导入包里没有可识别的配置段（认识的有：{', '.join(BUNDLE_STORES)}）。",
+                "The import bundle has no recognised configuration section (known: "
+                f"{', '.join(BUNDLE_STORES)})."))
     return {
         "schema": schema,
         "exported_at": raw.get("exported_at"),

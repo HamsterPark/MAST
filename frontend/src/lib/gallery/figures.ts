@@ -14,6 +14,7 @@
 // 无 React、无值 import 以外的依赖 ⇒ node --test 直接加载。
 // ════════════════════════════════════════════════════════════════════════════
 
+import { tr } from "../i18n.ts";
 import type { components } from "@/api/schema";
 import type { GalleryItem, Mark, Series } from "./types.ts";
 
@@ -31,38 +32,53 @@ export type StsLinePlan = components["schemas"]["GalleryStsLinePlan"];
 export const CATEGORY_ORDER: readonly FigureCategoryKey[] = ["frames", "grids", "sts_lines", "sts_stitch", "series"];
 
 export const CATEGORY_TITLE: Record<FigureCategoryKey, string> = {
-  frames: "标记帧",
-  grids: "网格谱",
-  sts_lines: "拉线谱",
-  sts_stitch: "单根谱拼接",
-  series: "旋转系列",
+  frames: tr("标记帧", "Marked frames"),
+  grids: tr("网格谱", "Grid spectra"),
+  sts_lines: tr("拉线谱", "STS line plots"),
+  sts_stitch: tr("单根谱拼接", "Single-spectrum stitching"),
+  series: tr("旋转系列", "Rotation series"),
 };
 
 /** 空类别下的一句「怎么出」。 */
 export const CATEGORY_HINT: Record<FigureCategoryKey, string> = {
-  frames: "顶部「为已标记出图」，或在大图侧栏点「出对比图」。",
-  grids: "顶部「全部网格谱出图」，或在网格谱的大图侧栏点「出逐层图」。",
-  sts_lines: "在一个谱系列的系列页点「拉线谱出图…」，勾上同一条线的各个区组。",
-  sts_stitch: "在「已标记」页的「不属于任何系列的单根谱」里按目录拼接，或选中几条谱后在底部点「拼接出图」。",
-  series: "在一个帧系列的系列页点「16:9 拼图」或「叠加…」。",
+  frames: tr(
+    "顶部「为已标记出图」，或在大图侧栏点「出对比图」。",
+    "Use \"Make figures for marked\" at the top, or \"Make comparison sheet\" in the lightbox sidebar.",
+  ),
+  grids: tr(
+    "顶部「全部网格谱出图」，或在网格谱的大图侧栏点「出逐层图」。",
+    "Use \"Make figures for all grids\" at the top, or \"Make layer sheets\" in a grid's lightbox sidebar.",
+  ),
+  sts_lines: tr(
+    "在一个谱系列的系列页点「拉线谱出图…」，勾上同一条线的各个区组。",
+    "On a spectrum series page, click \"STS line figure…\" and tick the blocks that belong to the same line.",
+  ),
+  sts_stitch: tr(
+    "在「已标记」页的「不属于任何系列的单根谱」里按目录拼接，或选中几条谱后在底部点「拼接出图」。",
+    "On the Marked page, stitch by directory under \"Single spectra not in any series\", or select several spectra and click \"Stitch figure\" in the bottom bar.",
+  ),
+  series: tr(
+    "在一个帧系列的系列页点「16:9 拼图」或「叠加…」。",
+    "On a frame series page, click \"16:9 sheet\" or \"Overlay…\".",
+  ),
 };
 
 export const KIND_LABEL: Record<FigureKind, string> = {
-  marked_frames: "为已标记出图",
-  frame_sheet: "帧对比图",
-  grid_sheets: "网格逐层图",
-  sts_lines: "拉线谱",
-  sts_stitch: "单根谱拼接",
-  series_slides: "16:9 拼图",
-  series_stack: "旋转叠加",
+  marked_frames: tr("为已标记出图", "Figures for marked"),
+  frame_sheet: tr("帧对比图", "Frame comparison sheet"),
+  grid_sheets: tr("网格逐层图", "Grid layer sheets"),
+  sts_lines: tr("拉线谱", "STS line plots"),
+  sts_stitch: tr("单根谱拼接", "Single-spectrum stitching"),
+  series_slides: tr("16:9 拼图", "16:9 sheet"),
+  series_stack: tr("旋转叠加", "Rotation overlay"),
 };
 
 export const JOB_PHASE: Record<string, string> = {
-  idle: "空闲",
-  running: "出图中",
-  done: "完成",
-  cancelled: "已取消",
-  error: "出错",
+  idle: tr("空闲", "Idle"),
+  running: tr("出图中", "Rendering"),
+  done: tr("完成", "Done"),
+  cancelled: tr("已取消", "Cancelled"),
+  error: tr("出错", "Error"),
 };
 
 export function categoryTitle(key: string, fallback?: string | null): string {
@@ -98,10 +114,10 @@ const TRAILING_NOTE = /\s*[（(][^（）()]*[）)]\s*$/;
 /** `batch A · block 2 · line X` → `batch A · line X`；末尾括号注释同样去除。 */
 export function normaliseLineName(name: string): string {
   let s = String(name ?? "").replace(new RegExp(BLOCK_TOKEN.source, "gi"), "");
-  // 末尾括号注释先去：「A · block 2 (retry)」去掉记号后是「A ·  (retry)」，先收拾分隔的话，
-  // 末尾那个「·」被括号挡着，会留下来。
+  // Strip the trailing parenthesised note first: "A · block 2 (retry)" becomes "A ·  (retry)"
+  // once the token is gone, and tidying separators first would leave the "·" behind the bracket.
   s = s.replace(TRAILING_NOTE, "");
-  // 记号删掉之后留下的空分隔：「A ·  · B」→「A · B」，首尾的分隔去掉。
+  // Collapse separators left empty by the removal ("A ·  · B" -> "A · B") and trim the ends.
   s = s.replace(/(\s*·\s*){2,}/g, " · ").replace(/^\s*·\s*/, "").replace(/\s*·\s*$/, "");
   return s.replace(/\s+/g, " ").trim();
 }
@@ -293,13 +309,13 @@ export function fmtNumber(v: number): string {
 export function fmtSummaryValue(v: unknown): string | null {
   if (v == null) return null;
   if (typeof v === "number") return fmtNumber(v);
-  if (typeof v === "boolean") return v ? "是" : "否";
+  if (typeof v === "boolean") return v ? tr("是", "Yes") : tr("否", "No");
   if (typeof v === "string") return v.length > 40 ? `${v.slice(0, 39)}…` : v;
   if (Array.isArray(v)) {
     if (v.length && v.length <= 4 && v.every((x) => typeof x === "number")) {
       return (v as number[]).map(fmtNumber).join(" / ");
     }
-    return `${v.length} 项`;
+    return tr(`${v.length} 项`, `${v.length} items`);
   }
   return null;
 }
@@ -406,13 +422,24 @@ export function describeStart(
   next: FigureJobStatus | null | undefined,
   kind: FigureKind,
 ): { ok: boolean; text: string } {
-  if (!next) return { ok: false, text: "出图没有开始：请求失败" };
-  if (next.degraded) return { ok: false, text: `出图没有开始：${next.detail || "出图后端不可用"}` };
-  const busy = (k: FigureKind | null | undefined) => `已有出图任务在跑（${KIND_LABEL[k ?? kind] ?? k}），等它结束再出`;
+  if (!next) return { ok: false, text: tr("出图没有开始：请求失败", "Figure job did not start: request failed") };
+  if (next.degraded) {
+    return {
+      ok: false,
+      text: tr(
+        `出图没有开始：${next.detail || "出图后端不可用"}`,
+        `Figure job did not start: ${next.detail || "figure backend unavailable"}`,
+      ),
+    };
+  }
+  const busy = (k: FigureKind | null | undefined) => {
+    const label = KIND_LABEL[k ?? kind] ?? k;
+    return tr(`已有出图任务在跑（${label}），等它结束再出`, `A figure job is already running (${label}); wait for it to finish`);
+  };
   if (prev?.running) return { ok: false, text: busy(prev.kind) };
   if (next.running && next.kind && next.kind !== kind) return { ok: false, text: busy(next.kind) };
-  if (next.phase === "error") return { ok: false, text: `出图出错：${next.message || next.detail || ""}` };
-  return { ok: true, text: `已开始：${KIND_LABEL[kind]}` };
+  if (next.phase === "error") return { ok: false, text: tr(`出图出错：${next.message || next.detail || ""}`, `Figure job failed: ${next.message || next.detail || ""}`) };
+  return { ok: true, text: tr(`已开始：${KIND_LABEL[kind]}`, `Started: ${KIND_LABEL[kind]}`) };
 }
 
 /** κ（nm⁻¹）输入框：正数才收。 */

@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from mast.core import instrument_profile as ip
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +49,11 @@ _DEFAULT_POLL_S = 0.1
 _DEFAULT_WINDOW_N = 5
 
 _STATE_LABELS = {
-    "tracking": "已稳定,反馈正握着隧道结(Z 是真实的间距读数)",
-    "out_of_range": "已稳定在压电极限,量程内没有表面(Z 是下界,不是距离)",
-    "moving": "超时:Z 还在走,没有可读的稳定值",
-    "unreadable": "读不到 Z",
-    "aborted": "被中止",
+    "tracking": tr("已稳定,反馈正握着隧道结(Z 是真实的间距读数)", "settled, feedback holds the tunnel junction (Z is a true distance reading)"),
+    "out_of_range": tr("已稳定在压电极限,量程内没有表面(Z 是下界,不是距离)", "settled at the piezo limit, no surface within range (Z is a bound, not a distance)"),
+    "moving": tr("超时:Z 还在走,没有可读的稳定值", "timed out: Z is still moving, no stable value to read"),
+    "unreadable": tr("读不到 Z", "cannot read Z"),
+    "aborted": tr("被中止", "aborted"),
 }
 
 
@@ -135,24 +136,34 @@ class ZSettle:
             rate = ""
             if self.drift_m is not None and self.samples > 1:
                 per_window = abs(self.drift_m) * 1e9
-                rate = f",最后一个窗口仍在以 ~{per_window:.1f} nm/窗口 移动"
+                rate = tr(f",最后一个窗口仍在以 ~{per_window:.1f} nm/窗口 移动", f", the last window is still moving at ~{per_window:.1f} nm/window")
             loop = ""
             if self.loop_confirmed_on is False:
-                loop = ("。**实时控制器在开始时回报 Z 反馈是断开的** —— "
-                        "先查 Z 反馈开关是否真的合上了,而不是加大预算")
+                loop = tr("。**实时控制器在开始时回报 Z 反馈是断开的** —— "
+                          "先查 Z 反馈开关是否真的合上了,而不是加大预算",
+                          ". **The real-time controller reported the Z feedback as off at the start** - "
+                          "first check that the Z feedback switch is really on, rather than raising the budget")
             elif self.loop_confirmed_on is None:
-                loop = "。(无法读回 Z 反馈开关状态,不能排除反馈根本没合上)"
-            return (f"{base}(等了 {self.elapsed_s:.1f}s / 预算 {self.timeout_s:.1f}s,"
-                    f"稳定判据 {self.tol_m * 1e9:.2f} nm{rate}){loop}")
+                loop = tr("。(无法读回 Z 反馈开关状态,不能排除反馈根本没合上)", ". (The Z feedback switch state could not be read back; feedback may not be on at all)")
+            return tr(f"{base}(等了 {self.elapsed_s:.1f}s / 预算 {self.timeout_s:.1f}s,"
+                      f"稳定判据 {self.tol_m * 1e9:.2f} nm{rate}){loop}",
+                      f"{base} (waited {self.elapsed_s:.1f}s of a {self.timeout_s:.1f}s budget, "
+                      f"settle criterion {self.tol_m * 1e9:.2f} nm{rate}){loop}")
         if self.state == "out_of_range":
-            return (f"{base};已等 {self.elapsed_s:.1f}s,"
-                    f"压电共走了 {abs(self.excursion_m or 0.0) * 1e9:.0f} nm")
+            return tr(f"{base};已等 {self.elapsed_s:.1f}s,"
+                      f"压电共走了 {abs(self.excursion_m or 0.0) * 1e9:.0f} nm",
+                      f"{base}; waited {self.elapsed_s:.1f}s, "
+                      f"piezo traveled {abs(self.excursion_m or 0.0) * 1e9:.0f} nm in total")
         if self.state == "tracking":
-            return (f"{base};已等 {self.elapsed_s:.1f}s,"
-                    f"|I| = {abs(self.current_a or 0.0):.3g} A")
+            return tr(f"{base};已等 {self.elapsed_s:.1f}s,"
+                      f"|I| = {abs(self.current_a or 0.0):.3g} A",
+                      f"{base}; waited {self.elapsed_s:.1f}s, "
+                      f"|I| = {abs(self.current_a or 0.0):.3g} A")
         if self.state == "unreadable":
-            return (f"{base}(ZCtrl_ZPosGet 连试 {self.samples} 次都没有可解析的读数)"
-                    " —— 这是读回链路的问题,不是等得不够久,加大预算没有用")
+            return tr(f"{base}(ZCtrl_ZPosGet 连试 {self.samples} 次都没有可解析的读数)"
+                      " —— 这是读回链路的问题,不是等得不够久,加大预算没有用",
+                      f"{base} (ZCtrl_ZPosGet gave no parseable reading in {self.samples} tries)"
+                      " - this is a read-back problem, not too short a wait; raising the budget will not help")
         return base
 
     def as_dict(self) -> dict[str, Any]:
@@ -256,13 +267,15 @@ def settle_and_read_z(
     append(rec_sp)
     if rec_sp.error:
         out.setpoint_a = None
-        out.setpoint_why = f"ZCtrl_SetpntGet 报错:{rec_sp.error}"
+        out.setpoint_why = tr(f"ZCtrl_SetpntGet 报错:{rec_sp.error}", f"ZCtrl_SetpntGet failed: {rec_sp.error}")
     else:
         out.setpoint_a = _first_val(rec_sp.return_value)
         if out.setpoint_a is None:
-            out.setpoint_why = (
+            out.setpoint_why = tr(
                 f"ZCtrl_SetpntGet 回包读不懂(shape={type(rec_sp.return_value).__name__}"
-                f",repr 前 120 字:{str(rec_sp.return_value)[:120]})")
+                f",repr 前 120 字:{str(rec_sp.return_value)[:120]})",
+                f"ZCtrl_SetpntGet reply not understood (shape={type(rec_sp.return_value).__name__}"
+                f", first 120 chars of repr: {str(rec_sp.return_value)[:120]})")
 
     # 2. Poll Z until it stops travelling.
     t0 = time.monotonic()

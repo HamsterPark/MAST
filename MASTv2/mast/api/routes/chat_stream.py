@@ -14,6 +14,7 @@ integration wires in app.py.
 
 from __future__ import annotations
 
+from mast.i18n import tr
 import json
 import logging
 import threading
@@ -41,7 +42,7 @@ router = APIRouter(tags=["chat"])
 #   * Event 可能在回合结束后继续保留，因此仅检查对象存在会误报停止成功。
 #     停止信号未送达时，仪器动作可能继续；响应必须区分信号送达与硬件已停止。
 #   * 同一个 agent 的多个会话**共用一个 Event** ⇒ 停一个聊天会连带停掉并发的另一
-#     个;更糟的是新回合开头那句 ``ev.clear()`` 会把另一条正在跑的回合刚收到的停止
+#     个;此外新回合开头那句 ``ev.clear()`` 会把另一条正在跑的回合刚收到的停止
 #     信号清掉。engine 的 docstring 说隔离的单位是**会话**,这里没做到。
 #
 # 现在:每一轮开始时登记一个**全新的** Event(按 agent+会话),``finally`` 里摘除。
@@ -98,11 +99,15 @@ def chat_abort_hook(agent_id: str, conversation_id: str | None = None) -> dict:
                 "conversation_ids": [k[1] for k, _ in hits],
                 "reason": ""}
     if want is not None:
-        reason = (f"会话 {want} 当前没有正在进行的回合 —— **没有东西被停止**"
-                  "（这不等于「已经停了」）。")
+        reason = tr(f"会话 {want} 当前没有正在进行的回合 —— **没有东西被停止**"
+                    "（这不等于「已经停了」）。",
+                    f"Conversation {want} has no turn in progress - **nothing was stopped** "
+                    "(that does not mean \"already stopped\").")
     else:
-        reason = (f"{agent_id} 当前没有正在进行的回合 —— **没有东西被停止**"
-                  "（这不等于「已经停了」）。")
+        reason = tr(f"{agent_id} 当前没有正在进行的回合 —— **没有东西被停止**"
+                    "（这不等于「已经停了」）。",
+                    f"{agent_id} has no turn in progress - **nothing was stopped** "
+                    "(that does not mean \"already stopped\").")
     logger.info("chat abort: no live turn for %s (conversation=%s)", agent_id, want)
     return {"signalled": 0, "conversation_ids": [], "reason": reason}
 
@@ -185,12 +190,14 @@ def _make_hitl_resolver(ctx, agent_id: str, conversation_id: str, abort):
 
 @router.post("/agents/{agent_id}/chat")
 def chat_turn(agent_id: str, body: ChatTurnRequest, request: Request) -> StreamingResponse:
+    from mast.legacy_gate import require_internal_llm
+    require_internal_llm(f"agent chat: {agent_id}")   # → 403 while legacy features are off
     ctx = request.app.state.ctx
     engine = getattr(ctx, "conversation_engine", None)
 
     def gen():
         if engine is None:
-            yield _sse({"kind": "error", "message": "对话引擎未接入（独立开发模式）", "degraded": True})
+            yield _sse({"kind": "error", "message": tr("对话引擎未接入（独立开发模式）", "Chat engine not attached (standalone dev mode)"), "degraded": True})
             yield _sse({"kind": "done"})
             return
         key, ev = _begin_turn(agent_id, body.conversation_id)
@@ -210,7 +217,7 @@ def chat_turn(agent_id: str, body: ChatTurnRequest, request: Request) -> Streami
 
     # A single LLM turn can be minutes of total silence — which is precisely what
     # an idle-TCP reaper (Tailscale roam, NAT timeout, sleep) kills, leaving the
-    # operator staring at a chat that never finishes (). with_heartbeat
+    # operator staring at a chat that never finishes. with_heartbeat
     # keeps bytes on the wire and gives the client a trustworthy idle watchdog.
     return StreamingResponse(
         with_heartbeat(gen(), label=f"chat-{agent_id}"),

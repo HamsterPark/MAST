@@ -47,6 +47,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from typing import Any
+from mast.i18n import tr
 
 from mast.core.tip_conditioning_policy import resolve_policy
 
@@ -79,11 +80,14 @@ class ResolvedConditioning:
 
     def human_trace(self) -> str:
         """「pulse_v=5.0（方案表）」这样的一行,放进技能结果里。"""
-        label = {SOURCE_EXPLICIT: "调用方指定", SOURCE_OVERRIDE: "用户覆写",
-                 SOURCE_POLICY: "针尖方案表", SOURCE_DEFAULT: "通用默认"}
-        bits = [f"{k}={self.params[k]!r}（{label.get(v, v)}）"
+        label = {SOURCE_EXPLICIT: tr("调用方指定", "specified by caller"),
+                 SOURCE_OVERRIDE: tr("用户覆写", "user override"),
+                 SOURCE_POLICY: tr("针尖方案表", "tip recipe table"),
+                 SOURCE_DEFAULT: tr("通用默认", "generic default")}
+        bits = [tr(f"{k}={self.params[k]!r}（{label.get(v, v)}）",
+                   f"{k}={self.params[k]!r} ({label.get(v, v)})")
                 for k, v in sorted(self.trace.items()) if k in self.params]
-        return "；".join(bits)
+        return tr("；", "; ").join(bits)
 
 
 def _read_tip_facts() -> "dict[str, Any] | None":
@@ -172,7 +176,9 @@ def _check_envelope(res: ResolvedConditioning, policy: dict[str, Any]) -> None:
     """安全包络:超上限**拒绝**,不夹紧(见模块 docstring)。"""
     tip = res.tip or {}
     is_qplus = str(tip.get("form") or "") == "qplus"
-    what = f"当前针尖（{tip.get('name') or '未命名'}）" if tip else "未登记针尖的通用档"
+    what = (tr(f"当前针尖（{tip.get('name') or '未命名'}）",
+               f"the current tip ({tip.get('name') or 'unnamed'})")
+            if tip else tr("未登记针尖的通用档", "the generic profile for an unregistered tip"))
 
     max_pulse = _num(policy.get("max_abs_pulse_v"))
     for key in ("pulse_v", "shaper_bias_v", "shaper_lift_v"):
@@ -181,11 +187,19 @@ def _check_envelope(res: ResolvedConditioning, policy: dict[str, Any]) -> None:
             continue
         if abs(val) > max_pulse:
             res.refusals.append(
-                f"{key}={val:g} V 超出{what}的安全上限 ±{max_pulse:g} V。"
-                + ("qPlus 石英音叉损坏不可逆（需拆机重装并重新标定 f₀/Q），"
-                   "所以这里拒绝而不是替你夹到上限。" if is_qplus else
-                   "拒绝而不是夹到上限——夹了你会以为自己用的是原来那个值。")
-                + "确需更大幅度请先确认针尖类型登记正确，或在设置里调整该针尖的方案上限。")
+                tr(f"{key}={val:g} V 超出{what}的安全上限 ±{max_pulse:g} V。",
+                   f"{key}={val:g} V exceeds the safety limit of {what}, +/-{max_pulse:g} V. ")
+                + (tr("qPlus 石英音叉损坏不可逆（需拆机重装并重新标定 f₀/Q），"
+                      "所以这里拒绝而不是替你夹到上限。",
+                      "Damage to the qPlus quartz fork is irreversible (needs disassembly, "
+                      "refitting and recalibrating f0/Q), so this is rejected rather than "
+                      "clamped to the limit for you. ") if is_qplus else
+                   tr("拒绝而不是夹到上限——夹了你会以为自己用的是原来那个值。",
+                      "Rejected rather than clamped to the limit -- clamping would let you "
+                      "think you are using the original value. "))
+                + tr("确需更大幅度请先确认针尖类型登记正确，或在设置里调整该针尖的方案上限。",
+                     "If a larger value is really needed, first confirm the tip type is "
+                     "registered correctly, or raise that tip's recipe limit in Settings."))
 
     max_depth = _num(policy.get("max_poke_depth_m"))
     for key in ("shaper_depth_m", "poke_shallow_depth_m", "poke_deep_depth_m"):
@@ -195,15 +209,21 @@ def _check_envelope(res: ResolvedConditioning, policy: dict[str, Any]) -> None:
         # 深度是负数(向表面下压),比较绝对值。
         if abs(val) > max_depth:
             res.refusals.append(
-                f"{key}={val:.3e} m 的下压深度超出{what}的上限 {max_depth:.3e} m。"
-                + ("qPlus 传感器被戳坏不可逆。" if is_qplus else "")
-                + "拒绝执行。")
+                tr(f"{key}={val:.3e} m 的下压深度超出{what}的上限 {max_depth:.3e} m。",
+                   f"{key}={val:.3e} m poke depth exceeds the limit of {what}, "
+                   f"{max_depth:.3e} m. ")
+                + (tr("qPlus 传感器被戳坏不可逆。",
+                      "A qPlus sensor damaged by poking cannot be repaired. ")
+                   if is_qplus else "")
+                + tr("拒绝执行。", "Refused."))
 
     max_count = _num(policy.get("max_pulse_count"))
     cnt = _num(res.params.get("pulse_count"))
     if cnt is not None and max_count is not None and cnt > max_count:
         res.refusals.append(
-            f"pulse_count={int(cnt)} 超出{what}的上限 {int(max_count)} 发。拒绝执行。")
+            tr(f"pulse_count={int(cnt)} 超出{what}的上限 {int(max_count)} 发。拒绝执行。",
+               f"pulse_count={int(cnt)} exceeds the limit of {what}, {int(max_count)} "
+               "pulses. Refused."))
 
 
 def envelope_of(facts: "dict[str, Any] | None" = None) -> dict[str, Any]:

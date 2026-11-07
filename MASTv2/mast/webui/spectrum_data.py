@@ -12,7 +12,7 @@ Design notes:
   ``columns`` list always holds every name, and an unrecognisable file falls back
   to "sweep = first column, series = the rest"). A viewer that silently shows a
   subset of what is in the file is the failure this codebase keeps recording from
-  the other direction.
+  the other direction (files hidden from a listing).
 * **dI/dV has three states, not two** — a real lock-in column, a numeric
   derivative of I(V), or nothing. They must not look alike on screen, so the
   response says which one it is and the client labels the numeric one. Silently
@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+
+from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +187,7 @@ def extract_spectrum(path: str) -> dict:
             z_m=cols[z_name] if z_name else None,
         )
     except Exception as exc:  # noqa: BLE001 — a curve is still drawable
-        kind, evidence = "", f"判据不可用：{exc}"
+        kind, evidence = "", tr(f"判据不可用：{exc}", f"Criterion unavailable: {exc}")
     out["kind"], out["kind_evidence"] = kind, evidence
 
     # The x axis is whichever column is actually being swept — the same question
@@ -239,15 +241,16 @@ def extract_spectrum(path: str) -> dict:
                 try:
                     grad = np.gradient(cur, bias)
                     series.append({
-                        "id": "didv", "name": f"dI/dV（{cur_name} 的数值微分）",
+                        "id": "didv", "name": tr(f"dI/dV（{cur_name} 的数值微分）", f"dI/dV (numerical derivative of {cur_name})"),
                         "values": _clean(grad), "source": "numeric",
                     })
                     out["didv_source"] = "numeric"
                 except Exception as exc:  # noqa: BLE001
-                    out["detail"] = f"数值微分失败：{exc}"
+                    out["detail"] = tr(f"数值微分失败：{exc}", f"Numerical differentiation failed: {exc}")
             else:
-                out["detail"] = (
-                    f"偏压跨度 {span:.3g} V 太小，不做数值微分（没有 lock-in 列）")
+                out["detail"] = tr(
+                    f"偏压跨度 {span:.3g} V 太小，不做数值微分（没有 lock-in 列）",
+                    f"Bias span {span:.3g} V is too small for numerical differentiation (no lock-in column)")
 
     # Whatever is left. A file whose roles we could not name still shows its
     # data — "重排不是过滤" applies to columns exactly as it does to files.
@@ -258,9 +261,11 @@ def extract_spectrum(path: str) -> dict:
             series.append({"id": f"col{i}", "name": name,
                            "values": _clean(cols[name][take]), "source": "file"})
         if len(names) - 1 > _MAX_FALLBACK_SERIES:
-            out["detail"] = (
+            out["detail"] = tr(
                 f"未能识别通道角色，显示前 {_MAX_FALLBACK_SERIES} 列"
-                f"（共 {len(names)} 列，全部列名在 columns 里）")
+                f"（共 {len(names)} 列，全部列名在 columns 里）",
+                f"Could not identify channel roles; showing the first {_MAX_FALLBACK_SERIES} columns "
+                f"({len(names)} in total, all column names are in `columns`)")
 
     out["series"] = series
     return out

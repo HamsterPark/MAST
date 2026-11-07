@@ -99,7 +99,7 @@ class Citation:
             entry_type = "misc"
 
         # Free-text fields get selective LaTeX escaping; identifier-like fields
-        # (key, doi, url, numeric volume/pages) are left verbatim — escaping a
+        # (key, doi, url, numeric volume/pages) are left unescaped — escaping a
         # URL's "_" would break the link, and pages use intentional "--".
         lines = [f"@{entry_type}{{{self.key},"]
         lines.append(f"  author = {{{_bibtex_escape(self.authors)}}},")
@@ -226,9 +226,15 @@ class HardwareState:
     y_pos_m: float | None = None
     z_controller_on: bool | None = None
     z_controller_status: str | None = None  # Off/On/Hold/SwitchingOff/SafeTip/Withdrawing
-    # The active Z controller identifies the feedback channel used by engage
-    # and approach. Surface it in live state instead of requiring a separate list
-    # query. The identity fields are serializable scalars and strings.
+    # ACTIVE Z-controller identity.
+    # A rig can define MULTIPLE Z controllers (e.g. "Current", "log Current",
+    # "df") with exactly one active; the active one is the feedback channel that
+    # engage/approach act on. Before this, the active controller was reachable
+    # ONLY via the on-demand GetZCtrlList skill, so an agent could loop several
+    # turns on "Z feedback still closed" during 进针 before discovering — by
+    # manually querying the list — which controller was active.
+    # Surfacing it in every live-state block removes that detour. All three are
+    # JSON-serialisable scalars/strings (checkpointer-safe).
     z_controller_name: str | None = None          # active controller name
     z_controller_index: int | None = None         # active controller index
     z_controller_names: list[str] | None = None   # all available controllers

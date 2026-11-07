@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import clsx from "clsx";
+import { langTag, tr } from "../../lib/i18n";
 
 /** Small presentational helpers shared by the Records domain panels. These are
  *  RecordsPage-local; they intentionally do not touch the global ui.tsx set. */
@@ -32,7 +33,7 @@ export function StatusPill({ status }: { status?: string | null }) {
   );
 }
 
-/** boolean success → 成功 / 失败 / — pill */
+/** boolean success → success / failed / — pill */
 export function SuccessPill({ success }: { success?: boolean | null }) {
   if (success === null || success === undefined) {
     return <span className="text-xs text-mast-muted">—</span>;
@@ -44,7 +45,7 @@ export function SuccessPill({ success }: { success?: boolean | null }) {
         success ? "bg-mast-auto-bg text-mast-auto" : "bg-mast-danger-bg text-mast-danger",
       )}
     >
-      {success ? "成功" : "失败"}
+      {success ? tr("成功", "Success") : tr("失败", "Failed")}
     </span>
   );
 }
@@ -77,7 +78,7 @@ export function fmtTime(ts?: string | null): string {
   if (!ts) return "—";
   const d = new Date(ts);
   if (!Number.isNaN(d.getTime())) {
-    return d.toLocaleString("zh-CN", { hour12: false });
+    return d.toLocaleString(langTag(), { hour12: false });
   }
   // HLC display strings ('2026-03-22T15:42:08Z-0009-main') etc. — show raw.
   return ts;

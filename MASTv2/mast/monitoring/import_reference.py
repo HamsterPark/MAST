@@ -8,6 +8,8 @@ import os
 import sys
 from typing import Any, Optional
 
+from mast.i18n import tr
+
 logger = logging.getLogger(__name__)
 
 #: Line windows tracked on import — kept identical to the acquisition skill's
@@ -96,12 +98,14 @@ def import_sweep(root: str, manifest: dict, *, activate: bool = False,
 
     store = store or get_store()
     if store is None:
-        return {"ok": False, "error": "拿不到 monitoring store"}
+        return {"ok": False, "error": tr("拿不到 monitoring store",
+                                          "Cannot get the monitoring store")}
 
     pts = [p for p in (_load_point(root, e) for e in manifest.get("points") or [])
            if p]
     if not pts:
-        return {"ok": False, "error": "manifest 里没有一个点能读出来"}
+        return {"ok": False, "error": tr("manifest 里没有一个点能读出来",
+                                          "None of the points in the manifest could be read")}
 
     bid = store.create_baseline(
         label=str(manifest.get("label") or ""),
@@ -109,7 +113,8 @@ def import_sweep(root: str, manifest: dict, *, activate: bool = False,
         conditions=dict(manifest.get("conditions") or {}),
         fs_hz=(manifest.get("conditions") or {}).get("fs_hz"))
     if not bid:
-        return {"ok": False, "error": "基线行建不出来"}
+        return {"ok": False, "error": tr("基线行建不出来",
+                                          "Could not create the baseline row")}
 
     for i, p in enumerate(pts):
         store.add_baseline_point(bid, tag=p["tag"], ordinal=i,
@@ -140,17 +145,20 @@ def import_sweep(root: str, manifest: dict, *, activate: bool = False,
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("root", help="含各工况点子目录的目录")
-    ap.add_argument("--manifest", help="manifest JSON；缺省用 <root>/manifest.json")
+    ap.add_argument("root", help=tr("含各工况点子目录的目录",
+                                   "Directory containing a subdirectory per operating point"))
+    ap.add_argument("--manifest", help=tr("manifest JSON；缺省用 <root>/manifest.json",
+                                      "manifest JSON; defaults to <root>/manifest.json"))
     ap.add_argument("--activate", action="store_true",
-                    help="导入后立刻启用为实时判据的基线")
-    ap.add_argument("--json", action="store_true", help="只打印 JSON")
+                    help=tr("导入后立刻启用为实时判据的基线",
+                          "Activate as the baseline for live judging right after import"))
+    ap.add_argument("--json", action="store_true", help=tr("只打印 JSON", "Print JSON only"))
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     mpath = a.manifest or os.path.join(a.root, "manifest.json")
     if not os.path.exists(mpath):
-        print("找不到 manifest: %s" % mpath, file=sys.stderr)
+        print(tr("找不到 manifest: %s", "Manifest not found: %s") % mpath, file=sys.stderr)
         return 2
     rep = import_sweep(a.root, json.load(open(mpath, encoding="utf-8")),
                        activate=a.activate)
@@ -159,27 +167,34 @@ def main(argv=None) -> int:
         return 0 if rep.get("ok") else 1
 
     if not rep.get("ok"):
-        print("导入未完成：%s" % (rep.get("error") or rep.get("status")))
+        print(tr("导入未完成：%s", "Import not completed: %s")
+              % (rep.get("error") or rep.get("status")))
         return 1
     sm, wm = rep["sigma_model"], rep["white_model"]
-    print("基线 #%d 已建立（%d 个点：setpoint %d / bias %d）%s"
+    print(tr("基线 #%d 已建立（%d 个点：setpoint %d / bias %d）%s",
+             "Baseline #%d created (%d points: setpoint %d / bias %d)%s")
           % (rep["baseline_id"], rep["n_points"], rep["n_setpoint"],
-             rep["n_bias"], "，已启用" if rep["activated"] else ""))
+             rep["n_bias"], tr("，已启用", ", activated") if rep["activated"] else ""))
     if sm:
-        print("  sigma 曲线  加性 %.3f pA   相对底 %.0f ppm   交叉 %.1f pA   R²=%.5f"
+        print(tr("  sigma 曲线  加性 %.3f pA   相对底 %.0f ppm   交叉 %.1f pA   R²=%.5f",
+                 "  sigma curve  additive %.3f pA   relative floor %.0f ppm   "
+                 "crossover %.1f pA   R²=%.5f")
               % (sm["additive_sigma_a"] * 1e12, sm["relative_floor"] * 1e6,
                  (sm["crossover_a"] or 0) * 1e12, sm["r2"]))
     if wm:
-        print("  白底分解    前放 %.2f fA/√Hz   乘性 %.1f ppm/√Hz   交叉 %.0f pA"
+        print(tr("  白底分解    前放 %.2f fA/√Hz   乘性 %.1f ppm/√Hz   交叉 %.0f pA",
+                 "  white floor  preamp %.2f fA/√Hz   multiplicative %.1f ppm/√Hz   "
+                 "crossover %.0f pA")
               % (wm["amp_a_per_rthz"] * 1e15, (wm["b"] ** 0.5) * 1e6,
                  (wm["crossover_a"] or 0) * 1e12))
     rp = rep.get("repeatability")
     if rp:
-        print("  重复性      %d 次，相对散布 %.1f%%"
+        print(tr("  重复性      %d 次，相对散布 %.1f%%",
+                 "  repeatability  %d runs, relative spread %.1f%%")
               % (rp["n"], (rp.get("relative_sd") or 0) * 100))
     lines = rep.get("lines") or {}
     if lines:
-        print("  谱线：")
+        print(tr("  谱线：", "  Lines:"))
         for nm, l in sorted(lines.items(),
                             key=lambda kv: -(kv[1].get("a_per_rthz") or 0)):
             print("    %-10s %7.1f Hz  %8.1f fA/√Hz  a_I=%s a_V=%s  %s"

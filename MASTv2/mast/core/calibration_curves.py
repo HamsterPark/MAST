@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import json
+from mast.i18n import tr
 import logging
 import re
 from pathlib import Path
@@ -76,12 +77,16 @@ def save_curve(curve: "dict[str, Any]", *, overwrite: bool = False) -> Path:
     """
     kind = str(curve.get("kind") or "").strip()
     if kind not in MATCH_KEYS:
-        raise ValueError(
+        raise ValueError(tr(
             f"未知曲线种类 {kind!r};已知:{sorted(MATCH_KEYS)}。"
             "加新种类时要同时决定它的可比性条件(MATCH_KEYS),否则消费侧无法判断"
-            "「这条曲线现在能不能用」。")
+            "「这条曲线现在能不能用」。",
+            f"Unknown curve kind {kind!r}; known: {sorted(MATCH_KEYS)}. "
+            "When adding a new kind, also decide its comparability conditions (MATCH_KEYS); "
+            "otherwise consumers cannot tell whether this curve is usable right now."))
     if not curve.get("points"):
-        raise ValueError("曲线没有数据点 —— 空曲线不落盘(它只会被当成一条已有的曲线)。")
+        raise ValueError(tr("曲线没有数据点 —— 空曲线不落盘(它只会被当成一条已有的曲线)。",
+                            "The curve has no data points -- an empty curve is not saved (it would only be mistaken for an existing curve)."))
 
     cond = curve.get("conditions") or {}
     meta = curve.get("meta") or {}
@@ -129,17 +134,17 @@ def describe(curve: "dict[str, Any]") -> str:
     """
     c = curve.get("conditions") or {}
     m = curve.get("meta") or {}
-    bits = [f"实测于 {m.get('date', '未记日期')}"]
+    bits = [tr(f"实测于 {m.get('date', '未记日期')}", f"measured on {m.get('date', 'date not recorded')}")]
     if c.get("sample"):
-        bits.append(f"样品 {c['sample']}")
+        bits.append(tr(f"样品 {c['sample']}", f"sample {c['sample']}"))
     if c.get("tip_type"):
-        bits.append(f"针尖 {c['tip_type']}")
+        bits.append(tr(f"针尖 {c['tip_type']}", f"tip {c['tip_type']}"))
     if c.get("mod_amp_v") is not None and c.get("mod_freq_hz") is not None:
-        bits.append(f"调制 {c['mod_amp_v']} V @ {c['mod_freq_hz']} Hz")
+        bits.append(tr(f"调制 {c['mod_amp_v']} V @ {c['mod_freq_hz']} Hz", f"modulation {c['mod_amp_v']} V @ {c['mod_freq_hz']} Hz"))
     if c.get("temperature_k") is not None:
         bits.append(f"{c['temperature_k']} K")
-    return ("、".join(bits)
-            + " —— **参考曲线,不是出厂常数**;换针/换样品/换调制参数请重采。")
+    return (tr("、", ", ").join(bits)
+            + tr(" —— **参考曲线,不是出厂常数**;换针/换样品/换调制参数请重采。", " -- **reference curve, not a factory constant**; re-measure after changing tip / sample / modulation parameters."))
 
 
 def match_conditions(curve: "dict[str, Any]",
@@ -152,23 +157,23 @@ def match_conditions(curve: "dict[str, Any]",
     kind = str(curve.get("kind") or "")
     keys = MATCH_KEYS.get(kind)
     if not keys:
-        return False, f"未知曲线种类 {kind!r},无法判断可比性。"
+        return False, tr(f"未知曲线种类 {kind!r},无法判断可比性。", f"Unknown curve kind {kind!r}; comparability cannot be judged.")
     cond = curve.get("conditions") or {}
     bad: list[str] = []
     for k in keys:
         want, got = cond.get(k), now.get(k)
         if want is None or got is None:
-            bad.append(f"{k}:曲线={want!r} 当前={got!r}(有一侧读不到)")
+            bad.append(tr(f"{k}:曲线={want!r} 当前={got!r}(有一侧读不到)", f"{k}: curve={want!r} current={got!r} (one side cannot be read)"))
             continue
         if isinstance(want, (int, float)) and isinstance(got, (int, float)):
             tol = max(abs(float(want)) * _REL_TOL, 1e-12)
             if abs(float(want) - float(got)) > tol:
-                bad.append(f"{k}:曲线={want} 当前={got}")
+                bad.append(tr(f"{k}:曲线={want} 当前={got}", f"{k}: curve={want} current={got}"))
         elif str(want).strip().lower() != str(got).strip().lower():
-            bad.append(f"{k}:曲线={want!r} 当前={got!r}")
+            bad.append(tr(f"{k}:曲线={want!r} 当前={got!r}", f"{k}: curve={want!r} current={got!r}"))
     if bad:
-        return False, "条件不匹配(" + ";".join(bad) + ")"
-    return True, "条件匹配"
+        return False, tr("条件不匹配(", "Conditions do not match (") + ";".join(bad) + ")"
+    return True, tr("条件匹配", "Conditions match")
 
 
 def curve_keys(curve: "dict[str, Any]", *, value_key: "str | None" = None,
@@ -201,18 +206,18 @@ def curve_problems(curve: "dict[str, Any]") -> "list[str]":
     kind = str(curve.get("kind") or "")
     keys = MATCH_KEYS.get(kind)
     if not keys:
-        return [f"未知曲线种类 {kind!r};已知:{sorted(MATCH_KEYS)}"]
+        return [tr(f"未知曲线种类 {kind!r};已知:{sorted(MATCH_KEYS)}", f"Unknown curve kind {kind!r}; known: {sorted(MATCH_KEYS)}")]
     cond = curve.get("conditions") or {}
     missing = [k for k in keys if cond.get(k) is None]
     if missing:
         out.append(
-            f"conditions 里缺可比性条件 {missing} —— 这条曲线**永远匹配不上**"
-            f"(不是今天条件不符)。可比性条件:{list(keys)}")
+            tr(f"conditions 里缺可比性条件 {missing} —— 这条曲线**永远匹配不上**"
+            f"(不是今天条件不符)。可比性条件:{list(keys)}", f"conditions lacks the comparability conditions {missing}: this curve can **never match** (not just that today's conditions differ). Comparability conditions: {list(keys)}"))
     pts = curve.get("points") or []
     if len(pts) < 2:
         # 措辞保留「不足两个」:老钉子按这句话认这个拒绝,而这次改动只是把它从
         # translate 里挪到这儿,判据没变 —— 那就不该顺手换掉它的说法。
-        out.append(f"可用点不足两个(只有 {len(pts)} 个),插不了值")
+        out.append(tr(f"可用点不足两个(只有 {len(pts)} 个),插不了值", f"Fewer than two usable points (only {len(pts)}); cannot interpolate"))
     else:
         vk, dk = curve_keys(curve)
         usable = sum(1 for p in pts
@@ -220,8 +225,8 @@ def curve_problems(curve: "dict[str, Any]") -> "list[str]":
                      and isinstance(p.get(dk), (int, float)))
         if usable < 2:
             out.append(
-                f"点里没有可用的 {vk!r}/{dk!r} 两列(只有 {usable} 个点两列都在);"
-                f"实际有的列:{sorted(pts[0]) if pts else []}")
+                tr(f"点里没有可用的 {vk!r}/{dk!r} 两列(只有 {usable} 个点两列都在);"
+                f"实际有的列:{sorted(pts[0]) if pts else []}", f"No usable {vk!r}/{dk!r} column pair in the points (only {usable} point(s) have both); columns actually present: {sorted(pts[0]) if pts else []}"))
     return out
 
 
@@ -240,10 +245,10 @@ def translate(curve: "dict[str, Any]", value: float, *,
     if broken:
         # 数据缺陷要与「今天条件不符」分开报 —— 一个永远空转的功能不该长得像一个
         # 正常工作、只是今天条件不符的功能。
-        return None, "这条曲线不可用(数据问题):" + ";".join(broken)
+        return None, tr("这条曲线不可用(数据问题):", "This curve is unusable (data problem): ") + ";".join(broken)
     ok, why = match_conditions(curve, now)
     if not ok:
-        return None, why + " —— **不翻译**,请按原始读数使用。"
+        return None, why + tr(" —— **不翻译**,请按原始读数使用。", " -- **no translation**; use the raw reading.")
     value_key, distance_key = curve_keys(curve, value_key=value_key,
                                          distance_key=distance_key)
     pts = [(p.get(value_key), p.get(distance_key)) for p in curve.get("points", [])]
@@ -251,18 +256,18 @@ def translate(curve: "dict[str, Any]", value: float, *,
                     if isinstance(v, (int, float)) and isinstance(d, (int, float))),
                    key=lambda t: t[0])
     if len(pairs) < 2:
-        return None, "曲线上可用的点不足两个,插不了值。"
+        return None, tr("曲线上可用的点不足两个,插不了值。", "Fewer than two usable points on the curve; cannot interpolate.")
     lo, hi = pairs[0][0], pairs[-1][0]
     if not (lo <= value <= hi):
-        return None, (f"读数 {value:.4g} 落在曲线覆盖范围 [{lo:.4g}, {hi:.4g}] 之外 —— "
-                      "**不外推**。这条曲线只描述它采过的那一段。")
+        return None, (tr(f"读数 {value:.4g} 落在曲线覆盖范围 [{lo:.4g}, {hi:.4g}] 之外 —— "
+                      "**不外推**。这条曲线只描述它采过的那一段。", f"Reading {value:.4g} lies outside the curve's coverage [{lo:.4g}, {hi:.4g}]: **no extrapolation**. The curve only describes the stretch it was sampled over."))
     for (v0, d0), (v1, d1) in zip(pairs, pairs[1:]):
         if v0 <= value <= v1:
             if v1 == v0:
-                return d0, "曲线在此处为平段,取端点。"
+                return d0, tr("曲线在此处为平段,取端点。", "The curve is flat here; using the endpoint.")
             frac = (value - v0) / (v1 - v0)
-            return d0 + frac * (d1 - d0), f"{describe(curve)}(线性插值)"
-    return None, "插值失败(曲线点位异常)。"
+            return d0 + frac * (d1 - d0), tr(f"{describe(curve)}(线性插值)", f"{describe(curve)} (linear interpolation)")
+    return None, tr("插值失败(曲线点位异常)。", "Interpolation failed (abnormal curve points).")
 
 
 __all__ = [

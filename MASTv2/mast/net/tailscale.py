@@ -1,4 +1,4 @@
-"""Tailscale detection + remote-access URL helpers — 傻瓜式跨网远程控制.
+"""Tailscale detection + remote-access URL helpers — one-click cross-network remote control.
 
 Why this exists
 ---------------
@@ -34,6 +34,8 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from typing import Optional
+
+from mast.i18n import tr
 
 
 # ── executable discovery ────────────────────────────────────────────────────
@@ -121,14 +123,20 @@ def _hint_for_state(state: str, *, ready: bool = False) -> str:
         return ""
     s = (state or "").strip()
     if s == "Running":  # up but no IP yet
-        return "Tailscale 已连接但尚未分配 IP —— 请稍候，或在 Tailscale 中重新登录。"
+        return tr("Tailscale 已连接但尚未分配 IP —— 请稍候，或在 Tailscale 中重新登录。",
+                  "Tailscale is connected but has no IP yet - wait a moment, or sign in to "
+                  "Tailscale again.")
     if s in ("Stopped", ""):
-        return "Tailscale 已安装但未连接 —— 打开 Tailscale 并点「Connect」，保持登录。"
+        return tr("Tailscale 已安装但未连接 —— 打开 Tailscale 并点「Connect」，保持登录。",
+                  'Tailscale is installed but not connected - open Tailscale, click "Connect" and '
+                  'stay signed in.')
     if s == "NeedsLogin":
-        return "Tailscale 需要登录 —— 打开 Tailscale，用与另一台电脑**相同的账号**登录。"
+        return tr("Tailscale 需要登录 —— 打开 Tailscale，用与另一台电脑**相同的账号**登录。",
+                  "Tailscale needs you to sign in - open Tailscale and sign in with the **same "
+                  "account** as on the other computer.")
     if s in ("NoState", "Starting"):
-        return "Tailscale 正在启动，请稍候…"
-    return f"Tailscale 当前状态：{s}"
+        return tr("Tailscale 正在启动，请稍候…", "Tailscale is starting, please wait...")
+    return tr(f"Tailscale 当前状态：{s}", f"Current Tailscale state: {s}")
 
 
 def _parse_status(data: dict) -> TailscaleStatus:
@@ -186,16 +194,22 @@ def get_status(timeout: float = 3.0, cli: Optional[str] = None) -> TailscaleStat
     if not exe:
         return TailscaleStatus(
             installed=False,
-            hint="未检测到 Tailscale —— 请在两台电脑都安装 Tailscale 并登录同一账号："
-                 "https://tailscale.com/download",
+            hint=tr("未检测到 Tailscale —— 请在两台电脑都安装 Tailscale 并登录同一账号："
+                    "https://tailscale.com/download",
+                    "Tailscale not detected - install Tailscale on both computers and sign in "
+                    "with the same account: https://tailscale.com/download"),
         )
     try:
         proc = subprocess.run([exe, "status", "--json"], **_run_kwargs(timeout))
     except subprocess.TimeoutExpired:
         return TailscaleStatus(installed=True, backend_state="",
-                               hint="Tailscale 响应超时 —— 请确认 Tailscale 正在运行。")
+                               hint=tr("Tailscale 响应超时 —— 请确认 Tailscale 正在运行。",
+                                       "Tailscale did not respond in time - make sure Tailscale "
+                                       "is running."))
     except OSError as exc:
-        return TailscaleStatus(installed=True, hint=f"无法调用 Tailscale：{exc}")
+        return TailscaleStatus(installed=True,
+                               hint=tr(f"无法调用 Tailscale：{exc}",
+                                       f"Could not run Tailscale: {exc}"))
 
     raw = (proc.stdout or "").strip()
     if not raw:
@@ -206,17 +220,57 @@ def get_status(timeout: float = 3.0, cli: Optional[str] = None) -> TailscaleStat
         data = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
         return TailscaleStatus(installed=True,
-                               hint="无法解析 Tailscale 状态输出 —— 请更新 Tailscale 后重试。")
+                               hint=tr("无法解析 Tailscale 状态输出 —— 请更新 Tailscale 后重试。",
+                                       "Could not parse the Tailscale status output - update "
+                                       "Tailscale and try again."))
     return _parse_status(data)
+
+
+def machine_name(node: dict) -> str:
+    """What the Tailscale apps call a device: the first label of its MagicDNS name
+    (``office-pc`` for ``office-pc.tail1234.ts.net.``), else its OS host name."""
+    label = str(node.get("DNSName", "") or "").split(".", 1)[0]
+    return label or str(node.get("HostName", "") or "")
+
+
+def peer_names(timeout: float = 3.0, cli: Optional[str] = None) -> dict[str, str]:
+    """Tailscale address -> machine name, for this device and every peer.
+
+    Used to name the computer an incoming connection comes from (remote AI access).
+    Empty when Tailscale is missing or does not answer; never raises.
+    """
+    exe = cli or find_cli()
+    if not exe:
+        return {}
+    try:
+        proc = subprocess.run([exe, "status", "--json"], **_run_kwargs(timeout))
+        data = json.loads((proc.stdout or "").strip() or "{}")
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    nodes = [data.get("Self")] + list((data.get("Peer") or {}).values())
+    out: dict[str, str] = {}
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        name = machine_name(node)
+        for ip in node.get("TailscaleIPs") or []:
+            if name and isinstance(ip, str):
+                out[ip] = name
+    return out
 
 
 # ── derived views (URLs + cert hosts) ───────────────────────────────────────
 
-def remote_urls(status: TailscaleStatus, port: int, scheme: str = "https") -> list[dict]:
-    """The URL(s) to open on *another* computer, best first (MagicDNS, then IP).
+def remote_urls(status: TailscaleStatus, port: int, scheme: str = "https", *,
+                include_ipv6: bool = False) -> list[dict]:
+    """The URL(s) to open on *another* computer, best first (IP, then MagicDNS).
 
-    Each entry is ``{"label", "host", "url"}``. IPv6 hosts are bracketed for the
-    URL. Empty when the node isn't ready.
+    Each entry is ``{"label", "host", "url"}``. Empty when the node isn't ready.
+    The Tailscale IPv6 address is listed only with *include_ipv6* (bracketed):
+    MAST binds IPv4 ``0.0.0.0``, so ``https://[fd7a:…]:7862`` is refused — it
+    was once listed as a 备用地址 and fails to connect.
     """
     out: list[dict] = []
     seen: set[str] = set()
@@ -230,14 +284,20 @@ def remote_urls(status: TailscaleStatus, port: int, scheme: str = "https") -> li
 
     # IP FIRST — the recommended address. MAST serves over a SELF-SIGNED cert, and
     # `*.ts.net` is on the browser HSTS-preload list, so a browser HARD-REJECTS a
-    # self-signed cert on the MagicDNS name (no "proceed anyway" — # 2026-07-25 "tailscale 连不上"). The Tailscale IP is NOT preloaded, so the
+    # self-signed cert on the MagicDNS name (no "proceed anyway"). The
+    # Tailscale IP is NOT preloaded, so the
     # browser lets you click through the warning. The MagicDNS name only works in a
     # browser once a *real* cert is provisioned (`tailscale cert` / `tailscale
     # serve`); we still list it, clearly labelled, for that case + for CLI/curl.
     for ip in status.self_ips:
-        add("Tailscale IP（推荐）" if ":" not in ip else "Tailscale IPv6", ip)
+        if ":" in ip and not include_ipv6:
+            continue
+        add(tr("Tailscale IP（推荐）", "Tailscale IP (recommended)") if ":" not in ip
+            else "Tailscale IPv6", ip)
     if status.magic_dns:
-        add("MagicDNS 名称（浏览器需 tailscale cert 真证书）", status.magic_dns)
+        add(tr("MagicDNS 名称（浏览器需 tailscale cert 真证书）",
+               "MagicDNS name (browsers need a real certificate from tailscale cert)"),
+            status.magic_dns)
     return out
 
 
@@ -275,6 +335,8 @@ __all__ = [
     "TailscaleStatus",
     "find_cli",
     "get_status",
+    "machine_name",
+    "peer_names",
     "remote_urls",
     "extra_cert_hosts",
     "summary",

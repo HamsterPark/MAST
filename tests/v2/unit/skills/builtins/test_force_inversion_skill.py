@@ -29,7 +29,7 @@ import pytest  # noqa: E402
 from mast.skills.builtins.force_inversion import InvertForceSaderJarvis  # noqa: E402
 from mast.vision.force_inversion import forward_df  # noqa: E402
 
-F0, K, AMP = 25296.2, 1800.0, 50e-12
+F0, K, AMP = 25000.0, 1800.0, 50e-12
 D_E_J, A_PER_M, Z_E_M = 150e-3 * 1.602176634e-19, 14e9, 0.30e-9
 Z = np.linspace(0.10e-9, 1.10e-9, 300)
 
