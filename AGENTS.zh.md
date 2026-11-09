@@ -38,8 +38,8 @@ MAST（Modular Autonomous SPM Toolkit）把外置 AI 智能体连接到 Nanonis 
 | agent 交接时实际传递了什么？ | `MASTv2/mast/agents/state.py`（`DocRef`、reducer）、`MASTv2/mast/agents/_shared/handoff.py`、`MASTv2/mast/agents/_shared/artifact_channel.py` | `tests/v2/agents/orchestrator/test_artifact_channel.py` |
 | 快速观测怎样进入较慢的推理，模型缺失时又会怎样？ | `MASTv2/mast/buffer/service.py`、`MASTv2/mast/vision/module.py`、`MASTv2/mast/agents/_shared/buffer_tools.py` | `tests/v2/buffer/test_buffer_service.py`、`tests/v2/vision/test_mock_backend.py`、`tests/v2/unit/agents/test_scan_progress_liveness.py` |
 | 操作员怎样区分任务完成与连接中断？ | `MASTv2/mast/api/sse.py`、`MASTv2/mast/api/ws.py`、`frontend/src/lib/sse.ts`、`frontend/src/lib/ws.ts` | `tests/v2/unit/api/test_sse_keepalive.py`、`tests/v2/unit/api/test_sse_client_contract.py`、`frontend/test/ws.reconnect.test.ts` |
-| **外部接口**怎样处理重试与重启？**软件已测，待真机验证。** | `MASTv2/mast/api/ext/jobs.py`：`JobManager.submit`、`fingerprint`、`_ensure_loaded` | `tests/v2/unit/api_ext/test_ext_jobs.py` |
-| 视觉脚手架怎样让智能体做到一动一观？**软件已测，待真机验证。** | `MASTv2/mast/vista/service.py`、`MASTv2/mast/vista/gate.py`、`MASTv2/mast/vista/wait.py`、`MASTv2/mast/api/ext/vista.py` | `tests/v2/vista/test_gate.py`、`tests/v2/vista/test_wait.py`、`tests/v2/vista/test_actions.py` |
+| **外部接口**怎样处理重试与重启？**软件已测，已在实机上使用（维护者报告）。** | `MASTv2/mast/api/ext/jobs.py`：`JobManager.submit`、`fingerprint`、`_ensure_loaded` | `tests/v2/unit/api_ext/test_ext_jobs.py` |
+| 视觉脚手架怎样让智能体做到一动一观？**软件已测，已在实机上使用（维护者报告）。** | `MASTv2/mast/vista/service.py`、`MASTv2/mast/vista/gate.py`、`MASTv2/mast/vista/wait.py`、`MASTv2/mast/api/ext/vista.py` | `tests/v2/vista/test_gate.py`、`tests/v2/vista/test_wait.py`、`tests/v2/vista/test_actions.py` |
 | 光学仪器（含出光）怎样设闸？**软件已测，待真机验证。** | `MASTv2/mast/instruments/emission_safety.py`、`MASTv2/mast/instruments/witec/microscope.py`、`MASTv2/mast/station.py`、`MASTv2/mast/satellite/hub.py` | `tests/v2/station/`、`tests/v2/instruments/witec/`、`tests/v2/satellite/` |
 
 agent 工具包装器与手动执行器分别在自己的入口取得仪器占用权，组合技能子步骤经过 `ExecutionContext.run`；
@@ -67,10 +67,11 @@ WebSocket 客户端负责重连与轮询回退，SSE 客户端区分完成、断
   完成检查，后端 **19,755 通过**；1 条时序相关的失败（单独复跑通过）、68 跳过、2 个预期失败，前端 **1,931 项单元测试**
   以及含类型检查的构建通过。环境、命令与范围见[验证记录](docs/OPEN_SOURCE_NOTES.md)。
 - **外部接口**：`/api/ext/v1` 与配套 MCP 集成将项目已有的外部控制能力扩展为公开接口。
-  该路径已经过软件测试，真机验证尚待完成；上述约 99 小时记录使用 MAST 6.4.0 的控制路径。
+  该路径已经过软件测试，并已在实机上使用（维护者报告）；上述约 99 小时记录使用 MAST 6.4.0 的控制路径。
 - **VISTA 与光学控制（7.0–7.1）**：视觉脚手架（`MASTv2/mast/vista/`）、TERS 工作流与卫星程序
   （`MASTv2/mast/satellite/`、`satellite/`）以及光学站（`MASTv2/mast/instruments/witec/`）
-  已有使用仪器替身的软件测试，真机验证尚待完成。
+  已有使用仪器替身的软件测试。视觉脚手架已在实机上使用（维护者报告）；
+  TERS 与光学站路径的真机验证尚待完成。
 - **实验性扩展**：`MASTv2/mast/conduct/`、`MASTv2/mast/agentruntime/`、`MASTv2/mast/goals/`、
   技能工坊与市场及 qPlus 路径继续探索长时间规划、执行与仪器能力，尚待真机验证。
   投稿管线的软件检查与具体投稿技能的真机验证分别记录。
