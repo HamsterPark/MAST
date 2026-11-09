@@ -200,7 +200,7 @@ The records below describe specific versions and execution paths. They include h
 |---|---|---|
 | Long STM campaign | MAST **6.4.0**; timestamped record spanning approximately 99 hours | Maintainer-reported real-instrument operation through the earlier external control path; selected figures are public. |
 | Public source snapshot | MAST **7.1.6**; exported and tested **2026-11-07** | Backend, frontend, and release checks using test doubles and synthetic data. |
-| External API and MCP integration | `/api/ext/v1` in this snapshot | The snapshot records software tests; it does not include hardware validation for this path. |
+| External API and MCP integration | `/api/ext/v1` in this snapshot | Maintainer-reported real-instrument use; the snapshot records software tests. |
 | VISTA-SPM layer | Added in MAST 7.0–7.1 | Maintainer-reported real-instrument use; the snapshot records software tests with instrument doubles. |
 | TERS and optical-station control | Added in MAST 7.0–7.1 | The snapshot records software tests with instrument doubles; it does not include hardware validation for these paths. |
 | Built-in orchestration and DINOv3-based vision | Earlier research and development retained in the source snapshot | Historical implementations; further development of these approaches has stopped. Current work uses external agents and VISTA-SPM. |
