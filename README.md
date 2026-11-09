@@ -201,7 +201,8 @@ The records below describe specific versions and execution paths. They include h
 | Long STM campaign | MAST **6.4.0**; timestamped record spanning approximately 99 hours | Maintainer-reported real-instrument operation through the earlier external control path; selected figures are public. |
 | Public source snapshot | MAST **7.1.6**; exported and tested **2026-11-07** | Backend, frontend, and release checks using test doubles and synthetic data. |
 | External API and MCP integration | `/api/ext/v1` in this snapshot | The snapshot records software tests; it does not include hardware validation for this path. |
-| VISTA-SPM layer, TERS and optical-station control | Added in MAST 7.0–7.1 | The snapshot records software tests with instrument doubles; it does not include hardware validation for these paths. |
+| VISTA-SPM layer | Added in MAST 7.0–7.1 | Maintainer-reported real-instrument use; the snapshot records software tests with instrument doubles. |
+| TERS and optical-station control | Added in MAST 7.0–7.1 | The snapshot records software tests with instrument doubles; it does not include hardware validation for these paths. |
 | Built-in orchestration and DINOv3-based vision | Earlier research and development retained in the source snapshot | Historical implementations; further development of these approaches has stopped. Current work uses external agents and VISTA-SPM. |
 | Other snapshot extensions | The skill workshop and marketplace, and qPlus paths | Hardware validation was pending in the recorded snapshot. |
 
@@ -269,7 +270,7 @@ The historical agent topology comprises one orchestrator; seven domain agents fo
 
 A target workflow is to compare scans before and after atom manipulation, register them against nearby landmarks, measure the displacement, and choose a follow-up observation that tests the interpretation. Visual modules also support offline analysis of archived scans and adaptation to other agent hosts.
 
-VISTA-SPM provides a public reference implementation. Its capabilities are integrated into MAST and have also been ported to dsh-spm. Its simulator results and integration records are documented in the respective repositories. The historical vision code in this snapshot predates this change in direction; validation records remain version-specific.
+VISTA-SPM provides a public reference implementation. Its capabilities are integrated into MAST, where they are in real-instrument use, and have also been ported to dsh-spm. Its simulator results and integration records are documented in the respective repositories. The historical vision code in this snapshot predates this change in direction; validation records remain version-specific.
 
 ## References
 
