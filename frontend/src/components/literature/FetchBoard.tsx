@@ -5,6 +5,7 @@ import { Card, Badge, Spinner, ErrorNote, DegradedNote, EmptyNote } from "@/comp
 import { Button, useToast } from "@/components/controls";
 import { tr } from "@/lib/i18n";
 import type { components } from "@/api/schema";
+import { apiError, refetchWhileError } from "@/lib/apiError";
 
 type IngestResponse = components["schemas"]["IngestResponse"];
 
@@ -154,14 +155,14 @@ export function FetchBoard() {
 
   const resolveM = useMutation({
     mutationFn: async (vars: { requestId: string; action: "done" | "dismissed" }) => {
-      const { data, error } = await api.POST(
+      const { data, error, response } = await api.POST(
         "/api/literature/fetch-board/{request_id}/resolve",
         {
           params: { path: { request_id: vars.requestId } },
           body: { action: vars.action, note: "" },
         },
       );
-      if (error) throw error;
+      if (error) throw apiError(error, response);
       return data;
     },
     onSuccess: (d, vars) => {
@@ -191,12 +192,13 @@ export function FetchBoard() {
   const q = useQuery({
     queryKey: ["literature", "fetch-board", status],
     queryFn: async () => {
-      const { data, error } = await api.GET("/api/literature/fetch-board", {
+      const { data, error, response } = await api.GET("/api/literature/fetch-board", {
         params: { query: { status: status || null } },
       });
-      if (error) throw error;
+      if (error) throw apiError(error, response);
       return data;
     },
+    refetchInterval: refetchWhileError,
   });
 
   const reqs = q.data?.requests ?? [];
@@ -232,7 +234,7 @@ export function FetchBoard() {
       </div>
 
       {q.isPending && <Spinner />}
-      {q.isError && <ErrorNote error={q.error} />}
+      {q.isError && <ErrorNote error={q.error} retrying />}
       {q.data?.degraded && <DegradedNote what={tr("取文请求板", "Full-text request board")} />}
       {q.data && !q.data.degraded && reqs.length === 0 && (
         <EmptyNote label={tr("取文请求板为空。文献 agent 需要某篇全文时会在此提交请求，你上传 PDF 或取文即可满足。", "The request board is empty. When the literature agent needs the full text of a paper it posts a request here; upload the PDF or fetch it to fulfil it.")} />

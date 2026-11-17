@@ -64,8 +64,8 @@ def _grab_channel_array(context, channel_index: int, direction: int,
 
 
 def _frames_dir():
-    from mast._runtime_paths import project_root
-    d = project_root() / "experiments" / "frames"
+    from mast._runtime_paths import data_root
+    d = data_root() / "experiments" / "frames"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

@@ -497,13 +497,14 @@ def _sample_gate_message(meta: Any, skill: str) -> Any:
 
 
 def _waits_for_human_nodes() -> bool:
-    """Whether a ``human`` node on this path asks a real operator: only on the optical station
-    (``mast.station``). An STM station keeps what it always did - the node
+    """Whether a ``human`` node on this path asks a real operator: only on a station with
+    structured operator prompts (``mast.station`` capability ``operator_prompts``: the optical
+    and the generic station). An STM station keeps what it always did - the node
     ends the job with ``needs_human_node``. Unreadable profile = STM: **永不抛**."""
     try:
         from mast import station
 
-        return bool(station.is_optical())
+        return bool(station.has("operator_prompts"))
     except Exception:  # noqa: BLE001
         return False
 

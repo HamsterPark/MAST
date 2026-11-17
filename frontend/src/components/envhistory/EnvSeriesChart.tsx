@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import UplotReact from "uplot-react";
 import type uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
@@ -6,7 +6,7 @@ import { useUiStore } from "@/store";
 import { tr } from "@/lib/i18n";
 import { EmptyNote } from "@/components/ui";
 import { useElementWidth, useViewportHeight } from "@/hooks/useElementWidth";
-import { TREND_RATIO, sizeChart } from "@/lib/chartSize";
+import { SMALL_MULTIPLE_RATIO, sizeChart } from "@/lib/chartSize";
 import {
   axisLabel,
   fmtSpan,
@@ -17,7 +17,13 @@ import {
   type EnvPointLike,
 } from "@/lib/envHistory";
 
-// Environment trend — one sensor's aggregated history.
+// Environment trend — one sensor's aggregated history, drawn as one small multiple.
+//
+// The page stacks one of these per sensor on a shared time axis (cursor and zoom are synced
+// through `syncKey`). Two channels are never overlaid on one axis: the only thing the old
+// overlay was for — "are these two recorded at the same moment?" — is visible when the strips
+// share a time axis, and the counted / excluded numbers stay on every strip. Overlaying two
+// curves on one Y axis would also only ever be honest for equal units.
 //
 // A mean line inside a min/max band, because that is exactly what a bucket is.
 // Drawing the mean alone would hide the excursion the bucket was built to keep:
@@ -39,45 +45,34 @@ function token(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-/**
- * Optional second series drawn over the first.
- *
- * Same axis, so the units MUST match — the caller checks. This is deliberate,
- * and it is the same rule AuxChannels states for its small multiples: two
- * curves on two Y axes sit at whatever relative height the person drawing them
- * chose, which invites the reader to see a correlation nobody measured. Two
- * temperatures on one Kelvin axis are genuinely comparable; a temperature and a
- * pressure are not.
- */
-export interface CompareSeries {
-  sensor: string;
-  points: readonly EnvPointLike[];
-}
-
 export function EnvSeriesChart({
   sensor,
   unit,
   points,
   bucketS,
   thinned,
-  compare,
+  syncKey,
 }: {
   sensor: string;
   unit: string;
   points: readonly EnvPointLike[];
   bucketS: number;
   thinned: boolean;
-  compare?: CompareSeries | null;
+  /** Charts with the same key share cursor and x-zoom (uPlot cursor sync). */
+  syncKey?: string;
 }) {
   const theme = useUiStore((s) => s.theme);
   const [boxRef, measuredW] = useElementWidth<HTMLDivElement>();
   const viewportH = useViewportHeight();
   const { width, height } = sizeChart(measuredW, 860, {
-    ratio: TREND_RATIO,
-    minHeight: 240,
-    maxHeight: 520,
+    ratio: SMALL_MULTIPLE_RATIO,
+    minHeight: 130,
+    maxHeight: 220,
     viewportH,
   });
+  // Has the operator dragged a zoom (here or on a synced strip)? Then a poll must not snap the x
+  // scale back: uplot-react resets scales on every data change unless told not to.
+  const zoomed = useRef(false);
   const [hover, setHover] = useState<{ t: number; mean: number | null; lo: number | null; hi: number | null } | null>(
     null,
   );
@@ -91,24 +86,8 @@ export function EnvSeriesChart({
       lo.map((v) => (v == null ? null : v * scale)),
       mean.map((v) => (v == null ? null : v * scale)),
     ];
-    if (compare) {
-      // Resampled onto the PRIMARY's timestamps by exact bucket match, not by
-      // index: the two series can have different numbers of buckets (one channel
-      // may have gaps the other does not), and lining them up by position would
-      // slide one curve along the time axis and invent an offset that is not there.
-      const byTs = new Map<number, number | null>();
-      for (const p of compare.points) {
-        if (p && Number.isFinite(p.ts)) {
-          byTs.set(p.ts, typeof p.mean === "number" && Number.isFinite(p.mean) ? p.mean : null);
-        }
-      }
-      cols.push(t.map((ts) => {
-        const v = byTs.get(ts);
-        return v == null ? null : v * scale;
-      }));
-    }
     return [t, ...cols] as uPlot.AlignedData;
-  }, [points, bucketS, duty, compare]);
+  }, [points, bucketS, duty]);
 
   const logScale = useMemo(() => !duty && preferLogScale(unit, points), [duty, unit, points]);
 
@@ -129,6 +108,7 @@ export function EnvSeriesChart({
       cursor: {
         drag: { x: true, y: false },
         points: { show: false },
+        ...(syncKey ? { sync: { key: syncKey, setSeries: false } } : {}),
       },
       axes: [
         { stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid } },
@@ -136,6 +116,9 @@ export function EnvSeriesChart({
           stroke: muted,
           label: yLabel,
           labelSize: 40,
+          size: 72,
+          // uPlot's default tick text rounds 1e-9 to "0"; tiny and huge values go exponential.
+          values: (_u: uPlot, vals: (number | null)[]) => vals.map((v) => (v == null ? "" : tickText(v))),
           grid: { stroke: grid, width: 1 },
           ticks: { stroke: grid },
         },
@@ -147,24 +130,23 @@ export function EnvSeriesChart({
         { stroke: "transparent", points: { show: false }, label: "max" },
         { stroke: "transparent", points: { show: false }, label: "min" },
         { stroke: accent, width: 1.5, points: { show: false }, label: "mean" },
-        // Dashed and in a different colour, with no band of its own: the band
-        // belongs to the series it was computed for, and a second one would
-        // just be two overlapping washes.
-        ...(compare
-          ? [{
-              stroke: token("--mast-dream") || "#a78bfa",
-              width: 1.3,
-              dash: [5, 3],
-              points: { show: false },
-              label: compare.sensor,
-            } as uPlot.Series]
-          : []),
       ],
       // Use `bands` to fill between the two series only. `series.fill` fills to
       // the baseline, not to the next series, so it would shade the whole region
       // under the curve.
       bands: [{ series: [1, 2], fill: withAlpha(accent, 0.18) }],
       hooks: {
+        setScale: [
+          (u: uPlot, key: string) => {
+            if (key !== "x") return;
+            const xs = u.data[0];
+            if (!xs || !xs.length) return;
+            const eps = Math.max(1, bucketS / 2);
+            zoomed.current =
+              (u.scales.x?.min ?? xs[0]!) > xs[0]! + eps ||
+              (u.scales.x?.max ?? xs[xs.length - 1]!) < xs[xs.length - 1]! - eps;
+          },
+        ],
         setCursor: [
           (u: uPlot) => {
             const i = u.cursor.idx;
@@ -182,11 +164,9 @@ export function EnvSeriesChart({
       },
       plugins: [],
     } as uPlot.Options;
-    // `theme` is in the deps because the tokens above only change with it.
-    // `compare?.sensor` rather than `compare`: the object identity changes on
-    // every refetch, and rebuilding the uPlot options on each poll throws away
-    // the cursor and any zoom the operator had dragged.
-  }, [width, height, sensor, unit, duty, logScale, theme, compare?.sensor]);
+    // `theme` is in the deps because the tokens above only change with it. The points are NOT:
+    // rebuilding the uPlot options on each poll would throw away the cursor and any zoom.
+  }, [width, height, sensor, unit, duty, logScale, theme, syncKey, bucketS]);
 
   if (!points.length) {
     // Still hand the measuring div back, so the width is already known when
@@ -205,7 +185,7 @@ export function EnvSeriesChart({
 
   return (
     <div ref={boxRef}>
-      <UplotReact options={options} data={data} />
+      <UplotReact options={options} data={data} resetScales={!zoomed.current} />
       <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-mast-muted">
         <span>
           {tr(
@@ -233,6 +213,12 @@ export function EnvSeriesChart({
       </div>
     </div>
   );
+}
+
+function tickText(v: number): string {
+  const a = Math.abs(v);
+  if (a !== 0 && (a < 1e-3 || a >= 1e6)) return v.toExponential(1).replace("e+", "e");
+  return String(Math.round(v * 1e6) / 1e6);
 }
 
 function fmtNum(v: number | null | undefined): string {

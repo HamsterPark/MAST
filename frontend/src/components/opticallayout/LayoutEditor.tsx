@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import clsx from "clsx";
 import { tr } from "@/lib/i18n";
@@ -36,10 +36,14 @@ import { errorsOf, validateLayout } from "@/lib/opticalLayout/validate";
 import { classifySaveError, saveFailureText, suggestCopyId, withOperator } from "@/lib/opticalLayout/saveFlow";
 import { layoutForWrite, openCommentCount } from "@/lib/opticalLayout/parse";
 import { exportFileName, resolveCssVars, standaloneSvg } from "@/lib/opticalLayout/exportSvg";
+import { paperColor, paperFileName, paperFrame, rotatedBox } from "@/lib/opticalLayout/exportStyle";
+import { withLayerDefaults } from "@/lib/opticalLayout/layers";
+import { glyphShapes, paperShapes, shapeBounds } from "@/lib/opticalLayout/glyphs";
+import { branchPoints } from "@/lib/opticalLayout/trace";
 import { toScreen, type View } from "@/lib/opticalLayout/view";
 import { typeLabel } from "@/lib/opticalLayout/catalog";
-import { LayoutCanvas, type CanvasFocus, type CanvasTool, type ToolPoint } from "./LayoutCanvas";
-import { DEFAULT_DISPLAY, LayoutSvg, type DisplayOptions } from "./LayoutSvg";
+import { BEAM_PICK_PX, LayoutCanvas, type CanvasFocus, type CanvasTool, type ToolPoint } from "./LayoutCanvas";
+import { LayoutSvg, paperTextBoxes, type DisplayOptions } from "./LayoutSvg";
 import { Palette } from "./Palette";
 import { Toolbar } from "./Toolbar";
 import { ComponentForm, GroupForm, type InspectorCtx } from "./ComponentForm";
@@ -48,11 +52,26 @@ import { CommentsPanel } from "./CommentsPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { CheckPanel } from "./CheckPanel";
 import { ConflictBanner, SaveAsDialog } from "./LayoutDialogs";
+import { figurePng } from "./figurePng";
+import { PngExportDialog, type PngExportChoice } from "./PngExportDialog";
+import { beamTableCsv, bomCsv, tableFileName } from "@/lib/opticalLayout/exportCsv";
+import { FigurePdfError, figurePdfFileName, requestFigurePdf } from "@/lib/opticalLayout/exportPdf";
+import { BeamInspector } from "./BeamInspector";
+import { nearestSegment, pickOf, refOf, type BeamPick, type SegRef } from "@/lib/opticalLayout/beamDraw";
+import { beamChecks } from "@/lib/opticalLayout/beam";
+import { insertTemplate, templateById } from "@/lib/opticalLayout/templates";
+
+/** The 3D view (three.js), fetched the first time it is opened: the 2D editor does not carry it. */
+const View3D = lazy(() => import("./view3d/View3D"));
 
 // The editor of one layout: the canvas in the middle, the palette on the left, the
 // inspector / comments / history / beam check on the right. All state of the drawing is
 // one reducer (lib/opticalLayout/editorState.ts); this component wires it to the pointer,
 // the keyboard and the server, and decides nothing the lib could decide.
+//
+// Focus mode (F, or the toolbar button; Esc leaves) folds the palette and the inspector away and
+// lays the toolbar and the canvas over the page's content area. It stops at that area on purpose:
+// the top bar with the E-STOP stays where it is and stays reachable.
 
 export interface LayoutEditorProps {
   initial: OpticalLayout;
@@ -64,11 +83,15 @@ export interface LayoutEditorProps {
   onSwitchTo: (id: string) => void;
 }
 
-type Tab = "inspector" | "comments" | "history" | "check";
+type Tab = "inspector" | "beam" | "comments" | "history" | "check";
 type Notice = { tone: "ok" | "info" | "warn" | "err"; text: string };
 
 const SNAP_KEY = "mast.opticalLayout.snap";
+/** the layers (v1 stored seven of them under this key; v2 reads it over the defaults, so new layers start on) */
 const DISPLAY_KEY = "mast.opticalLayout.display";
+const PAPER_HOLES_KEY = "mast.opticalLayout.paperHoles";
+/** whether the 3D view was the one open last */
+const VIEW3D_KEY = "mast.opticalLayout.view3d";
 
 function readStored<T>(key: string, fallback: T, valid: (v: unknown) => v is T): T {
   try {
@@ -88,8 +111,16 @@ function writeStored(key: string, v: unknown) {
   }
 }
 const isSnap = (v: unknown): v is SnapMode => v === "off" || v === "hole" || v === "half" || v === "mm";
-const isDisplay = (v: unknown): v is DisplayOptions =>
-  typeof v === "object" && v !== null && (Object.keys(DEFAULT_DISPLAY) as (keyof DisplayOptions)[]).every((k) => typeof (v as Record<string, unknown>)[k] === "boolean");
+const isBool = (v: unknown): v is boolean => typeof v === "boolean";
+/** whatever is stored under a key, parsed, or null */
+function readRaw(key: string): unknown {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw === null ? null : (JSON.parse(raw) as unknown);
+  } catch {
+    return null;
+  }
+}
 
 function download(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);
@@ -102,14 +133,15 @@ function download(blob: Blob, name: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-const TAB_BTN = "relative -mb-px whitespace-nowrap border-b-2 px-2.5 py-1.5 text-sm";
+const TAB_BTN = "relative -mb-px shrink-0 whitespace-nowrap border-b-2 px-2 py-1.5 text-[13px]";
 /** pixels per millimetre the view is zoomed in to (at least) when it is moved to where the trace stopped */
 const CUT_ZOOM = 8;
 
 export function LayoutEditor({ initial, linksState, taken, onDirtyChange, onSwitchTo }: LayoutEditorProps) {
   const [state, dispatch] = useReducer(editorReducer, initial, initialEditorState);
   const present = state.history.present;
-  const dirty = isDirty(state);
+  // compares two whole layouts as text: once per change of the editor state, not on every frame of a drag
+  const dirty = useMemo(() => isDirty(state), [state]);
   const saved = state.baseRevision > 0;
   const theme = useUiStore((s) => s.theme);
   const [operator] = useOperatorName();
@@ -118,7 +150,14 @@ export function LayoutEditor({ initial, linksState, taken, onDirtyChange, onSwit
   const [selection, setSelection] = useState<string[]>([]);
   const [tool, setTool] = useState<CanvasTool>("select");
   const [snap, setSnap] = useState<SnapMode>(() => readStored(SNAP_KEY, "hole" as SnapMode, isSnap));
-  const [display, setDisplay] = useState<DisplayOptions>(() => ({ ...DEFAULT_DISPLAY, ...readStored(DISPLAY_KEY, DEFAULT_DISPLAY, isDisplay) }));
+  const [display, setDisplay] = useState<DisplayOptions>(() => withLayerDefaults(readRaw(DISPLAY_KEY)));
+  const [paperHoles, setPaperHoles] = useState<boolean>(() => readStored(PAPER_HOLES_KEY, false, isBool));
+  const [focusMode, setFocusMode] = useState(false);
+  const [view3d, setView3d] = useState<boolean>(() => readStored(VIEW3D_KEY, false, isBool));
+  /** the beam the beam tab shows, named so that it survives a re-trace (source, wavelength, branch, segment) */
+  const [beamPick, setBeamPick] = useState<BeamPick | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const focusRect = useContentArea(focusMode, rootRef);
   const [preview, setPreview] = useState<ReadonlyMap<string, Vec> | null>(null);
   const [tab, setTab] = useState<Tab>("inspector");
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -131,6 +170,10 @@ export function LayoutEditor({ initial, linksState, taken, onDirtyChange, onSwit
   const [saveAsError, setSaveAsError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [linksSnapshot, setLinksSnapshot] = useState<LinksState>(linksState);
+  /** the figure the PNG dialog exports (made when the dialog opens), null while it is closed */
+  const [pngFigure, setPngFigure] = useState<{ text: string; width: number; height: number } | null>(null);
+  /** a PDF or a PNG of the figure is being made */
+  const [exporting, setExporting] = useState(false);
   const centerRef = useRef<Vec | null>(null);
 
   const qc = useQueryClient();
@@ -156,7 +199,10 @@ export function LayoutEditor({ initial, linksState, taken, onDirtyChange, onSwit
   const misses = useMemo(() => shownNearMisses(shown, trace, preview !== null), [shown, trace, preview]);
   const checks = useMemo<Diagnostic[]>(() => (preview ? [] : diagnostics(shown, trace, { indicators, misses })), [shown, trace, indicators, misses, preview]);
   const issues = useMemo(() => validateLayout(present), [present]);
-  const problems = checks.filter((d) => d.level !== "ok").length + errorsOf(issues).length;
+  /** the beam checks of v2 (spot past the aperture, light extinguished, ...) count towards the Check tab's number */
+  const beamWarnings = useMemo(() => (preview ? 0 : beamChecks(shown, trace).filter((c) => c.level === "warn").length), [preview, shown, trace]);
+  const problems = checks.filter((d) => d.level !== "ok").length + errorsOf(issues).length + beamWarnings;
+  const beamRef = useMemo<SegRef | null>(() => (beamPick ? refOf(trace, beamPick) : null), [beamPick, trace]);
 
   const commentCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -167,8 +213,8 @@ export function LayoutEditor({ initial, linksState, taken, onDirtyChange, onSwit
 
   // ── bookkeeping ──
   const selectedSet = useMemo(() => new Set(selection), [selection]);
-  const latest = useRef({ present, selection, tool, readOnly, trace, dirty, state });
-  latest.current = { present, selection, tool, readOnly, trace, dirty, state };
+  const latest = useRef({ present, selection, tool, readOnly, trace, dirty, state, focusMode, beamPick, display });
+  latest.current = { present, selection, tool, readOnly, trace, dirty, state, focusMode, beamPick, display };
 
   useEffect(() => {
     onDirtyChange(dirty);
@@ -194,6 +240,12 @@ export function LayoutEditor({ initial, linksState, taken, onDirtyChange, onSwit
   useEffect(() => {
     writeStored(DISPLAY_KEY, display);
   }, [display]);
+  useEffect(() => {
+    writeStored(PAPER_HOLES_KEY, paperHoles);
+  }, [paperHoles]);
+  useEffect(() => {
+    writeStored(VIEW3D_KEY, view3d);
+  }, [view3d]);
 
   // Selections follow the layout: a component that is gone cannot stay selected.
   useEffect(() => {
@@ -217,7 +269,28 @@ export function LayoutEditor({ initial, linksState, taken, onDirtyChange, onSwit
     dispatch({ type: "edit", layout: next, key, now: Date.now() });
   }, []);
 
-  const selectIds = useCallback((ids: string[]) => setSelection(ids), []);
+  /** a selection made on the canvas; a component picked while the beam tab is open is shown in Properties */
+  const selectIds = useCallback((ids: string[]) => {
+    setSelection(ids);
+    if (ids.length > 0) setTab((t) => (t === "beam" ? "inspector" : t));
+  }, []);
+  /**
+   * a click on the empty canvas: the beam under it, if any, goes to the beam tab; otherwise nothing is picked.
+   * Only beams one can see: with the Beams layer off a click there is a click on the empty table.
+   */
+  const pickBeamAt = useCallback((world: Vec, k: number): boolean => {
+    const cur = latest.current;
+    const hit = cur.display.beams ? nearestSegment(cur.trace, world, BEAM_PICK_PX / k) : null;
+    if (!hit) {
+      setBeamPick(null);
+      return false;
+    }
+    setBeamPick(pickOf(cur.trace, hit));
+    setSelection([]);
+    setTab("beam");
+    return true;
+  }, []);
+  const pickBeam = useCallback((r: SegRef | null) => setBeamPick(r ? pickOf(latest.current.trace, r) : null), []);
   /** the banner's button: move the view to the point where the trace was cut and zoom in on it */
   const showCut = useCallback(() => {
     const p = cutPoint(latest.current.trace);
@@ -254,6 +327,32 @@ export function LayoutEditor({ initial, linksState, taken, onDirtyChange, onSwit
       placeAt(type, snap === "off" ? centre : snapPoint(cur.table, centre, snap));
     },
     [placeAt, snap],
+  );
+
+  /** an assembly (v2 section 8.6): all its parts in ONE edit (one undo step), selected, so [ ] turn them as a group */
+  const placeTemplate = useCallback(
+    (id: string, at: Vec) => {
+      const template = templateById(id);
+      if (!template) return;
+      const r = insertTemplate(latest.current.present, template, at);
+      if (r.refusal) {
+        return say("warn", r.refusal === "sources" ? tr("光源最多 32 个。", "At most 32 light sources.") : r.refusal === "components" ? tr("器件最多 400 个。", "At most 400 components.") : tr("这个版本还不认识组件组里的某个器件类型。", "This build does not know one of the assembly's component types."));
+      }
+      edit(() => r.layout);
+      setSelection(r.ids);
+      setTab("inspector");
+      setTool("select");
+      say("info", tr(`已加入 ${template.name()}（${r.ids.length} 个器件，已选中）。用 [ ] 整组旋转，方向键整组移动，Ctrl+Z 一步撤销。`, `Added ${template.name()} (${r.ids.length} components, selected). [ and ] turn the group, the arrow keys move it, Ctrl+Z takes it back in one step.`));
+    },
+    [edit, say],
+  );
+  const onAddTemplate = useCallback(
+    (id: string) => {
+      const cur = latest.current.present;
+      const centre = centerRef.current ?? { x: cur.table.width_mm / 2, y: cur.table.height_mm / 2 };
+      placeTemplate(id, snap === "off" ? centre : snapPoint(cur.table, centre, snap));
+    },
+    [placeTemplate, snap],
   );
 
   // ── deleting, duplicating ──
@@ -381,13 +480,28 @@ export function LayoutEditor({ initial, linksState, taken, onDirtyChange, onSwit
           setSelection(cur.present.components.map((c) => c.id));
           return;
         case "escape":
+          // one thing per press: the tool, then focus mode, then the selection (a drag is the canvas's own)
           if (cur.tool !== "select") {
             handled();
             setToolChecked("select");
+          } else if (cur.focusMode) {
+            handled();
+            setFocusMode(false);
           } else if (cur.selection.length > 0) {
             handled();
             setSelection([]);
+          } else if (cur.beamPick) {
+            handled();
+            setBeamPick(null);
           }
+          return;
+        case "focus":
+          handled();
+          setFocusMode((f) => !f);
+          return;
+        case "view3d":
+          handled();
+          setView3d((v) => !v);
           return;
       }
       if (cur.readOnly || cur.selection.length === 0) return;
@@ -511,6 +625,85 @@ export function LayoutEditor({ initial, linksState, taken, onDirtyChange, onSwit
     say("ok", tr("已导出 SVG。", "SVG exported."));
   };
 
+  /** the figure: the canvas component in its paper variant, framed on what is drawn, in print colours (a standalone SVG file) */
+  const paperFigure = (): { text: string; width: number; height: number } => {
+    const layers: DisplayOptions = { ...display, holes: paperHoles, grid: false, rulers: false, alignment: false, comments: false };
+    const beams = layers.beams ? trace.flatMap((t) => t.branches.flatMap((b) => branchPoints(b))) : [];
+    // framed on the drawings and the beams, then on the names, powers and notes as the figure writes them
+    const frame = paperFrame({
+      table: shown.table,
+      components: shown.components,
+      texts: layers.texts ? shown.texts : [],
+      beamPoints: beams,
+      componentBox: (c, k) => rotatedBox(c, shapeBounds(k === null ? glyphShapes(c) : paperShapes(glyphShapes(c), k))),
+      screenBoxes: (view) => paperTextBoxes(shown, trace, view, layers, "light"),
+    });
+    const markup = renderToStaticMarkup(
+      <LayoutSvg layout={shown} trace={trace} indicators={indicators} nearMisses={[]} view={frame.view} width={frame.width} height={frame.height} theme="light" display={layers} selected={new Set()} variant="paper" />,
+    );
+    return { text: standaloneSvg(resolveCssVars(markup, (n) => paperColor(n))), width: frame.width, height: frame.height };
+  };
+
+  const exportPaper = async (kind: "svg" | "png") => {
+    const fig = paperFigure();
+    try {
+      if (kind === "svg") download(new Blob([fig.text], { type: "image/svg+xml" }), paperFileName(present, "svg", dirty));
+      // three times the figure's pixels; the file says the figure's own size on paper (pHYs: 288 dpi)
+      else download((await figurePng(fig.text, fig, { kind: "scale", scale: 3 })).blob, paperFileName(present, "png", dirty));
+      say("ok", kind === "svg" ? tr("已导出论文风格 SVG。", "Figure SVG exported.") : tr("已导出论文风格 PNG。", "Figure PNG exported."));
+    } catch (e) {
+      say("err", tr(`导出失败：${(e as Error).message}`, `Export failed: ${(e as Error).message}`));
+    }
+  };
+
+  // ── more exports (docs/v2/design/optical_layout_exports.md): the figure as a PDF and as a PNG at a chosen
+  // resolution, the bill of materials and the beam table. Named after what is shown: the revision being looked at,
+  // or the layout being edited (with "-unsaved" when it has edits not saved).
+  const exportName = viewingRev !== null ? { id: shown.id, revision: viewingRev } : present;
+  const exportUnsaved = viewingRev === null && dirty;
+
+  const exportPaperPdf = async () => {
+    if (exporting) return;
+    const fig = paperFigure();
+    setExporting(true);
+    say("info", tr("正在生成 PDF…", "Making the PDF…"));
+    try {
+      const blob = await requestFigurePdf({ svg: fig.text, title: shown.title || shown.id });
+      download(blob, figurePdfFileName(exportName, exportUnsaved));
+      say("ok", tr("已导出论文风格 PDF。", "Figure PDF exported."));
+    } catch (e) {
+      if (e instanceof FigurePdfError) say(e.kind === "unavailable" || e.kind === "too_large" ? "warn" : "err", e.message);
+      else say("err", tr(`PDF 导出失败：${(e as Error).message}`, `PDF export failed: ${(e as Error).message}`));
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const exportPngAt = async (c: PngExportChoice) => {
+    const fig = pngFigure;
+    if (!fig || exporting) return;
+    setExporting(true);
+    try {
+      const out = await figurePng(fig.text, fig, c.res, c.paperWidthMm);
+      const dpi = Math.round(out.dpi);
+      download(out.blob, paperFileName(exportName, "png", exportUnsaved).replace(/\.png$/, `-${dpi}dpi.png`));
+      setPngFigure(null);
+      const what = tr(`${out.width} × ${out.height} 像素，${dpi} dpi，纸面宽 ${out.plan.paperWidthMm.toFixed(1)} mm`, `${out.width} × ${out.height} px, ${dpi} dpi, ${out.plan.paperWidthMm.toFixed(1)} mm wide on paper`);
+      if (out.plan.limited) say("warn", tr(`已导出 PNG（${what}；浏览器画不了更大的图，分辨率降低了）。`, `PNG exported (${what}; the browser cannot draw it larger, so the resolution is lower).`));
+      else say("ok", tr(`已导出 PNG（${what}）。`, `PNG exported (${what}).`));
+    } catch (e) {
+      say("err", tr(`导出失败：${(e as Error).message}`, `Export failed: ${(e as Error).message}`));
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const exportTable = (kind: "bom" | "beams") => {
+    const text = kind === "bom" ? bomCsv(shown) : beamTableCsv(shown, trace);
+    download(new Blob([text], { type: "text/csv;charset=utf-8" }), tableFileName(exportName, kind, exportUnsaved));
+    say("ok", kind === "bom" ? tr("已导出物料清单 CSV。", "Bill of materials exported (CSV).") : tr("已导出光束表 CSV。", "Beam table exported (CSV)."));
+  };
+
   const exportPng = async () => {
     if (!saved) return say("warn", tr("PNG 由服务器根据已保存的版本渲染，请先保存。", "The PNG is rendered by the server from the saved revision; save first."));
     try {
@@ -601,8 +794,58 @@ export function LayoutEditor({ initial, linksState, taken, onDirtyChange, onSwit
     return m;
   }, [indicators]);
 
+
+  // The trace-cut banner and the notice bar. In focus mode they float over the top of the canvas: in the flow they
+  // would change its height each time a notice comes and goes, and the view would rescale under the pointer.
+  const cutBanner = cut ? (
+    <div role="status" data-trace-cut="" className="flex items-start justify-between gap-3 rounded-mast-ctl border border-mast-warn-border bg-mast-warn-bg px-3 py-1.5 text-sm text-mast-warn">
+      <span>{traceCutMessage(cut)}</span>
+      <button type="button" data-trace-cut-locate="" onClick={showCut} className="shrink-0 rounded-mast-ctl border border-mast-warn-border px-2 py-0.5 text-xs font-semibold hover:bg-mast-panel-2">
+        {tr("定位到截断处", "Show where it stopped")}
+      </button>
+    </div>
+  ) : null;
+  const noticeBar =
+    notice || hint ? (
+      <div
+        role={notice?.tone === "err" ? "alert" : "status"}
+        className={clsx(
+          "flex items-start justify-between gap-3 rounded-mast-ctl border px-3 py-1.5 text-sm",
+          notice
+            ? notice.tone === "ok"
+              ? "border-mast-auto-border bg-mast-auto-bg text-mast-auto"
+              : notice.tone === "warn"
+                ? "border-mast-warn-border bg-mast-warn-bg text-mast-warn"
+                : notice.tone === "err"
+                  ? "border-mast-danger-border bg-mast-danger-bg text-mast-danger"
+                  : "border-mast-info-border bg-mast-info-bg text-mast-info"
+            : "border-mast-border bg-mast-panel-2 text-mast-muted",
+        )}
+      >
+        <span>{notice?.text ?? hint}</span>
+        {notice && (
+          <button type="button" className="shrink-0 opacity-70 hover:opacity-100" aria-label={tr("关闭", "Dismiss")} onClick={() => setNotice(null)}>
+            ✕
+          </button>
+        )}
+      </div>
+    ) : null;
+  const banners =
+    cutBanner || noticeBar ? (
+      <>
+        {cutBanner}
+        {noticeBar}
+      </>
+    ) : null;
+
   return (
-    <div className="space-y-2" data-editor="optical-layout">
+    <div
+      ref={rootRef}
+      className={focusMode ? "fixed z-30 flex flex-col gap-2 overflow-hidden bg-mast-bg p-3" : "space-y-2"}
+      style={focusMode ? (focusRect ? { top: focusRect.top, left: focusRect.left, width: focusRect.width, height: focusRect.height } : { inset: 0 }) : undefined}
+      data-editor="optical-layout"
+      data-focus-mode={focusMode ? "" : undefined}
+    >
       {state.conflict && (
         <ConflictBanner
           conflict={state.conflict}
@@ -617,7 +860,7 @@ export function LayoutEditor({ initial, linksState, taken, onDirtyChange, onSwit
         />
       )}
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+      <div className={clsx("flex flex-wrap items-center gap-x-4 gap-y-2", focusMode && "hidden")}>
         <OperatorNameField />
         <div className="flex items-center gap-2 text-xs text-mast-muted">
           <span className="font-mono text-mast-text">{present.id}</span>
@@ -634,6 +877,7 @@ export function LayoutEditor({ initial, linksState, taken, onDirtyChange, onSwit
 
       <Toolbar
         onAdd={onAdd}
+        onAddTemplate={onAddTemplate}
         tool={tool}
         onTool={setToolChecked}
         snap={snap}
@@ -656,53 +900,67 @@ export function LayoutEditor({ initial, linksState, taken, onDirtyChange, onSwit
         }}
         onExportSvg={exportSvg}
         onExportPng={() => void exportPng()}
+        onExportPaper={(kind) => void exportPaper(kind)}
+        paperHoles={paperHoles}
+        onPaperHoles={setPaperHoles}
+        onExportPaperPdf={() => void exportPaperPdf()}
+        onExportPaperPngAt={() => setPngFigure(paperFigure())}
+        onExportTable={exportTable}
+        focus={focusMode}
+        onFocus={setFocusMode}
+        view3d={view3d}
+        onView3d={setView3d}
       />
 
-      {cut && (
-        <div role="status" data-trace-cut="" className="flex items-start justify-between gap-3 rounded-mast-ctl border border-mast-warn-border bg-mast-warn-bg px-3 py-1.5 text-sm text-mast-warn">
-          <span>{traceCutMessage(cut)}</span>
-          <button type="button" data-trace-cut-locate="" onClick={showCut} className="shrink-0 rounded-mast-ctl border border-mast-warn-border px-2 py-0.5 text-xs font-semibold hover:bg-mast-panel-2">
-            {tr("定位到截断处", "Show where it stopped")}
-          </button>
-        </div>
-      )}
-
-      {(notice || hint) && (
-        <div
-          role={notice?.tone === "err" ? "alert" : "status"}
-          className={clsx(
-            "flex items-start justify-between gap-3 rounded-mast-ctl border px-3 py-1.5 text-sm",
-            notice
-              ? notice.tone === "ok"
-                ? "border-mast-auto-border bg-mast-auto-bg text-mast-auto"
-                : notice.tone === "warn"
-                  ? "border-mast-warn-border bg-mast-warn-bg text-mast-warn"
-                  : notice.tone === "err"
-                    ? "border-mast-danger-border bg-mast-danger-bg text-mast-danger"
-                    : "border-mast-info-border bg-mast-info-bg text-mast-info"
-              : "border-mast-border bg-mast-panel-2 text-mast-muted",
-          )}
-        >
-          <span>{notice?.text ?? hint}</span>
-          {notice && (
-            <button type="button" className="shrink-0 opacity-70 hover:opacity-100" aria-label={tr("关闭", "Dismiss")} onClick={() => setNotice(null)}>
-              ✕
-            </button>
-          )}
-        </div>
-      )}
+      {!focusMode && banners}
       {revision.isError && viewingRev !== null && <ErrorNote error={revision.error} label={tr("那一版读取失败", "Could not read that revision")} />}
 
-      <div className="grid gap-3 xl:h-[max(34rem,calc(100vh-25rem))] xl:grid-cols-[11rem_minmax(0,1fr)_21rem]">
-        <aside className="hidden min-h-0 xl:block" aria-label={tr("器件面板", "Component palette")}>
+      <div className={focusMode ? "grid min-h-0 flex-1 grid-cols-1" : "grid gap-3 xl:h-[max(34rem,calc(100vh-25rem))] xl:grid-cols-[11rem_minmax(0,1fr)_22rem]"}>
+        <aside className={focusMode ? "hidden" : "hidden min-h-0 xl:block"} aria-label={tr("器件面板", "Component palette")}>
           <Palette
             onAdd={onAdd}
+            onAddTemplate={onAddTemplate}
             disabled={readOnly}
             refusal={readOnly ? tr("正在看历史版本，不能添加。", "Viewing an old revision: nothing can be added.") : null}
           />
         </aside>
 
-        <div className="h-[30rem] min-w-0 xl:h-auto xl:min-h-[24rem]">
+        <div className={focusMode ? "relative h-full min-h-0 min-w-0" : "h-[30rem] min-w-0 xl:h-auto xl:min-h-[24rem]"}>
+          {focusMode && banners && (
+            <div className="pointer-events-none absolute left-10 right-16 top-2 z-20 flex flex-col gap-1 [&>*]:pointer-events-auto [&>*]:shadow-mast" data-focus-banners="">
+              {banners}
+            </div>
+          )}
+          {view3d ? (
+            <Suspense fallback={<div className="flex h-full min-h-[320px] items-center justify-center rounded-mast-card border border-mast-border bg-mast-bg text-sm text-mast-muted">{tr("正在载入 3D 视图…", "Loading the 3D view…")}</div>}>
+              <View3D
+                layout={shown}
+                trace={trace}
+                display={display}
+                theme={theme}
+                selected={selectedSet}
+                commentCounts={commentCounts}
+                snap={snap}
+                tool={tool}
+                readOnly={readOnly}
+                fitNonce={0}
+                focus={focus}
+                centerRef={centerRef}
+                onSelect={selectIds}
+                onPreview={setPreview}
+                onCommitMove={(positions) => edit((l) => setPositions(l, positions), undefined)}
+                onDropType={placeAt}
+                onDropTemplate={placeTemplate}
+                onToolPoint={onToolPoint}
+                onLockedDrag={() => say("info", tr("这个器件已锁定，不会被拖动。要移动它先解锁。", "This component is locked and cannot be dragged. Unlock it to move it."))}
+                beamPick={beamRef}
+                onBackgroundClick={pickBeamAt}
+                onExit={() => setView3d(false)}
+                dirty={dirty}
+                notify={say}
+              />
+            </Suspense>
+          ) : (
           <LayoutCanvas
             layout={shown}
             trace={trace}
@@ -722,17 +980,22 @@ export function LayoutEditor({ initial, linksState, taken, onDirtyChange, onSwit
             onPreview={setPreview}
             onCommitMove={(positions) => edit((l) => setPositions(l, positions), undefined)}
             onDropType={placeAt}
+            onDropTemplate={placeTemplate}
             onToolPoint={onToolPoint}
             onLockedDrag={() => say("info", tr("这个器件已锁定，不会被拖动。要移动它先解锁。", "This component is locked and cannot be dragged. Unlock it to move it."))}
             renderOverlay={renderOverlay}
+            beamPick={beamRef}
+            onBackgroundClick={pickBeamAt}
           />
+          )}
         </div>
 
-        <aside className="flex max-h-[44rem] min-h-0 flex-col rounded-mast-card border border-mast-border bg-mast-panel xl:max-h-none" aria-label={tr("检查面板", "Inspector")}>
-          <div className="flex border-b border-mast-border px-1" role="tablist">
+        <aside className={clsx("flex max-h-[44rem] min-h-0 flex-col rounded-mast-card border border-mast-border bg-mast-panel xl:max-h-none", focusMode && "hidden")} aria-label={tr("检查面板", "Inspector")}>
+          <div className="flex overflow-x-auto border-b border-mast-border px-1 [scrollbar-width:thin]" role="tablist">
             {(
               [
                 ["inspector", tr("属性", "Properties"), null],
+                ["beam", tr("光束", "Beam"), null],
                 ["comments", tr("评论", "Comments"), openComments > 0 ? openComments : null],
                 ["history", tr("历史", "History"), null],
                 ["check", tr("检查", "Check"), problems > 0 ? problems : null],
@@ -774,6 +1037,7 @@ export function LayoutEditor({ initial, linksState, taken, onDirtyChange, onSwit
                   }}
                 />
               ))}
+            {tab === "beam" && <BeamInspector layout={shown} trace={trace} pick={beamRef} theme={theme} onPick={pickBeam} onSelectComponent={(id) => actions.select([id])} />}
             {tab === "comments" && <CommentsPanel layout={present} saved={saved} selectedId={selection.length === 1 ? (selection[0] ?? null) : null} onSelect={(id) => actions.select([id])} />}
             {tab === "history" && (
               <HistoryPanel
@@ -791,15 +1055,15 @@ export function LayoutEditor({ initial, linksState, taken, onDirtyChange, onSwit
                 onRestore={(r) => void restore(r)}
               />
             )}
-            {tab === "check" && <CheckPanel diagnostics={checks} issues={issues} trace={trace} onSelect={(id) => actions.select([id])} />}
+            {tab === "check" && <CheckPanel diagnostics={checks} issues={issues} trace={trace} layout={preview ? undefined : shown} pending={preview !== null} onSelect={(id) => actions.select([id])} />}
           </div>
         </aside>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 text-xs text-mast-muted">
+      <div className={clsx("flex flex-wrap items-center gap-3 text-xs text-mast-muted", focusMode && "hidden")}>
         <span>{tr(`${shown.components.length} 个器件 · ${trace.length} 束光`, `${shown.components.length} components · ${trace.length} beams`)}</span>
         {selectedComps.length === 1 && <span>{typeLabel(selectedComps[0]!.type)}</span>}
-        <span className="hidden xl:inline">{tr("滚轮缩放，空白处拖动平移，Shift+拖动框选。", "Wheel zooms, drag on empty canvas pans, Shift+drag selects a box.")}</span>
+        {!view3d && <span className="hidden xl:inline">{tr("滚轮缩放，空白处拖动平移，Shift+拖动框选。", "Wheel zooms, drag on empty canvas pans, Shift+drag selects a box.")}</span>}
       </div>
 
       <SaveAsDialog
@@ -812,8 +1076,48 @@ export function LayoutEditor({ initial, linksState, taken, onDirtyChange, onSwit
         onClose={() => setSaveAsOpen(false)}
         onSave={(id, title) => void saveAs(id, title)}
       />
+      <PngExportDialog key={pngFigure ? "png-open" : "png-closed"} open={pngFigure !== null} figure={pngFigure} busy={exporting} onClose={() => setPngFigure(null)} onExport={(c) => void exportPngAt(c)} />
     </div>
   );
+}
+
+/**
+ * The page's content area (the app's <main>) in viewport pixels, kept up to date while `enabled`: focus mode
+ * lays the editor over exactly that, so the top bar (E-STOP) and the side rail stay where they are. While the
+ * editor covers it, a wheel turned over the toolbar must not scroll the page underneath; the canvas and the
+ * menus handle their own wheel.
+ */
+function useContentArea(enabled: boolean, rootRef: { current: HTMLElement | null }): { top: number; left: number; width: number; height: number } | null {
+  const [rect, setRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
+  // measured before the browser paints, so the editor goes straight to its focus-mode size (no frame at another size)
+  useLayoutEffect(() => {
+    if (!enabled) {
+      setRect(null);
+      return;
+    }
+    const main = document.querySelector("main");
+    if (!main) return;
+    const measure = () => {
+      const r = main.getBoundingClientRect();
+      setRect((p) => (p && p.top === r.top && p.left === r.left && p.width === r.width && p.height === r.height ? p : { top: r.top, left: r.left, width: r.width, height: r.height }));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    ro?.observe(main);
+    const root = rootRef.current;
+    const onWheel = (e: WheelEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (!e.defaultPrevented && !t?.closest('[role="menu"]')) e.preventDefault();
+    };
+    root?.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      window.removeEventListener("resize", measure);
+      ro?.disconnect();
+      root?.removeEventListener("wheel", onWheel);
+    };
+  }, [enabled, rootRef]);
+  return rect;
 }
 
 function centreOf(l: OpticalLayout, id: string, fallback: Vec): Vec {

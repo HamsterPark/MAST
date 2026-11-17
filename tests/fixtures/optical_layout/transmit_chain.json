@@ -351,6 +351,10 @@
     {
       "source": "las1",
       "wavelength_nm": 532.0,
+      "beam": {
+        "source_mw": null,
+        "m2": null
+      },
       "branches": [
         {
           "branch": "0",
@@ -360,67 +364,188 @@
               "x0": 50.0,
               "y0": 62.5,
               "x1": 100.0,
-              "y1": 62.5
+              "y1": 62.5,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             },
             {
               "x0": 100.0,
               "y0": 62.5,
               "x1": 150.0,
-              "y1": 62.5
+              "y1": 62.5,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             },
             {
               "x0": 150.0,
               "y0": 62.5,
               "x1": 200.0,
-              "y1": 62.5
+              "y1": 62.5,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             },
             {
               "x0": 200.0,
               "y0": 62.5,
               "x1": 250.0,
-              "y1": 62.5
+              "y1": 62.5,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             },
             {
               "x0": 250.0,
               "y0": 62.5,
               "x1": 300.0,
-              "y1": 62.5
+              "y1": 62.5,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.5,
+                "s": [
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             },
             {
               "x0": 300.0,
               "y0": 62.5,
               "x1": 350.0,
-              "y1": 62.5
+              "y1": 62.5,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.5,
+                "s": [
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             },
             {
               "x0": 350.0,
               "y0": 62.5,
               "x1": 400.0,
-              "y1": 62.5
+              "y1": 62.5,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.05,
+                "s": [
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             },
             {
               "x0": 400.0,
               "y0": 62.5,
               "x1": 450.0,
-              "y1": 62.5
+              "y1": 62.5,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.05,
+                "s": [
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             },
             {
               "x0": 450.0,
               "y0": 62.5,
               "x1": 500.0,
-              "y1": 62.5
+              "y1": 62.5,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.05,
+                "s": [
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             },
             {
               "x0": 500.0,
               "y0": 62.5,
               "x1": 550.0,
-              "y1": 62.5
+              "y1": 62.5,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.05,
+                "s": [
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             },
             {
               "x0": 550.0,
               "y0": 62.5,
               "x1": 600.0,
-              "y1": 62.5
+              "y1": 62.5,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.05,
+                "s": [
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             }
           ],
           "events": [
@@ -429,99 +554,231 @@
               "action": "transmit",
               "x": 100.0,
               "y": 62.5,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 50.0
+              "path_mm": 50.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             },
             {
               "component": "obj1",
               "action": "transmit",
               "x": 150.0,
               "y": 62.5,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 100.0
+              "path_mm": 100.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             },
             {
               "component": "hwp1",
               "action": "transmit",
               "x": 200.0,
               "y": 62.5,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 150.0
+              "path_mm": 150.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             },
             {
               "component": "pol1",
               "action": "transmit",
               "x": 250.0,
               "y": 62.5,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 200.0
+              "path_mm": 200.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             },
             {
               "component": "win1",
               "action": "transmit",
               "x": 300.0,
               "y": 62.5,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 250.0
+              "path_mm": 250.0,
+              "beam": {
+                "p": 0.5,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  -1.0,
+                  0.0,
+                  0.0
+                ]
+              }
             },
             {
               "component": "nd1",
               "action": "transmit",
               "x": 350.0,
               "y": 62.5,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 300.0
+              "path_mm": 300.0,
+              "beam": {
+                "p": 0.5,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  -1.0,
+                  0.0,
+                  0.0
+                ]
+              }
             },
             {
               "component": "aotf1",
               "action": "transmit",
               "x": 400.0,
               "y": 62.5,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 350.0
+              "path_mm": 350.0,
+              "beam": {
+                "p": 0.05,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  -1.0,
+                  0.0,
+                  0.0
+                ]
+              }
             },
             {
               "component": "pr1",
               "action": "transmit",
               "x": 450.0,
               "y": 62.5,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 400.0
+              "path_mm": 400.0,
+              "beam": {
+                "p": 0.05,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  -1.0,
+                  0.0,
+                  0.0
+                ]
+              }
             },
             {
               "component": "per1",
               "action": "transmit",
               "x": 500.0,
               "y": 62.5,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 450.0
+              "path_mm": 450.0,
+              "beam": {
+                "p": 0.05,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  -1.0,
+                  0.0,
+                  0.0
+                ]
+              }
             },
             {
               "component": "cus1",
               "action": "transmit",
               "x": 550.0,
               "y": 62.5,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 500.0
+              "path_mm": 500.0,
+              "beam": {
+                "p": 0.05,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  -1.0,
+                  0.0,
+                  0.0
+                ]
+              }
             },
             {
               "component": "sam1",
               "action": "stop",
               "x": 600.0,
               "y": 62.5,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 550.0
+              "path_mm": 550.0,
+              "beam": {
+                "p": 0.05,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  -1.0,
+                  0.0,
+                  0.0
+                ]
+              }
             }
           ],
           "end": "stop"

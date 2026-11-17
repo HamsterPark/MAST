@@ -1,9 +1,10 @@
 # Operating MAST
 
 MAST is the control system of a real instrument station: a scanning tunnelling microscope (STM,
-Nanonis controller) or an optical Raman / SHG station with no STM. `mast_briefing` says which; on an
-optical station read the `09-optical-station.md` guide resource first (the rest of this page
-describes the STM station).
+Nanonis controller), an optical Raman / SHG station with no STM, or a generic station with neither an
+STM nor a WITec (its instruments are the configured devices and sensors). `mast_briefing` says which;
+on an optical station read the `09-optical-station.md` guide resource first, on a generic station
+`11-generic-station.md` (the rest of this page describes the STM station).
 You act through the `mast_*` tools of MAST's MCP server `mast`; MAST checks every action against
 its safety gates and records it under your name. Treat every action as physical: a wrong parameter
 can crash the tip or damage the sample.
@@ -162,4 +163,4 @@ The full guide, served by the `mast` server as MCP resources (English `mast://gu
 Chinese `mast://guide/zh/<file>`): `README.md` (overview), `01-quickstart.md`, `02-concepts.md`,
 `03-operating-rules.md`, `04-records-and-context.md`, `05-authoring-skills.md`,
 `06-contributing-skills.md`, `07-api-reference.md`, `08-troubleshooting.md`,
-`09-optical-station.md`.
+`09-optical-station.md`, `11-generic-station.md`.

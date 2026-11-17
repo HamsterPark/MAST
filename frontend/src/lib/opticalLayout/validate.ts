@@ -1,5 +1,6 @@
 // Checks of a layout against the rules of the server's model (section 3 and section 11.1 of
-// docs/v2/design/optical_layout.md; MASTv2/mast/optical_layout/model.py), done early so the
+// docs/v2/design/optical_layout.md, section 3 of optical_layout_v2.md;
+// MASTv2/mast/optical_layout/model.py), done early so the
 // editor can say what is wrong before the server answers 422. The server stays the
 // authority: these checks reject only what the model rejects, never something it accepts
 // (test/opticalLayoutFixtures.test.ts runs them over every fixture layout, which the
@@ -8,7 +9,8 @@
 import { tr } from "../i18n.ts";
 import type { LayoutComponent, OpticalLayout } from "./types.ts";
 import { GRID_KINDS, LIMITS, isComponentType, isSourceType } from "./types.ts";
-import { propFields } from "./catalog.ts";
+import { DEFAULT_PROP_DECIMALS, dependencyMet, propFields, type PropField } from "./catalog.ts";
+import { pyRound } from "./geometry.ts";
 import { charCount } from "./text.ts";
 
 export type IssueLevel = "error" | "warn";
@@ -43,6 +45,22 @@ export function layoutIdFormatProblem(id: string): "format" | "reserved" | null 
 
 const tooLong = (what: string, max: number) => tr(`${what}最多 ${max} 个字符。`, `${what} is at most ${max} characters.`);
 
+/**
+ * Whether a number is in a field's range, the way the server checks it: an open lower bound is checked
+ * on the value as given and on the value as stored (rounded to the field's decimals), because the server
+ * refuses what it would store as the bound itself (0.0000004 mm of beam diameter would be kept as 0, which
+ * the next read refuses and the beam physics would divide by).
+ */
+export function propNumberInRange(f: PropField, n: number): boolean {
+  if (f.min !== undefined) {
+    if (f.minExclusive) {
+      if (n <= f.min || pyRound(n, f.decimals ?? DEFAULT_PROP_DECIMALS) <= f.min) return false;
+    } else if (n < f.min) return false;
+  }
+  return !(f.max !== undefined && n > f.max);
+}
+
+
 export function validateComponent(c: LayoutComponent, layout?: OpticalLayout): Issue[] {
   const out: Issue[] = [];
   const at = (suffix: string) => `components[${c.id}]${suffix}`;
@@ -75,7 +93,7 @@ export function validateComponent(c: LayoutComponent, layout?: OpticalLayout): I
     const v = c.props[f.key];
     const p = at(`.props.${f.key}`);
     if (v === undefined || v === null) continue;
-    const inRange = (n: number) => !((f.min !== undefined && (f.minExclusive ? n <= f.min : n < f.min)) || (f.max !== undefined && n > f.max));
+    const inRange = (n: number) => propNumberInRange(f, n);
     switch (f.kind) {
       case "number":
         if (!finite(v)) out.push(issue("error", p, tr(`${f.label}必须是数。`, `${f.label} must be a number.`), c.id));
@@ -107,6 +125,26 @@ export function validateComponent(c: LayoutComponent, layout?: OpticalLayout): I
     if (f.required && (c.props[f.key] === undefined || c.props[f.key] === null)) {
       out.push(issue("error", at(`.props.${f.key}`), tr(`${f.label}必须填写。`, `${f.label} is required.`), c.id));
     }
+  }
+  // v2 section 3.2: a prop that only means something next to another one (pol_angle_deg needs
+  // polarization = linear, m2 needs beam_diameter_mm); the server answers 422 otherwise
+  for (const f of fields) {
+    const given = c.props[f.key] !== undefined && c.props[f.key] !== null;
+    if (!given || dependencyMet(f, c.props) || !f.dependsOn) continue;
+    const dep = fields.find((d) => d.key === f.dependsOn?.key);
+    const depLabel = dep?.label ?? f.dependsOn.key;
+    const want = f.dependsOn.value;
+    const wantLabel = want === undefined ? null : (dep?.options?.find((o) => o.value === want)?.label ?? want);
+    out.push(
+      issue(
+        "error",
+        at(`.props.${f.key}`),
+        wantLabel === null
+          ? tr(`${f.label}要和${depLabel}一起填：先填${depLabel}，或把${f.label}清空。`, `${f.label} needs ${depLabel}: fill that in first, or clear ${f.label}.`)
+          : tr(`${f.label}只有在${depLabel}是“${wantLabel}”时才能填。`, `${f.label} is only allowed when ${depLabel} is "${wantLabel}".`),
+        c.id,
+      ),
+    );
   }
   if (c.type === "laser" || c.type === "fiber_out") {
     // exactly one of the two forms; for a fibre output that another fibre input continues at, the
@@ -187,6 +225,11 @@ export function validateLayout(layout: OpticalLayout): Issue[] {
     out.push(issue("error", "table.hole_offset_mm", tr(`首孔偏移要在 0 到 ${LIMITS.holeOffsetMax} mm 之间。`, `The first hole's offset must be between 0 and ${LIMITS.holeOffsetMax} mm.`)));
   }
   if (!(GRID_KINDS as readonly string[]).includes(t.grid)) out.push(issue("error", "table.grid", tr("孔位样式只能是 metric、imperial 或 none。", "The grid must be metric, imperial or none.")));
+  // the 3D contract, section 2: above 0 (also as stored, at 0.01 mm) and at most 10000 mm; absent or null = 75
+  const bh: unknown = t.beam_height_mm;
+  if (bh !== undefined && bh !== null && !(finite(bh) && bh > 0 && pyRound(bh, 2) > 0 && bh <= LIMITS.beamHeightMax)) {
+    out.push(issue("error", "table.beam_height_mm", tr(`台面光束高度要大于 0、不超过 ${LIMITS.beamHeightMax} mm。`, `The beam height must be above 0 and at most ${LIMITS.beamHeightMax} mm.`)));
+  }
 
   if (layout.components.length > LIMITS.components) {
     out.push(issue("error", "components", tr(`器件最多 ${LIMITS.components} 个。`, `At most ${LIMITS.components} components.`)));

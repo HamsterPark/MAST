@@ -464,3 +464,130 @@ def test_the_recorder_sees_the_whole_lifecycle_in_order():
     assert rec.declared() == rec.ended() == ["rig1/ccd/spectrum"]
     assert rec.frames("rig1/ccd/spectrum")[0]["y"] == [3.0, 4.0]
     assert rec.axes("rig1/ccd/spectrum") == [{"ver": 1, "unit": "nm", "n": 2, "x": [1.0, 2.0]}]
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 7 · map2d_rows（一帧一行）、drop、预算算上每帧开销、按位置保留的流按 seq 翻页
+#     （docs/v2/design/scan_map_live.md §8）
+# ════════════════════════════════════════════════════════════════════════════
+
+ROWS = dict(nx=4, ny=3, x0=0.0, y0=0.0, dx=1.0, dy=1.0, x_unit="m", y_unit="m")
+
+
+def test_a_row_frame_keeps_its_contract_fields_and_nulls_non_finite_values():
+    h = _strict()
+    h.declare("s/scan/1", "map2d_rows", title="scan", source="s", meta=ROWS)
+    h.publish("s/scan/1", {"iy": 2, "ix0": 0, "junk": 1,
+                           "values": {"Z": [1.0, float("nan"), np.float32(3), 4]}})
+    f = _no_nan(h.snapshot("s/scan/1").frames[0][1])
+    assert f == {"t": NOW, "iy": 2, "ix0": 0, "values": {"Z": [1.0, None, 3.0, 4.0]}}
+    h.publish("s/scan/1", {"iy": 0, "ix0": 1, "values": {"Z": [7, 8, 9]}})   # a segment
+    assert _no_nan(h.snapshot("s/scan/1", since=-1).frames[0][1])["ix0"] == 1
+
+
+@pytest.mark.parametrize("frame", [
+    {"iy": 3, "values": {"Z": [1]}},                        # iy outside 0…ny-1
+    {"iy": -1, "values": {"Z": [1]}},
+    {"iy": 0, "ix0": 2, "values": {"Z": [1, 2, 3]}},        # runs past nx
+    {"iy": 0, "ix0": -1, "values": {"Z": [1]}},
+    {"iy": 0, "values": {"Z": [1, 2], "I": [1]}},           # channels of unequal length
+    {"iy": 0, "values": {}},
+    {"iy": 0, "values": {"Z": 1.0}},                        # a number, not a row
+    {"values": {"Z": [1]}},                                 # no iy
+], ids=["iy-high", "iy-low", "past-nx", "ix0-neg", "ragged", "empty", "scalar", "no-iy"])
+def test_a_bad_row_frame_is_refused(frame):
+    h = _strict()
+    h.declare("s/scan/1", "map2d_rows", title="scan", source="s", meta=ROWS)
+    with pytest.raises(LiveError):
+        h.publish("s/scan/1", frame)
+
+
+def test_rows_are_kept_by_iy_and_a_new_frame_of_a_row_replaces_the_old():
+    h = _strict()
+    h.declare("s/scan/1", "map2d_rows", title="scan", source="s", meta=ROWS)
+    for iy in (2, 1, 0):
+        h.publish("s/scan/1", {"iy": iy, "values": {"Z": [iy] * 4}})
+    h.publish("s/scan/1", {"iy": 2, "values": {"Z": [9] * 4}})          # row 2 again
+    got = [(f["seq"], f["frame"]["iy"]) for f in h.frames("s/scan/1", since=0)]
+    assert got == [(2, 1), (3, 0), (4, 2)]
+    d = h.describe("s/scan/1")
+    assert d["n_frames"] == 3 and d["retain"] == 3, "a row stream keeps ny rows"
+    assert h.snapshot("s/scan/1", since=1).dropped is None, "a replaced row is not a lost one"
+
+
+def test_a_row_stream_is_bounded_by_its_side_and_its_row_count():
+    h = _strict()
+    with pytest.raises(LiveError):
+        h.declare("s/scan/big", "map2d_rows", title="b", source="s",
+                  meta={**ROWS, "nx": hub_mod.MAP_ROWS_MAX_SIDE + 1})
+    h.declare("s/scan/1", "map2d_rows", title="s", source="s", meta={**ROWS, "ny": 600},
+              retain=10**6)
+    assert h.describe("s/scan/1")["retain"] == 600
+
+
+def test_drop_removes_a_stream_at_once_and_its_seq_keeps_counting():
+    h = _strict()
+    with LiveRecorder(h) as rec:
+        h.declare("s/scan/1", "map2d_rows", title="s", source="s", meta=ROWS)
+        h.publish("s/scan/1", {"iy": 0, "values": {"Z": [1, 2, 3, 4]}})
+        h.end("s/scan/1")
+        h.drop("s/scan/1")
+        assert h.describe("s/scan/1") is None
+        assert [e["stream"] for e in rec.of("evict")] == ["s/scan/1"]
+        assert h._chars == 0, "a dropped stream still counted against the budget"
+        h.declare("s/scan/1", "map2d_rows", title="s", source="s", meta=ROWS)
+        assert h.publish("s/scan/1", {"iy": 0, "values": {"Z": [1, 2, 3, 4]}}) == 2, (
+            "seq went back after a drop: a client would take the new frame for one it has")
+    with pytest.raises(LiveError):
+        h.drop("never/declared/x")
+
+
+def test_the_budget_counts_every_frames_fixed_overhead():
+    """A per-pixel frame costs ~390 B in the process while its text
+    is ~64 characters. Counting text alone let a 256 Mi budget hold ~1.5 GiB."""
+    h = _strict()
+    h.declare("s/map/r", "map2d", title="m", source="s", meta=MAP)
+    h.publish("s/map/r", {"ix": 0, "iy": 0, "values": {"I": 1}})
+    text = h.snapshot("s/map/r").frames[0][1]
+    assert h.describe("s/map/r")["bytes"] == len(text) + hub_mod.FRAME_OVERHEAD_CHARS
+    h.publish("s/map/r", {"ix": 0, "iy": 0, "values": {"I": 2}})        # same pixel: replaced
+    assert h._chars == h.describe("s/map/r")["bytes"] == len(text) + hub_mod.FRAME_OVERHEAD_CHARS
+
+
+@pytest.mark.parametrize("kind, meta, frame", [
+    ("map2d", {**MAP, "nx": 50, "ny": 50}, lambda k: {"ix": k % 50, "iy": k // 50, "values": {"I": k}}),
+    ("map2d_rows", {**ROWS, "nx": 2, "ny": 2500}, lambda k: {"iy": k, "values": {"Z": [k, k]}}),
+])
+def test_keyed_streams_page_forward_by_seq(kind, meta, frame):
+    """REST backfill pages through a keyed stream by seq (bisect on an index),
+    skipping what a newer frame of the same position replaced."""
+    h = _strict()
+    h.declare("s/k/1", kind, title="k", source="s", meta=meta)
+    for k in range(2500):
+        h.publish("s/k/1", frame(k))
+    for k in range(1000, 1100):                     # re-measure a stretch: new seqs 2501…2600
+        h.publish("s/k/1", frame(k))
+    seen, since = [], 0
+    while True:
+        page = h.snapshot("s/k/1", since=since, limit=300)
+        seen += [s for s, _ in page.frames]
+        if not page.more:
+            break
+        since = seen[-1]
+    assert seen == sorted(seen) and len(seen) == len(set(seen)) == 2500
+    assert seen[-100:] == list(range(2501, 2601)), "the re-measured stretch comes last, at its new seqs"
+    assert not set(range(1001, 1101)) & set(seen), "a replaced frame was served"
+    mid = h.snapshot("s/k/1", since=1500, limit=3)
+    assert [s for s, _ in mid.frames] == [1501, 1502, 1503] and mid.more
+    tail = h.snapshot("s/k/1", since=2599, limit=3)
+    assert [s for s, _ in tail.frames] == [2600] and not tail.more
+
+
+def test_the_seq_index_stays_bounded_while_rows_are_rewritten():
+    h = _strict()
+    h.declare("s/scan/1", "map2d_rows", title="s", source="s", meta={**ROWS, "ny": 4})
+    for k in range(10_000):
+        h.publish("s/scan/1", {"iy": k % 4, "values": {"Z": [k] * 4}})
+    st = h._streams["s/scan/1"]
+    assert len(st.order) <= 2 * len(st.frames) + 1, f"index grew to {len(st.order)} entries"
+    assert [s for s, _ in h.snapshot("s/scan/1", since=0).frames] == [9997, 9998, 9999, 10000]

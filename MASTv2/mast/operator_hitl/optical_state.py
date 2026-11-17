@@ -47,7 +47,7 @@ from typing import Any, Callable, Iterator
 logger = logging.getLogger(__name__)
 
 __all__ = ["SLOT_KINDS", "OpticalSlot", "SlotValue", "OpticalStateError", "UnknownSlot",
-           "OpticalStateStore", "DEFAULT_SLOTS", "get_store", "set_store",
+           "OpticalStateStore", "DEFAULT_SLOTS", "GENERIC_DEFAULT_SLOTS", "get_store", "set_store",
            "MAX_SLOT_TEXT_CHARS", "MAX_SLOT_NOTE_CHARS", "parse_aware", "restored_valid_until"]
 
 #: records kept in ``OpticalStateStore.history`` (the in-memory tail; persistent
@@ -211,6 +211,13 @@ DEFAULT_SLOTS: tuple[OpticalSlot, ...] = (
                 description="签了才允许软件开出光；8 小时后失效 / required before software may "
                             "switch emission on; expires after 8 h"),
 )
+
+#: What a station with operator prompts but no WITec (the generic station, design
+#: ``generic_station.md`` §3.6) starts with when ``config/optical_station.json`` defines no slots:
+#: the one attestation emission needs. The rest of :data:`DEFAULT_SLOTS` describes the WITec
+#: bench (its objectives, its λ/2 plates, the NPI pump current) and would be wrong anywhere else.
+GENERIC_DEFAULT_SLOTS: tuple[OpticalSlot, ...] = tuple(
+    s for s in DEFAULT_SLOTS if s.id == "laser_area_safe")
 
 
 class OpticalStateStore:

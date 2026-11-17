@@ -22,6 +22,11 @@ from mast.config import SafetyLimits as SafetyLimits  # noqa: F401  (re-export)
 
 ThinkingMode = Literal["none", "fixed", "tunable"]
 
+#: ``mast.station.CAPABILITIES`` as an API type (the generated TypeScript union);
+#: ``tests/v2/station/test_station_capabilities.py`` keeps the two equal.
+StationCapability = Literal["nanonis", "stm_safety", "stm_actions", "scan_map", "witec",
+                            "optical_bench", "operator_prompts", "laser_safety", "sensor_echo"]
+
 
 class HealthResponse(BaseModel):
     """Liveness + a snapshot of which optional backends are wired in."""
@@ -35,14 +40,21 @@ class HealthResponse(BaseModel):
     skill_registry_wired: bool = False
     settings_store_wired: bool = False
     experiment_storage_wired: bool = False
-    # Station profile the running process IS ("stm" | "optical"; mast.station): the one
-    # it started under, so the UI variant always matches the subsystems that are
+    # Station profile the running process IS ("stm" | "optical" | "generic"; mast.station):
+    # the one it started under, so the UI variant always matches the subsystems that are
     # running. `station_profile_source` says where the configured value comes from
     # (env = MAST_STATION_PROFILE pins it and the settings page cannot change it);
     # `station_restart_pending` = the setting was changed after start (restart needed).
-    station_profile: Literal["stm", "optical"] = "stm"
+    station_profile: Literal["stm", "optical", "generic"] = "stm"
     station_profile_source: Literal["env", "settings", "default"] = "default"
     station_restart_pending: bool = False
+    # What the running station HAS (mast.station.CAPABILITIES, in that order): the UI gates
+    # on these, never on the profile name (docs/v2/design/generic_station.md §4.1). Empty only
+    # from a service older than the capability table: derive them from station_profile then.
+    station_capabilities: list[StationCapability] = Field(default_factory=list)
+    # Serial auto-detection of the running profile: default_on (STM: the sensor file decides),
+    # default_off (generic: the setting serial_autodetect switches it on), forced_off (optical).
+    station_serial_autodetect: Literal["default_on", "default_off", "forced_off"] = "default_on"
 
 
 class ModelInfo(BaseModel):
@@ -97,12 +109,15 @@ class SettingsResponse(BaseModel):
     # memory, vision models, wishlist feedback). Default OFF; vision models load at
     # service start, so a change needs a restart. No admin PIN.
     legacy_features_enabled: Optional[bool] = False
-    # Station profile (optical station, docs/v2/design/optical_station_witec.md D1):
-    # "stm" | "optical"; unset = "stm". This is what is STORED; the profile the
+    # Station profile (docs/v2/design/optical_station_witec.md, generic_station.md):
+    # "stm" | "optical" | "generic"; unset = "stm". This is what is STORED; the profile the
     # running process IS (the one it started under) is GET /api/health
     # `station_profile`. Part of the effect is decided at service start, so a change
     # needs a restart.
     station_profile: Optional[str] = None
+    # Serial auto-detection switch (generic_station.md §1.4); unset = the profile's default.
+    # What will really happen is GET /api/environment/sensors `autodetect_effective`.
+    serial_autodetect: Optional[bool] = None
     # LangGraph 退出的两个切换面（2026-08-26/27）。都是 DEFAULT OFF / live-read /
     # fail-safe OFF：设置缺失或读不出来一律走旧路径。放在 HTTP 面上而不是只留一个
     # 配置文件，是因为真机在别处 —— 翻开关不该需要先 SSH 上去。

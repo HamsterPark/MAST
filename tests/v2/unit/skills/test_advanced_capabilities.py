@@ -242,11 +242,15 @@ def test_guarded_keys_are_exactly_the_known_set():
 
     ⚠️ Guarding it is a TRADE-OFF, not obviously right: it also means a rig with
     no PIN configured can never change the tip policy. Listed for the operator to
-    overrule — see docs/v2/design/forge_scan_working_point.md §八."""
+    overrule — see docs/v2/design/forge_scan_working_point.md §八.
+
+    ``station_profile`` and ``serial_autodetect`` (2026-11-13,
+    docs/v2/design/generic_station.md §4.2) decide what the process does at its next start:
+    which station it is, and whether it probes every free serial port."""
     from mast.api.admin_pin import GUARDED_KEYS
     assert GUARDED_KEYS == {"advanced_capabilities", "hardware_modules",
                             "coarse_drive", "tip_conditioning_overrides",
-                            "station_profile"}, (
+                            "station_profile", "serial_autodetect"}, (
         f"受 PIN 保护的键变了：{sorted(GUARDED_KEYS)}。"
         "少一个就等于那个开关/声明不再需要 PIN。"
     )

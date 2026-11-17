@@ -628,8 +628,10 @@ def _prescan_check() -> CompositeSpec:
             # 声明式流程无法查询仪器档位表，必须由调用者显式提供每线时间。
             # 不设置默认值，避免把未提供的参数解释成已经确认的扫描设置。
             ParamSpec("line_time_s", "number", None,
-                      "每线时间(s)，必须显式提供。请根据当前仪器配置与扫描范围设置；"
-                      "声明式流程无法查询档位表，不提供默认值。", True),
+                      "每线时间(s)，必须显式提供：声明式流程读不到档位表，不替你猜。"
+                      "真身 PreScanCheck 不传时按扫描宽度查档位表，出厂档位 50 nm ⇒ 1.0 s/线"
+                      "（约 50 nm/s），这里请填同一档位的值。别填 0.1：50 nm 上那是约 488 nm/s，"
+                      "比档位表快约 10 倍，足以刮伤针尖。", True),
         ],
         nodes=[
             # ⭐⭐ 这道闸挡的是**继承来的刮针速度**。
@@ -654,8 +656,9 @@ def _prescan_check() -> CompositeSpec:
             # 两者折叠掉不会丢信息 —— 下面的话把两种都说了。
             {"type": "if", "id": "need_line_time", "cond": "not line_time_s", "then": [
                 {"type": "fail", "reason":
-                    "'PreScanCheck(声明式)必须显式给 line_time_s。"
-                    "请根据当前仪器配置与扫描范围提供每线时间；此流程无法查询档位表。'"},
+                    "'PreScanCheck(声明式)必须显式给 line_time_s；此流程读不到档位表，也不推测每线时间。"
+                    "真身不传时按宽度查表：出厂档位 50 nm ⇒ 1.0 s/线（约 50 nm/s）。"
+                    "别填 0.1：在 50 nm 上约 488 nm/s，会刮伤针尖。'"},
             ], "else": []},
             {"type": "step", "id": "configure", "skill": "ConfigureScan", "params": {
                 "center_x_m": {"$expr": "center_x_m"}, "center_y_m": {"$expr": "center_y_m"},

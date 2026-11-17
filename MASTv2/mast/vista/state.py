@@ -237,8 +237,10 @@ _OPTICAL_KEYS = {"microscope": "microscope", "laser": "lasers", "temperature": "
                  "power_meter": "power_meter"}
 
 
-def optical_echo(*, timeout_s: float | None = None, registry: Any = None) -> dict:
-    """The optical station's state echo: what ``state_echo`` is to the STM.
+def optical_echo(*, timeout_s: float | None = None, registry: Any = None,
+                 operator: bool = True, environment: dict | None = None) -> dict:
+    """The state echo of a station without Nanonis (optical, generic): what ``state_echo`` is
+    to the STM.
 
     ``microscope`` / ``lasers`` / ``temperature`` / ``power_meter``
         the status of each device the process has open, keyed by device id (a device
@@ -250,6 +252,14 @@ def optical_echo(*, timeout_s: float | None = None, registry: Any = None) -> dic
         ones nobody has signed);
     ``operator_prompts_open``
         how many questions are waiting for the operator.
+    ``environment``
+        only when ``environment`` is given (a station whose sensors are its readings,
+        capability ``sensor_echo``): ``{sensor: {value, unit, status, age_s}}`` from the
+        environment monitor's cache (``station_view.environment_readings``), or
+        ``environment_error``.
+
+    ``operator=False`` leaves out ``optical_state`` and ``operator_prompts_open`` (a station
+    without operator prompts has neither).
 
     Nothing is guessed and nothing is opened: a status that could not be read is
     reported as an ``error`` string next to the device.
@@ -275,6 +285,13 @@ def optical_echo(*, timeout_s: float | None = None, registry: Any = None) -> dic
         out.setdefault(key, {})[str(d.get("id"))] = row
     if closed:
         out["devices_closed"] = closed
+    if environment is not None:
+        if environment.get("error"):
+            out["environment_error"] = environment["error"]
+        else:
+            out["environment"] = environment.get("sensors", {})
+    if not operator:
+        return out
     ms = sv.manual_state()
     if ms.get("error"):
         out["optical_state_error"] = ms["error"]

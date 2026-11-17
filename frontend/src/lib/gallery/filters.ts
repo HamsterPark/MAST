@@ -13,6 +13,7 @@
 import type { GalleryItem, Mark } from "./types.ts";
 import type { ViewName } from "./route.ts";
 import { bKey, gridIncomplete, partial, wKey } from "./format.ts";
+import { ENV_FILTERS, envFacets, envMatches, type EnvFacets, type EnvFilter } from "./env.ts";
 
 export type FilterKind = "all" | "f" | "s" | "g";
 export type ContrastFilter = "" | "atom" | "half" | "li";
@@ -40,6 +41,14 @@ export interface Filters {
   sort: "asc" | "desc";
   /** 卡片最小宽度 px。 */
   cw: number;
+  /** 环境标签：有 / 保存时记录的 / 推断的 / 没有（lib/gallery/env.ts）。 */
+  env: EnvFilter;
+  /** 温度范围，K（规范值）；null = 不限。 */
+  tmin: number | null;
+  tmax: number | null;
+  /** 磁场范围，T（规范值，带符号）；null = 不限。 */
+  bmin: number | null;
+  bmax: number | null;
 }
 
 export const DEFAULT_FILTERS: Filters = {
@@ -55,6 +64,11 @@ export const DEFAULT_FILTERS: Filters = {
   q: "",
   sort: "asc",
   cw: 220,
+  env: "",
+  tmin: null,
+  tmax: null,
+  bmin: null,
+  bmax: null,
 };
 
 export const CARD_WIDTH_MIN = 150;
@@ -100,6 +114,7 @@ export function applyFilters(
     if (F.m === "ser" && !ctx.seriesOf(it.id).length) return false;
     if (F.m === "anc" && !(m && m.anchor)) return false;
     if (F.tag && !(m && (m.tags || []).includes(F.tag))) return false;
+    if (!envMatches(it, F)) return false;
     if (q && !(it.fn.toLowerCase().includes(q) || (m && (m.note || "").toLowerCase().includes(q)))) {
       return false;
     }
@@ -115,6 +130,8 @@ export interface Facets {
   widths: [string, number][];
   /** `[前缀, 条目数]`，按前缀名排序。 */
   prefixes: [string, number][];
+  /** 有没有环境标签、可筛选的温度 / 磁场（决定筛选条上那几个控件出不出现）。 */
+  env: EnvFacets;
 }
 
 export function facets(base: readonly GalleryItem[]): Facets {
@@ -133,6 +150,7 @@ export function facets(base: readonly GalleryItem[]): Facets {
     biases: byValue(bs),
     widths: byValue(ws),
     prefixes: [...ps.entries()].sort((a, b) => a[0].localeCompare(b[0])),
+    env: envFacets(base),
   };
 }
 
@@ -150,6 +168,9 @@ export function sanitizeFilters(F: Filters, fac: Facets, tags: readonly string[]
   if (out.w && !has(fac.widths, out.w)) out.w = "";
   if (out.pf && !has(fac.prefixes, out.pf)) out.pf = "";
   if (out.tag && !tags.includes(out.tag)) out.tag = "";
+  if (!fac.env.any && (out.env === "any" || out.env === "rec" || out.env === "inf")) out.env = "";
+  if (!fac.env.T) out.tmin = out.tmax = null;
+  if (!fac.env.B) out.bmin = out.bmax = null;
   return out;
 }
 
@@ -188,6 +209,12 @@ export function parseStoredFilters(raw: string | null | undefined): Filters {
   if (typeof o.cw === "number" && Number.isFinite(o.cw)) {
     F.cw = Math.max(CARD_WIDTH_MIN, Math.min(CARD_WIDTH_MAX, Math.round(o.cw)));
   }
+  if (ENV_FILTERS.includes(str(o.env) as EnvFilter)) F.env = o.env as EnvFilter;
+  const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : null);
+  F.tmin = num(o.tmin);
+  F.tmax = num(o.tmax);
+  F.bmin = num(o.bmin);
+  F.bmax = num(o.bmax);
   return F;
 }
 

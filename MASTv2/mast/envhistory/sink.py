@@ -43,9 +43,14 @@ _DEFAULT_GATED: frozenset[str] = frozenset({"tunnel_current"})
 #: 合成序列名。写在这里而不是散在各处,因为前端和文档都引用它。
 QUIET_SERIES = "instrument_quiet"
 
+#: 读数晚到超过这么多秒（归档在排队），就不再拿它喊 ``on_tick``：到期检查要按
+#: 仪器**现在**的状态决定要不要起 Z burst，不能按几分钟前那一刻的「安静」。
+_TICK_FRESH_S = 5.0
+
 
 class EnvHistorySink:
-    """把环境读数聚合成桶。线程内串行（只有监控线程调用 :meth:`write`）。"""
+    """把环境读数聚合成桶。:meth:`write` 只由一个线程调用（环境监控的归档线程），
+    :meth:`capture` 在监控的读数线程上调用。"""
 
     def __init__(self, *, store_getter: Callable | None = None,
                  thresholds_getter: Callable | None = None,
@@ -64,6 +69,7 @@ class EnvHistorySink:
         self._ctx_quiet: str = "unknown"
         self._ctx_at: float = 0.0
         self._disabled_until = 0.0
+        self._closed = False
         self._warned = False
         self.written = 0
         self.failed = 0
@@ -89,22 +95,52 @@ class EnvHistorySink:
 
     # ── sink 协议 ─────────────────────────────────────────────────────
 
-    def write(self, sensor: str, value: float, unit: str, status: str) -> None:
+    def capture(self, now: float):
+        """读数那一刻仪器安不安静 —— 在监控的**读数线程**上调用。
+
+        两个零 TCP 的内存快照（仪器状态、仪器锁持有者），不碰库、不碰网络。返回值原样
+        随这一轮读数排队，写的时候交回 :meth:`write`：归档排了队，扫描期间读到的隧道
+        电流也不会因为写的时候扫描已经停了而被当成「安静」收进永久的桶。
+        """
+        if self._closed:
+            return None
+        try:
+            from mast.envhistory.quiet import classify, context_from_snapshots
+            ctx = context_from_snapshots(self._state_getter)
+            return (ctx, classify(ctx))
+        except Exception:  # noqa: BLE001 — 拿不到就退回写时再判
+            return None
+
+    def write(self, sensor: str, value: float, unit: str, status: str,
+              *, ts: float | None = None, scope_ids=None, captured=None) -> None:
         """收一条读数。**永不抛。**
 
         自禁期间连 :meth:`_refresh_ctx` 都不做，所以 ``on_tick`` 也不响 —— 那 60 秒
         里清扫与 Z burst 一并暂停。这是刻意的：写入正在失败的时候不是开始删东西
         的好时机。下一拍自然恢复。
+
+        监控把整轮读数排队交给归档线程，写进来时可能已经晚了，所以读数那一刻的事实
+        跟着读数一起来：``ts`` 是读到它的时刻（epoch 秒，分桶按它），``scope_ids`` 是
+        当时的（实验，样品），``captured`` 是 :meth:`capture` 当时记下的安静与否。
+        都不给就按现在。
         """
         now = time.time()
-        if time.monotonic() < self._disabled_until:
+        if ts is not None:
+            try:
+                now = float(ts)
+            except (TypeError, ValueError):
+                pass
+        if self._closed or time.monotonic() < self._disabled_until:
             return
         th = self._thresholds()
         if th is None or not th.enabled:
             return
         try:
-            quietness = self._refresh_ctx(now)
-            eid, sid = self._scope_ids()
+            if scope_ids is not None:
+                eid, sid = (scope_ids[0] or None), (scope_ids[1] or None)
+            else:
+                eid, sid = self._scope_ids()
+            quietness = self._refresh_ctx(now, captured, (eid, sid))
             admit = True
             if sensor in self._gated:
                 from mast.envhistory.quiet import admits
@@ -129,24 +165,34 @@ class EnvHistorySink:
 
     # ── 心跳搭车的两件事 ──────────────────────────────────────────────
 
-    def _refresh_ctx(self, now: float) -> str:
-        """按 TTL 刷新上下文快照；刷新的那一拍顺带喂合成序列并喊 on_tick。"""
-        if (now - self._ctx_at) < _CTX_TTL_S:
-            return self._ctx_quiet
+    def _refresh_ctx(self, now: float, captured=None, ids=None) -> str:
+        """按 TTL 刷新上下文快照；刷新的那一拍顺带喂合成序列并喊 on_tick。
+
+        给了 ``captured``（读数那一刻记下的上下文）就用它，不再现读快照；``ids`` 是这条
+        读数的（实验，样品），合成序列跟着它归属。``on_tick`` 只拿新鲜的读数去喊：
+        到期检查要看仪器现在的状态。
+        """
         from mast.envhistory.quiet import QUIET, classify, context_from_snapshots
-        ctx = context_from_snapshots(self._state_getter)
-        quietness = classify(ctx)
+        if captured is not None:
+            ctx, quietness = captured
+            if (now - self._ctx_at) < _CTX_TTL_S:
+                return quietness
+        else:
+            if (now - self._ctx_at) < _CTX_TTL_S:
+                return self._ctx_quiet
+            ctx = context_from_snapshots(self._state_getter)
+            quietness = classify(ctx)
         self._ctx, self._ctx_quiet, self._ctx_at = ctx, quietness, now
 
         th = self._thresholds()
         if th is not None:
-            eid, sid = self._scope_ids()
+            eid, sid = ids if ids is not None else self._scope_ids()
             try:
                 self._feed(QUIET_SERIES, now, 1.0 if quietness == QUIET else 0.0,
                            "", "ok", th.bucket_s, admit=True, eid=eid, sid=sid)
             except Exception:  # noqa: BLE001 — 合成序列不比真读数重要
                 logger.debug("quiet series feed failed", exc_info=True)
-        if self._on_tick is not None:
+        if self._on_tick is not None and (time.time() - now) <= _TICK_FRESH_S:
             try:
                 self._on_tick(now, ctx, quietness)
             except Exception:  # noqa: BLE001 — 到期检查失败不影响本次读数
@@ -205,6 +251,8 @@ class EnvHistorySink:
         self.flush()
 
     def close(self) -> None:
+        """落定未满的桶，此后拒收读数（关停时晚到的读数不能再改写已落定的桶）。"""
+        self._closed = True
         self.flush()
 
     # ── 杂项 ──────────────────────────────────────────────────────────
@@ -264,6 +312,7 @@ class EnvHistorySink:
             "failed": self.failed,
             "buckets_written": self.buckets_written,
             "disabled": time.monotonic() < self._disabled_until,
+            "closed": self._closed,
             "sensors": sorted(pending),
             "pending": pending,
             "gated": sorted(self._gated),

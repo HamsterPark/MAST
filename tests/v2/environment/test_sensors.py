@@ -336,13 +336,16 @@ class TestConfigAutodetect:
         monkeypatch.setattr(ad, "list_serial_ports", lambda: ports)
         # COM13 = DL-7; COM14 = Lakeshore; COM15 = nothing
         monkeypatch.setattr(ad, "probe_dl7", lambda dev: dev == "COM13")
-        def _probe_lsci(dev):
+        def _probe_lsci(dev, **_k):
             if dev == "COM14":
                 return LakeshoreInfo("MODEL336", "LSCI,MODEL336,1,1",
                                      SerialSettings(port=dev, baudrate=57600,
                                                     bytesize=7, parity="O"))
             return None
         monkeypatch.setattr(ad, "probe_lakeshore", _probe_lsci)
+        # The other identity probes find nothing (and must never reach a real port).
+        monkeypatch.setattr(ad, "probe_lm510", lambda dev, **_k: None)
+        monkeypatch.setattr(ad, "probe_model625", lambda dev, **_k: None)
         found = ad.autodetect_sensors(skip_ports={"COM15"})
         names = [s.name() for s in found]
         assert any("COM13" in n for n in names)   # DL-7 detected

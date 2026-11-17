@@ -37,11 +37,19 @@ def _profile_is_clean(monkeypatch):
 
 @pytest.fixture()
 def probes(monkeypatch):
-    """Three fake ports, and probes that find nothing but remember being asked."""
-    asked: dict[str, list[str]] = {"lakeshore": [], "dl7": []}
+    """Three fake ports, and probes that find nothing but remember being asked.
+
+    Every probe autodetect can call is replaced — an unpatched one would reach for
+    a real port (the suite-wide guard in tests/v2/conftest.py refuses that anyway).
+    """
+    asked: dict[str, list[str]] = {"lakeshore": [], "dl7": [], "lm510": [], "m625": []}
     monkeypatch.setattr(autodetect, "list_serial_ports", lambda: list(PORTS))
     monkeypatch.setattr(autodetect, "probe_lakeshore",
                         lambda port, **k: asked["lakeshore"].append(port))
+    monkeypatch.setattr(autodetect, "probe_lm510",
+                        lambda port, **k: asked["lm510"].append(port))
+    monkeypatch.setattr(autodetect, "probe_model625",
+                        lambda port, **k: asked["m625"].append(port))
     monkeypatch.setattr(autodetect, "probe_dl7",
                         lambda port, *a, **k: asked["dl7"].append(port) or False)
     return asked
@@ -93,7 +101,7 @@ def test_a_port_claimed_by_a_configured_sensor_is_not_probed_or_logged(probes, c
 def test_a_file_that_turns_it_off_is_obeyed_and_says_so(probes, caplog):
     with caplog.at_level(logging.INFO, logger="mast.environment.autodetect"):
         sensors = autodetect.build_environment_sensors(cfg={"autodetect": False, "sensors": []})
-    assert probes == {"lakeshore": [], "dl7": []}
+    assert probes == {"lakeshore": [], "dl7": [], "lm510": [], "m625": []}
     assert any("serial scan skipped" in l and "environment_sensors.json" in l for l in _infos(caplog))
     assert sensors, "the placeholders are still there"
 
@@ -105,7 +113,8 @@ def test_an_optical_station_never_probes_a_port(probes, caplog, monkeypatch, fil
     cfg = {"sensors": []} if file_says is None else {"autodetect": file_says, "sensors": []}
     with caplog.at_level(logging.INFO, logger="mast.environment.autodetect"):
         sensors = autodetect.build_environment_sensors(cfg=cfg)
-    assert probes == {"lakeshore": [], "dl7": []}, "a probe reached a laser's or a controller's port"
+    assert probes == {"lakeshore": [], "dl7": [], "lm510": [], "m625": []}, \
+        "a probe reached a laser's or a controller's port"
     assert any("serial scan skipped - forced off by the optical station profile" in l
                for l in _infos(caplog))
     assert not [l for l in _infos(caplog) if "probing" in l]
@@ -163,6 +172,9 @@ def test_a_failed_dl7_probe_is_logged_at_debug(monkeypatch, caplog):
 def test_a_manual_device_scan_leaves_the_same_trace(monkeypatch, caplog):
     monkeypatch.setattr(autodetect, "list_serial_ports", lambda: list(PORTS[:2]))
     monkeypatch.setattr(autodetect, "discover_lakeshore", lambda port, **k: None)
+    monkeypatch.setattr(autodetect, "probe_lakeshore", lambda port, **k: None)
+    monkeypatch.setattr(autodetect, "probe_lm510", lambda port, **k: None)
+    monkeypatch.setattr(autodetect, "probe_model625", lambda port, **k: None)
     monkeypatch.setattr(autodetect, "probe_dl7", lambda port, *a, **k: False)
     with caplog.at_level(logging.INFO, logger="mast.environment.autodetect"):
         autodetect.discover_devices()

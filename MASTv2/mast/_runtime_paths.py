@@ -41,6 +41,35 @@ def project_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+DATA_DIR_ENV = "MAST_DATA_DIR"
+
+
+def data_root() -> Path:
+    """Return the directory that runtime-written user data hangs off.
+
+    ``<data_root>/experiments/`` holds the records databases, the usage ledger, the
+    current-monitor store, frame archives and composite progress sidecars;
+    ``<data_root>/artifacts/`` the park board, overflowing tool returns and figure
+    panels; ``<data_root>/data/`` the legacy drafts / reviews / reports / figures pool.
+
+    Resolution order:
+      1. ``MAST_DATA_DIR`` env var. The v2 records DB has always honoured it; the
+         other writers under these folders follow the same variable, so one setting
+         moves them together (simulator bring-up, the test suite).
+      2. :func:`project_root`.
+
+    Without ``MAST_DATA_DIR`` this is exactly ``project_root()``, so nothing moves in
+    a normal install. The test suite sets it for every test (``tests/v2/conftest.py``):
+    most tests leave project_root alone, and these writers used to land in the
+    checkout itself — on a development machine that is where the real usage ledger,
+    park board and monitor store live.
+    """
+    override = os.environ.get(DATA_DIR_ENV, "").strip()
+    if override:
+        return Path(override).expanduser()
+    return project_root()
+
+
 def package_root() -> Path:
     """Return the ``mast/`` package directory (always next to source files)."""
     return Path(__file__).resolve().parent

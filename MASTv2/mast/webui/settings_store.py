@@ -268,7 +268,9 @@ KNOWN_KEYS: frozenset[str] = frozenset({
                             #   （端点认证与监视线程，live-read，约 1 s 生效，不用重启）。
                             #   缺席 = 开：没有卫星配置时这条通道本来就进不来（要令牌）。
     # ── 站点画像 (2026-11-03, docs/v2/design/optical_station_witec.md D1) ───────
-    "station_profile",      # "stm" | "optical"; 缺席 = "stm"（现有所有机器的行为）。
+    "station_profile",      # "stm" | "optical" | "generic"; 缺席 = "stm"（现有所有机器的行为）。
+                            #   代码只问能力（mast.station.has），画像只决定
+                            #   能力是哪一组（docs/v2/design/generic_station.md）。
                             #   光学站画像下：不连 Nanonis、不起它的线程、关串口自动探测、
                             #   工具面只留光学与通用技能、简报/observe/首页换成光学内容。
                             #   读者：mast.station（环境变量 MAST_STATION_PROFILE 优先）。
@@ -278,6 +280,14 @@ KNOWN_KEYS: frozenset[str] = frozenset({
                             #   部分后果在**服务启动时**决定（起不起线程），所以改了要
                             #   重启服务才完全生效 —— 写入路由用 _READ_ONCE_AT_STARTUP
                             #   把这句话带回给界面。取值非法一律按 "stm" 处理并记 WARNING。
+    "serial_autodetect",    # bool | 缺席 (docs/v2/design/generic_station.md §1.4)。
+                            #   串口自动探测（往每个空闲串口发 *IDN? 和一帧 Modbus）的开关。
+                            #   缺席 = 画像的默认：stm 照旧由 environment_sensors.json 决定（默认开），
+                            #   generic 关；optical 一律强制关、不看它。文件里显式的
+                            #   "autodetect": false 永远压过它。读者：environment.config.
+                            #   autodetect_policy（经 mast.station.serial_autodetect_setting）。
+                            #   **在 admin_pin.GUARDED_KEYS 里**：打开它的后果（探测别人的串口）
+                            #   在下次启动或硬件页「重新扫描」时才显现，与 station_profile 同一类。
     # ── 墓碑：三个删掉的键（2026-08-10）────────────────────────────────
     #
     # ── 2026-08-24 删除：knowledge_mode（auto | simple | normal | expert）──

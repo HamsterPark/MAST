@@ -1,0 +1,720 @@
+{
+  "name": "pol_pbs_unpolarized_split",
+  "description": "Anchors E and E3. +45 deg light into PBS1: transmitted p = 0.5 horizontal, reflected p = 0.5 vertical (fractions 0.5 / 0.5). Unpolarized light (no polarization given) into PBS2: the same halves, each fully polarized. Unpolarized light of a lamp through polarizer P3 (axis 60 deg): p = 0.5, linear 60 deg (s = [-0.5, 0.866025, 0]); a lamp has no absolute power (mw null).",
+  "layout": {
+    "schema": 1,
+    "id": "pbs-split",
+    "title": "PBS: +45 and unpolarized light; a polarizer on a lamp",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 50.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 633.0,
+          "power_mw": 10.0,
+          "polarization": "linear",
+          "pol_angle_deg": 45.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "pbs1",
+        "type": "pbs",
+        "label": "PBS1",
+        "x_mm": 250.0,
+        "y_mm": 100.0,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.4,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det_r1",
+        "type": "detector",
+        "label": "DR1",
+        "x_mm": 250.0,
+        "y_mm": 300.0,
+        "angle_deg": 270.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det_t1",
+        "type": "detector",
+        "label": "DT1",
+        "x_mm": 450.0,
+        "y_mm": 100.0,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "las2",
+        "type": "laser",
+        "label": "L2",
+        "x_mm": 50.0,
+        "y_mm": 500.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 633.0,
+          "power_mw": 10.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "pbs2",
+        "type": "pbs",
+        "label": "PBS2",
+        "x_mm": 250.0,
+        "y_mm": 500.0,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.4,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det_r2",
+        "type": "detector",
+        "label": "DR2",
+        "x_mm": 250.0,
+        "y_mm": 700.0,
+        "angle_deg": 270.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det_t2",
+        "type": "detector",
+        "label": "DT2",
+        "x_mm": 450.0,
+        "y_mm": 500.0,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "lamp1",
+        "type": "lamp",
+        "label": "LAMP",
+        "x_mm": 600.0,
+        "y_mm": 820.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 5.0,
+        "props": {
+          "wavelength_nm": 550.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "pol3",
+        "type": "polarizer",
+        "label": "P3",
+        "x_mm": 800.0,
+        "y_mm": 820.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 12.7,
+        "props": {
+          "axis_deg": 60.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det3",
+        "type": "detector",
+        "label": "D3",
+        "x_mm": 1000.0,
+        "y_mm": 820.0,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 633.0,
+      "beam": {
+        "source_mw": 10.0,
+        "m2": null
+      },
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 100.0,
+              "x1": 250.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "pbs1",
+              "action": "split",
+              "x": 250.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 200.0,
+              "beam": {
+                "p": 1.0,
+                "mw": 10.0,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "split"
+        },
+        {
+          "branch": "0.r",
+          "fraction": 0.5,
+          "segments": [
+            {
+              "x0": 250.0,
+              "y0": 100.0,
+              "x1": 250.0,
+              "y1": 300.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.5,
+                "s": [
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "det_r1",
+              "action": "stop",
+              "x": 250.0,
+              "y": 300.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 400.0,
+              "beam": {
+                "p": 0.5,
+                "mw": 5.0,
+                "d_mm": null,
+                "s": [
+                  -1.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "stop"
+        },
+        {
+          "branch": "0.t",
+          "fraction": 0.5,
+          "segments": [
+            {
+              "x0": 250.0,
+              "y0": 100.0,
+              "x1": 450.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.5,
+                "s": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "det_t1",
+              "action": "stop",
+              "x": 450.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 400.0,
+              "beam": {
+                "p": 0.5,
+                "mw": 5.0,
+                "d_mm": null,
+                "s": [
+                  1.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "las2",
+      "wavelength_nm": 633.0,
+      "beam": {
+        "source_mw": 10.0,
+        "m2": null
+      },
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 500.0,
+              "x1": 250.0,
+              "y1": 500.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "pbs2",
+              "action": "split",
+              "x": 250.0,
+              "y": 500.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 200.0,
+              "beam": {
+                "p": 1.0,
+                "mw": 10.0,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "split"
+        },
+        {
+          "branch": "0.r",
+          "fraction": 0.5,
+          "segments": [
+            {
+              "x0": 250.0,
+              "y0": 500.0,
+              "x1": 250.0,
+              "y1": 700.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.5,
+                "s": [
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "det_r2",
+              "action": "stop",
+              "x": 250.0,
+              "y": 700.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 400.0,
+              "beam": {
+                "p": 0.5,
+                "mw": 5.0,
+                "d_mm": null,
+                "s": [
+                  -1.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "stop"
+        },
+        {
+          "branch": "0.t",
+          "fraction": 0.5,
+          "segments": [
+            {
+              "x0": 250.0,
+              "y0": 500.0,
+              "x1": 450.0,
+              "y1": 500.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.5,
+                "s": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "det_t2",
+              "action": "stop",
+              "x": 450.0,
+              "y": 500.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 400.0,
+              "beam": {
+                "p": 0.5,
+                "mw": 5.0,
+                "d_mm": null,
+                "s": [
+                  1.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "lamp1",
+      "wavelength_nm": 550.0,
+      "beam": {
+        "source_mw": null,
+        "m2": null
+      },
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 600.0,
+              "y0": 820.0,
+              "x1": 800.0,
+              "y1": 820.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            },
+            {
+              "x0": 800.0,
+              "y0": 820.0,
+              "x1": 1000.0,
+              "y1": 820.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.5,
+                "s": [
+                  -0.5,
+                  0.866025404,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "pol3",
+              "action": "transmit",
+              "x": 800.0,
+              "y": 820.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 200.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "det3",
+              "action": "stop",
+              "x": 1000.0,
+              "y": 820.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 400.0,
+              "beam": {
+                "p": 0.5,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  -0.5,
+                  0.866025404,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ]
+}

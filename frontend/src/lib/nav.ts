@@ -14,8 +14,14 @@
 //   - `legacy`: hidden unless Settings → General → Legacy features is on (the
 //     built-in agent stack). The route still exists and explains how to enable it.
 //   - `status: "incomplete"`: shown, with a marker that the feature is unfinished.
+//   - `requires`: a station capability (lib/stationCapabilities.ts). Hidden on a
+//     station without it: the STM pages on an optical or a generic station. The route
+//     still exists and says which station it belongs to (CapabilityOnly), so a
+//     bookmark lands on an explanation rather than on a page that polls an instrument
+//     this station does not have.
 
 import { tr } from "./i18n.ts";
+import type { Capability } from "./stationCapabilities.ts";
 
 export type FeatureStatus = "incomplete";
 
@@ -25,6 +31,8 @@ export interface NavSection {
   label: string;
   legacy?: boolean;
   status?: FeatureStatus;
+  /** Only on a station with this capability. */
+  requires?: Capability;
 }
 
 export interface NavTab {
@@ -41,6 +49,8 @@ export interface NavTab {
   sections?: NavSection[];
   legacy?: boolean;
   status?: FeatureStatus;
+  /** Only on a station with this capability. */
+  requires?: Capability;
 }
 
 export const TABS: NavTab[] = [
@@ -69,7 +79,8 @@ export const TABS: NavTab[] = [
     sections: [
       { seg: "log", label: tr("记录", "Log") },
       { seg: "gallery", label: tr("数据图库", "Data Gallery") },
-      { seg: "map", label: tr("扫描地图", "Scan Map") },
+      // Where the STM scan frames were taken: only a station that takes them has one.
+      { seg: "map", label: tr("扫描地图", "Scan Map"), requires: "scan_map" },
       { seg: "conduct", label: tr("多天 conduct", "Multi-day Conduct"), legacy: true },
       { seg: "memory", label: tr("记忆", "Memory"), legacy: true },
     ],
@@ -87,7 +98,9 @@ export const TABS: NavTab[] = [
     label: tr("设置", "Settings"),
     sections: [
       { seg: "general", label: tr("常规设置", "General") },
-      { seg: "setup", label: tr("仪器初始化", "Instrument Setup") },
+      // The checklist is made of STM quantities (preamp, safety envelope, approach,
+      // retract, coarse drive); on a station without them it has nothing to ask.
+      { seg: "setup", label: tr("仪器初始化", "Instrument Setup"), requires: "stm_safety" },
       { seg: "admin", label: tr("高级管理 🔒", "Advanced 🔒") },
       { seg: "usage", label: tr("用量花销", "Usage & Cost"), legacy: true },
     ],
@@ -96,7 +109,10 @@ export const TABS: NavTab[] = [
     to: "/monitoring",
     label: tr("监控", "Monitoring"),
     sections: [
-      { seg: "current", label: tr("电流监控", "Current Monitor") },
+      // The tunnelling current and the other Nanonis channels, recorded by the current
+      // monitor. The backend starts that monitor only with `stm_safety` (generic_station.md
+      // §2 item 6), so the page follows the same capability.
+      { seg: "current", label: tr("信号监控", "Signal Monitor"), requires: "stm_safety" },
       { seg: "env", label: tr("环境历史", "Environment History") },
     ],
   },
@@ -104,6 +120,9 @@ export const TABS: NavTab[] = [
     to: "/experimental",
     label: tr("实验性功能", "Experimental"),
     sections: [
+      // On every station: the mosaic stitches saved .sxm files and needs no instrument. The
+      // two Nanonis tools inside (signal capture + FFT, long-term monitoring) are gated on
+      // `nanonis` by the page itself.
       { seg: "tools", label: tr("仪器工具", "Instrument Tools") },
       { seg: "optics", label: tr("光学台", "Optics Bench") },
       // Drawn optical path of the setup, shared with the AI. Not legacy and not tied to a
@@ -119,10 +138,39 @@ export function homeLabel(legacy: boolean): string {
   return legacy ? tr("仪器 Chat", "Instrument Chat") : tr("总览", "Overview");
 }
 
-/** Tabs and sections visible for the given legacy setting. */
-export function visibleTabs(legacy: boolean): NavTab[] {
-  return TABS.filter((t) => legacy || !t.legacy).map((t) =>
-    t.sections ? { ...t, sections: t.sections.filter((s) => legacy || !s.legacy) } : t,
+/** What a station has, as far as the nav is concerned (`useStationCapabilities().has`). */
+export type HasCapability = (cap: Capability) => boolean;
+
+/** Every capability present: what an STM station, and a caller that does not know, sees. */
+const EVERY_CAPABILITY: HasCapability = () => true;
+
+/**
+ * Tabs and sections of `tabs` visible for the legacy setting and the station's capabilities.
+ * A tab whose sections are all hidden is hidden with them: its bare address would have
+ * nowhere to forward to.
+ */
+export function filterTabs(tabs: readonly NavTab[], legacy: boolean, has: HasCapability): NavTab[] {
+  const shown = (e: { legacy?: boolean; requires?: Capability }) =>
+    (legacy || !e.legacy) && (e.requires === undefined || has(e.requires));
+  return tabs
+    .filter(shown)
+    .map((t) => (t.sections ? { ...t, sections: t.sections.filter(shown) } : t))
+    .filter((t) => !t.sections || t.sections.length > 0);
+}
+
+/**
+ * Tabs and sections visible for the given legacy setting and station capabilities. Without
+ * `has` every capability counts as present (the STM station's nav); the shell always passes
+ * the station's own (test/stationCapabilityWiring.test.ts).
+ */
+export function visibleTabs(legacy: boolean, has: HasCapability = EVERY_CAPABILITY): NavTab[] {
+  return filterTabs(TABS, legacy, has);
+}
+
+/** Whether the page at `path` (a tab's `to` or a section's full path) is in the visible nav. */
+export function pathVisible(path: string, legacy: boolean, has: HasCapability = EVERY_CAPABILITY): boolean {
+  return visibleTabs(legacy, has).some(
+    (t) => t.to === path || (t.sections ?? []).some((s) => sectionPath(t, s.seg) === path),
   );
 }
 

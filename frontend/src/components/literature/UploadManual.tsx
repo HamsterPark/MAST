@@ -6,6 +6,7 @@ import { Field, TextField, Toggle, Button } from "@/components/controls";
 import { LibraryRef, LibraryTargetNote } from "@/components/literature/LibraryTargetNote";
 import { tr } from "@/lib/i18n";
 import type { components } from "@/api/schema";
+import { apiError } from "@/lib/apiError";
 
 type IngestResponse = components["schemas"]["IngestResponse"];
 
@@ -203,7 +204,7 @@ export function ManualEntryPanel({ libraryId }: { libraryId: string | null }) {
     mutationFn: async () => {
       if (!title.trim() && !abstract.trim())
         throw new Error(tr("至少填写标题或摘要", "Enter at least a title or an abstract"));
-      const { data, error } = await api.POST("/api/literature/manual-entry", {
+      const { data, error, response } = await api.POST("/api/literature/manual-entry", {
         body: {
           title: title.trim(),
           abstract: abstract.trim(),
@@ -216,7 +217,7 @@ export function ManualEntryPanel({ libraryId }: { libraryId: string | null }) {
           library_id: libraryId ?? "",
         },
       });
-      if (error) throw error;
+      if (error) throw apiError(error, response);
       return data;
     },
     onSuccess: (d) => {

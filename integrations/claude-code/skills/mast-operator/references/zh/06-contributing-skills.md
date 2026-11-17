@@ -4,6 +4,34 @@
 都能用的一部分。这一篇走一遍那个流程；spec 格式与提议机制本身见
 [造技能](05-authoring-skills.md)。
 
+## 习惯：好用的做法先存本地
+
+如果在 MAST 的真实工作里你写出了被验证有用的流程或小工具——在真实数据或仪器上跑过、结果对——
+就在会话结束前把它存成可复用技能，并告诉用户，不必等人来问。
+
+1. **选形式。** 官方技能能表达就做组合技能（`mast_composite_save`，存在 `config/composite_skills/`）；
+   否则写 Python 技能。
+2. **默认存本地。** Python 技能用脚手架在本地目录生成并自检：
+
+   ```bash
+   python scripts/skill_scaffold.py new MySkill --summary "one line" --evidence "what validated it"
+   python scripts/skill_scaffold.py check MySkill
+   ```
+
+   （或用 `mast_propose_skill` / `POST /skills/proposals` 送代码；同一目录、同一套检查。）
+   文件是 `config/custom_skills/MySkill.py`：文件名、类名、`metadata().name`、`enabled.json`
+   的键是同一个驼峰单词，一个文件一个技能类。该目录已 gitignore；在操作员把名字写进
+   `config/custom_skills/enabled.json` 并重启 MAST 之前，里面什么都不会运行。`check` 会说出
+   它为什么加载不了（加载器自己只留一行日志）：拒绝名单、形状、文件名、量纲与范围、硬件足迹、
+   冒烟运行，以及验证依据是否还是占位符。以这种方式保存的组合技能落在 `config/composite_skills/`，
+   那里也有受版本控制的文件：按路径逐个 stage，不要 `git add -A`。
+3. **说明用什么验证的。** 在 docstring 的 `Validated on` 行填写数据集、帧或仪器运行，
+   并向用户说明存了什么、放在哪、依据是什么。
+4. **要不要 PR 由用户定。** 按其已表达的偏好；没有就问一次。要提升时：按下文把它放进
+   `contrib/skills/<Name>/`，跑 `python scripts/skill_check.py contrib/skills/<Name>`，再开 PR。
+5. **存下来的技能不绕过任何安全门。** 如实声明 `safety_level` 与能力标签；运行模式、令牌、
+   占用锁对它与对其他技能一视同仁，合规检查会拒绝隐藏硬件足迹的技能。
+
 ## 两个层级
 
 | 层级 | 在真实仪器上验证过吗 | 存放在哪 |
@@ -45,7 +73,7 @@ python -m pytest contrib -q
 |---|---|
 | 移植自某篇已发表论文的方法，或者从别人仓库里拷来的代码 | 这棵树收的是原创工作；检查也会拒绝源码里出现的引用、DOI 与 arXiv 编号。 |
 | 描述某一台具体仪器的默认值（某次标定、某个压电范围、某个控制器增益、某个实测工作点） | 默认值必须与具体仪器无关，或者干脆不设默认值、只给出明确的范围。 |
-| `contrib/skills/<Name>/` 之外的改动 | 别处的一切都由别的地方维护，改了也扛不过下一次更新 —— 那些请另开 issue。 |
+| 夹在技能 PR 里的其他改动 | 技能 PR 只改 `contrib/skills/<Name>/`；别处的改动请单独发 PR（见仓库根目录的 `CONTRIBUTING.zh.md`），合并后回流开发仓、在那里测试、随下一次发布出去。 |
 
 ## 许可证与签署
 

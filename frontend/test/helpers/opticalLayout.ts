@@ -37,20 +37,32 @@ export function foldLayout(over: { mirrorAngle?: number; laserY?: number } = {})
 
 const near = (a: number, b: number, tol: number) => Math.abs(a - b) <= tol;
 
+/** The geometry of segments without their beam state (v2 adds `beam` to every segment of a trace made here). */
+export function segGeom(segs: ReadonlyArray<{ x0: number; y0: number; x1: number; y1: number }>): Array<{ x0: number; y0: number; x1: number; y1: number }> {
+  return segs.map(({ x0, y0, x1, y1 }) => ({ x0, y0, x1, y1 }));
+}
+
 /**
- * Compares two JSON-like values: numbers within `tol`, everything else exactly. Returns
- * the path of the first difference, or null when they agree.
+ * The comparison of v2 section 4.8 for the numbers under a `beam` key: |a - b| <= tol * max(1, |a|, |b|)
+ * (q's zR can be tens of thousands of mm, where an absolute 1e-6 would ask for 11 significant digits).
  */
-export function firstDifference(actual: unknown, expected: unknown, tol = 1e-6, path = "$"): string | null {
+export const nearMixed = (a: number, b: number, tol: number): boolean => Math.abs(a - b) <= tol * Math.max(1, Math.abs(a), Math.abs(b));
+
+/**
+ * Compares two JSON-like values: numbers within `tol` (absolute; under a `beam` key, the mixed tolerance
+ * of v2 section 4.8, nearMixed), everything else exactly: strings, booleans, null, array lengths and key
+ * sets. Returns the path of the first difference, or null when they agree.
+ */
+export function firstDifference(actual: unknown, expected: unknown, tol = 1e-6, path = "$", inBeam = false): string | null {
   if (typeof expected === "number") {
     if (typeof actual !== "number") return `${path}: expected number ${expected}, got ${JSON.stringify(actual)}`;
-    return near(actual, expected, tol) ? null : `${path}: ${actual} != ${expected}`;
+    return (inBeam ? nearMixed(actual, expected, tol) : near(actual, expected, tol)) ? null : `${path}: ${actual} != ${expected}`;
   }
   if (Array.isArray(expected)) {
     if (!Array.isArray(actual)) return `${path}: expected an array, got ${JSON.stringify(actual)}`;
     if (actual.length !== expected.length) return `${path}: length ${actual.length} != ${expected.length}`;
     for (let i = 0; i < expected.length; i++) {
-      const d = firstDifference(actual[i], expected[i], tol, `${path}[${i}]`);
+      const d = firstDifference(actual[i], expected[i], tol, `${path}[${i}]`, inBeam);
       if (d) return d;
     }
     return null;
@@ -63,7 +75,7 @@ export function firstDifference(actual: unknown, expected: unknown, tol = 1e-6, 
     for (const k of [...keys].sort()) {
       if (!(k in e)) return `${path}.${k}: unexpected key (value ${JSON.stringify(a[k])})`;
       if (!(k in a)) return `${path}.${k}: missing`;
-      const d = firstDifference(a[k], e[k], tol, `${path}.${k}`);
+      const d = firstDifference(a[k], e[k], tol, `${path}.${k}`, inBeam || k === "beam");
       if (d) return d;
     }
     return null;

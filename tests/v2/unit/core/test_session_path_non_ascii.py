@@ -61,7 +61,7 @@ def test_resolve_session_dir_uses_the_repaired_path(tmp_path, monkeypatch):
     rec = SimpleNamespace(error=None, return_value=("", b"\x00" + raw, [len(raw), received + "\x00"]))
 
     class Pool:
-        def safe_call(self, method, role="main"):
+        def safe_call(self, method, role="main", **kw):
             assert method == "Util_SessionPathGet"
             return rec
 

@@ -58,6 +58,15 @@ _IMPLEMENTATIONS = {
     ("vision", "scan_monitor.py"),   # _call() wrapper: forwards to the pool
 }
 
+#: Forwarders inside a file that also has real call sites: exempt the one function,
+#: not the file, so the file's own call sites stay checked. (package, file, "Class.method")
+_FORWARDERS = {
+    # The live scan's data-role context: hands each call of the shared scan helpers
+    # to the pool on the data role. The verbs it forwards are literals at their call
+    # sites (Scan_StatusGet, Scan_FrameGet, ...), where the tools see them.
+    ("monitoring", "scan_live.py", "_DataRole.safe_call"),
+}
+
 #: Both entry points onto the Nanonis link. ``urgent_call`` is the emergency
 #: path added 2026-07-28 (bounded role-lock wait + force-unstick); its verbs
 #: must stay just as greppable as ``safe_call``'s, or the abort-policy checker
@@ -70,6 +79,19 @@ def _is_implementation(path: Path) -> bool:
     return any(pkg in parts and path.name == fname for pkg, fname in _IMPLEMENTATIONS)
 
 
+def _forwarder_functions(path: Path, tree: ast.AST) -> list[tuple[str, ast.AST]]:
+    """The exempted forwarder functions defined in this file, by qualified name."""
+    wanted = {qual for pkg, fname, qual in _FORWARDERS if pkg in path.parts and path.name == fname}
+    found: list[tuple[str, ast.AST]] = []
+    for cls in ast.walk(tree):
+        if isinstance(cls, ast.ClassDef):
+            for fn in cls.body:
+                qual = f"{cls.name}.{getattr(fn, 'name', '')}"
+                if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) and qual in wanted:
+                    found.append((qual, fn))
+    return found
+
+
 def _offenders() -> list[str]:
     """Every safe_call whose first positional argument is not a string literal."""
     bad: list[str] = []
@@ -80,8 +102,9 @@ def _offenders() -> list[str]:
             tree = ast.parse(py.read_text(encoding="utf-8", errors="replace"))
         except SyntaxError:  # pragma: no cover
             continue
+        skip = {id(n) for _, fn in _forwarder_functions(py, tree) for n in ast.walk(fn)}
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
+            if not isinstance(node, ast.Call) or id(node) in skip:
                 continue
             fn = node.func
             name = fn.attr if isinstance(fn, ast.Attribute) else \
@@ -128,6 +151,30 @@ def test_every_safe_call_verb_is_a_string_literal():
           '  for key, thunk in (("z", lambda: context.safe_call("ZCtrl_ZPosGet")), …):\n'
           '      rec = thunk()\n'
     )
+
+
+def test_each_forwarder_exemption_names_a_real_forwarder():
+    """An exemption that names nothing exempts nothing, and hides that it does. Each
+    entry must be a method that hands its own verb parameter to safe_call; anything
+    else exempted here would be a call site taken out of the tools' sight."""
+    assert _FORWARDERS
+    for pkg, fname, qual in sorted(_FORWARDERS):
+        py = _ROOT / pkg / fname
+        assert py.is_file(), f"{pkg}/{fname} does not exist"
+        fns = _forwarder_functions(py, ast.parse(py.read_text(encoding="utf-8")))
+        assert [q for q, _ in fns] == [qual], f"{pkg}/{fname} defines {qual} {len(fns)} times"
+        fn = fns[0][1]
+        params = [a.arg for a in fn.args.args]
+        assert len(params) >= 2 and params[0] == "self", f"{qual} is not a method taking a verb"
+        verb = params[1]
+        calls = [n for n in ast.walk(fn) if isinstance(n, ast.Call)
+                 and getattr(n.func, "attr", getattr(n.func, "id", None)) in _CALL_NAMES]
+        assert calls, f"{qual} never calls safe_call"
+        for c in calls:
+            assert c.args and isinstance(c.args[0], ast.Name) and c.args[0].id == verb, (
+                f"{qual}:{c.lineno} passes something other than its own verb parameter "
+                f"{verb!r}: that is a call site, not forwarding"
+            )
 
 
 @pytest.mark.parametrize("tool", ["abort-policy", "coverage-census"])

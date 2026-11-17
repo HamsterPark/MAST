@@ -116,6 +116,22 @@ SKILL_EXTRA: dict[str, dict] = {
         "nanonis": "ZCtrl_Withdraw + 回读 ZCtrl_OnOffGet/ZCtrl_ZPosGet 确认",
         "example": '{"name": "SafeRetract", "input": {}}',
     },
+    "VerifyBiasAtJunction": {
+        "when_use": (
+            "AutoApproach / ApproachTip 进针之后、RelocateCoarseXY 重新进针之后，"
+            "开始扫图或谱学之前。检查样品偏压是否真的加在隧道结上:被动看电流符号"
+            "是否与偏压一致,主动把 |V| 降到 0.6×V(同极性、不过零)看 Z 有没有响应"
+            "(健康结:针尖靠近样品,Z 减小)。"
+            "verdict 三态:ok / bias_not_at_junction / inconclusive;"
+            "**只有 ok 才能往下做,inconclusive 不是 ok**。"
+            "bias_not_at_junction 时默认用 SafeRetract 退针(withdraw_on_fail),"
+            "并提示操作员检查外部偏压线。"
+        ),
+        "when_not": "反馈关着/针尖没进隧穿时(返回 inconclusive);谱学采集期间。",
+        "related": "前序 AutoApproach / ApproachTip / RelocateCoarseXY;失败时调用 SafeRetract",
+        "nanonis": "Bias_Get, Bias_Set, Current_Get, ZCtrl_ZPosGet, ZCtrl_SetpntGet, ZCtrl_Withdraw(失败时)",
+        "example": '{"name": "VerifyBiasAtJunction", "input": {}}',
+    },
     "EmergencyRetract": {
         "when_use": "异常（电流突增/振动）时紧急退针。使用 TCP 6504 紧急端口。",
         "when_not": "正常操作用 SafeRetract。",
@@ -131,9 +147,12 @@ SKILL_EXTRA: dict[str, dict] = {
         "example": '{"name": "WithdrawTip", "input": {}}',
     },
     "AutoApproach": {
-        "when_use": "退针后重新逼近表面。最危险的内置操作之一。",
+        "when_use": "退针后重新逼近表面。最危险的内置操作之一。"
+                    "进针完成后**必须再跑一次 VerifyBiasAtJunction**，确认偏压真的"
+                    "加在结上，再开始扫图/谱学（偏压线接触不良时，"
+                    "反馈把针尖推向近接触）。",
         "when_not": "针尖已在表面时不应调用。",
-        "related": "回滚 WithdrawTip",
+        "related": "回滚 WithdrawTip / 后续 VerifyBiasAtJunction",
         "nanonis": "AutoApproach_Open, AutoApproach_OnOffSet",
         "example": '{"name": "AutoApproach", "input": {}}',
     },
@@ -448,7 +467,8 @@ SKILL_EXTRA: dict[str, dict] = {
                     "先用 get_coarse_map 拿方向/步数建议 —— 它知道哪些片已经去过。",
         "when_not": "压电量程内还有干净地方时(先用 get_next_scan_position)。"
                     "换样品/关机的大退针用 RetractForSampleChange。",
-        "related": "前序 get_coarse_map / get_map_analysis;内部已含退针+重新进针",
+        "related": "前序 get_coarse_map / get_map_analysis;内部已含退针+重新进针;"
+                   "重新进针后跑 VerifyBiasAtJunction(粗动 XY 之后最容易出现偏压没到结上)",
         "nanonis": "Motor_StartMove(内部), ZCtrl_Withdraw, AutoApproach",
         "example": '{"name": "RelocateCoarseXY", '
                    '"input": {"axis": "x", "direction": "+", "steps": 300}}',

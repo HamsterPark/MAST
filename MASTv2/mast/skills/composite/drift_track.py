@@ -166,8 +166,8 @@ class TrackDrift_ReferenceScan(CompositeSkillGraph):
                 return
             try:
                 import time as _t
-                from mast._runtime_paths import project_root
-                frames = project_root() / "experiments" / "frames"
+                from mast._runtime_paths import data_root
+                frames = data_root() / "experiments" / "frames"
                 frames.mkdir(parents=True, exist_ok=True)
                 ref_file = frames / f"drift_ref_{int(_t.time() * 1000)}.npy"
                 np.save(ref_file, np.asarray(current_image, dtype=np.float64))

@@ -120,16 +120,23 @@ EN_BY_ZH: dict[str, str] = {
     "宽 (m，与完整扫描同宽)": "Width (m, same as the full scan)",
     "【已不再接线】旧余弦阈,保留仅为兼容签名":
         "[No longer wired] old cosine threshold, kept only to keep the signature compatible",
-    ("每线时间(s)，必须显式提供。请根据当前仪器配置与扫描范围设置；"
-     "声明式流程无法查询档位表，不提供默认值。"):
+    ("每线时间(s)，必须显式提供：声明式流程读不到档位表，不替你猜。"
+     "真身 PreScanCheck 不传时按扫描宽度查档位表，出厂档位 50 nm ⇒ 1.0 s/线"
+     "（约 50 nm/s），这里请填同一档位的值。别填 0.1：50 nm 上那是约 488 nm/s，"
+     "比档位表快约 10 倍，足以刮伤针尖。"):
         ("Time per line (s). **Required**: the declarative twin cannot read the tier table and "
-         "will not guess for you. Set it according to the current instrument configuration and "
-         "scan range; no default is provided."),
-    ("'PreScanCheck(声明式)必须显式给 line_time_s。"
-     "请根据当前仪器配置与扫描范围提供每线时间；此流程无法查询档位表。'"):
-        ("'PreScanCheck (declarative) requires line_time_s to be given explicitly. "
-         "Provide a time per line suited to the current instrument configuration and scan range; "
-         "this flow cannot look up the tier table.'"),
+         "will not guess for you. The real PreScanCheck looks it up by scan width when it is "
+         "omitted (factory tier: 50 nm => 1.0 s per line, about 50 nm/s); give the value of the "
+         "same tier here. Do not use 0.1: on 50 nm that is about 488 nm/s, about 10x faster "
+         "than the tier table and fast enough to scratch the tip."),
+    ("'PreScanCheck(声明式)必须显式给 line_time_s；此流程读不到档位表，也不推测每线时间。"
+     "真身不传时按宽度查表：出厂档位 50 nm ⇒ 1.0 s/线（约 50 nm/s）。"
+     "别填 0.1：在 50 nm 上约 488 nm/s，会刮伤针尖。'"):
+        ("'PreScanCheck (declarative) requires line_time_s to be given explicitly; this flow "
+         "cannot look up the tier table and does not guess a time per line. The real skill "
+         "looks it up by width when it is omitted: factory tier 50 nm => 1.0 s per line "
+         "(about 50 nm/s). Do not use 0.1: on 50 nm that is about 488 nm/s and scratches "
+         "the tip.'"),
     "'预扫描还没走到取数那一步'": "'The pre-scan has not reached the data-grab step yet'",
     ("'判不了：缓冲路径相似度与 .sxm 路径不可比,且缓冲内容未必是本帧。"
      "这是弃权,不是「针尖不合格」:下一步是去 .sxm 里取这一帧 / 换个地方重新量,"

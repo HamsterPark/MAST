@@ -94,6 +94,12 @@ from mast.core.safety import (  # noqa: E402
 # Pure SafetyGuard logic (port of v1 SafetyGuard, decoupled from middleware)
 # ─────────────────────────────────────────────────────────────────────
 
+def _core_narrower_hint(bound: float, side: str) -> str:
+    from mast.core.safety import _narrower_hint
+
+    return _narrower_hint(bound, side)
+
+
 class SafetyGate:
     """3-layer safety guard with admin override. Pure logic, no LangChain dep.
 
@@ -260,6 +266,7 @@ class SafetyGate:
                             f"{global_min}"
                             + self._diagnose(name, value, global_min, unit_lower,
                                              min_attr)
+                            + _core_narrower_hint(global_min, "min")
                         )
                     if value > global_max:
                         violations.append(
@@ -267,6 +274,7 @@ class SafetyGate:
                             f"{global_max}"
                             + self._diagnose(name, value, global_max, unit_lower,
                                              max_attr)
+                            + _core_narrower_hint(global_max, "max")
                         )
                     break
         return violations

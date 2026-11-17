@@ -31,7 +31,7 @@ import { errorsOf, validateLayout } from "../src/lib/opticalLayout/validate.ts";
 import { LIMITS } from "../src/lib/opticalLayout/types.ts";
 import { diagnostics, nearMisses, shownNearMisses, traceCutMessage, traceCutTexts, unlitComponents, type NearMiss } from "../src/lib/opticalLayout/indicators.ts";
 import type { Trace } from "../src/lib/opticalLayout/types.ts";
-import { budgetLayout, comp, denseSplitterLayout, foldLayout, layoutOf } from "./helpers/opticalLayout.ts";
+import { budgetLayout, comp, denseSplitterLayout, foldLayout, layoutOf, segGeom } from "./helpers/opticalLayout.ts";
 
 const eventsIn = (t: Trace) => t.reduce((n, s) => n + s.branches.reduce((m, b) => m + b.events.length, 0), 0);
 const branchesIn = (t: Trace) => t.reduce((n, s) => n + s.branches.length, 0);
@@ -91,7 +91,7 @@ describe("the budget of a whole trace", () => {
   it("the transmitted branch is cut where it starts when the reflected one used up the budget exactly (the shared fixture's case)", () => {
     const t = traceLayout(budgetLayout(), { maxTraceEvents: 3 });
     assert.deepEqual(shape(t), ["las1:0=split(1s,1e),0.r=stop(2s,2e),0.t=budget(1s,0e)"], "and las2 is not traced at all");
-    assert.deepEqual(t[0]!.branches[2]!.segments, [{ x0: 150, y0: 62.5, x1: 300, y1: 62.5 }]);
+    assert.deepEqual(segGeom(t[0]!.branches[2]!.segments), [{ x0: 150, y0: 62.5, x1: 300, y1: 62.5 }]);
   });
 
   it("the next source is cut at its first hit when the budget is used up between trees", () => {

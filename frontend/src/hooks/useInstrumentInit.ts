@@ -6,12 +6,16 @@ import { api } from "@/api/client";
  *  the page says it is done.
  *
  *  The backend never returns 500: an unreadable checklist degrades to degraded=true. Callers must
- *  not present an unreadable checklist as "nothing left to fill in". */
+ *  not present an unreadable checklist as "nothing left to fill in".
+ *
+ *  `enabled: false` (the banner on a station without the STM safety parameters) asks for
+ *  nothing: the checklist is made of STM quantities. */
 export const INSTRUMENT_INIT_KEY = ["instrument-init"] as const;
 
-export function useInstrumentInit() {
+export function useInstrumentInit({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: INSTRUMENT_INIT_KEY,
+    enabled,
     queryFn: async () => {
       const { data, error } = await api.GET("/api/instrument-init");
       if (error) throw error;

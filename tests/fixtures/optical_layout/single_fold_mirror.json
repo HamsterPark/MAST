@@ -104,6 +104,10 @@
     {
       "source": "las1",
       "wavelength_nm": 532.0,
+      "beam": {
+        "source_mw": null,
+        "m2": null
+      },
       "branches": [
         {
           "branch": "0",
@@ -113,13 +117,35 @@
               "x0": 50.0,
               "y0": 62.5,
               "x1": 112.5,
-              "y1": 62.5
+              "y1": 62.5,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             },
             {
               "x0": 112.5,
               "y0": 62.5,
               "x1": 112.5,
-              "y1": 287.5
+              "y1": 287.5,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             }
           ],
           "events": [
@@ -128,18 +154,42 @@
               "action": "reflect",
               "x": 112.5,
               "y": 62.5,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 45.0,
-              "path_mm": 62.5
+              "path_mm": 62.5,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             },
             {
               "component": "det1",
               "action": "stop",
               "x": 112.5,
               "y": 287.5,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 287.5
+              "path_mm": 287.5,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             }
           ],
           "end": "stop"

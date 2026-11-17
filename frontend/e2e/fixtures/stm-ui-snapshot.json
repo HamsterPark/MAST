@@ -1,0 +1,93 @@
+{
+  "tabs": [
+    "/ | 总览",
+    "/skills | 技能",
+    "/literature | 文献库不完善",
+    "/ters | 光谱 / TERS",
+    "/records | 实验记录",
+    "/wishlist | 操作员请求",
+    "/settings | 设置",
+    "/monitoring | 监控",
+    "/experimental | 实验性功能"
+  ],
+  "estopTitle": "紧急停止：中止任务 + 停止运动 + 退针",
+  "readingsRow": 1,
+  "status": "Nanonis · Connected",
+  "rightPanel": [
+    "INSTRUMENT",
+    "ENVIRONMENT",
+    "EXPERIMENT",
+    "SETTINGS",
+    "SYSTEM",
+    "TCP"
+  ],
+  "overviewHeadings": [
+    "总览",
+    "硬件实时读数",
+    "系统自检",
+    "TCP 端口"
+  ],
+  "overviewCards": [
+    "Nanonis 连接",
+    "实验存储"
+  ],
+  "settingsSections": [
+    "外观 Appearance",
+    "硬件连接 Hardware",
+    "温度计 / 真空计 Instruments",
+    "远程访问 Remote（Tailscale 跨网控制）",
+    "卫星通道 Satellites（光谱电脑）",
+    "实验默认参数 Experiment defaults",
+    "Z 参数组 Z-control presets（AI 按名应用，数值由代码写）",
+    "扫描参数档位 Scan policy（按尺度：速度 / 像素 / 反馈）",
+    "仪器进退针 Instrument (退针方向 / dI/dV)",
+    "对话处理与归档 Conversation & archiving",
+    "经典针尖阈值 Classical（免模型 · 按仪器重标定）",
+    "信号监控 Signal Monitor（常开 / 保留策略 / 告警阈值）",
+    "环境历史 Environment History（记录粒度 / 保留期 / 噪声谱）",
+    "硬件模块 Hardware",
+    "其它 Other"
+  ],
+  "subTabs": {
+    "/settings/general": [
+      "常规设置",
+      "仪器初始化",
+      "高级管理 🔒"
+    ],
+    "/monitoring/current": [
+      "信号监控",
+      "环境历史"
+    ],
+    "/records/log": [
+      "记录",
+      "数据图库",
+      "扫描地图",
+      "实验记录",
+      "数据",
+      "日志",
+      "诊断",
+      "报告",
+      "反馈",
+      "导出全部（仅限实验室内部）"
+    ],
+    "/experimental/tools": [
+      "仪器工具",
+      "光学台",
+      "光路图",
+      "信号捕获 + FFT",
+      "长期监控",
+      "图像拼接"
+    ],
+    "/skills/library": [
+      "技能目录",
+      "技能构建器",
+      "技能目录",
+      "市场",
+      "技能详情编辑",
+      "复合技能",
+      "覆盖层",
+      "百科 · 不完善",
+      "参考/Codex · 不完善"
+    ]
+  }
+}

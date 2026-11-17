@@ -131,7 +131,7 @@ class MonitoringStatus(BaseModel):
     running: bool = False
     enabled_in_settings: bool = False
     alerts_enabled: bool = False
-    state: str = "unknown"            # disabled|no_pool|comms_down|probing|running|unavailable|paused
+    state: str = "unknown"            # disabled|no_pool|comms_down|comms_recovering|probing|running|unavailable|paused
     detail: str = ""
     retry_in_s: float = 0.0
     strategy: Optional[str] = None    # osci1t | osci2t | oscihr | None

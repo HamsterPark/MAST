@@ -68,7 +68,9 @@ def test_importing_the_client_module_never_imports_comtypes():
             "import mast.instruments.witec.comtypes_client, mast.instruments.witec.microscope, "
             "mast.skills.builtins.optics_witec; assert 'comtypes' not in sys.modules, 'comtypes was imported'")
     env = dict(os.environ, MAST_LANG="zh")
-    proc = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True,
+    # -P: `python -c` would otherwise put the working directory first on sys.path, and TEMP is shared with every
+    # other program on the machine - a stray re.py there replaced the standard library's re.
+    proc = subprocess.run([sys.executable, "-P", "-c", code], env=env, capture_output=True, text=True,
                           timeout=180, cwd=os.environ.get("TEMP") or None)
     assert proc.returncode == 0, proc.stderr[-800:]
 

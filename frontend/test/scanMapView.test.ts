@@ -24,6 +24,8 @@ import {
   MAP_LAYER_IDS,
   MAP_PRESETS,
   MIN_AUTO_ANALYSIS_INTERVAL_MS,
+  SCAN_IMAGE_OPACITY,
+  STALE_EPOCH_OPACITY,
   analysisAutoEnabled,
   analysisSignature,
   boundsForMode,
@@ -35,11 +37,23 @@ import {
   nextAnalysisDelayMs,
   niceStepNm,
   pinnedLabel,
+  drawnHistory,
+  drawnScanImages,
+  exportFileName,
+  filterMarkerRows,
+  fmtCount,
+  kindCounts,
+  markerKeys,
+  markerKindOptions,
+  scanImageDetailRows,
+  scanImageOpacity,
   stageToScreen,
   visibleStepNm,
   withLayerDefaults,
   type MapLayers,
 } from "../src/lib/scanMapView.ts";
+import { MAX_ZOOM } from "../src/lib/scanMapGeometry.ts";
+import { browserOffsetMin, fmtUtcOffset } from "../src/lib/scanMapTime.ts";
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 
@@ -322,6 +336,69 @@ describe("stale epoch", () => {
   });
 });
 
+// ── stale-coordinate thumbnails (scan_map_upgrade.md §1) ─────────────────────
+//
+// The backend has always flagged a .sxm written before the last coarse move
+// (`stale_epoch`), and the canvas never read the flag: the image was drawn at
+// 0.92 on surface it never imaged, exactly as bright as a current one, and the
+// "old coordinates" switch did nothing to it.
+
+describe("scanImageOpacity", () => {
+  const current = { stale_epoch: false };
+  const old = { stale_epoch: true };
+  const FADED = SCAN_IMAGE_OPACITY * STALE_EPOCH_OPACITY;
+
+  // underlay × stale layer × image → opacity (null = not drawn)
+  const cases: [boolean, boolean, "current" | "old", number | null][] = [
+    [true, true, "current", SCAN_IMAGE_OPACITY],
+    [true, true, "old", FADED],
+    [true, false, "current", SCAN_IMAGE_OPACITY],
+    [true, false, "old", null],
+    [false, true, "current", null],
+    [false, true, "old", null],
+    [false, false, "current", null],
+    [false, false, "old", null],
+  ];
+  for (const [underlay, stale, which, want] of cases) {
+    it(`underlay ${underlay ? "on" : "off"} · old coordinates ${stale ? "on" : "off"} · ${which} image → ${want ?? "hidden"}`, () => {
+      const got = scanImageOpacity(which === "old" ? old : current, layers({ underlay, stale }));
+      assert.equal(got, want);
+    });
+  }
+
+  it("fades an old image by exactly the factor an old marker gets", () => {
+    const got = scanImageOpacity(old, DEFAULT_LAYERS)!;
+    assert.ok(Math.abs(got / SCAN_IMAGE_OPACITY - STALE_EPOCH_OPACITY) < 1e-12);
+    assert.ok(got < 0.25, `an old image at ${got} still reads as current`);
+  });
+
+  it("treats a missing flag as current, not as old", () => {
+    // Older backends and the in-progress frame send no flag at all.
+    assert.equal(scanImageOpacity({}, DEFAULT_LAYERS), SCAN_IMAGE_OPACITY);
+    assert.equal(scanImageOpacity({ stale_epoch: null }, DEFAULT_LAYERS), SCAN_IMAGE_OPACITY);
+  });
+
+  it("stops fitting the view around an old image the layer hides", () => {
+    const map = mapWith({
+      markers: [{ status: "done", x_m: 0, y_m: 0, w_m: nm(20), h_m: nm(20) }],
+      scan_images: [
+        { center_x_m: 0, center_y_m: 0, width_m: nm(50), height_m: nm(50) },
+        { center_x_m: nm(6000), center_y_m: 0, width_m: nm(100), height_m: nm(100), stale_epoch: true },
+      ],
+    });
+    assert.ok(boundsForMode("fit", map, null, DEFAULT_LAYERS).bounds!.maxX > nm(6000));
+    const hidden = boundsForMode("fit", map, null, layers({ stale: false })).bounds!;
+    assert.ok(hidden.maxX < nm(100), `the hidden old image still holds the view open to ${hidden.maxX}`);
+  });
+
+  it("keeps fitting a current image when only the old ones are hidden", () => {
+    const map = mapWith({
+      scan_images: [{ center_x_m: nm(3000), center_y_m: 0, width_m: nm(100), height_m: nm(100) }],
+    });
+    assert.ok(boundsForMode("fit", map, null, layers({ stale: false })).bounds!.maxX > nm(3000));
+  });
+});
+
 // ── map chrome under wheel zoom  ───────────────────────────────────────
 
 describe("visibleStepNm / niceStepNm", () => {
@@ -519,5 +596,354 @@ describe("markerDetailRows", () => {
   it("drops a non-finite coordinate instead of rendering NaN", () => {
     const rows = markerDetailRows({ x_m: Number.NaN, y_m: 1e-9 });
     assert.equal(row(rows, "位置"), undefined);
+  });
+});
+
+// ── what is drawn: layers × time window (scan_map_upgrade.md §2.3) ───────────
+
+describe("drawnHistory", () => {
+  const T = (h: number) => `2026-11-12T${String(h).padStart(2, "0")}:00:00`;
+  const at = (h: number) => new Date(2026, 10, 12, h).getTime();
+  const markers = [
+    { kind: "scan", status: "done", coord_epoch: 1, x_m: 0, y_m: 0, timestamp: T(9) },
+    { kind: "sts", status: "done", coord_epoch: 1, x_m: 0, y_m: 0, timestamp: T(11) },
+    { kind: "sts", status: "done", coord_epoch: 1, x_m: 0, y_m: 0, timestamp: "" }, // undated
+    { kind: "sts", status: "done", coord_epoch: 1, x_m: 0, y_m: 0, timestamp: "garbage" }, // bad
+    { kind: "pulse", status: "done", coord_epoch: 0, x_m: 0, y_m: 0, timestamp: T(8) }, // stale
+    { kind: "scan", status: "planned", x_m: 0, y_m: 0 }, // the route, not history
+    { kind: "move", status: "done", coord_epoch: 1, x_m: null, y_m: 0, timestamp: T(12) }, // no position
+  ];
+
+  it("keeps executed, positioned markers and their indexes", () => {
+    const got = drawnHistory(markers, 1, DEFAULT_LAYERS).map((d) => d.index);
+    assert.deepEqual(got, [0, 1, 2, 3, 4]);
+  });
+
+  it("splits live and old coordinates by their two layers", () => {
+    assert.deepEqual(drawnHistory(markers, 1, layers({ stale: false })).map((d) => d.index), [0, 1, 2, 3]);
+    assert.deepEqual(drawnHistory(markers, 1, layers({ history: false })).map((d) => d.index), [4]);
+  });
+
+  it("drops what is outside the window but ALWAYS keeps the undated", () => {
+    const w = { from: at(10), to: null };
+    assert.deepEqual(drawnHistory(markers, 1, DEFAULT_LAYERS, w).map((d) => d.index), [1, 2, 3]);
+  });
+
+  it("an empty window leaves only the undated, not a crash", () => {
+    const w = { from: at(23), to: null };
+    assert.deepEqual(drawnHistory(markers, 1, DEFAULT_LAYERS, w).map((d) => d.index), [2, 3]);
+  });
+
+  it("survives no markers", () => {
+    assert.deepEqual(drawnHistory(null, 0, DEFAULT_LAYERS), []);
+  });
+});
+
+describe("drawnScanImages", () => {
+  const imgs = [
+    { name: "old", stale_epoch: true, mtime: "2026-11-12T00:00:00Z" },
+    { name: "a", mtime: "2026-11-12T01:00:00Z" },
+    { name: "b", mtime: "2026-11-12T03:00:00Z" },
+    { name: "undated", mtime: "" },
+  ];
+
+  it("applies the stale rule and carries the opacity", () => {
+    const all = drawnScanImages(imgs, DEFAULT_LAYERS);
+    assert.deepEqual(all.map((d) => d.img.name), ["old", "a", "b", "undated"]);
+    assert.ok(all[0]!.opacity < all[1]!.opacity);
+    assert.deepEqual(drawnScanImages(imgs, layers({ stale: false })).map((d) => d.img.name), ["a", "b", "undated"]);
+  });
+
+  it("filters by mtime and keeps an image whose mtime could not be read", () => {
+    const w = { from: Date.UTC(2026, 10, 12, 2), to: null };
+    assert.deepEqual(drawnScanImages(imgs, DEFAULT_LAYERS, w).map((d) => d.img.name), ["b", "undated"]);
+  });
+
+  it("never filters the scan in progress out by time", () => {
+    // Its mtime is its newest milestone's. A window whose upper end closed
+    // before that hid the very scan the operator was watching.
+    const withLive = [...imgs, { name: "in-progress", mtime: "2026-11-12T05:00:00Z", live: true }];
+    const closed = { from: Date.UTC(2026, 10, 12, 0, 30), to: Date.UTC(2026, 10, 12, 1, 30) };
+    assert.deepEqual(drawnScanImages(withLive, DEFAULT_LAYERS, closed).map((d) => d.img.name), ["a", "undated", "in-progress"]);
+    const before = { from: Date.UTC(2026, 10, 12, 6), to: null };
+    assert.deepEqual(drawnScanImages(withLive, DEFAULT_LAYERS, before).map((d) => d.img.name), ["undated", "in-progress"]);
+  });
+
+  it("still filters a saved scan that merely claims nothing about being live", () => {
+    const w = { from: Date.UTC(2026, 10, 12, 2), to: null };
+    const notLive = [{ name: "saved", mtime: "2026-11-12T01:00:00Z", live: false }, { name: "old", mtime: "2026-11-12T01:00:00Z", live: null }];
+    assert.deepEqual(drawnScanImages(notLive, DEFAULT_LAYERS, w), []);
+  });
+});
+
+describe("marker stamps with their own offset", () => {
+  const at = (ts: string) => ({ kind: "sts", status: "done", coord_epoch: 0, x_m: 0, y_m: 0, timestamp: ts });
+  /** "+02:00" for 120 minutes east. */
+  const suffix = (min: number) => {
+    const a = Math.abs(min);
+    return `${min < 0 ? "-" : "+"}${String(Math.floor(a / 60)).padStart(2, "0")}:${String(a % 60).padStart(2, "0")}`;
+  };
+  /** The wall clock at `offMin`, as the backend writes it: "2026-11-12T10:00:00.000+08:00". */
+  const stamp = (ms: number, offMin: number) => new Date(ms + offMin * 60_000).toISOString().slice(0, 23) + suffix(offMin);
+
+  it("files markers into the time window by the lab's clock", () => {
+    // A lab two hours WEST of wherever this test runs: without the offset, read
+    // as browser-local, its stamps land two hours early and fall out of a "last
+    // 30 min" window (whose upper end is open, so a lab to the east would not
+    // show the difference).
+    const ref = Date.UTC(2026, 10, 12, 2);
+    const lab = browserOffsetMin(ref) - 120;
+    const markers = [at(stamp(ref, lab)), at(stamp(ref - 3 * 3_600_000, lab))];
+    const recent = { from: ref - 30 * 60_000, to: null };
+    assert.deepEqual(drawnHistory(markers, 0, DEFAULT_LAYERS, recent).map((d) => d.index), [0]);
+    const naive = markers.map((m) => ({ ...m, timestamp: m.timestamp.slice(0, 23) }));
+    assert.deepEqual(drawnHistory(naive, 0, DEFAULT_LAYERS, recent).map((d) => d.index), [], "test premise: the naive reading is two hours off");
+  });
+
+  it("shows a marker's time in the popup the way the image's time is shown", () => {
+    // Both through the browser's clock: one popup, one time zone.
+    const rows = markerDetailRows({ timestamp: "2026-11-12T10:00:00.123456+08:00" }, null);
+    const want = new Date(Date.UTC(2026, 10, 12, 2));
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const local = `${want.getFullYear()}-${pad(want.getMonth() + 1)}-${pad(want.getDate())} ${pad(want.getHours())}:${pad(want.getMinutes())}:${pad(want.getSeconds())}`;
+    assert.equal(rows.find((r) => r.label === "时间")?.value, local);
+    const img = scanImageDetailRows({ name: "a.sxm", mtime: "2026-11-12T02:00:00Z" });
+    assert.equal(img.find((r) => r.label === "修改时间")?.value, local, "marker and image of the same instant print the same");
+  });
+
+  it("adds the instrument's own wall clock, at the stamp's own offset, only when the zones differ", () => {
+    const t0 = Date.UTC(2026, 10, 12, 2);
+    const here = browserOffsetMin(t0);
+    const pc = (rows: { label: string; value: string }[]) => rows.find((r) => r.label === "仪器时钟");
+    // A PC one hour east of this browser at that instant: its wall clock, as
+    // written, with the offset the stamp names (not any "current" one).
+    const east = stamp(t0, here + 60);
+    assert.equal(pc(markerDetailRows({ timestamp: east }, null))?.value, `${east.slice(0, 10)} ${east.slice(11, 19)} (${fmtUtcOffset(here + 60)})`);
+    // Same zone as the browser, or a stamp that names no offset: nothing to add.
+    assert.equal(pc(markerDetailRows({ timestamp: stamp(t0, here) }, null)), undefined);
+    assert.equal(pc(markerDetailRows({ timestamp: "2026-11-12T10:00:00.123456" }, null)), undefined);
+  });
+
+  it("prints an unreadable stamp as recorded instead of dropping it", () => {
+    assert.equal(markerDetailRows({ timestamp: "not-a-time" }, null).find((r) => r.label === "时间")?.value, "not-a-time");
+  });
+});
+
+describe("legend counts", () => {
+  it("counts by kind, case-insensitively", () => {
+    assert.deepEqual(kindCounts([{ kind: "sts" }, { kind: "STS" }, { kind: "scan" }]), { sts: 2, scan: 1 });
+  });
+
+  it("shows one number when everything is drawn, shown/total otherwise", () => {
+    assert.equal(fmtCount(14, 14), "14");
+    assert.equal(fmtCount(5, 14), "5/14");
+  });
+});
+
+describe("markerKeys", () => {
+  const m = (label: string, ts = "2026-11-12T10:00:00.1") => ({ kind: "sts", timestamp: ts, label, x_m: 1e-9, y_m: 0 });
+
+  it("does not change when older rows drop off the front", () => {
+    // The backend returns the newest 2000 rows: once a scope outgrows that,
+    // every array index shifts on each new operation. Keys must not.
+    const a = markerKeys([m("one"), m("two"), m("three")]);
+    const b = markerKeys([m("two"), m("three"), m("four")]);
+    assert.equal(a[1], b[0]);
+    assert.equal(a[2], b[1]);
+  });
+
+  it("tells exact duplicates apart", () => {
+    const k = markerKeys([m("same"), m("same")]);
+    assert.notEqual(k[0], k[1]);
+  });
+});
+
+describe("scanImageDetailRows", () => {
+  const row = (rows: { label: string; value: string }[], label: string) => rows.find((r) => r.label === label);
+  const img = {
+    name: "Au111_003.sxm",
+    path: "D:/data/Au111_003.sxm",
+    center_x_m: 1.5e-7,
+    center_y_m: -2e-8,
+    width_m: 1.5e-7,
+    height_m: 1.5e-7,
+    angle_deg: 0,
+    mtime: "2023-11-14T22:13:20Z",
+  };
+
+  it("names the file, its place, size and time", () => {
+    const rows = scanImageDetailRows(img, 1_700_000_000_000 + 2 * 3_600_000);
+    assert.equal(row(rows, "文件")?.value, "Au111_003.sxm");
+    assert.equal(row(rows, "路径")?.value, "D:/data/Au111_003.sxm");
+    assert.match(row(rows, "中心")!.value, /150\.00 nm/);
+    assert.match(row(rows, "尺寸")!.value, /150\.00 nm × 150\.00 nm/);
+    assert.match(row(rows, "修改时间")!.value, /2 小时前/);
+    assert.equal(row(rows, "角度"), undefined, "a zero angle is not worth a row");
+    assert.equal(row(rows, "坐标")?.value, "当前坐标系");
+  });
+
+  it("says in words what an old-coordinate image means", () => {
+    const rows = scanImageDetailRows({ ...img, stale_epoch: true });
+    assert.match(row(rows, "坐标")!.value, /粗动之前/);
+    assert.match(row(rows, "坐标")!.value, /淡显/);
+  });
+
+  it("says an unreadable mtime is unknown, rather than 1970 or nothing", () => {
+    const rows = scanImageDetailRows({ ...img, mtime: "" });
+    assert.match(row(rows, "修改时间")!.value, /读不到/);
+  });
+});
+
+describe("fmtNm minus sign", () => {
+  it("prints axis numbers with U+2212, not a hyphen", () => {
+    assert.equal(fmtNm(-200, 100), "\u2212200");
+    assert.equal(fmtNm(-0.25, 0.05), "\u22120.25");
+    assert.equal(fmtNm(200, 100), "200");
+  });
+});
+
+// ── the marker list, the export name, the 200× ceiling ──────────────────────
+
+describe("filterMarkerRows", () => {
+  const rows = [
+    { index: 0, m: { kind: "scan", label: "scan #1", skill_name: "ScanFrame" } },
+    { index: 3, m: { kind: "sts", label: "STS #1", skill_name: "AcquireSTS" } },
+    { index: 7, m: { kind: "STS", label: "", skill_name: "GridSTS" } },
+    { index: 9, m: { kind: "pulse", label: "pulse 3 V", skill_name: "BiasPulse" } },
+  ];
+  const names: Record<string, string> = { sts: "STS 点谱", scan: "扫图", pulse: "电脉冲" };
+  const kindName = (k?: string | null) => names[(k ?? "").toLowerCase()] ?? "";
+
+  it("lists newest first, by record order", () => {
+    assert.deepEqual(filterMarkerRows(rows, {}).map((r) => r.index), [9, 7, 3, 0]);
+  });
+
+  it("narrows by kind, case-insensitively", () => {
+    assert.deepEqual(filterMarkerRows(rows, { kind: "sts" }).map((r) => r.index), [7, 3]);
+  });
+
+  it("matches the query against label, skill and the kind's display name", () => {
+    assert.deepEqual(filterMarkerRows(rows, { query: "grid" }).map((r) => r.index), [7]);
+    assert.deepEqual(filterMarkerRows(rows, { query: " 3 V " }).map((r) => r.index), [9]);
+    assert.deepEqual(filterMarkerRows(rows, { query: "点谱" }, kindName).map((r) => r.index), [7, 3]);
+  });
+
+  it("returns nothing rather than everything when nothing matches", () => {
+    assert.deepEqual(filterMarkerRows(rows, { query: "zzz" }), []);
+  });
+
+  it("does not reorder the caller's array", () => {
+    const copy = rows.map((r) => r.index);
+    filterMarkerRows(rows, {});
+    assert.deepEqual(rows.map((r) => r.index), copy);
+  });
+});
+
+describe("markerKindOptions", () => {
+  const rows = [{ m: { kind: "scan" } }, { m: { kind: "STS" } }, { m: { kind: "pulse" } }, { m: { kind: "" } }];
+
+  it("offers the kinds the rows have, once each, lower-cased and sorted", () => {
+    assert.deepEqual(markerKindOptions(rows, ""), ["pulse", "scan", "sts"]);
+  });
+
+  it("keeps the selected kind as an option after its rows have left", () => {
+    // "Last 1 h" took the STS rows away. Without the option the select showed
+    // "All kinds" while the list stayed narrowed to STS — to nothing.
+    const later = rows.filter((r) => (r.m.kind ?? "").toLowerCase() !== "sts");
+    assert.deepEqual(markerKindOptions(later, "sts"), ["pulse", "scan", "sts"]);
+    assert.deepEqual(filterMarkerRows(later.map((r, index) => ({ ...r, index })), { kind: "sts" }), []);
+  });
+
+  it("does not add an option for no selection", () => {
+    assert.deepEqual(markerKindOptions([], ""), []);
+    assert.deepEqual(markerKindOptions([], "  "), []);
+  });
+});
+
+describe("exportFileName", () => {
+  const at = new Date(2026, 10, 12, 15, 42, 10);
+
+  it("carries the sample and the local time", () => {
+    assert.equal(exportFileName("Au(111) #3", at), "scanmap_Au(111)_#3_20261112-154210.png");
+  });
+
+  it("replaces what Windows forbids in a file name", () => {
+    assert.equal(exportFileName('a<b>c:"d/e\\f|g?h*', at), "scanmap_a_b_c_d_e_f_g_h_20261112-154210.png");
+    assert.ok(!exportFileName("C:\\data\\x", at).includes("\\"), "a backslash must not survive");
+  });
+
+  it("keeps a Chinese sample name", () => {
+    assert.equal(exportFileName("金 111 样品", at), "scanmap_金_111_样品_20261112-154210.png");
+  });
+
+  it("falls back to 'map' without a usable sample name", () => {
+    assert.equal(exportFileName("", at), "scanmap_map_20261112-154210.png");
+    assert.equal(exportFileName(null, at), "scanmap_map_20261112-154210.png");
+    assert.equal(exportFileName("???", at), "scanmap_map_20261112-154210.png");
+  });
+});
+
+describe("sub-nanometre grid at the 200× ceiling", () => {
+  it("raised the ceiling to 200×", () => {
+    assert.equal(MAX_ZOOM, 200);
+  });
+
+  it("steps go sub-nm and the labels keep the digits they need", () => {
+    // A 300 nm map at 200× shows 1.5 nm across the canvas.
+    const step = visibleStepNm(300, 200);
+    assert.ok(step < 1 && step > 0, `step ${step}`);
+    assert.equal(step, 0.2);
+    assert.equal(fmtNm(0.4, step), "0.4");
+    assert.equal(fmtNm(-0.6000000000000001, step), "\u22120.6", "float noise from i·step must not leak");
+    // A 20 nm map at 200× shows 0.1 nm: two decimals.
+    const fine = visibleStepNm(20, 200);
+    assert.equal(fine, 0.02);
+    assert.equal(fmtNm(0.04, fine), "0.04");
+  });
+
+  it("keeps the scale bar on the canvas all the way to 200×", () => {
+    const spanNm = 500;
+    const pxPerNm = 532 / spanNm;
+    for (const k of [25, 50, 100, 200]) {
+      const L = visibleStepNm(spanNm, k) * pxPerNm * k;
+      assert.ok(L > 40 && L < 300, `scale bar ${L}px at ${k}×`);
+    }
+  });
+
+  it("never prints a tick label with more than a few decimals", () => {
+    for (const k of [1, 10, 50, 200]) {
+      const step = visibleStepNm(437, k);
+      for (let i = -3; i <= 3; i++) {
+        const label = fmtNm(i * step + 1234.5678 * (k === 1 ? 1 : 0), step);
+        assert.ok(!/\d\.\d{5,}/.test(label), `${label} at step ${step}`);
+      }
+    }
+  });
+});
+
+// ── the live scan layer (docs/v2/design/scan_map_live.md) ───────────────────
+
+describe("live scan layer", () => {
+  it("comes on for a browser whose saved layers predate it", () => {
+    // An old localStorage has every other key and not this one.
+    const old = { ...DEFAULT_LAYERS } as Partial<MapLayers>;
+    delete old.live;
+    assert.equal(withLayerDefaults(old).live, true);
+  });
+
+  it("is on in All and Minimal, off with the thumbnails in Planning focus", () => {
+    const by = (id: string) => MAP_PRESETS.find((p) => p.id === id)!.layers;
+    assert.equal(by("all").live, true);
+    assert.equal(by("minimal").live, true);
+    assert.equal(by("planning").live, false);
+  });
+
+  it("the 1/8 milestone image steps aside for the stream, and goes with the layer", () => {
+    const imgs = [{ name: "saved.sxm" }, { name: "milestone.png", live: true }];
+    const names = (l: Partial<MapLayers>, shown = false) =>
+      drawnScanImages(imgs, layers(l), undefined, shown).map((d) => d.img.name);
+    assert.deepEqual(names({}), ["saved.sxm", "milestone.png"], "no stream: the PNG is the fallback");
+    assert.deepEqual(names({}, true), ["saved.sxm"], "the stream is drawing that frame");
+    assert.deepEqual(names({ live: false }), ["saved.sxm"], "live layer off");
   });
 });

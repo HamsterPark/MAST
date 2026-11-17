@@ -397,7 +397,7 @@ export function AuxChannels({
             ": this is the factory state, not a fault. The Z and amplitude thresholds have never been calibrated on this machine; first run",
           )}
           <code className="mx-1">python -m mast.monitoring.commission</code>
-          {tr("看【辅助通道】那一段，再到「设置 → 电流监控」把", "and read the [Auxiliary channels] section, then in Settings → Current monitor turn on")}
+          {tr("看【辅助通道】那一段，再到「设置 → 信号监控」把", "and read the [Auxiliary channels] section, then in Settings → Signal monitor turn on")}
           <code className="mx-1">cm_aux_alerts_enabled</code>
           {tr("打开。记录一直在进行。", ". Recording continues regardless.")}
         </p>

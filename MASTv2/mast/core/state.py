@@ -21,6 +21,18 @@ logger = logging.getLogger(__name__)
 
 _HISTORY_LEN = 20
 
+#: 带这些标签的技能读的是 Nanonis 之外的仪器（低温、磁体电源、环境）或者历史记录。它们结果里的
+#: ``current_a`` / ``setpoint_a`` 之类**不是**隧道结的状态，写回缓存就把实时读数换成了别的量。
+#: 曾出现过：``GetMagnetState`` 的 ``current_a``（625 输出电流，安培量级）被写成了隧道电流，
+#: 顶栏实时读数和 agent 的实时状态块里出现了荒谬的 pA 值，直到下一次 1 Hz 刷新。
+#: 判断放在**收的这一侧**（:func:`patch_state_from_result`），不指望每个技能记得别用这些键名。
+NO_STATE_WRITEBACK_TAGS = frozenset({"cryostat", "cryo", "magnet", "environment"})
+
+#: 隧道电流的物理上限（A）。STM 前放最大量程在微安量级；超过 1 mA 的「隧道电流」只可能是别的
+#: 量（磁体电源电流、单位弄错的数），写回缓存一律拒收。只管 ``current_a``：``setpoint_a`` 在 df
+#: 反馈下是赫兹，不能套这个界。
+MAX_PLAUSIBLE_TUNNEL_CURRENT_A = 1e-3
+
 
 def reply_scalar(return_value: Any, *, field: str = "") -> "float | None":
     """从一次 ``safe_call`` 的回包里取出**那一个数**;取不出返回 ``None``。
@@ -331,6 +343,10 @@ class InstrumentState:
                 v = coerce_number(v, field=k)
                 if v is None:
                     continue  # 写不进去就不写:陈的真值好过一个假形状
+                if k == "current_a" and abs(v) > MAX_PLAUSIBLE_TUNNEL_CURRENT_A:
+                    logger.warning("state apply_patch: current_a=%r A 不可能是隧道电流 —— 不写回"
+                                   "（多半是别的仪器的电流）", v)
+                    continue
             try:
                 setattr(cache, k, v)
             except Exception:  # pragma: no cover - defensive
@@ -415,7 +431,8 @@ class InstrumentState:
 
 # ── 写回:一个成功的写技能立刻更新缓存 ────────────────────────────────────────
 
-def patch_state_from_result(state: Any, data: Any, *, what: str = "") -> None:
+def patch_state_from_result(state: Any, data: Any, *, what: str = "",
+                            tags: Any = None) -> None:
     """把一个**成功**技能的结果字段写回仪器状态缓存。**两条路径共用这一份。**
 
     为什么要有这个函数(而不是在两处各写一遍):写回从前只存在于 agent 的工具调用
@@ -436,8 +453,17 @@ def patch_state_from_result(state: Any, data: Any, *, what: str = "") -> None:
     —— 不是没生效,是补的洞不在那儿。
 
     尽力而为:写回失败绝不能影响技能结果(它是缓存的一致性,不是执行的正确性)。
+
+    ``tags``：技能元数据的标签。带 :data:`NO_STATE_WRITEBACK_TAGS` 里任何一个的技能**不写回**
+    —— 它们描述的不是隧道结（7.2.0 的 GetMagnetState 把磁体电流写成了隧道电流）。
     """
     if not isinstance(data, dict) or not data:
+        return
+    try:
+        skip = bool(tags) and not NO_STATE_WRITEBACK_TAGS.isdisjoint(tags)
+    except TypeError:
+        skip = False
+    if skip:
         return
     patch = getattr(state, "apply_patch", None)
     if not callable(patch):

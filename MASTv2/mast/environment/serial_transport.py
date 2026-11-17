@@ -117,6 +117,80 @@ _STOPBITS_MAP = {1.0: "STOPBITS_ONE", 1.5: "STOPBITS_ONE_POINT_FIVE",
                  2.0: "STOPBITS_TWO"}
 _BYTESIZE_MAP = {5: "FIVEBITS", 6: "SIXBITS", 7: "SEVENBITS", 8: "EIGHTBITS"}
 
+#: Bounds for one terminator-delimited read. A device that streams without ever
+#: sending the terminator must not hold the port (and its lock) indefinitely.
+_MAX_REPLY_BYTES = 8192
+_MAX_READ_S_FLOOR = 5.0
+
+
+def is_complete_line(raw: "bytes | bytearray | None", terminator: bytes = b"\n") -> bool:
+    """True when *raw* ends with *terminator*, i.e. the instrument finished its answer.
+
+    A reply that stops short of its terminator is not a shorter answer but a
+    broken one: ``+14.6800`` cut after two bytes parses as ``+1``, and
+    ``+1.2E-01`` cut after seven as ``+1.2E-0``, ten times too large. Drivers
+    that turn replies into values check this before parsing.
+    """
+    return bool(raw) and bytes(raw).endswith(terminator)
+
+
+def _end_of_nth(buf: "bytes | bytearray", term: bytes, n: int) -> "int | None":
+    """Index just past the *n*-th *term* in *buf*, or ``None`` if there are fewer."""
+    start = 0
+    for _ in range(n):
+        i = buf.find(term, start)
+        if i < 0:
+            return None
+        start = i + len(term)
+    return start
+
+
+def _read_lines(ser, term: bytes, lines: int, timeout: "float | None") -> bytes:
+    """Read until *lines* terminators have arrived, or no byte arrives within the timeout.
+
+    This replaces pyserial's ``read_until``. That function reads one byte per call
+    and checks a single absolute deadline after every byte. Each ``read(1)`` is
+    several ctypes calls, and each call hands the GIL back. With other Python
+    threads busy, every byte waits for the GIL and the deadline passes in the
+    middle of a reply that has already arrived.
+
+    Observed at MAST start-up: auto-detection logged that the Lake
+    Shore 625 "answered but was not recognised". The same probe run on its own
+    identified the supply 7 times out of 7. With three busy threads in the
+    process, the 31-byte ``*IDN?`` answer came back as ``b'LSCI,M'``.
+
+    Here the timeout bounds only the wait for the NEXT byte, and whatever the
+    driver has already buffered is taken in a single ``read``. A starved thread
+    therefore still collects a reply that has fully arrived.
+
+    Returns the bytes up to and including the *lines*-th terminator. Anything
+    after that is dropped; the next transaction flushes the input buffer anyway.
+    A reply that stops before its terminator is returned unchanged; see
+    :func:`is_complete_line`.
+    """
+    want = max(1, int(lines))
+    buf = bytearray()
+    budget = max(10.0 * float(timeout or 0.0), _MAX_READ_S_FLOOR)
+    hard_stop = time.monotonic() + budget
+    while len(buf) < _MAX_REPLY_BYTES:
+        try:
+            waiting = int(getattr(ser, "in_waiting", 0) or 0)
+        except Exception:  # noqa: BLE001 - only a shortcut; fall back to one byte
+            waiting = 0
+        room = _MAX_REPLY_BYTES - len(buf)
+        chunk = bytes(ser.read(min(waiting, room) if waiting > 0 else 1) or b"")
+        if not chunk:
+            break  # nothing more within the read timeout: the device has stopped
+        buf += chunk
+        end = _end_of_nth(buf, term, want)
+        if end is not None:
+            return bytes(buf[:end])
+        if time.monotonic() > hard_stop:
+            logger.debug("serial read: %d byte(s), fewer than %d terminator(s) after "
+                         "%.1f s; giving up", len(buf), want, budget)
+            break
+    return bytes(buf)
+
 
 class SerialTransport:
     """Real pyserial-backed transport. Lazy — the port is opened on first use.
@@ -125,9 +199,23 @@ class SerialTransport:
     :class:`SerialUnavailable` so callers handle a missing port in one place.
     """
 
+    #: Drivers that verify an instrument's identity before talking to it check this
+    #: (``getattr(transport, "supports_generations", False)``) to know they can pin
+    #: each query to the handle generation they verified.
+    supports_generations = True
+    #: ``transact(min_gap_s=...)`` is honoured (see there). Drivers check this the same way.
+    supports_min_gap = True
+
     def __init__(self, settings: SerialSettings):
         self.settings = settings
         self._ser = None  # serial.Serial | None
+        # Incremented on every successful open(). A COM *name* is not an identity:
+        # unplug two USB adapters and plug them back in, and COM13/COM14 can swap
+        # devices. A driver that checked ``*IDN?``
+        # once and then let ``transact`` silently reopen the port by name would
+        # be talking to whatever now answers on that name. Drivers record the
+        # generation they verified and pass it back as ``expect_generation``.
+        self._generation = 0
         # A request/response link is only coherent if one transaction completes
         # before the next begins. Two threads DO share a transport now: the
         # EnvironmentMonitor loop polls temperature every interval while the
@@ -135,6 +223,19 @@ class SerialTransport:
         # demand — interleaved write/read would splice one reply onto the other
         # request. Guard the whole flush→write→read sequence, not just the write.
         self._io_lock = threading.RLock()
+        # Message spacing (transact(min_gap_s=...)). When the last transaction on this
+        # transport ended, and before when no transaction may start, whoever makes it.
+        self._last_end = 0.0
+        self._quiet_until = 0.0
+
+    @property
+    def open_generation(self) -> int:
+        """How many times this transport has successfully opened its port.
+
+        ``0`` = never opened. Paired with :attr:`is_open`, it tells a driver
+        whether the handle it verified is still the handle it would use.
+        """
+        return self._generation
 
     # -- lifecycle ---------------------------------------------------------
     def open(self) -> None:
@@ -156,6 +257,7 @@ class SerialTransport:
         except Exception as exc:
             self._ser = None
             raise SerialUnavailable(f"open {s.label()} failed: {exc}") from exc
+        self._generation += 1
 
     def close(self) -> None:
         # Deliberately does NOT take _io_lock. Closing the port is what CANCELS
@@ -182,6 +284,9 @@ class SerialTransport:
         read_size: int | None = None,
         read_until: bytes | None = None,
         timeout: float | None = None,
+        lines: int = 1,
+        expect_generation: int | None = None,
+        min_gap_s: float | None = None,
     ) -> bytes:
         """Write *payload*, then read the reply.
 
@@ -190,8 +295,38 @@ class SerialTransport:
         if both are None a single short read is returned. Flushes stale input
         before writing so a previous partial reply can't corrupt this one.
         Raises :class:`SerialUnavailable` if the port isn't usable.
+
+        ``lines`` (with ``read_until``) reads that many terminator-delimited
+        lines in ONE locked transaction — for an instrument that echoes the
+        command before answering it (Cryomagnetics over USB). Stops early on a
+        read timeout; whatever arrived is returned. The timeout bounds the wait
+        for each next byte, not the whole reply (:func:`_read_lines`), so a reply
+        is not cut short because this thread was slow to get the GIL back. A
+        reply that still ends without its terminator is returned as is: check
+        :func:`is_complete_line` before parsing a value from it.
+
+        ``expect_generation``: refuse (``SerialUnavailable``, nothing written)
+        unless the port is open RIGHT NOW with exactly this open generation.
+        Never reopens. This is how an identity-checked driver guarantees that a
+        query is only ever written on the handle whose ``*IDN?`` it checked;
+        reopening is left to the driver's identity probe.
+
+        ``min_gap_s``: the instrument needs this much silence around every message
+        (Lake Shore 335 manual §6.3.5: nothing for 50 ms after a command or a reply,
+        at most 20 messages per second, or communication fails intermittently).
+        Inside the I/O lock, this call waits until ``min_gap_s`` after the previous
+        transaction on this transport ended, whoever made it, and the next
+        transaction, whoever makes it, waits until ``min_gap_s`` after this one.
+        Callers that do not pass it are spaced only after a call that did.
         """
         with self._io_lock:
+            if expect_generation is not None:
+                if self._ser is None or self._generation != expect_generation:
+                    raise SerialUnavailable(
+                        f"{self.settings.port}: handle is not the identity-verified "
+                        f"one (want generation {expect_generation}, have "
+                        f"{self._generation if self._ser is not None else 'closed'}); "
+                        "nothing written")
             if self._ser is None:
                 self.open()
             ser = self._ser
@@ -204,29 +339,46 @@ class SerialTransport:
                 except Exception:  # pragma: no cover
                     pass
 
+            gap = float(min_gap_s) if min_gap_s else 0.0
+            wait = max(self._quiet_until, self._last_end + gap) - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)
             try:
-                try:
-                    ser.reset_input_buffer()
-                except Exception:  # pragma: no cover
-                    pass
-                ser.write(payload)
-                try:
-                    ser.flush()
-                except Exception:  # pragma: no cover
-                    pass
+                return self._exchange(ser, payload, read_size=read_size,
+                                      read_until=read_until, timeout=timeout, lines=lines)
+            finally:
+                self._last_end = time.monotonic()
+                if gap:
+                    self._quiet_until = self._last_end + gap
 
-                if read_until is not None:
-                    data = ser.read_until(read_until)
-                elif read_size is not None:
-                    data = ser.read(read_size)
-                else:
-                    data = ser.read(256)
-                return bytes(data or b"")
-            except SerialUnavailable:
-                raise
-            except Exception as exc:
-                raise SerialUnavailable(
-                    f"transact on {self.settings.label()} failed: {exc}") from exc
+    def _exchange(self, ser, payload: bytes, *, read_size, read_until, timeout,
+                  lines: int) -> bytes:
+        """flush -> write -> read. The caller holds the I/O lock."""
+        try:
+            try:
+                ser.reset_input_buffer()
+            except Exception:  # pragma: no cover
+                pass
+            ser.write(payload)
+            try:
+                ser.flush()
+            except Exception:  # pragma: no cover
+                pass
+
+            if read_until is not None:
+                # Not pyserial's read_until: see _read_lines for the start-up
+                # failure it caused.
+                data = _read_lines(ser, read_until, lines, timeout)
+            elif read_size is not None:
+                data = ser.read(read_size)
+            else:
+                data = ser.read(256)
+            return bytes(data or b"")
+        except SerialUnavailable:
+            raise
+        except Exception as exc:
+            raise SerialUnavailable(
+                f"transact on {self.settings.label()} failed: {exc}") from exc
 
     # context-manager sugar
     def __enter__(self) -> "SerialTransport":

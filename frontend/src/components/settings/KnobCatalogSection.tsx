@@ -87,6 +87,13 @@ const GROUP_META: Record<string, { title: string; note: string }> = {
       "A 1 Hz slow side path that does not use the oscilloscope. Thresholds are in metres and hertz, unrelated to the group above, so do not copy values across. Alarms are off by default: first run python -m mast.monitoring.commission and read the suggested values in its [auxiliary channels] section.",
     ),
   },
+  scan_live: {
+    title: tr("扫描地图实时扫描", "Live scan on the scan map"),
+    note: tr(
+      "扫描进行时逐行抓帧，地图上像 Nanonis 那样一行一行地画出来。只读、只走 data 口；空闲时一次调用都不发。",
+      "While a scan runs, the frame is grabbed row by row and drawn on the map line by line, as Nanonis does. Read-only and on the data port only; no call at all while idle.",
+    ),
+  },
 };
 
 function KnobRow({

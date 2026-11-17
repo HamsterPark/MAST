@@ -58,6 +58,7 @@ _TYPE_TO_HEADLINE = {
     "LakeshoreTemperatureSensor": "temperature",
     "TemperatureSensor": "temperature",
     "HeliumLevelSensor": "helium_level",
+    "LM510LevelSensor": "helium_level",
     "NoiseSensor": "noise_level",
 }
 

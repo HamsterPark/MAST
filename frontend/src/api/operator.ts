@@ -14,7 +14,7 @@
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWsEvent } from "@/hooks/useWsEvents";
-import { api } from "./client";
+import { useHasCapability } from "@/hooks/useStationCapabilities";
 import {
   errorDetail,
   openPromptFeed,
@@ -26,7 +26,6 @@ import {
   type OpenPromptFeed,
 } from "../lib/operatorPrompts.ts";
 import {
-  isOpticalProfile,
   parseHistory,
   parseOpticalState,
   type HistoryEntry,
@@ -89,13 +88,14 @@ interface PromptsQueryOpts {
 
 /**
  * The gate every operator query goes through. Operator prompts and the optical state exist
- * on an optical station only: on an STM station, or while the service has not said what it
- * is, nothing under /api/operator is asked for, so an STM station's request traffic stays
+ * only on a station with the operator prompt service (capability `operator_prompts`, the
+ * optical station by default): on any other station, or while the service has not said what
+ * it has, nothing under /api/operator is asked for, so an STM station's request traffic stays
  * what it was before this feature.
  */
 function useOperatorQueryEnabled(enabled = true): boolean {
-  const optical = useIsOpticalStation();
-  return optical && enabled;
+  const hasPrompts = useHasOperatorPrompts();
+  return hasPrompts && enabled;
 }
 
 export function useOperatorPrompts({ status, limit = 100, poll = true, enabled = true }: PromptsQueryOpts) {
@@ -120,12 +120,12 @@ export function useOperatorPrompts({ status, limit = 100, poll = true, enabled =
  * The open prompts. Call it with `poll: true` once (AppLayout owns the polling); other
  * readers pass `poll: false` and share the cache, so there is one request stream.
  *
- * Only an optical station has operator prompts. On any other profile, or while the service
- * has not said what it is, the query is off, the socket event is not listened to, and the
- * feed is `NO_PROMPT_FEED` (empty, `enabled: false`): no request, no badge, no toast, no sound.
- * The owner keeps asking what the station is until the service answers (see
- * `useIsOpticalStation`), so a page opened while MAST was still starting finds its prompts
- * once it is up.
+ * Only a station with the operator prompt service has operator prompts. On any other
+ * station, or while the service has not said what it has, the query is off, the socket event
+ * is not listened to, and the feed is `NO_PROMPT_FEED` (empty, `enabled: false`): no request,
+ * no badge, no toast, no sound. The owner keeps asking what the station has until the service
+ * answers (see `useHasOperatorPrompts`), so a page opened while MAST was still starting finds
+ * its prompts once it is up.
  *
  * The service also announces every post / answer / close on /ws/events as a pointer-only
  * `operator_prompt` event; that triggers an immediate refetch. It matters most for a tab in
@@ -135,30 +135,30 @@ export function useOperatorPrompts({ status, limit = 100, poll = true, enabled =
  */
 export function useOpenPromptFeed({ poll = true }: { poll?: boolean } = {}): OpenPromptFeed {
   const qc = useQueryClient();
-  const optical = useIsOpticalStation({ keepAsking: poll });
+  const hasPrompts = useHasOperatorPrompts({ keepAsking: poll });
   useWsEvent(
     "operator_prompt",
     (ev) => {
       const what = (ev.data as { what?: unknown } | null)?.what;
       void qc.invalidateQueries({ queryKey: what === "optical_state" ? OPTICAL_KEY : PROMPTS_KEY });
     },
-    poll && optical,
+    poll && hasPrompts,
   );
   const q = useOperatorPrompts({ status: "open", poll });
   const list = q.data?.prompts;
   const persistError = q.data?.persistError ?? null;
   const errorStatus = (q.error as { status?: number } | null)?.status;
   return useMemo(
-    () => openPromptFeed({ optical, list, loaded: q.isSuccess, errorStatus, persistError }),
-    [optical, list, q.isSuccess, errorStatus, persistError],
+    () => openPromptFeed({ hasPrompts, list, loaded: q.isSuccess, errorStatus, persistError }),
+    [hasPrompts, list, q.isSuccess, errorStatus, persistError],
   );
 }
 
 /** Closed prompts, most recently handled first. */
 export function usePromptHistory(enabled: boolean) {
-  const optical = useIsOpticalStation();
+  const hasPrompts = useHasOperatorPrompts();
   const q = useOperatorPrompts({ status: "all", limit: 100, enabled });
-  const list = optical ? q.data?.prompts : undefined;
+  const list = hasPrompts ? q.data?.prompts : undefined;
   const history = useMemo(() => sortHistory(list ?? []), [list]);
   return { history, isError: q.isError, error: q.error };
 }
@@ -231,36 +231,21 @@ export function useClearSlot() {
   });
 }
 
-// ── which kind of station this is ───────────────────────────────────────────
-
-/** How often to ask again while the service has not said what it is. */
-const PROFILE_RETRY_MS = 10_000;
+// ── whether this station has operator prompts ───────────────────────────────
 
 /**
- * Whether the service runs as an optical station. Operator prompts, the optical-state
- * panel and the prompt board exist for that profile only, so an STM station's page and
- * request traffic stay exactly as they were. Reads `GET /api/health` `station_profile` (the
- * profile in force) through the `["health"]` query the Wishlist page, the top bar and the
- * dashboard already share, so it costs no extra request (`useStationProfile()` would also
- * fetch the settings). `isOpticalProfile` is the station profile helper's `normalizeProfile`,
- * so this and `useStationProfile().isOptical` can never disagree. Not known yet (no answer
- * so far, or no `station_profile` in it) reads as STM.
+ * Whether the station has the operator prompt service (capability `operator_prompts`; by
+ * default the optical station, lib/stationCapabilities.ts). Operator prompts, the
+ * optical-state panel and the prompt board exist only there, so an STM station's page and
+ * request traffic stay exactly as they were. Reads `GET /api/health` through the
+ * `["health"]` query the Wishlist page, the top bar and the dashboard already share, so it
+ * costs no extra request. Not known yet (no answer so far) reads as no.
  *
  * `keepAsking`: until the service has answered once, ask again every 10 s (this page may
  * have been opened while MAST was still starting; nothing else refetches a failed health
- * query). An answer stands, since the profile only changes with a restart. Only the owner
- * of the prompt polling passes it, so there is one timer rather than one per reader.
+ * query). An answer stands, since the capabilities only change with a restart. Only the
+ * owner of the prompt polling passes it, so there is one timer rather than one per reader.
  */
-export function useIsOpticalStation({ keepAsking = false }: { keepAsking?: boolean } = {}): boolean {
-  const q = useQuery({
-    queryKey: ["health"],
-    queryFn: async () => {
-      const { data, error } = await api.GET("/api/health");
-      if (error) throw error;
-      return data;
-    },
-    staleTime: 5 * 60_000,
-    refetchInterval: keepAsking ? (query) => (query.state.data === undefined ? PROFILE_RETRY_MS : false) : false,
-  });
-  return isOpticalProfile((q.data as { station_profile?: unknown } | undefined)?.station_profile);
+export function useHasOperatorPrompts({ keepAsking = false }: { keepAsking?: boolean } = {}): boolean {
+  return useHasCapability("operator_prompts", { keepAsking });
 }

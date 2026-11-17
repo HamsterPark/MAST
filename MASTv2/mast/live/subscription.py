@@ -8,7 +8,7 @@ unsubscribe 也先入队，由 ``drain()`` 在同一个消费者里执行 ——
 推送语义（契约 §7）：
 
 * spectrum、scalar 只留最新一帧 —— 一个节拍里来了 10 帧只推最后那帧（被覆盖的不算丢）；
-* xy、map2d、status 是增量：不丢，只合批成 ``frames``；
+* xy、map2d、map2d_rows、status 是增量：不丢，只合批成 ``frames``；
 * 每条连接积压的增量帧有上限（默认 50000）。超了就从积压最多的那个流丢最旧的，下一拍先发
   ``{"kind":"dropped","stream","from","to"}`` —— 客户端可以带 ``since`` 重订或走 REST 补齐，
   而不是拿着一个自己看不见的空洞。
@@ -25,7 +25,7 @@ from typing import Any
 from mast.live.hub import LATEST_ONLY_KINDS, LiveEvent, LiveHub, _Axis, _dumps, _Frame
 from mast.i18n import tr
 
-#: 一条连接最多积压多少个增量帧（xy / map2d / status）。spectrum / scalar 每个流只占一帧。
+#: 一条连接最多积压多少个增量帧（xy / map2d / map2d_rows / status）。spectrum / scalar 每个流只占一帧。
 MAX_PENDING = 50_000
 #: 一条 ``frames`` 消息最多装多少帧、多少字符。
 BATCH_ITEMS = 2000

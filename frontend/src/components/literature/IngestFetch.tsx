@@ -6,6 +6,7 @@ import { Field, TextField, Toggle, Button } from "@/components/controls";
 import { LibraryRef, LibraryTargetNote } from "@/components/literature/LibraryTargetNote";
 import { tr } from "@/lib/i18n";
 import type { components } from "@/api/schema";
+import { apiError, refetchWhileError } from "@/lib/apiError";
 
 type IngestResponse = components["schemas"]["IngestResponse"];
 
@@ -16,10 +17,11 @@ export function IngestReadiness() {
   const q = useQuery({
     queryKey: ["literature", "ingest-status"],
     queryFn: async () => {
-      const { data, error } = await api.GET("/api/literature/ingest-status");
-      if (error) throw error;
+      const { data, error, response } = await api.GET("/api/literature/ingest-status");
+      if (error) throw apiError(error, response);
       return data;
     },
+    refetchInterval: refetchWhileError,
   });
 
   const s = q.data;
@@ -32,7 +34,7 @@ export function IngestReadiness() {
         </Button>
       </div>
       {q.isPending && <Spinner />}
-      {q.isError && <ErrorNote error={q.error} />}
+      {q.isError && <ErrorNote error={q.error} retrying />}
       {s?.degraded && <DegradedNote what={tr("摄取就绪探针", "Ingest readiness probe")} />}
       {s && !s.degraded && (
         <div className="space-y-2">
@@ -79,7 +81,7 @@ export function IngestPanel({ libraryId }: { libraryId: string | null }) {
 
   const m = useMutation({
     mutationFn: async () => {
-      const { data, error } = await api.POST("/api/literature/ingest", {
+      const { data, error, response } = await api.POST("/api/literature/ingest", {
         body: {
           pdf_path: pdfPath.trim(),
           work_id: workId.trim(),
@@ -90,7 +92,7 @@ export function IngestPanel({ libraryId }: { libraryId: string | null }) {
           year: year.trim(),
         },
       });
-      if (error) throw error;
+      if (error) throw apiError(error, response);
       return data;
     },
     onSuccess: () => {
@@ -208,14 +210,14 @@ export function FetchPanel({ onFetchedPath }: { onFetchedPath?: (path: string) =
 
   const m = useMutation({
     mutationFn: async () => {
-      const { data, error } = await api.POST("/api/literature/fetch", {
+      const { data, error, response } = await api.POST("/api/literature/fetch", {
         body: {
           doi_or_url: doiOrUrl.trim(),
           oa_url: oaUrl.trim(),
           auto_oa: autoOa,
         },
       });
-      if (error) throw error;
+      if (error) throw apiError(error, response);
       return data;
     },
     onSuccess: (d) => {

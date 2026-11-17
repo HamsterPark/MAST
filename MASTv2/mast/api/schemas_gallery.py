@@ -51,12 +51,70 @@ class GalleryRootSuggestion(BaseModel):
     why: str
 
 
+class GalleryEnvTagStatus(BaseModel):
+    """The env-tag recorder in THIS process (``mast.envhistory.filetags.tagger``). Counters are
+    since the service started. ``active=false``: no recorder here (standalone API process)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    active: bool = False
+    enabled: bool = True
+    max_age_s: float = 30.0
+    pending: int = 0
+    worker_alive: bool = False
+    written: int = Field(0, description="sidecars written")
+    superseded: int = Field(0, description="sidecars written after moving a stale one aside")
+    same: int = Field(0, description="files whose sidecar already described them")
+    reused: int = Field(0, description="copies given the original's record")
+    computed: int = Field(0, description="records made from the cached readings")
+    empty: int = Field(0, description="files saved while nothing was known (no record written)")
+    failed_write: int = Field(0, description="sidecar writes that failed (central record kept)")
+    cooldown_skipped: int = Field(0, description="files in a directory cooling down after a failure")
+    central_written: int = 0
+    central_failed: int = Field(0, description="central records that could not be written")
+    dropped_full: int = Field(0, description="files dropped because the queue was full")
+    dropped_disabled: int = Field(0, description="files dropped because recording was switched off")
+    errors: int = Field(0, description="unexpected errors inside the recorder (see last_error)")
+    cooling_dirs: int = 0
+    last_error: Optional[str] = None
+
+
+class GalleryEnvTagsConfig(BaseModel):
+    """Environment tags on saved data files (docs/v2/design/data_env_tags.md): the two
+    settings and the recorder in this process. Stored in the gallery state directory
+    (``env_tags.json``), not in the gallery ``config.json``: saving the data roots rewrites that
+    file and must not reset these."""
+
+    ok: bool = True
+    enabled: bool = Field(
+        True, description="record the known environment beside every newly saved data file "
+                          "(.mast/envtags/<file>.json)")
+    max_age_s: float = Field(
+        30.0, description="a cached reading counts as current when it is at most this many seconds "
+                          "from the save (5-600); older ones are recorded with their age")
+    status: Optional[GalleryEnvTagStatus] = Field(
+        None, description="the recorder in this process; null in a process without one")
+    degraded: bool = False
+    detail: Optional[str] = None
+
+
+class GalleryEnvTagsUpdate(BaseModel):
+    """Change the env-tag settings. An omitted key is unchanged; the data roots are never touched."""
+
+    enabled: Optional[bool] = Field(default=None, description="omitted ⇒ unchanged")
+    max_age_s: Optional[float] = Field(default=None, ge=5, le=600, description="omitted ⇒ unchanged")
+
+
 class GalleryConfigResponse(BaseModel):
     ok: bool = True
     state_dir: str = Field("", description="where caches, thumbnails, index and marks live")
     roots: list[GalleryRoot] = Field(default_factory=list)
     suggestions: list[GalleryRootSuggestion] = Field(default_factory=list)
     workers: int = 2
+    auto_build: bool = Field(
+        True, description="incremental build in the background every auto_interval_min minutes "
+                          "and when the gallery page is opened")
+    auto_interval_min: int = Field(10, description="minutes between automatic incremental builds (2-720)")
     degraded: bool = False
     detail: Optional[str] = None
 
@@ -75,6 +133,8 @@ class GalleryConfigUpdate(BaseModel):
 
     roots: list[GalleryRootIn] = Field(default_factory=list)
     workers: Optional[int] = Field(default=None, ge=1, le=16)
+    auto_build: Optional[bool] = Field(default=None, description="omitted ⇒ unchanged")
+    auto_interval_min: Optional[int] = Field(default=None, ge=2, le=720, description="omitted ⇒ unchanged")
 
 
 # ── build ──────────────────────────────────────────────────────────────
@@ -86,6 +146,14 @@ class GalleryBuildRequest(BaseModel):
         description="re-render and re-judge everything; the inventory cache is still "
                     "keyed on (size, mtime_ns), so unchanged headers are not re-read",
     )
+
+
+class GalleryAutoRequest(BaseModel):
+    """Ask for an automatic incremental build. The body is required (a bodyless POST must not be
+    accepted: trap on optional request bodies as a CSRF door). The server decides whether one
+    actually starts (switch on, a root enabled, nothing running, >= 1 min since the last build)."""
+
+    reason: Literal["open"] = Field(..., description="the gallery page was opened / became visible")
 
 
 class GalleryBuildError(BaseModel):
@@ -116,9 +184,49 @@ class GalleryBuildStatus(BaseModel):
     message: str = ""
     degraded: bool = False
     detail: Optional[str] = None
+    trigger: Literal["manual", "auto"] = Field(
+        "manual", description="who started this build: the operator's click, or the automatic updater")
+    n_removed: int = Field(0, description="entries dropped because their files are gone")
+    n_deferred: int = Field(
+        0, description="files written in the last minute, left for the next round (not read, not cached)")
+    n_env: int = Field(
+        0, description="entries whose environment tags changed in this build (a sidecar appeared "
+                       "after the file was first indexed counts) — the index changed even if no file did")
 
 
 # ── index ──────────────────────────────────────────────────────────────
+
+
+class GalleryEnvValue(BaseModel):
+    """One primary value in an item's environment summary (card + filters)."""
+
+    v: Optional[float] = Field(None, description="value in the sensor's own unit (4 significant digits)")
+    u: str = Field("", description="the sensor's own unit, shown on the card as is")
+    c: Optional[float] = Field(None, description="canonical value for filters: K / T / Pa / % / cm")
+    s: Literal["l", "h", "o", "i"] = Field(
+        "l", description="l = a cached reading near the save; h = the env-history bucket holding the "
+                         "save; o = stale (the last reading before the save, see a); i = inferred later")
+    a: Optional[int] = Field(None, description="stale only: how many seconds before the save it was read")
+
+
+class GalleryEnvSummary(BaseModel):
+    """``env`` on an index item. Present only when something is known."""
+
+    s: Literal["r", "i"] = Field(
+        "r", description="r = recorded when the file was saved (sidecar or central record); "
+                         "i = inferred by the gallery from the environment history")
+    T: Optional[GalleryEnvValue] = Field(None, description="temperature")
+    B: Optional[GalleryEnvValue] = Field(None, description="magnetic field")
+    P: Optional[GalleryEnvValue] = Field(None, description="pressure")
+    L: Optional[GalleryEnvValue] = Field(None, description="cryogen level")
+    wT: Optional[list[float]] = Field(None, description="[min, max] during the acquisition, same unit as T.u")
+    wB: Optional[list[float]] = Field(None, description="[min, max] during the acquisition, same unit as B.u")
+    wP: Optional[list[float]] = Field(None, description="[min, max] during the acquisition, same unit as P.u")
+    wL: Optional[list[float]] = Field(None, description="[min, max] during the acquisition, same unit as L.u")
+    wr: Optional[list[str]] = Field(
+        None, description="keys (T/B/P/L) whose window came from individual readings, so it covers "
+                          "exactly the acquisition; the other windows come from 1-minute buckets and "
+                          "are wider. Only these mark a card as changed during the acquisition")
 
 
 class GalleryItem(BaseModel):
@@ -186,6 +294,10 @@ class GalleryItem(BaseModel):
     gy: Optional[int] = None
     have: Optional[int] = Field(None, description="grid points completed")
 
+    # environment (docs/v2/design/data_env_tags.md)
+    env: Optional[GalleryEnvSummary] = Field(
+        None, description="known environment when the file was saved (or inferred); absent = nothing known")
+
 
 class GalleryIndex(BaseModel):
     version: int = 1
@@ -197,6 +309,96 @@ class GalleryIndex(BaseModel):
     n_grids: int = 0
     last_batch: str = ""
     items: list[GalleryItem] = Field(default_factory=list)
+    degraded: bool = False
+    detail: Optional[str] = None
+
+
+# ── environment detail (GET /gallery/env/{id}) ─────────────────────────
+# The record is the sidecar's own schema (``mast.envtags/1``,
+# docs/v2/design/data_env_tags.md §4); these models only give the frontend types.
+
+
+class GalleryEnvValueDetail(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    sensor: str = Field("", description="sensor name at the time (provenance only)")
+    driver: str = ""
+    kind: str = Field("", description="temperature / field / pressure / level / magnet_current / other")
+    value: Optional[float] = None
+    unit: str = ""
+    canonical: Optional[float] = None
+    canonical_unit: str = ""
+    status: str = ""
+    source: str = Field("", description="live / history / inferred")
+    fresh: bool = True
+    t: Optional[float] = Field(None, description="when MAST got the reading (bucket start for history), epoch s")
+    iso: str = ""
+    span_s: Optional[float] = Field(None, description="0 for a reading; the bucket width for history")
+    dt_s: Optional[float] = Field(None, description="reading time minus save time, s (negative = before)")
+    bucket: Optional[dict[str, Any]] = None
+    primary: bool = False
+
+
+class GalleryEnvWindowDetail(BaseModel):
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    sensor: str = ""
+    kind: str = ""
+    unit: str = ""
+    min: Optional[float] = None
+    max: Optional[float] = None
+    canonical_min: Optional[float] = None
+    canonical_max: Optional[float] = None
+    canonical_unit: str = ""
+    n: int = 0
+    from_: Optional[float] = Field(None, alias="from", description="start of the interval actually covered")
+    to: Optional[float] = Field(None, description="end of the interval actually covered")
+    method: str = Field("", description="readings / buckets / buckets+readings")
+    complete: bool = False
+
+
+class GalleryEnvMissing(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    sensor: str = ""
+    kind: Optional[str] = None
+    why: str = Field("", description="no_reading / invalid")
+    status: Optional[str] = None
+
+
+class GalleryEnvAcquisition(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    start: Optional[float] = None
+    start_iso: str = ""
+    start_from: str = ""
+    end: Optional[float] = None
+    end_iso: str = ""
+    end_from: str = ""
+    duration_s: Optional[float] = None
+
+
+class GalleryEnvRecord(BaseModel):
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    schema_: str = Field("", alias="schema")
+    file: dict[str, Any] = Field(default_factory=dict)
+    saved_at: dict[str, Any] = Field(default_factory=dict)
+    acquisition: Optional[GalleryEnvAcquisition] = None
+    values: list[GalleryEnvValueDetail] = Field(default_factory=list)
+    window: list[GalleryEnvWindowDetail] = Field(default_factory=list)
+    missing: list[GalleryEnvMissing] = Field(default_factory=list)
+    tagged: dict[str, Any] = Field(default_factory=dict)
+    inferred: bool = False
+
+
+class GalleryEnvDetail(BaseModel):
+    id: str
+    how: Literal["sidecar", "central", "inferred", "none"] = Field(
+        "none", description="sidecar / central record (both made when the file was saved) / "
+                            "inferred from the environment history / nothing known")
+    sidecar_path: str = ""
+    record: Optional[GalleryEnvRecord] = None
     degraded: bool = False
     detail: Optional[str] = None
 

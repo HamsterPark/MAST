@@ -213,3 +213,58 @@ def test_the_spec_actually_wires_this_in():
     assert "_src_report.violations" in spec, "spec 里没有凭据守卫"
     assert "MIN_FILES" in spec, "spec 里没有数量守卫"
     assert "data_files += _src_report.files" in spec, "收集了却没加进 data_files"
+
+
+# ── 不随包发出的模块（PRIVATE_MODULES）─────────────────────────────────
+def _fake_tree(tmp_path: Path) -> Path:
+    mastv2 = tmp_path / "MASTv2"
+    for rel in ("mast/__init__.py", "mast/a.py", "mast/pkg/__init__.py",
+                "mast/pkg/private_one.py", "mast/pkg/private_onex.py",
+                "mast/pkg/private_pkg/__init__.py", "mast/pkg/private_pkg/inner.py"):
+        p = mastv2 / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("X = 1\n", encoding="utf-8")
+    return mastv2
+
+
+def test_private_modules_stay_out_of_the_source_copy(tmp_path, monkeypatch):
+    """名单里的模块连同子模块都不进 ``mast/_src/``，而且被**报出来**。
+
+    名字按模块边界比：``private_onex`` 不会因为以 ``private_one`` 开头就被一起带走。
+    """
+    mastv2 = _fake_tree(tmp_path)
+    monkeypatch.setattr(bs, "gitignored", lambda _root, _paths: (set(), ""))
+    monkeypatch.setattr(bs, "PRIVATE_MODULES",
+                        {"mast.pkg.private_one": "测试", "mast.pkg.private_pkg": "测试"})
+    rep = bs.collect(mastv2, tmp_path)
+    shipped = {Path(s).relative_to(mastv2).as_posix() for s, _d in rep.files}
+    skipped = {p.relative_to(mastv2).as_posix() for p in rep.skipped_private}
+    assert skipped == {"mast/pkg/private_one.py", "mast/pkg/private_pkg/__init__.py",
+                       "mast/pkg/private_pkg/inner.py"}
+    assert shipped == {"mast/__init__.py", "mast/a.py", "mast/pkg/__init__.py",
+                       "mast/pkg/private_onex.py"}
+
+
+def test_module_names_follow_the_package_layout(tmp_path):
+    mast_pkg = tmp_path / "MASTv2" / "mast"
+    assert bs.module_name(mast_pkg / "__init__.py", mast_pkg) == "mast"
+    assert bs.module_name(mast_pkg / "pkg" / "__init__.py", mast_pkg) == "mast.pkg"
+    assert bs.module_name(mast_pkg / "pkg" / "x.py", mast_pkg) == "mast.pkg.x"
+
+
+def test_every_private_module_is_real_and_says_why():
+    """名单里写错一个名字，什么都不会被排除 —— 构建照样成功，模块照样进包。"""
+    mast_pkg = _REPO / "MASTv2" / "mast"
+    for name, why in bs.PRIVATE_MODULES.items():
+        p = mast_pkg.parent / Path(*name.split("."))
+        assert p.with_suffix(".py").is_file() or (p / "__init__.py").is_file(), (
+            f"PRIVATE_MODULES 里的 {name} 在源码树里不存在")
+        assert why.strip(), f"{name} 没写理由"
+
+
+def test_the_spec_keeps_private_modules_out_of_the_pyz():
+    """源码副本那一侧由 ``collect()`` 管；PYZ 那一侧只能在 spec 里接上，三处都要在。"""
+    spec = (_REPO / "mast2.spec").read_text(encoding="utf-8")
+    assert "_bundle_sources.is_private(m)" in spec, "hiddenimports 没滤掉不随包发出的模块"
+    assert "sorted(_bundle_sources.PRIVATE_MODULES)" in spec, "excludes 里没有它们"
+    assert "_private_in_pyz" in spec, "Analysis 之后没有再核对一次"

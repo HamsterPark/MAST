@@ -167,22 +167,34 @@ def _scope(request: Request) -> dict:
     }
 
 
-def _is_optical() -> bool:
-    """Optical station profile (``mast.station``). Never true on an STM station."""
+def _has(cap: str) -> bool:
+    """A capability of this station (``mast.station``). Unreadable profile = the STM's answer."""
     try:
-        return station.is_optical()
+        return station.has(cap)
+    except ValueError:
+        raise
     except Exception:  # noqa: BLE001 - no profile information: STM, as before
-        return False
+        return cap in station.capabilities_of(station.DEFAULT_PROFILE)
+
+
+#: the status line that names a station without Nanonis (display; the optical text is the one
+#: it always was)
+_STATION_STATUS_LINE: dict[str, Callable[[], str]] = {
+    "optical": lambda: tr("- 站点画像: optical（光学站，没有 STM / Nanonis）",
+                          "- Station profile: optical (an optical station, no STM / Nanonis)"),
+    "generic": lambda: tr("- 站点画像: generic（通用站，没有 STM / Nanonis，也没有 WITec）",
+                          "- Station profile: generic (a generic station, no STM / Nanonis and no WITec)"),
+}
 
 
 def _status(request: Request) -> tuple[dict, list[str]]:
     degraded: list[str] = []
     out: dict[str, Any] = {"mode": operating_mode()}
     probes: list[tuple[str, Callable[[], Any]]] = [("abort", lambda: _abort(request)), ("lock", _lock)]
-    if _is_optical():
-        # No Nanonis on an optical station: its four-port connection row and the live
-        # bias / current / Z readings are not "unreadable", they do not exist.
-        out["station"] = station.PROFILE_OPTICAL
+    if not _has("nanonis"):
+        # No Nanonis on this station (optical, generic): its four-port connection row and the
+        # live bias / current / Z readings are not "unreadable", they do not exist.
+        out["station"] = station.current_profile()
     else:
         probes += [("connection", lambda: _connection(request)), ("live", lambda: _live(request))]
     probes.append(("scope", lambda: _scope(request)))
@@ -211,11 +223,13 @@ def status(request: Request):
 
 
 def _status_text(s: dict) -> str:
-    optical = s.get("station") == station.PROFILE_OPTICAL
+    no_nanonis = bool(s.get("station"))      # _status names the station only when it has no Nanonis
     lines = [tr(f"- 运行模式 mode: {s.get('mode')}", f"- Operating mode: {s.get('mode')}")]
-    if optical:
-        lines.append(tr("- 站点画像: optical（光学站，没有 STM / Nanonis）",
-                        "- Station profile: optical (an optical station, no STM / Nanonis)"))
+    if no_nanonis:
+        name = str(s.get("station"))
+        line = _STATION_STATUS_LINE.get(name)
+        lines.append(line() if line is not None
+                     else tr(f"- 站点画像: {name}", f"- Station profile: {name}"))
     ab = s.get("abort")
     if ab is None:
         lines.append(tr("- 中止/急停: 读不到", "- Abort / e-stop: unreadable"))
@@ -235,7 +249,7 @@ def _status_text(s: dict) -> str:
         lines.append(tr("- 仪器锁: 空闲", "- Instrument lock: free"))
     conn = s.get("connection") or {}
     roles = conn.get("roles") or {}
-    if optical:
+    if no_nanonis:
         pass                          # no Nanonis connection to report on this station
     elif not conn.get("wired"):
         lines.append(tr("- Nanonis 连接: 未接线", "- Nanonis connection: not wired"))
@@ -243,7 +257,7 @@ def _status_text(s: dict) -> str:
         marks = ", ".join(f"{k}={'✓' if v else '✗'}" for k, v in roles.items())
         lines.append(tr(f"- Nanonis 连接: {marks}", f"- Nanonis connection: {marks}"))
     lv = s.get("live") or {}
-    if lv and not optical:
+    if lv and not no_nanonis:
         lines.append(f"- live: bias={lv.get('bias_v')} V, I={lv.get('current_a')} A, setpoint={lv.get('setpoint_a')} A, "
                      f"Z={lv.get('z_pos_m')} m, "
                      + tr(f"Z控制={lv.get('z_controller_status') or lv.get('z_controller_on')}, "
@@ -484,12 +498,12 @@ def _sec_safety(request, caller):
     from mast.api.routes.safety import get_latches
     from mast.api.safety_view import in_force_safety_limits
 
-    optical = _is_optical()
-    if optical:
-        # The envelope is made of STM quantities (bias, setpoint, tip height). The optical
-        # station's limits live in each device's own configuration (Layer-0); only the
-        # latches below mean the same thing here.
-        source, keep = "optical station profile", {}
+    no_envelope = not _has("stm_safety")
+    if no_envelope:
+        # The envelope is made of STM quantities (bias, setpoint, tip height). A station without
+        # a tip (optical, generic) keeps its limits in each device's own configuration
+        # (Layer-0); only the latches below mean the same thing here.
+        source, keep = f"{station.current_profile()} station profile", {}
     else:
         limits, source = in_force_safety_limits(ctx_of(request))
         lim = limits.model_dump() if hasattr(limits, "model_dump") else dict(limits)
@@ -500,7 +514,7 @@ def _sec_safety(request, caller):
                   f"{s.name} ({s.why or 'no reason given'}; release: {s.release or 'none'})")
                for s in (lat.latches or []) if s.latched]
     unreadable = list(lat.unreadable or [])
-    lines = ([] if optical else
+    lines = ([] if no_envelope else
              [tr(f"- 生效包络（来源 {source}）: ", f"- Envelope in force (source {source}): ") + ", ".join(f"{k}={v}" for k, v in sorted(keep.items()))])
     lines.append(tr("- 挂着的闩: ", "- Latches set: ") + (tr("；", "; ").join(latched) if latched else tr("无", "none")))
     if unreadable:
@@ -725,18 +739,39 @@ def _sec_optical_layouts(request, caller):
 
 
 # ─────────────────────────────────────────────────────────────────────
-# 光学站画像的段落（mast.station；设计 optical_station_witec.md）
+# 没有 Nanonis 的站（光学站、通用站）的段落（mast.station；设计 optical_station_witec.md、
+# generic_station.md）
 # ─────────────────────────────────────────────────────────────────────
 #
-# 光学站上 tip / instrument / live / prefs / recent_files 这几段不是「读不到」，是不存在：
+# 这些站上 tip / instrument / live / prefs / recent_files 这几段不是「读不到」，是不存在：
 # 没有针尖、没有 Nanonis 读数、没有 STM 的扫描默认值、没有扫描文件。换成下面这几段。
 # 同样三条纪律：逐段独立降级；不为简报去打开任何设备（只读配置，和进程里已经打开的
-# 设备 —— station_view.inventory）；有界。
+# 设备 —— station_view.inventory；环境读数只读监控缓存）；有界。
 
-#: 光学站简报的默认段序（只含存在的段）。STM 的段序见 SECTIONS（顺序即其键序，原样不动）。
-OPTICAL_ORDER = ("station", "status", "scope", "resume", "optical_state", "operator_prompts",
-                 "safety", "recent_actions", "recent_spectra", "alarms", "notes", "recording",
-                 "jobs", "operator_requests", "optical_layouts")
+#: 没有 Nanonis 的站的段序，每段带它需要的能力（mast.station.CAPABILITIES）。一台站的简报
+#: 就是这张表里它的能力够得着的那些段（:func:`station_order`）。STM 的段序见 SECTIONS
+#: （顺序即其键序，原样不动）。
+STATION_ORDER: tuple[tuple[str, frozenset[str]], ...] = (
+    ("station", frozenset()), ("status", frozenset()), ("scope", frozenset()),
+    ("resume", frozenset()),
+    ("environment", frozenset({"sensor_echo"})),
+    ("optical_state", frozenset({"operator_prompts"})),
+    ("operator_prompts", frozenset({"operator_prompts"})),
+    ("safety", frozenset()), ("recent_actions", frozenset()), ("recent_spectra", frozenset()),
+    ("alarms", frozenset()), ("notes", frozenset()), ("recording", frozenset()),
+    ("jobs", frozenset()), ("operator_requests", frozenset()), ("optical_layouts", frozenset()),
+)
+
+
+def station_order(caps: Any) -> tuple[str, ...]:
+    """The sections of a station without Nanonis that has the capabilities ``caps``, in order."""
+    have = frozenset(caps or ())
+    return tuple(name for name, needs in STATION_ORDER if needs <= have)
+
+
+#: the optical station's sections (the order it always had) and the generic station's
+OPTICAL_ORDER = station_order(station.capabilities_of(station.PROFILE_OPTICAL))
+GENERIC_ORDER = station_order(station.capabilities_of(station.PROFILE_GENERIC))
 
 _OPTICAL_RULES = (
     tr("规则（光学站）：",
@@ -769,6 +804,51 @@ _OPTICAL_RULES = (
        "  6. Serial ports are exclusive: when a port is held by vendor software, ask the operator to "
        "close that software."),
 )
+
+_GENERIC_RULES = (
+    tr("规则（通用站）：",
+       "Rules (generic station):"),
+    tr("  1. 这里没有 STM，也没有 WITec：用 mast_run 跑技能（mast_find_skills 按动作找、先读 "
+       "mast_skill_card）；mast_act 的 STM 动作词表在这里不存在。",
+       "  1. There is no STM and no WITec here: run skills with mast_run (find them by action with "
+       "mast_find_skills, read mast_skill_card first); mast_act's STM action vocabulary does not "
+       "exist here."),
+    tr("  2. 仪器就是配置里的外部设备（config/optical_instruments.json：光谱仪、光源、功率计、温控、"
+       "位移台、相机）和环境传感器（config/environment_sensors.json）。设备由第一个用到它的技能打开；"
+       "简报和 observe 从不打开设备。",
+       "  2. The instruments are the external devices in the configuration "
+       "(config/optical_instruments.json: spectrometers, light sources, power meters, temperature "
+       "controllers, stages, cameras) and the environment sensors (config/environment_sensors.json). "
+       "A device is opened by the first skill that uses it; the briefing and observe never open one."),
+    tr("  3. 需要人动手的步骤走 mast_ask_operator，再 mast_wait 等答复；你不能替操作员作答，"
+       "也不能替他签署。",
+       "  3. Steps that need a person's hands go through mast_ask_operator, then mast_wait for the "
+       "reply. You cannot answer or attest for the operator."),
+    tr("  4. 开出光（LaserEmissionOn）需要设备配置允许，并且操作员已签署 laser_area_safe（8 小时有效）；"
+       "关出光（LaserEmissionOff）永远允许。",
+       "  4. Switching laser emission on (LaserEmissionOn) needs the device configuration to allow it "
+       "and the operator's current laser_area_safe attestation (valid 8 h); switching it off "
+       "(LaserEmissionOff) is always allowed."),
+    tr("  5. 串口是独占的：被厂商软件占着的口打不开时，请操作员关掉对应软件。这台站默认不扫串口，"
+       "除非操作员在设置里打开了自动探测。",
+       "  5. Serial ports are exclusive: when a port is held by vendor software, ask the operator to "
+       "close that software. This station does not scan the serial ports unless the operator "
+       "switched auto-detection on in the settings."),
+)
+
+#: display text per station profile: the station section's first line and its rules (the
+#: optical texts are the ones they always were)
+_STATION_HEADER: dict[str, Callable[[], str]] = {
+    "optical": lambda: tr("- 站点画像 station profile: optical（光学站：没有 STM / Nanonis；"
+                          "技能面只有光学与通用技能）",
+                          "- Station profile: optical (an optical station: no STM / Nanonis; the skill face "
+                          "shows optical and generic skills only)"),
+    "generic": lambda: tr("- 站点画像 station profile: generic（通用站：没有 STM / Nanonis，也没有 WITec；"
+                          "仪器就是配置的设备和传感器）",
+                          "- Station profile: generic (a generic station: no STM / Nanonis and no WITec; "
+                          "the instruments are the configured devices and sensors)"),
+}
+_STATION_RULES: dict[str, tuple[str, ...]] = {"optical": _OPTICAL_RULES, "generic": _GENERIC_RULES}
 
 
 def _status_brief(status: Any) -> str:
@@ -809,25 +889,27 @@ def _device_line(d: dict) -> str:
 
 
 def _sec_station(request, caller):
+    prof = station.current_profile()
     inv = station_view.inventory()
     devs = inv.get("devices") or []
-    lines = [tr("- 站点画像 station profile: optical（光学站：没有 STM / Nanonis；"
-                "技能面只有光学与通用技能）",
-                "- Station profile: optical (an optical station: no STM / Nanonis; the skill face "
-                "shows optical and generic skills only)")]
-    lines += list(_OPTICAL_RULES)
+    header = _STATION_HEADER.get(prof)
+    lines = [header() if header is not None
+             else tr(f"- 站点画像 station profile: {prof}", f"- Station profile: {prof}")]
+    lines += list(_STATION_RULES.get(prof, ()))
+    # a WITec station calls its devices optical devices; elsewhere they are what is configured
+    zh, en = ("光学设备", "Optical devices") if _has("witec") else ("配置的设备", "Configured devices")
     if inv.get("error"):
-        lines.append(tr(f"- 光学设备：读不到配置（{inv['error']}）",
-                        f"- Optical devices: configuration unreadable ({inv['error']})"))
+        lines.append(tr(f"- {zh}：读不到配置（{inv['error']}）",
+                        f"- {en}: configuration unreadable ({inv['error']})"))
     elif not devs:
-        lines.append(tr("- 光学设备：没有配置（config/optical_instruments.json 为空或不存在）",
-                        "- Optical devices: none configured (config/optical_instruments.json is empty "
+        lines.append(tr(f"- {zh}：没有配置（config/optical_instruments.json 为空或不存在）",
+                        f"- {en}: none configured (config/optical_instruments.json is empty "
                         "or missing)"))
     else:
         n_open = sum(1 for d in devs if d.get("connected"))
-        lines.append(tr(f"- 光学设备 {len(devs)} 台，进程里已打开 {n_open} 台"
+        lines.append(tr(f"- {zh} {len(devs)} 台，进程里已打开 {n_open} 台"
                         "（来自配置；简报不会为了读状态去打开任何设备）：",
-                        f"- Optical devices: {len(devs)} configured, {n_open} open in this process "
+                        f"- {en}: {len(devs)} configured, {n_open} open in this process "
                         "(from the configuration; the briefing never opens a device to read it):"))
         lines += [_device_line(d) for d in devs]
     last_off = _last_safe_off()
@@ -840,7 +922,7 @@ def _sec_station(request, caller):
                         f"- ⚠ The last switch-everything-off ({why}, {at}) was NOT confirmed for: {bad}. "
                         "Ask the operator to check at the instrument that it is off."))
     return {"text": _cap("\n".join(lines)),
-            "data": {"profile": station.PROFILE_OPTICAL, **inv, "last_safe_off": last_off}}
+            "data": {"profile": prof, **inv, "last_safe_off": last_off}}
 
 
 def _last_safe_off() -> dict | None:
@@ -906,25 +988,54 @@ def _sec_recent_spectra(request, caller):
             "data": data}
 
 
-OPTICAL_SECTIONS: dict[str, Callable[[Request, Caller], dict]] = {
+def _sec_environment(request, caller):
+    """The newest readings of the station's environment sensors, on a station whose sensors are
+    its readings (``sensor_echo``: the generic station). From the monitor's cache - zero hardware
+    I/O; a placeholder for a kind of sensor the station does not have is not listed."""
+    env = station_view.environment_readings(getattr(ctx_of(request), "environment_monitor", None))
+    if env.get("error"):
+        raise RuntimeError(env["error"])
+    rows = env.get("sensors") or {}
+    if not rows:
+        return {"text": tr("（没有配置环境传感器）", "(no environment sensors are configured)"),
+                "data": env}
+    lines = [tr("环境传感器的最新读数（来自环境监控的缓存；简报不会为此去读传感器）：",
+                "Newest readings of the environment sensors (from the environment monitor's cache; "
+                "the briefing never reads a sensor):")]
+    for name, r in rows.items():
+        if "value" not in r:
+            lines.append(f"- {name}: " + tr("（还没读到）", "(not read yet)"))
+            continue
+        unit = f" {r['unit']}" if r.get("unit") else ""
+        age = f", {_ago(r['age_s'])}" if r.get("age_s") is not None else ""
+        lines.append(f"- {name}: {r.get('value')}{unit} [{r.get('status')}{age}]")
+    return {"text": _cap("\n".join(lines)), "data": env}
+
+
+#: the sections only a station without Nanonis has (``OPTICAL_SECTIONS`` is the old name)
+STATION_SECTIONS: dict[str, Callable[[Request, Caller], dict]] = {
     "station": _sec_station,
+    "environment": _sec_environment,
     "optical_state": _sec_optical_state,
     "operator_prompts": _sec_operator_prompts,
     "recent_spectra": _sec_recent_spectra,
 }
+OPTICAL_SECTIONS = STATION_SECTIONS
 
 
 def _section_table() -> dict[str, Callable[[Request, Caller], dict]]:
     """The sections this station's briefing offers, looked up per request.
 
-    STM: ``SECTIONS`` itself (its keys, its order, entries monkeypatched in a test still
-    win). Optical: the sections that exist on an optical station, in :data:`OPTICAL_ORDER` -
-    the shared ones taken from ``SECTIONS`` at request time, the optical ones from
-    :data:`OPTICAL_SECTIONS`. Asking an optical station for ``tip`` / ``instrument`` /
-    ``live`` is a 422 that lists what does exist."""
-    if not _is_optical():
+    With ``nanonis`` (the STM): ``SECTIONS`` itself (its keys, its order, entries monkeypatched
+    in a test still win). Without (optical, generic): the sections this station's capabilities
+    reach in :data:`STATION_ORDER` - the shared ones taken from ``SECTIONS`` at request time,
+    the station ones from :data:`STATION_SECTIONS`; for the optical station that is
+    :data:`OPTICAL_ORDER`, as it always was. Asking such a station for ``tip`` / ``instrument``
+    / ``live`` is a 422 that lists what does exist."""
+    if _has("nanonis"):
         return SECTIONS
-    return {name: (SECTIONS.get(name) or OPTICAL_SECTIONS[name]) for name in OPTICAL_ORDER}
+    return {name: (SECTIONS.get(name) or STATION_SECTIONS[name])
+            for name in station_order(station.capabilities())}
 
 
 SECTIONS: dict[str, Callable[[Request, Caller], dict]] = {

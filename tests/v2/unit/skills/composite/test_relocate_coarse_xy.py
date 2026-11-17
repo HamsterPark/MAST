@@ -1056,3 +1056,71 @@ def test_an_unverified_optical_drive_restore_blocks_the_relocation(tmp_path, mon
         assert "还原" in (res.error or "")
     finally:
         mg.reset_for_tests()
+
+
+# ── verify_bias_after (opt-in, default off) ─────────────────────────────────
+# A bad external bias cable contact can first show up right after coarse XY
+# moves; VerifyBiasAtJunction checks it after the re-approach.
+
+def _verify_rig(verdict, success, **data):
+    from mast.core.types import SkillResult
+
+    return _healthy_rig(sub_results={
+        "VerifyBiasAtJunction": SkillResult(
+            skill_name="VerifyBiasAtJunction", success=success,
+            error="" if success else "bias not at junction",
+            data={"verdict": verdict, **data})})
+
+
+def test_verify_bias_after_is_off_by_default_and_never_called():
+    meta = RelocateCoarseXY().metadata()
+    spec = {p.name: p for p in meta.parameters}["verify_bias_after"]
+    assert spec.default is False
+    ctx = _healthy_rig()
+    res = RelocateCoarseXY().run_composite(ctx, _params(reapproach=True))
+    assert res.success is True
+    assert "VerifyBiasAtJunction" not in [n for n, _ in ctx.ran]
+    assert "bias_check" not in res.data
+
+
+def test_verify_bias_after_needs_a_reapproach():
+    ctx = _verify_rig("ok", True)
+    res = RelocateCoarseXY().run_composite(
+        ctx, _params(reapproach=False, verify_bias_after=True))
+    assert res.success is True
+    assert "VerifyBiasAtJunction" not in [n for n, _ in ctx.ran]
+
+
+def test_verify_bias_after_ok_junction_succeeds_and_reports():
+    ctx = _verify_rig("ok", True, dz_lowered_m=-175e-12)
+    res = RelocateCoarseXY().run_composite(
+        ctx, _params(reapproach=True, verify_bias_after=True))
+    assert res.success is True
+    names = [n for n, _ in ctx.ran]
+    assert names.index("ApproachTip") < names.index("VerifyBiasAtJunction")
+    assert res.data["bias_check"]["verdict"] == "ok"
+    assert res.data["bias_check"]["data"]["dz_lowered_m"] == -175e-12
+
+
+def test_verify_bias_after_bad_bias_fails_with_reason():
+    ctx = _verify_rig("bias_not_at_junction", False,
+                      withdraw={"called": True, "retracted": True})
+    res = RelocateCoarseXY().run_composite(
+        ctx, _params(reapproach=True, verify_bias_after=True, steps=301))
+    assert res.success is False
+    assert "偏压" in (res.error or "") or "bias" in (res.error or "")
+    assert "301" in (res.error or ""), "the move already happened - say how far"
+    assert res.data["bias_check"]["verdict"] == "bias_not_at_junction"
+    assert res.data["bias_check"]["data"]["withdraw"]["called"] is True
+    # the withdraw is the verify skill's job (its withdraw_on_fail default):
+    # relocate passes no override and does not retract itself a second time.
+    assert ("VerifyBiasAtJunction", {}) in ctx.ran
+    assert "SafeRetract" not in [n for n, _ in ctx.ran]
+
+
+def test_verify_bias_after_inconclusive_is_not_ok():
+    ctx = _verify_rig("inconclusive", False)
+    res = RelocateCoarseXY().run_composite(
+        ctx, _params(reapproach=True, verify_bias_after=True))
+    assert res.success is False
+    assert res.data["bias_check"]["verdict"] == "inconclusive"

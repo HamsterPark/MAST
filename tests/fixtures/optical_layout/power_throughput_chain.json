@@ -1,0 +1,1131 @@
+{
+  "name": "power_throughput_chain",
+  "description": "The throughput of every part that takes one (window, lens without a focal length, filter, AOTF, prism, periscope, custom transmit, waveplate without retardance - transparent to the polarization -, polarizer, objective without a focal length, grating, reflecting sample, custom reflect), and an open iris and an open shutter that take none: 10 mW of unpolarized light, the product of all, the polarizer halving it and making it linear 0 deg; the reflections then keep it horizontal.",
+  "layout": {
+    "schema": 1,
+    "id": "throughput",
+    "title": "The throughput of every kind of part",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 20.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0,
+          "power_mw": 10.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "win",
+        "type": "window",
+        "label": "WIN",
+        "x_mm": 100.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "throughput": 0.95
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "lens",
+        "type": "lens",
+        "label": "LENS",
+        "x_mm": 150.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "throughput": 0.98
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "filt",
+        "type": "filter",
+        "label": "FILT",
+        "x_mm": 200.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "pass_min_nm": 500.0,
+          "throughput": 0.9
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "aotf",
+        "type": "aotf",
+        "label": "AOTF",
+        "x_mm": 250.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "throughput": 0.5
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "prism",
+        "type": "prism",
+        "label": "PRISM",
+        "x_mm": 300.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "throughput": 0.99
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "peri",
+        "type": "periscope",
+        "label": "PERI",
+        "x_mm": 350.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "throughput": 0.97
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "cust_t",
+        "type": "custom",
+        "label": "CT",
+        "x_mm": 400.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "behavior": "transmit",
+          "throughput": 0.8
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "wp",
+        "type": "waveplate",
+        "label": "WP",
+        "x_mm": 450.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 12.7,
+        "props": {
+          "throughput": 0.9
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "pol",
+        "type": "polarizer",
+        "label": "POL",
+        "x_mm": 500.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 12.7,
+        "props": {
+          "throughput": 0.8
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "obj",
+        "type": "objective",
+        "label": "OBJ",
+        "x_mm": 550.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 10.0,
+        "props": {
+          "throughput": 0.7
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "iris",
+        "type": "iris",
+        "label": "IRIS",
+        "x_mm": 600.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "open_mm": 5.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "shut",
+        "type": "shutter",
+        "label": "SHUT",
+        "x_mm": 625.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 12.7,
+        "props": {
+          "closed": false
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "grat",
+        "type": "grating",
+        "label": "GRAT",
+        "x_mm": 650.0,
+        "y_mm": 100.0,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.0,
+        "props": {
+          "throughput": 0.7
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "smp",
+        "type": "sample",
+        "label": "SMP",
+        "x_mm": 650.0,
+        "y_mm": 300.0,
+        "angle_deg": 315.0,
+        "aperture_mm": 10.0,
+        "props": {
+          "reflects": true,
+          "throughput": 0.6
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "cust_r",
+        "type": "custom",
+        "label": "CR",
+        "x_mm": 850.0,
+        "y_mm": 300.0,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "behavior": "reflect",
+          "throughput": 0.5
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det",
+        "type": "detector",
+        "label": "D",
+        "x_mm": 850.0,
+        "y_mm": 500.0,
+        "angle_deg": 270.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 532.0,
+      "beam": {
+        "source_mw": 10.0,
+        "m2": null
+      },
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 20.0,
+              "y0": 100.0,
+              "x1": 100.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            },
+            {
+              "x0": 100.0,
+              "y0": 100.0,
+              "x1": 150.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.95,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            },
+            {
+              "x0": 150.0,
+              "y0": 100.0,
+              "x1": 200.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.931,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            },
+            {
+              "x0": 200.0,
+              "y0": 100.0,
+              "x1": 250.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.8379,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            },
+            {
+              "x0": 250.0,
+              "y0": 100.0,
+              "x1": 300.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.41895,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            },
+            {
+              "x0": 300.0,
+              "y0": 100.0,
+              "x1": 350.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.4147605,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            },
+            {
+              "x0": 350.0,
+              "y0": 100.0,
+              "x1": 400.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.402317685,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            },
+            {
+              "x0": 400.0,
+              "y0": 100.0,
+              "x1": 450.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.321854148,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            },
+            {
+              "x0": 450.0,
+              "y0": 100.0,
+              "x1": 500.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.289668733,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            },
+            {
+              "x0": 500.0,
+              "y0": 100.0,
+              "x1": 550.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.115867493,
+                "s": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            },
+            {
+              "x0": 550.0,
+              "y0": 100.0,
+              "x1": 600.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.081107245,
+                "s": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            },
+            {
+              "x0": 600.0,
+              "y0": 100.0,
+              "x1": 625.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.081107245,
+                "s": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            },
+            {
+              "x0": 625.0,
+              "y0": 100.0,
+              "x1": 650.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.081107245,
+                "s": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            },
+            {
+              "x0": 650.0,
+              "y0": 100.0,
+              "x1": 650.0,
+              "y1": 300.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.056775072,
+                "s": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            },
+            {
+              "x0": 650.0,
+              "y0": 300.0,
+              "x1": 850.0,
+              "y1": 300.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.034065043,
+                "s": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            },
+            {
+              "x0": 850.0,
+              "y0": 300.0,
+              "x1": 850.0,
+              "y1": 500.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.017032522,
+                "s": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "win",
+              "action": "transmit",
+              "x": 100.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 80.0,
+              "beam": {
+                "p": 1.0,
+                "mw": 10.0,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "lens",
+              "action": "transmit",
+              "x": 150.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 130.0,
+              "beam": {
+                "p": 0.95,
+                "mw": 9.5,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "filt",
+              "action": "transmit",
+              "x": 200.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 180.0,
+              "beam": {
+                "p": 0.931,
+                "mw": 9.31,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "aotf",
+              "action": "transmit",
+              "x": 250.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 230.0,
+              "beam": {
+                "p": 0.8379,
+                "mw": 8.379,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "prism",
+              "action": "transmit",
+              "x": 300.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 280.0,
+              "beam": {
+                "p": 0.41895,
+                "mw": 4.1895,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "peri",
+              "action": "transmit",
+              "x": 350.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 330.0,
+              "beam": {
+                "p": 0.4147605,
+                "mw": 4.147605,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "cust_t",
+              "action": "transmit",
+              "x": 400.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 380.0,
+              "beam": {
+                "p": 0.402317685,
+                "mw": 4.02317685,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "wp",
+              "action": "transmit",
+              "x": 450.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 430.0,
+              "beam": {
+                "p": 0.321854148,
+                "mw": 3.21854148,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "pol",
+              "action": "transmit",
+              "x": 500.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 480.0,
+              "beam": {
+                "p": 0.289668733,
+                "mw": 2.896687332,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "obj",
+              "action": "transmit",
+              "x": 550.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 530.0,
+              "beam": {
+                "p": 0.115867493,
+                "mw": 1.158674933,
+                "d_mm": null,
+                "s": [
+                  1.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "iris",
+              "action": "transmit",
+              "x": 600.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 580.0,
+              "beam": {
+                "p": 0.081107245,
+                "mw": 0.811072453,
+                "d_mm": null,
+                "s": [
+                  1.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "shut",
+              "action": "transmit",
+              "x": 625.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 605.0,
+              "beam": {
+                "p": 0.081107245,
+                "mw": 0.811072453,
+                "d_mm": null,
+                "s": [
+                  1.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "grat",
+              "action": "reflect",
+              "x": 650.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 630.0,
+              "beam": {
+                "p": 0.081107245,
+                "mw": 0.811072453,
+                "d_mm": null,
+                "s": [
+                  1.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "smp",
+              "action": "reflect",
+              "x": 650.0,
+              "y": 300.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 830.0,
+              "beam": {
+                "p": 0.056775072,
+                "mw": 0.567750717,
+                "d_mm": null,
+                "s": [
+                  1.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "cust_r",
+              "action": "reflect",
+              "x": 850.0,
+              "y": 300.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 1030.0,
+              "beam": {
+                "p": 0.034065043,
+                "mw": 0.34065043,
+                "d_mm": null,
+                "s": [
+                  1.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "det",
+              "action": "stop",
+              "x": 850.0,
+              "y": 500.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 1230.0,
+              "beam": {
+                "p": 0.017032522,
+                "mw": 0.170325215,
+                "d_mm": null,
+                "s": [
+                  1.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ]
+}

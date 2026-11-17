@@ -154,10 +154,13 @@ export function useManualReadouts(plan: ReadoutPlan | null): ManualReadoutsState
   return state;
 }
 
-/** 针尖 / 反馈 / 扫描状态。queryKey 与顶栏、右栏相同：同一份请求，不多一倍流量。 */
-export function useTipState() {
+/** 针尖 / 反馈 / 扫描状态。queryKey 与顶栏、右栏相同：同一份请求，不多一倍流量。
+ *  `enabled`：只有带 Nanonis 的站才有针尖可读（调用方传 `station.ready && station.has("nanonis")`），
+ *  别的站上一次也不请求。 */
+export function useTipState(enabled: boolean) {
   return useQuery({
     queryKey: ["hardware", "live-readings"],
+    enabled,
     queryFn: async () => {
       const { data, error } = await api.GET("/api/hardware/live-readings");
       if (error) throw error;

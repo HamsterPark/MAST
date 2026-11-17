@@ -239,7 +239,7 @@ describe("licence and look", () => {
 
   it("every component type has its own drawing, made in the lib from simple shapes", () => {
     const glyphs = read("lib", "opticalLayout", "glyphs.ts");
-    for (const t of ["mirror", "beam_splitter", "dichroic", "grating", "lens", "objective", "waveplate", "polarizer", "filter", "window", "nd", "aotf", "prism", "periscope", "iris", "shutter", "sample", "detector", "camera", "spectrometer", "power_meter", "beam_dump", "blocker", "fiber_in", "fiber_out", "laser", "lamp", "led", "custom"]) {
+    for (const t of ["mirror", "beam_splitter", "pbs", "dichroic", "grating", "lens", "objective", "waveplate", "polarizer", "filter", "window", "nd", "aotf", "prism", "periscope", "iris", "shutter", "sample", "detector", "camera", "spectrometer", "power_meter", "beam_dump", "blocker", "fiber_in", "fiber_out", "laser", "lamp", "led", "custom"]) {
       assert.match(glyphs, new RegExp(`case "${t}"`), t);
     }
   });
@@ -345,7 +345,7 @@ describe("a cut trace is said, not hidden", () => {
 
   it("the editor shows a banner made from truncation(trace), worked out again only when the trace changes", () => {
     assert.match(EDITOR, /const cut = useMemo\(\(\) => truncation\(trace\), \[trace\]\);/);
-    assert.match(EDITOR, /\{cut && \(\s*<div role="status" data-trace-cut=""/, "shown whenever the trace is cut, as a status strip");
+    assert.match(EDITOR, /const cutBanner = cut \? \(\s*<div role="status" data-trace-cut=""/, "shown whenever the trace is cut, as a status strip");
     assert.match(EDITOR, /traceCutMessage\(cut\)/);
   });
 

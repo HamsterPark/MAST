@@ -13,8 +13,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { labelSize, placeLabels, type LabelBox } from "../src/lib/opticalLayout/labels.ts";
-import { ALL_READOUTS_MIN_K, PROBLEM_TEXT_MIN_K, hitMarks, missText, planTexts, readoutText, signedText, worstHit } from "../src/lib/opticalLayout/textPlan.ts";
+import { labelSize, placeLabels, placeLabelsAt, type LabelBox } from "../src/lib/opticalLayout/labels.ts";
+import { ALL_READOUTS_MIN_K, PROBLEM_TEXT_MIN_K, hitMarks, missText, planTexts, powerTagWidth, readoutText, signedText, worstHit } from "../src/lib/opticalLayout/textPlan.ts";
+import { glyphShapes, screenBox, shapeBounds } from "../src/lib/opticalLayout/glyphs.ts";
+import type { LayoutComponent } from "../src/lib/opticalLayout/types.ts";
 import { layoutOptionLabel, pickDefaultLayout } from "../src/lib/opticalLayout/listing.ts";
 import { hitIndicators, nearMisses } from "../src/lib/opticalLayout/indicators.ts";
 import { traceLayoutDetailed } from "../src/lib/opticalLayout/trace.ts";
@@ -25,6 +27,26 @@ import { comp, foldLayout, layoutOf } from "./helpers/opticalLayout.ts";
 const box = (id: string, x: number, y: number, w = 40, h = 14, force = false): LabelBox => ({ id, x, y, w, h, force });
 
 describe("placing labels", () => {
+  it("a crowded label tries its other places, in order, before it is dropped", () => {
+    const first: LabelBox = { id: "a", x: 0, y: 0, w: 50, h: 12 };
+    const moved: LabelBox = { id: "b", x: 10, y: 4, w: 40, h: 12, alts: [{ x: 10, y: 6 }, { x: 10, y: 40 }, { x: 10, y: 80 }] };
+    const at = placeLabelsAt([first, moved]);
+    assert.deepEqual(at.get("a"), { x: 0, y: 0 });
+    assert.deepEqual(at.get("b"), { x: 10, y: 40 }, "the first free alternative, not a later one");
+    const boxed: LabelBox = { id: "c", x: 10, y: 4, w: 40, h: 12, alts: [{ x: 10, y: 6 }] };
+    assert.equal(placeLabelsAt([first, boxed]).has("c"), false, "no free place: dropped");
+    assert.deepEqual([...placeLabels([first, moved])].sort(), ["a", "b"]);
+  });
+
+  it("keeps off a beam when one of its places allows, and takes a place on the beam rather than none", () => {
+    const beam = { x: 0, y: 48, w: 300, h: 6 };
+    const name: LabelBox = { id: "n", x: 10, y: 45, w: 40, h: 12, alts: [{ x: 10, y: 20 }] };
+    assert.deepEqual(placeLabelsAt([name], 2, [beam]).get("n"), { x: 10, y: 20 }, "the free place above");
+    assert.deepEqual(placeLabelsAt([name], 2, []).get("n"), { x: 10, y: 45 }, "no beams to avoid: its own place");
+    const nowhere: LabelBox = { id: "w", x: 10, y: 45, w: 40, h: 12, alts: [{ x: 10, y: 47 }] };
+    assert.deepEqual(placeLabelsAt([nowhere], 2, [beam]).get("w"), { x: 10, y: 45 }, "every place is on the beam: the first one");
+  });
+
   it("draws everything that does not overlap", () => {
     const shown = placeLabels([box("a", 0, 0), box("b", 100, 0), box("c", 0, 50)]);
     assert.deepEqual([...shown].sort(), ["a", "b", "c"]);
@@ -212,5 +234,50 @@ describe("opening a layout", () => {
   it("an entry reads title, revision, and open comments when there are any", () => {
     assert.equal(layoutOptionLabel(s("main", "", { title: "SHG path", revision: 3 })), "SHG path · r3");
     assert.match(layoutOptionLabel(s("main", "", { title: "", revision: 3, open_comments: 2 })), /^main · r3 · .*2/);
+  });
+});
+
+describe("names and power tags beside the drawings (v2)", () => {
+  const view = (k: number): View => ({ k, ox: 50, oy: 800 });
+  const extent = (k: number) => (c: LayoutComponent) => screenBox(shapeBounds(glyphShapes(c)), c.angle_deg, k);
+
+  it("a name is centred under its drawing, not under the component's centre", () => {
+    const l = layoutOf([comp("laser", "las1", 100, 100, 0, { props: { wavelength_nm: 532 }, label: "Pump" })]);
+    const k = 2;
+    const [label] = planTexts({ components: l.components, indicators: new Map(), misses: [], view: view(k), selected: new Set(), hover: null, showLabels: true, showReadouts: false, extent: extent(k) });
+    const box = extent(k)(l.components[0]!);
+    const centreX = 50 + 100 * k + box.dx;
+    const w = labelSize("Pump", 11).w;
+    assert.ok(label && Math.abs(label.x + w / 2 - centreX) < 1e-9, "centred under the body, which is behind the emission point");
+    assert.ok(label.y > 800 - 100 * k + box.dy + box.ey, "below the drawing");
+  });
+
+  it("a power tag sits right of the drawing it is about; crowded, it moves instead of vanishing", () => {
+    const l = layoutOf([comp("detector", "det1", 100, 100, 180, { label: "PD" })]);
+    const k = 3;
+    const powers = [{ key: "det1", componentId: "det1", at: { x: 100, y: 100 }, parts: [{ text: "12.0 mW", color: "#00ff00" }] }];
+    const plan = (others: LayoutComponent[], movable = true, selected: string[] = []) =>
+      planTexts({ components: [...l.components, ...others], indicators: new Map(), misses: [], view: view(k), selected: new Set(selected), hover: null, showLabels: true, showReadouts: false, extent: extent(k), powers, movable });
+    const alone = plan([]).find((t) => t.kind === "power")!;
+    const box = extent(k)(l.components[0]!);
+    assert.ok(alone.x >= 50 + 100 * k + box.dx + box.ex, "right of the drawing");
+    assert.deepEqual(alone.parts, powers[0]!.parts);
+    // the selected mirror's name (always drawn) lands where the tag would go: the tag moves to another place
+    const tagBox = { x: alone.x, y: alone.y - 11, w: powerTagWidth(powers[0]!.parts), h: labelSize("0", 10.5).h };
+    const name = "A long mirror name";
+    const nameW = labelSize(name, 11).w;
+    // the mirror's own drawing is about 2 x 1.5 mm; put the centre of its name on the tag
+    const mx = (tagBox.x + tagBox.w / 2 - 50) / k;
+    const my = (800 - (tagBox.y - 6)) / k;
+    const crowd = [comp("mirror", "m1", mx, my, 0, { label: name, aperture: 2 })];
+    const forced = plan(crowd, true, ["m1"]);
+    const nameAt = forced.find((t) => t.key === "l:m1")!;
+    const overlap = (x: number, y: number) => x < nameAt.x + nameW && nameAt.x < x + tagBox.w && y - 11 < nameAt.y - 11 + 15 && nameAt.y - 11 < y - 11 + tagBox.h;
+    assert.ok(overlap(alone.x, alone.y), "the setup puts the name on the tag's first place");
+    const moved = forced.find((t) => t.kind === "power");
+    assert.ok(moved && !(moved.x === alone.x && moved.y === alone.y), "moved, not dropped");
+    assert.ok(!overlap(moved.x, moved.y), "to a free place");
+    assert.equal(plan(crowd, false, ["m1"]).find((t) => t.kind === "power"), undefined, "a crowded canvas that does not move names drops it, as v1 did");
+    assert.ok(powerTagWidth(powers[0]!.parts) > labelSize("12.0 mW", 10.5).w, "the dot takes room too");
   });
 });

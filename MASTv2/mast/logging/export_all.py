@@ -218,7 +218,7 @@ def export_all_history(
         keys: created_at, project_root, include_heavy, databases, files,
         skipped, errors, total_bytes, file_count, dest.
     """
-    from mast._runtime_paths import project_root
+    from mast._runtime_paths import data_root, project_root
 
     def _note(msg: str) -> None:
         logger.info("export: %s", msg)
@@ -229,6 +229,10 @@ def export_all_history(
                 pass
 
     root = project_root()
+    # 历史数据（experiments/、artifacts/）在 data_root()（MAST_DATA_DIR >
+    # project_root）下，与写它们的运行时同一个根；MASTv2/artifacts 属于源码树，
+    # 仍从 project_root 取。zip 里的路径各按自己的根算，布局不变。
+    data = data_root()
     dest_zip = Path(dest_zip)
     dest_zip.parent.mkdir(parents=True, exist_ok=True)
 
@@ -236,6 +240,7 @@ def export_all_history(
         "tool": "MAST full history export",
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "project_root": str(root),
+        "data_root": str(data),
         "include_heavy": include_heavy,
         "databases": [],
         "files": [],
@@ -244,8 +249,9 @@ def export_all_history(
         "total_bytes": 0,
     }
 
-    exp_dir = root / "experiments"
-    artifact_roots = [root / "artifacts", root / "MASTv2" / "artifacts"]
+    exp_dir = data / "experiments"
+    artifact_roots = [(data / "artifacts", data),
+                      (root / "MASTv2" / "artifacts", root)]
 
     tmp_dbs: list[Path] = []
     try:
@@ -280,14 +286,14 @@ def export_all_history(
 
             # ── 2. experiments/ — jsonl logs, plans, snapshots (db handled above) ──
             _note(tr("打包 experiments/ 会话与日志 …", "Packaging experiments/ sessions and logs ..."))
-            _add_tree(zf, exp_dir, root, manifest,
+            _add_tree(zf, exp_dir, data, manifest,
                       skip_db=True, include_heavy=include_heavy, dest_zip=dest_zip)
 
             # ── 3. artifacts/ — captured traces, mosaics, analysis products ──
-            for aroot in artifact_roots:
+            for aroot, abase in artifact_roots:
                 if aroot.is_dir():
-                    _note(tr(f"打包 {aroot.relative_to(root).as_posix()} 数据产物 …", f"Packaging data products of {aroot.relative_to(root).as_posix()} ..."))
-                    _add_tree(zf, aroot, root, manifest,
+                    _note(tr(f"打包 {aroot.relative_to(abase).as_posix()} 数据产物 …", f"Packaging data products of {aroot.relative_to(abase).as_posix()} ..."))
+                    _add_tree(zf, aroot, abase, manifest,
                               skip_db=False, include_heavy=include_heavy,
                               dest_zip=dest_zip)
 

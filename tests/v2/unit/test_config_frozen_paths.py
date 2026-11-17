@@ -27,6 +27,7 @@ def test_db_path_resolves_to_env_root_not_cwd(tmp_path, monkeypatch):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.setenv("MAST2_PROJECT_ROOT", str(root))
+    monkeypatch.delenv("MAST_DATA_DIR", raising=False)   # the launcher sets only the root
     monkeypatch.chdir(elsewhere)  # process cwd != data root (the frozen failure mode)
 
     cfg = MASTConfig()
@@ -47,6 +48,7 @@ def test_storage_builds_under_env_root_with_foreign_cwd(tmp_path, monkeypatch):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.setenv("MAST2_PROJECT_ROOT", str(root))
+    monkeypatch.delenv("MAST_DATA_DIR", raising=False)
     monkeypatch.chdir(elsewhere)
 
     cfg = MASTConfig()

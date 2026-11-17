@@ -1,6 +1,7 @@
 import type { ReactNode, SVGProps } from "react";
 import clsx from "clsx";
 import { tr } from "@/lib/i18n";
+import { errorMessage } from "@/lib/apiError";
 
 /** Shared, dependency-light UI primitives every panel reuses. All
  *  color/radius/shadow comes from the design tokens (never hardcoded hex), so
@@ -129,14 +130,24 @@ export function Spinner({ label = tr("加载中…", "Loading…") }: { label?: 
   );
 }
 
-export function ErrorNote({ error, label = tr("加载失败", "Failed to load") }: { error: unknown; label?: string }) {
+export function ErrorNote({
+  error,
+  label = tr("加载失败", "Failed to load"),
+  retrying = false,
+}: {
+  error: unknown;
+  label?: string;
+  /** The query behind this note asks again by itself: say so, and the note goes away when it works. */
+  retrying?: boolean;
+}) {
   // ``label`` lets a caller use a context-appropriate prefix: a mid-run stream
   // error is not a load failure, so run panels pass their own label.
   return (
     <div className="flex items-center gap-2 rounded-mast-ctl border border-mast-danger-border bg-mast-danger-bg px-3 py-2.5 text-sm text-mast-danger">
       <IconAlertCircle className="h-[15px] w-[15px] shrink-0" />
       <span>
-        {label}{tr("：", ": ")}{String((error as Error)?.message ?? error)}
+        {label}{tr("：", ": ")}{errorMessage(error) || tr("未知错误", "unknown error")}
+        {retrying && <span className="ml-1 opacity-80">{tr("（正在自动重试…）", "(retrying automatically…)")}</span>}
       </span>
     </div>
   );

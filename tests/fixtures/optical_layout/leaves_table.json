@@ -108,6 +108,10 @@
     {
       "source": "las1",
       "wavelength_nm": 532.0,
+      "beam": {
+        "source_mw": null,
+        "m2": null
+      },
       "branches": [
         {
           "branch": "0",
@@ -117,7 +121,18 @@
               "x0": 50.0,
               "y0": 62.5,
               "x1": 2200.0,
-              "y1": 62.5
+              "y1": 62.5,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             }
           ],
           "events": [],
@@ -128,6 +143,10 @@
     {
       "source": "las2",
       "wavelength_nm": 532.0,
+      "beam": {
+        "source_mw": null,
+        "m2": null
+      },
       "branches": [
         {
           "branch": "0",
@@ -137,7 +156,18 @@
               "x0": 100.0,
               "y0": 100.0,
               "x1": 100.0,
-              "y1": 1900.0
+              "y1": 1900.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             }
           ],
           "events": [],
@@ -148,6 +178,10 @@
     {
       "source": "las3",
       "wavelength_nm": 532.0,
+      "beam": {
+        "source_mw": null,
+        "m2": null
+      },
       "branches": [
         {
           "branch": "0",
@@ -157,7 +191,18 @@
               "x0": 600.0,
               "y0": 450.0,
               "x1": -850.0,
-              "y1": -1000.0
+              "y1": -1000.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             }
           ],
           "events": [],

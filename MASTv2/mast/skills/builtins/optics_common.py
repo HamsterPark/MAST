@@ -266,17 +266,26 @@ def resolve_device(registry: Any, *, kind: str, role: str | None,
 
 
 def no_stm() -> bool:
-    """True on an optical station (``mast.station``): there is no STM and no Nanonis, so
-    nothing may try to read one. ``AcquireSpectrum`` calls :func:`stm_snapshot` twice and
-    samples the tunnelling current through the whole exposure; without this each of those
-    reads is a failed Nanonis round-trip that logs a warning and leaves a sidecar section
-    that looks like data. Never true on an STM station."""
+    """True on a station without Nanonis (``mast.station``: the optical and the generic
+    station): there is no STM, so nothing may try to read one. ``AcquireSpectrum`` calls
+    :func:`stm_snapshot` twice and samples the tunnelling current through the whole exposure;
+    without this each of those reads is a failed Nanonis round-trip that logs a warning and
+    leaves a sidecar section that looks like data. Never true on an STM station."""
     try:
         from mast import station
 
-        return station.is_optical()
+        return not station.has("nanonis")
     except Exception:  # noqa: BLE001 - no profile information: STM, as before
         return False
+
+
+def _no_stm_why() -> str:
+    try:
+        from mast import station
+
+        return f"{station.current_profile()} station profile: there is no STM"
+    except Exception:  # noqa: BLE001
+        return "there is no STM"
 
 
 def stm_snapshot(context: Any, *, fresh: bool = True) -> dict:
@@ -284,7 +293,7 @@ def stm_snapshot(context: Any, *, fresh: bool = True) -> dict:
     (``state.refresh()``) when the context offers it; otherwise the 1 Hz cache.
     Never raises: ``{"available": False, "why": ...}`` instead."""
     if no_stm():
-        return {"available": False, "why": "optical station profile: there is no STM"}
+        return {"available": False, "why": _no_stm_why()}
     st = getattr(context, "state", None)
     snap = None
     source = ""
@@ -401,7 +410,7 @@ class CurrentSampler:
         self.values: list[float] = []
         self.errors = 0
         self._max = int(max_samples)
-        # an optical station has no tunnelling current to sample (see no_stm)
+        # a station without Nanonis has no tunnelling current to sample (see no_stm)
         self.enabled = callable(getattr(context, "safe_call", None)) and not no_stm()
 
     def tick(self) -> None:

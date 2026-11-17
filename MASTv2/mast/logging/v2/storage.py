@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
+from mast.logging import db_keepalive
 from mast.logging.v2.schema import ALL_DDL, REQUIRED_PRAGMAS
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,12 @@ class ExperimentStoreV2:
     def __init__(self, db_path: str | Path):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        # connect() below opens and closes a connection per call.  Without another
+        # connection open, each close is the LAST one: an EXCLUSIVE checkpoint +
+        # fsync + delete of -wal/-shm per call, which on a busy disk stalls every
+        # other connection (even readers) past the busy timeout.  A process-wide
+        # keeper makes every per-call close an ordinary one.
+        db_keepalive.hold(self.db_path)
         # Per-thread connection cache for repository methods that don't take a conn explicitly.
         self._tls = threading.local()
         self._init_schema()

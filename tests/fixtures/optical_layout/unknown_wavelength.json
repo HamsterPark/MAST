@@ -215,6 +215,10 @@
     {
       "source": "lamp1",
       "wavelength_nm": null,
+      "beam": {
+        "source_mw": null,
+        "m2": null
+      },
       "branches": [
         {
           "branch": "0",
@@ -224,19 +228,52 @@
               "x0": 50.0,
               "y0": 62.5,
               "x1": 150.0,
-              "y1": 62.5
+              "y1": 62.5,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             },
             {
               "x0": 150.0,
               "y0": 62.5,
               "x1": 225.0,
-              "y1": 62.5
+              "y1": 62.5,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             },
             {
               "x0": 225.0,
               "y0": 62.5,
               "x1": 350.0,
-              "y1": 62.5
+              "y1": 62.5,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             }
           ],
           "events": [
@@ -245,27 +282,63 @@
               "action": "transmit",
               "x": 150.0,
               "y": 62.5,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 100.0
+              "path_mm": 100.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             },
             {
               "component": "dm1",
               "action": "transmit",
               "x": 225.0,
               "y": 62.5,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 45.0,
-              "path_mm": 175.0
+              "path_mm": 175.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             },
             {
               "component": "det1",
               "action": "stop",
               "x": 350.0,
               "y": 62.5,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 300.0
+              "path_mm": 300.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             }
           ],
           "end": "stop"
@@ -275,6 +348,10 @@
     {
       "source": "led1",
       "wavelength_nm": 450.0,
+      "beam": {
+        "source_mw": null,
+        "m2": null
+      },
       "branches": [
         {
           "branch": "0",
@@ -284,13 +361,35 @@
               "x0": 50.0,
               "y0": 187.5,
               "x1": 225.0,
-              "y1": 187.5
+              "y1": 187.5,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             },
             {
               "x0": 225.0,
               "y0": 187.5,
               "x1": 225.0,
-              "y1": 250.0
+              "y1": 250.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             }
           ],
           "events": [
@@ -299,18 +398,42 @@
               "action": "reflect",
               "x": 225.0,
               "y": 187.5,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 45.0,
-              "path_mm": 175.0
+              "path_mm": 175.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             },
             {
               "component": "det2",
               "action": "stop",
               "x": 225.0,
               "y": 250.0,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 237.5
+              "path_mm": 237.5,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             }
           ],
           "end": "stop"

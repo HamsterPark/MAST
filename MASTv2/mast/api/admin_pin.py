@@ -100,6 +100,10 @@ GUARDED_KEYS: frozenset[str] = frozenset({
     # 没设 PIN 的机器改不了它 —— 新机器第一次要设成 optical，要么先设 PIN，要么用环境变量
     # MAST_STATION_PROFILE（它压过这个设置，见 mast/station.py）。
     "station_profile",
+    # 串口自动探测开关（generic_station.md §1.4）。打开它，MAST 会往每个空闲串口
+    # 发 *IDN? 和一帧 Modbus —— 那些口可能属于一台激光器或厂商软件。后果在下次启动或硬件页
+    # 「重新扫描」时才显现，和 station_profile 同一类：挡在写入口，同样 fail-closed。
+    "serial_autodetect",
 })
 
 

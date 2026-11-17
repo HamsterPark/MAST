@@ -32,13 +32,15 @@ from mast.gallery import paths as _paths
 logger = logging.getLogger(__name__)
 
 SAVE_EVERY = 200
+#: 修改时刻在最近这么多秒之内的文件，这一轮不收（Nanonis 可能还在写）。
+RECENT_SKIP_S = 60.0
 LOG_KEEP = 50
 ERRORS_KEEP = 200
 
 #: ``GalleryBuildStatus`` 的字段，一个不多一个不少。
 STATUS_KEYS = ("running", "phase", "started", "finished", "done", "total", "n_files", "n_new",
                "n_changed", "n_render", "n_analysis", "n_failed", "errors", "log", "message",
-               "degraded", "detail")
+               "degraded", "detail", "trigger", "n_removed", "n_deferred", "n_env")
 
 TIMING_LABEL = {"frame": tr("帧", "frame"), "spectrum": tr("谱", "spectrum"),
                 "grid": tr("网格", "grid"), "analysis": tr("判据", "criteria")}
@@ -59,6 +61,7 @@ class Progress:
             "done": 0, "total": 0, "n_files": 0, "n_new": 0, "n_changed": 0,
             "n_render": 0, "n_analysis": 0, "n_failed": 0, "errors": [], "log": [],
             "message": "", "degraded": False, "detail": None,
+            "trigger": "manual", "n_removed": 0, "n_deferred": 0, "n_env": 0,
         }
 
     def update(self, **kw) -> None:
@@ -256,8 +259,13 @@ def _run_task(t: Task, thumbs: Path, cancel: threading.Event) -> dict:
 
 def run_build(force: bool = False, workers: int | None = None, only: str | None = None,
               progress: Progress | None = None, cancel: threading.Event | None = None,
-              state: Path | str | None = None) -> dict:
-    """跑一次构建。永不抛；结果在返回的状态快照里（外加 ``timing`` / ``elapsed_s``）。"""
+              state: Path | str | None = None, *, max_workers: int | None = None,
+              skip_recent_s: float = 0.0, now_ns: int | None = None) -> dict:
+    """跑一次构建。永不抛；结果在返回的状态快照里（外加 ``timing`` / ``elapsed_s``）。
+
+    ``max_workers``：给线程数封顶（自动构建用，免得和实时回路抢 CPU）；``skip_recent_s`` > 0：
+    修改时刻在最近这么多秒内的文件这一轮不收（见 :func:`mast.gallery.inventory.walk_roots`）。
+    两个参数默认不生效，CLI 与既有调用的行为不变。"""
     from mast.gallery.analysis import acquisition_fragments, find_repeat_saves
     from mast.gallery.index import build_items, make_doc, write_index
 
@@ -276,6 +284,8 @@ def run_build(force: bool = False, workers: int | None = None, only: str | None 
     try:
         cfg = _config.load_config(lay)
         nworkers = max(1, min(_config.MAX_WORKERS, int(workers or cfg.workers or _config.default_workers())))
+        if max_workers:
+            nworkers = max(1, min(nworkers, int(max_workers)))
         enabled = {r.name for r in cfg.roots if r.enabled}
         _paths.ensure_state_dir(lay)
         inv = _read_cache(lay, "inventory.json")
@@ -289,17 +299,30 @@ def run_build(force: bool = False, workers: int | None = None, only: str | None 
             prog.log(tr("这些数据根现在不存在，保留它们已有的条目：", "These data roots do not exist right now; keeping their existing entries: ")
                      + tr("、", ", ").join(missing))
 
-        files, scopes = _inv.walk_roots(cfg, only=only or None, state=lay.state)
+        deferred: list[_inv.FileRef] = []
+        t_now = time.time_ns() if now_ns is None else int(now_ns)
+        cutoff = t_now - int(skip_recent_s * 1e9) if skip_recent_s and skip_recent_s > 0 else None
+        dir_has_mast: dict = {}           # 走过的目录 → 有没有 .mast（环境标签只去列有的）
+        files, scopes = _inv.walk_roots(cfg, only=only or None, state=lay.state,
+                                        recent_cutoff_ns=cutoff, now_ns=t_now, deferred=deferred,
+                                        mast_dirs=dir_has_mast)
         groups = _inv.collapse(files)
         new_ids, changed_ids, failed = _inv.update_inventory(groups, inv, stamp, force=force)
-        removed = _inv.purge(inv, scopes, {rep.id for rep, _m in groups})
+        # 刚写过的文件不在 groups 里（不读头、不进缓存），但它们**还在**：算进「见过」，
+        # 否则清点缓存里它们上一版的条目会被当成已删除清掉。
+        removed = _inv.purge(inv, scopes, {rep.id for rep, _m in groups} | {f.id for f in deferred})
         for rid in removed:
             render.pop(rid, None)
             analysis.pop(rid, None)
             _remove_thumbs(lay, rid)
         for iid, why in failed:
             prog.error(iid, tr("读头信息失败：", "Failed to read header: ") + why)
-        prog.update(n_new=len(new_ids), n_changed=len(changed_ids))
+        prog.update(n_new=len(new_ids), n_changed=len(changed_ids), n_removed=len(removed),
+                    n_deferred=len(deferred))
+        if deferred:
+            prog.log(tr("%d 个文件刚写过（%.0f s 内），这一轮不收，留到下一轮",
+                        "%d files were written within the last %.0f s; skipped this round, picked up next round")
+                     % (len(deferred), skip_recent_s))
         prog.log(tr("清点%s：%d 个文件 → %d 条（副本折叠后）；新 %d · 变动 %d · 消失 %d · 读失败 %d",
                     "Inventory%s: %d files -> %d entries (after folding copies); new %d · changed %d · gone %d · read failed %d")
                  % (tr(f"（{only}）", f" ({only})") if only else "", len(files), len(groups), len(new_ids),
@@ -354,8 +377,28 @@ def run_build(force: bool = False, workers: int | None = None, only: str | None 
         seg = acquisition_fragments(inv, render, dup)
         _save_cache(lay, "dups.json", dcache)
 
+        # 环境标签（docs/v2/design/data_env_tags.md §6.1）：读 sidecar / 中央记录，没有的按
+        # 环境历史推断。缓存的身份含 sidecar 的 (mtime_ns, size) —— 数据文件没变、sidecar 后来
+        # 才写成，下一轮也看得见（n_env 让前端知道该重拉索引）。取消了就不做，用上一轮的缓存。
+        prog.update(phase="index", message=tr("环境标签…", "Environment tags…"))
+        env_cache = _read_cache(lay, "envtags.json")
+        if not cancel.is_set():
+            from mast.gallery import envtags as _envtags
+
+            try:
+                ec = _envtags.update_env(inv, env_cache, enabled=enabled, should_stop=cancel.is_set,
+                                         dir_has_mast=dir_has_mast)
+                _save_cache(lay, "envtags.json", env_cache)
+                prog.update(n_env=ec["n_env"])
+                prog.log(tr("环境标签：sidecar %d · 中央记录 %d · 推断 %d · 无 %d · 变了 %d",
+                            "Environment tags: sidecar %d · central record %d · inferred %d · none %d · changed %d")
+                         % (ec["sidecar"], ec["central"], ec["inferred"], ec["none"], ec["n_env"]))
+            except Exception as exc:  # noqa: BLE001 — 环境标签出错不能拖垮一次构建
+                logger.warning("gallery env tags failed: %s", exc)
+                prog.log(tr(f"环境标签失败：{exc}", f"Environment tags failed: {exc}"))
+
         prog.update(phase="index", message=tr("写索引…", "Writing index…"))
-        items = build_items(inv, render, analysis, dup, seg, enabled, lay.thumbs)
+        items = build_items(inv, render, analysis, dup, seg, enabled, lay.thumbs, env=env_cache)
         roots = [{"name": r.name, "path": r.path, "enabled": r.enabled,
                   "exists": os.path.isdir(r.path)} for r in cfg.roots]
         write_index(make_doc(items, roots, stamp), lay)

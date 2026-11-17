@@ -36,7 +36,7 @@
       "name": "line_time_s",
       "type": "number",
       "default": null,
-      "description": "每线时间（s），必须显式提供。声明式规格不读取仪器扫描档位表；请根据当前仪器配置、扫描范围和允许的线速度设置。",
+      "description": "每线时间（s），必须显式提供：声明式规格读不到扫描档位表，不替你猜。真身 PreScanCheck 不传时按扫描宽度查档位表，出厂档位 50 nm ⇒ 1.0 s/线（约 50 nm/s），这里请填同一档位的值。别填 0.1：50 nm 上那是约 488 nm/s，比档位表快约 10 倍，足以刮伤针尖。",
       "required": true
     }
   ],
@@ -48,7 +48,7 @@
       "then": [
         {
           "type": "fail",
-          "reason": "'PreScanCheck（声明式）必须显式给 line_time_s；该规格不读取扫描档位表，也不推测每线时间。请根据当前仪器配置与扫描范围提供。'"
+          "reason": "'PreScanCheck（声明式）必须显式给 line_time_s；该规格读不到扫描档位表，也不推测每线时间。真身不传时按宽度查表：出厂档位 50 nm ⇒ 1.0 s/线（约 50 nm/s）。别填 0.1：在 50 nm 上约 488 nm/s，会刮伤针尖。'"
         }
       ],
       "else": []

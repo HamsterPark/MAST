@@ -80,3 +80,4 @@ detector hit or a timer.
 | [08-troubleshooting.md](08-troubleshooting.md) | Symptom, cause and fix, for when something goes wrong |
 | [09-optical-station.md](09-optical-station.md) | Running MAST on an optical (Raman / SHG) station: what differs from the STM, what needs the operator, what `mast_observe` returns |
 | [10-optical-layout.md](10-optical-layout.md) | The operator's optical layout: reading it (`mast_optical_layout`), what its trace and description say, commenting on it, and why you cannot change it |
+| [11-generic-station.md](11-generic-station.md) | Running MAST on a generic station (no STM, no WITec): the instruments are the configured devices and sensors, what differs, what `mast_observe` returns, serial auto-detection |

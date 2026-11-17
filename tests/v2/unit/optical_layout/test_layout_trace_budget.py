@@ -19,7 +19,7 @@ import pytest
 from mast.optical_layout import trace as T
 from mast.optical_layout.trace import trace_layout, truncation
 
-from ._layouts import budget_layout, comp, dense_field, det, laser, layout, mirror
+from ._layouts import budget_layout, comp, dense_field, det, laser, layout, mirror, trace_fixture_files
 
 FIXTURES = Path(__file__).resolve().parents[3] / "fixtures" / "optical_layout"
 
@@ -128,8 +128,13 @@ def test_the_budget_is_for_the_whole_trace_not_for_each_tree():
     cut = trace_layout(budget_layout(), max_trace_events=4)
     assert [t["source"] for t in cut] == ["las1", "las2"]
     assert len(flat_events(cut[:1])) == 4
+    # the segment to the hit it could not record carries the beam at its start (contract v2 §4.7):
+    # here the source's own state, unpolarized, no Gaussian beam; and its height (contract 3D §4: the
+    # table's beam height, 75 mm) and its passes (none)
     assert cut[1]["branches"] == [{"branch": "0", "fraction": 1.0, "events": [], "end": "budget",
-                                   "segments": [{"x0": 50.0, "y0": 400.0, "x1": 300.0, "y1": 400.0}]}]
+                                   "segments": [{"x0": 50.0, "y0": 400.0, "x1": 300.0, "y1": 400.0, "z_mm": 75.0,
+                                                 "beam": {"p": 1.0, "s": [0.0, 0.0, 0.0], "q": None},
+                                                 "passes": []}]}]
 
 
 def test_the_reflected_branch_is_followed_to_its_end_before_the_transmitted_one_is_cut():
@@ -208,7 +213,7 @@ def test_the_audits_worst_case_is_cut_at_the_budget_and_fast():
 
 
 def test_no_shared_fixture_is_cut_by_the_contracts_budget():
-    for path in sorted(FIXTURES.glob("*.json")):
+    for path in trace_fixture_files():
         doc = json.loads(path.read_text(encoding="utf-8"))
         if "trace_options" in doc:
             continue                                                    # these are made with a smaller budget on purpose

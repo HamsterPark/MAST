@@ -160,6 +160,10 @@
     {
       "source": "las1",
       "wavelength_nm": 532.0,
+      "beam": {
+        "source_mw": null,
+        "m2": null
+      },
       "branches": [
         {
           "branch": "0",
@@ -169,7 +173,18 @@
               "x0": 150.0,
               "y0": 150.0,
               "x1": 150.0,
-              "y1": 62.5
+              "y1": 62.5,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             }
           ],
           "events": [
@@ -178,9 +193,21 @@
               "action": "stop",
               "x": 150.0,
               "y": 62.5,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 87.5
+              "path_mm": 87.5,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             }
           ],
           "end": "stop"
@@ -190,6 +217,10 @@
     {
       "source": "fo1",
       "wavelength_nm": 532.0,
+      "beam": {
+        "source_mw": null,
+        "m2": null
+      },
       "branches": [
         {
           "branch": "0",
@@ -199,19 +230,52 @@
               "x0": 300.0,
               "y0": 62.5,
               "x1": 300.0,
-              "y1": 300.0
+              "y1": 300.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             },
             {
               "x0": 300.0,
               "y0": 300.0,
               "x1": 150.0,
-              "y1": 300.0
+              "y1": 300.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             },
             {
               "x0": 150.0,
               "y0": 300.0,
               "x1": 150.0,
-              "y1": 62.5
+              "y1": 62.5,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             }
           ],
           "events": [
@@ -220,27 +284,63 @@
               "action": "reflect",
               "x": 300.0,
               "y": 300.0,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 45.0,
-              "path_mm": 237.5
+              "path_mm": 237.5,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             },
             {
               "component": "m2",
               "action": "reflect",
               "x": 150.0,
               "y": 300.0,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 45.0,
-              "path_mm": 387.5
+              "path_mm": 387.5,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             },
             {
               "component": "fi1",
               "action": "stop",
               "x": 150.0,
               "y": 62.5,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 625.0
+              "path_mm": 625.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             }
           ],
           "end": "stop"

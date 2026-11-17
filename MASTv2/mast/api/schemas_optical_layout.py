@@ -66,11 +66,63 @@ class LayoutListResponse(BaseModel):
     layouts: list[LayoutRowOut] = Field(default_factory=list)
 
 
+def _stokes() -> Any:
+    """``[S1/S0, S2/S0, S3/S0]``: the normalised Stokes vector (contract v2 §4.1-§4.2)."""
+    return Field(min_length=3, max_length=3,
+                 description="[S1/S0, S2/S0, S3/S0], the normalised Stokes vector in the beam's own frame "
+                             "(e_h = z x d in the table plane, left of the beam; e_v = z, up; S1 = I_h - I_v, "
+                             "S2 = I_+45 - I_-45, angles from e_h towards e_v); null when no light (S0 = 0)")
+
+
+class SegmentBeam(BaseModel):
+    """The beam at the start of a segment (contract v2 §4.7)."""
+
+    p: float = Field(description="power relative to the tree's source (S0; 1 at the source)")
+    s: Optional[list[float]] = _stokes()
+    q: Optional[list[float]] = Field(min_length=2, max_length=2,
+                                     description="[z, zR] in mm: the complex beam parameter q = z + i zR of the "
+                                                 "Gaussian beam (z > 0 past the waist); null without one")
+
+
+class EventBeam(BaseModel):
+    """The beam as it arrives at a component, before the component acts (contract v2 §4.7)."""
+
+    p: float = Field(description="power relative to the tree's source")
+    mw: Optional[float] = Field(description="absolute power in mW (the tree's source_mw times p); null when "
+                                            "the source's power is not known")
+    d_mm: Optional[float] = Field(description="1/e^2 diameter of the Gaussian beam here, mm; null without one")
+    s: Optional[list[float]] = _stokes()
+
+
+class TreeBeam(BaseModel):
+    """What the beam of a whole tree has in common (contract v2 §4.7)."""
+
+    source_mw: Optional[float] = Field(description="the source's power in mW (every wavelength of a source has "
+                                                   "all of power_mw; a fibre continuation what reached its "
+                                                   "coupler times the coupling); null when not known")
+    m2: Optional[float] = Field(description="beam quality factor M^2 of the tree; null when it has no Gaussian beam")
+
+
+class TracePass(BaseModel):
+    """A component a segment passes over or under (contract 3D §3.5): the ray meets its working surface in the
+    plane, inside the aperture, but more than half the aperture above or below its axis, and goes on."""
+
+    component: str
+    x: float = Field(description="where the ray passes it, in the plane, mm")
+    y: float
+    dz_mm: float = Field(description="height of the beam minus that of the component's axis (a periscope: of its "
+                                     "entrance for this direction), mm; above 0 the beam passes over it")
+
+
 class TraceSegment(BaseModel):
     x0: float
     y0: float
     x1: float
     y1: float
+    z_mm: float = Field(description="height of the beam along the segment above the table top, mm (contract 3D §4)")
+    beam: SegmentBeam
+    passes: list[TracePass] = Field(description="the components the segment passes over or under, in the order "
+                                                "along it (contract 3D §3.5)")
 
 
 class TraceEvent(BaseModel):
@@ -78,9 +130,13 @@ class TraceEvent(BaseModel):
     action: Literal["reflect", "transmit", "split", "stop", "blocked", "back_hit"]
     x: float
     y: float
+    z_mm: float = Field(description="height of the beam arriving here, mm (contract 3D §4)")
     offset_mm: float
+    dz_mm: float = Field(description="height of the beam minus that of the component's axis (a periscope: of its "
+                                     "entrance for this direction), mm; above 0 the beam is above the axis")
     incidence_deg: float
-    path_mm: float
+    path_mm: float = Field(description="path from the source, mm, with the vertical runs inside periscopes")
+    beam: EventBeam
 
 
 class TraceBranch(BaseModel):
@@ -94,6 +150,7 @@ class TraceBranch(BaseModel):
 class TraceTree(BaseModel):
     source: str
     wavelength_nm: Optional[float] = None
+    beam: TreeBeam
     branches: list[TraceBranch]
 
 
@@ -161,8 +218,8 @@ class CommentsResponse(BaseModel):
 
 __all__ = [
     "ArchiveResponse", "CommentBody", "CommentOut", "CommentsResponse", "ConflictResponse",
-    "HistoryResponse",
+    "EventBeam", "HistoryResponse",
     "LayoutArchiveBody", "LayoutListResponse", "LayoutRowOut", "LayoutViewResponse",
-    "LayoutWriteBody", "ResolveBody", "RevisionResponse", "RevisionRowOut", "TraceBranch",
-    "TraceEvent", "TraceSegment", "TraceTree",
+    "LayoutWriteBody", "ResolveBody", "RevisionResponse", "RevisionRowOut", "SegmentBeam", "TraceBranch",
+    "TraceEvent", "TracePass", "TraceSegment", "TraceTree", "TreeBeam",
 ]

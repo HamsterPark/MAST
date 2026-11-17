@@ -227,9 +227,111 @@ def test_props_set_to_null_count_as_not_given_and_numbers_are_rounded():
 def test_the_prop_table_covers_exactly_the_types_the_contract_gives_props():
     assert set(PROPS) == {"laser", "fiber_out", "lamp", "led", "beam_splitter", "dichroic", "grating",
                           "lens", "objective", "waveplate", "polarizer", "filter", "nd", "iris",
-                          "shutter", "sample", "fiber_in", "custom"}
+                          "shutter", "sample", "fiber_in", "custom",
+                          # v2 §3.2: throughput
+                          "mirror", "window", "aotf", "prism", "periscope"}
     with pytest.raises(ValueError):
         validate_props("mirror", "not a dict")
+
+
+# ── v2: the beam props (contract optical_layout_v2.md §3) ────────────────────────────────────
+
+
+def test_the_beam_props_go_to_exactly_the_types_of_the_contract():
+    throughput = {t for t, specs in PROPS.items() if "throughput" in specs}
+    assert throughput == {"mirror", "grating", "lens", "objective", "waveplate", "polarizer", "filter", "window",
+                          "aotf", "prism", "periscope", "sample", "custom"}
+    for t in ("laser", "fiber_out"):
+        assert {"polarization", "pol_angle_deg", "beam_diameter_mm", "m2"} <= set(PROPS[t])
+    for t in ("lamp", "led"):           # always unpolarized, no Gaussian beam, no absolute power
+        assert set(PROPS[t]) == {"wavelength_nm"}
+    assert set(PROPS["fiber_in"]) == {"continues_at", "coupling"}
+    assert "pbs" not in PROPS and ok([comp("p", "pbs", 0, 0)]).components[0].props == {}
+    refused(layout([comp("p", "pbs", 0, 0, props={"reflect_fraction": 0.5})]), where="props")
+    refused(layout([comp("p", "beam_splitter", 0, 0, props={"throughput": 0.5})]), where="props")
+    refused(layout([comp("l", "lamp", 0, 0, props={"polarization": "linear"})]), where="props")
+
+
+def test_the_polarizing_beam_splitter_is_a_splitter_of_its_own():
+    info = TYPES["pbs"]
+    assert (info.role, info.aperture_mm, info.zh, info.en) == ("splitter", 25.4, "偏振分束器", "polarizing beam splitter")
+    with use_lang("en"):
+        assert type_name("pbs") == "polarizing beam splitter"
+
+
+def test_the_beam_props_are_rounded_and_kept():
+    props = {"wavelength_nm": 633, "polarization": "linear", "pol_angle_deg": -45.006, "beam_diameter_mm": 1.23456749,
+             "m2": 1.0004, "power_mw": 50}
+    got = ok([comp("l", "laser", 0, 0, props=props)]).components[0].props
+    assert got == {"wavelength_nm": 633.0, "polarization": "linear", "pol_angle_deg": -45.01,
+                   "beam_diameter_mm": 1.234567, "m2": 1.0, "power_mw": 50.0}
+    assert ok([comp("f", "fiber_in", 0, 0, props={"coupling": 0.12345649})]).components[0].props == {"coupling": 0.123456}
+    assert ok([comp("m", "mirror", 0, 0, props={"throughput": 0.9999994})]).components[0].props == {"throughput": 0.999999}
+    # null is "not given"
+    nulls = {"wavelength_nm": 633, "polarization": None, "pol_angle_deg": None, "beam_diameter_mm": None, "m2": None}
+    assert ok([comp("l", "laser", 0, 0, props=nulls)]).components[0].props == {"wavelength_nm": 633.0}
+    assert ok([comp("l", "laser", 0, 0, props={"wavelength_nm": 633, "polarization": "unpolarized"})]).components[0].props \
+        == {"wavelength_nm": 633.0, "polarization": "unpolarized"}
+
+
+@pytest.mark.parametrize("t, props", [
+    ("laser", {"wavelength_nm": 633, "polarization": "circular"}),
+    ("laser", {"wavelength_nm": 633, "polarization": "linear", "pol_angle_deg": 360.5}),
+    ("laser", {"wavelength_nm": 633, "polarization": "linear", "pol_angle_deg": "45"}),
+    ("laser", {"wavelength_nm": 633, "beam_diameter_mm": 0}),
+    ("laser", {"wavelength_nm": 633, "beam_diameter_mm": -1}),
+    ("laser", {"wavelength_nm": 633, "beam_diameter_mm": 1000.001}),
+    ("laser", {"wavelength_nm": 633, "beam_diameter_mm": 1, "m2": 0.99}),
+    ("laser", {"wavelength_nm": 633, "beam_diameter_mm": 1, "m2": 1000.5}),
+    ("fiber_in", {"coupling": 1.01}), ("fiber_in", {"coupling": -0.1}),
+    ("mirror", {"throughput": 1.5}), ("lens", {"throughput": -0.01}), ("custom", {"throughput": True}),
+])
+def test_bad_beam_props_are_refused(t, props):
+    refused(layout([comp("c", t, 0, 0, props=props)]), where="props")
+
+
+def test_the_two_props_that_need_another_one_are_refused_without_it():
+    """``pol_angle_deg`` only with ``polarization = linear``; ``m2`` only with ``beam_diameter_mm`` (§3.2)."""
+    for t in ("laser", "fiber_out"):
+        for props in ({"pol_angle_deg": 10}, {"polarization": "unpolarized", "pol_angle_deg": 10}):
+            errors = refused(layout([comp("c", t, 0, 0, props={"wavelength_nm": 633, **props})]), where="pol_angle_deg")
+            assert any("linear" in e["msg"] for e in errors)
+        errors = refused(layout([comp("c", t, 0, 0, props={"wavelength_nm": 633, "m2": 1.5})]), where="m2")
+        assert any("beam_diameter_mm" in e["msg"] for e in errors)
+        # with the other one they are fine, and a linear source needs no angle (0 deg)
+        ok([comp("c", t, 0, 0, props={"wavelength_nm": 633, "polarization": "linear", "pol_angle_deg": 10,
+                                       "beam_diameter_mm": 2, "m2": 1.5})])
+        ok([comp("c", t, 0, 0, props={"wavelength_nm": 633, "polarization": "linear"})])
+    with use_lang("zh"), pytest.raises(ValidationError) as exc:
+        Layout.model_validate(layout([comp("c", "laser", 0, 0, props={"wavelength_nm": 633, "m2": 1.5})]))
+    assert "只能和" in str(exc.value)
+
+
+@pytest.mark.parametrize("t, key, tiny", [
+    ("laser", "wavelength_nm", 0.0004), ("laser", "beam_diameter_mm", 4e-7), ("iris", "open_mm", 0.0004),
+    ("grating", "lines_per_mm", 0.0004),
+])
+def test_a_number_with_an_open_lower_bound_that_rounds_onto_it_is_refused(t, key, tiny):
+    """Normalising twice must change nothing: 0.0004 nm would be stored as 0.0, which the next read refuses
+    (and a zero wavelength or waist would be a division by zero in the beam physics)."""
+    props = {key: tiny}
+    if t == "laser" and key != "wavelength_nm":
+        props["wavelength_nm"] = 633
+    refused(layout([comp("c", t, 0, 0, props=props)]), where=key)
+    props[key] = tiny * 2 if key != "beam_diameter_mm" else 6e-7          # rounds to the smallest step: kept
+    c = ok([comp("c", t, 0, 0, props=props)]).components[0]
+    assert Layout.model_validate(ok([comp("c", t, 0, 0, props=props)]).to_dict()).components[0].props == c.props
+
+
+def test_point_0001_nm_is_refused_rather_than_stored_as_zero():
+    """The case of the contract (v2 §12.1): before, 0.0001 nm was accepted and stored as 0.0, which the next
+    read refused - a layout that could be saved but not opened again."""
+    errors = refused(layout([laser("l", 0, 0, wl=0.0001)]), where="wavelength_nm")
+    assert any("> 0" in e["msg"] for e in errors)
+    refused(layout([laser("l", 0, 0, wl=[532, 0.0001])]), where="wavelengths_nm")
+    once = ok([laser("l", 0, 0, wl=0.0006)]).to_dict()
+    assert once["components"][0]["props"]["wavelength_nm"] == 0.001
+    assert Layout.model_validate(once).to_dict() == once                         # normalising twice changes nothing
 
 
 # ── annotations, links, texts, table ─────────────────────────────────────────────────────────

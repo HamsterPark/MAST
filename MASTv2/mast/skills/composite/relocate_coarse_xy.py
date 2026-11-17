@@ -219,6 +219,19 @@ class RelocateCoarseXY(CompositeSkillGraph):
                                    "Whether to re-approach automatically after the move "
                                    "(AutoApproach).")),
                 ParameterSpec(
+                    name="verify_bias_after", type="bool", required=False, default=False,
+                    description=tr(
+                        "重新进针成功后跑 VerifyBiasAtJunction，确认偏压真的加在结上"
+                        "(默认关)。仅在 reapproach=True 时有效。判 bias_not_at_junction "
+                        "时该技能按其 withdraw_on_fail(默认开)退针，本技能返回失败并给出原因；"
+                        "inconclusive 同样算失败(不能当 ok)。结果在 data.bias_check。",
+                        "After a successful re-approach run VerifyBiasAtJunction to confirm "
+                        "the bias really reaches the junction (default off). Only effective "
+                        "with reapproach=True. On bias_not_at_junction that skill withdraws "
+                        "per its withdraw_on_fail (default on) and this skill returns failure "
+                        "with the reason; inconclusive also counts as failure (never ok). "
+                        "Result in data.bias_check.")),
+                ParameterSpec(
                     name="prewithdraw_steps", type="int", required=False,
                     default=None, min_value=0, max_value=100_000,
                     description=(
@@ -301,7 +314,8 @@ class RelocateCoarseXY(CompositeSkillGraph):
         if params.get("reapproach", True):
             steps.append(CompositeStep(
                 step_id="reapproach", skill_name=_P_REAPPROACH,
-                params={"dry_run": bool(params.get("dry_run", False))},
+                params={"dry_run": bool(params.get("dry_run", False)),
+                        "verify_bias_after": bool(params.get("verify_bias_after", False))},
                 optional=False, checkpoint_after=True, tags=("approach",)))
         return steps
 
@@ -1248,6 +1262,8 @@ class RelocateCoarseXY(CompositeSkillGraph):
         self._restore_bias(real_ctx)
         res = real_ctx.run("ApproachTip", {})
         ok = bool(getattr(res, "success", False))
+        if ok and params.get("verify_bias_after"):
+            return self._verify_bias_after_approach(real_ctx, res)
         return SkillResult(
             skill_name=_P_REAPPROACH, success=ok,
             # WHAT THIS SENTENCE MAY CLAIM (2026-08-05). It used to assert
@@ -1271,6 +1287,45 @@ class RelocateCoarseXY(CompositeSkillGraph):
                    "The old piezo coordinates no longer point at the original surface; check the "
                    "bookkeeping position with get_coarse_map, do not infer it from this sentence.")),
             data={"approach": getattr(res, "data", None) or {}})
+
+    def _verify_bias_after_approach(self, real_ctx, approach_res) -> SkillResult:
+        """Opt-in (``verify_bias_after``): is the bias really at the junction?
+
+        A bad external bias cable contact can first show up right
+        after coarse XY moves; the feedback then regulates a mV junction and
+        pushes the tip toward contact. VerifyBiasAtJunction withdraws on its own
+        (its ``withdraw_on_fail``); this phase only turns anything but ``ok``
+        into a failure of the relocation, with the reason in the error."""
+        vres = real_ctx.run("VerifyBiasAtJunction", {})
+        vdata = dict(getattr(vres, "data", None) or {})
+        verdict = vdata.get("verdict") or "inconclusive"
+        self._bias_check = {"verdict": verdict, "data": vdata,
+                            "success": bool(getattr(vres, "success", False))}
+        approach_data = getattr(approach_res, "data", None) or {}
+        if verdict == "ok" and getattr(vres, "success", False):
+            return SkillResult(skill_name=_P_REAPPROACH, success=True,
+                               data={"approach": approach_data,
+                                     "bias_check": self._bias_check})
+        reason = getattr(vres, "error", "") or verdict
+        if verdict == "bias_not_at_junction":
+            err = tr(
+                f"换区后重新进针成功，但偏压没有加到隧道结上(VerifyBiasAtJunction: "
+                f"{reason})。横向移动本身已完成({self._moved_steps} 步)，"
+                "不要再移动；先检查外部偏压线，修好后再进针。",
+                f"Re-approach succeeded, but the bias is not reaching the tunnel junction "
+                f"(VerifyBiasAtJunction: {reason}). The lateral move itself is complete "
+                f"({self._moved_steps} steps); do not move again; check the external bias "
+                "cable first, then re-approach.")
+        else:
+            err = tr(
+                f"换区后重新进针成功，但无法确认偏压到了结上(VerifyBiasAtJunction 返回 "
+                f"{verdict}: {reason})。不能当作 ok，请手动核对偏压/电流符号。",
+                f"Re-approach succeeded, but it could not be confirmed that the bias reaches "
+                f"the junction (VerifyBiasAtJunction returned {verdict}: {reason}). Not ok; "
+                "check the bias / current sign manually.")
+        return SkillResult(skill_name=_P_REAPPROACH, success=False, error=err,
+                           data={"approach": approach_data,
+                                 "bias_check": self._bias_check})
 
     def _lower_bias_for_move(self, real_ctx) -> None:
         """横移前降低偏压并记住原值，收尾只恢复本流程实际改动的状态。"""
@@ -1375,6 +1430,8 @@ class RelocateCoarseXY(CompositeSkillGraph):
         self._rungs: list[dict] = []
         self._baseline_settle: dict[str, Any] | None = None
         self._checks: dict[str, Any] = {}
+        #: VerifyBiasAtJunction 的结果(仅 verify_bias_after 打开且跑到时)。
+        self._bias_check: dict[str, Any] | None = None
         self._clearance: dict[str, Any] = {}
         self._temperature_k: float | None = None
         #: 横移前被本流程降下去的偏压原值；None = 没降过 / 已放回。
@@ -1439,6 +1496,8 @@ class RelocateCoarseXY(CompositeSkillGraph):
         }
         if self._temperature_k is not None:
             data["temperature_k"] = self._temperature_k
+        if self._bias_check is not None:
+            data["bias_check"] = self._bias_check
 
         if not executor.progress.aborted:
             executor.clear_sidecar()

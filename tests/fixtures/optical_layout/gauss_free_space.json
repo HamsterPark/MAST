@@ -1,0 +1,323 @@
+{
+  "name": "gauss_free_space",
+  "description": "Anchor F. 633 nm, 1/e^2 diameter 1 mm at the exit (the waist), M^2 = 1: zR = pi 0.5^2 / 633e-6 = 1240.755392 mm; 500 mm on (window W1) d = sqrt(1 + (500 / zR)^2) mm; 1000 mm on (D1) d = 1.284357 mm. L2 has M^2 = 2: zR is halved and d grows faster. The window does not change q.",
+  "layout": {
+    "schema": 1,
+    "id": "gauss-free",
+    "title": "A Gaussian beam spreading in free space",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 50.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 633.0,
+          "beam_diameter_mm": 1.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "win1",
+        "type": "window",
+        "label": "W1",
+        "x_mm": 550.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 25.4,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det1",
+        "type": "detector",
+        "label": "D1",
+        "x_mm": 1050.0,
+        "y_mm": 100.0,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "las2",
+        "type": "laser",
+        "label": "L2",
+        "x_mm": 50.0,
+        "y_mm": 500.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 633.0,
+          "beam_diameter_mm": 1.0,
+          "m2": 2.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det2",
+        "type": "detector",
+        "label": "D2",
+        "x_mm": 1050.0,
+        "y_mm": 500.0,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 633.0,
+      "beam": {
+        "source_mw": null,
+        "m2": 1.0
+      },
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 100.0,
+              "x1": 550.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": [
+                  0.0,
+                  1240.75539
+                ]
+              },
+              "passes": []
+            },
+            {
+              "x0": 550.0,
+              "y0": 100.0,
+              "x1": 1050.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": [
+                  500.0,
+                  1240.75539
+                ]
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "win1",
+              "action": "transmit",
+              "x": 550.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 500.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": 1.078143374,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "det1",
+              "action": "stop",
+              "x": 1050.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 1000.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": 1.284356859,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "las2",
+      "wavelength_nm": 633.0,
+      "beam": {
+        "source_mw": null,
+        "m2": 2.0
+      },
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 500.0,
+              "x1": 1050.0,
+              "y1": 500.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": [
+                  0.0,
+                  620.377696
+                ]
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "det2",
+              "action": "stop",
+              "x": 1050.0,
+              "y": 500.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 1000.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": 1.89691596,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ]
+}

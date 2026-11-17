@@ -1,0 +1,209 @@
+{
+  "name": "gauss_objective_focus",
+  "description": "Anchor H. 633 nm, 4 mm collimated (waist at the laser), an objective f = 4 mm 50 mm on: after it q = [-4.000002, zR'] - the waist 4.000002 mm behind the objective, 2 sqrt(lambda zR' / pi) = 0.805958 um across (the estimate lambda f / (pi w) gives 0.805961 um). The sample sits 4.00 mm behind the objective, in its back focal plane, 1.9 nm before the waist: d there = 0.805961 um (= lambda f / (pi w0) exactly, the size in the back focal plane whatever the input waist).",
+  "layout": {
+    "schema": 1,
+    "id": "objective",
+    "title": "A collimated 4 mm beam focused by an f = 4 mm objective onto a sample",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 50.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 5.0,
+        "props": {
+          "wavelength_nm": 633.0,
+          "beam_diameter_mm": 4.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "obj1",
+        "type": "objective",
+        "label": "OBJ",
+        "x_mm": 100.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 10.0,
+        "props": {
+          "focal_mm": 4.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "smp1",
+        "type": "sample",
+        "label": "SMP",
+        "x_mm": 104.0,
+        "y_mm": 100.0,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 633.0,
+      "beam": {
+        "source_mw": null,
+        "m2": 1.0
+      },
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 100.0,
+              "x1": 100.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": [
+                  0.0,
+                  19852.0863
+                ]
+              },
+              "passes": []
+            },
+            {
+              "x0": 100.0,
+              "y0": 100.0,
+              "x1": 104.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": [
+                  -4.00000187,
+                  0.000805956305
+                ]
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "obj1",
+              "action": "transmit",
+              "x": 100.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 50.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": 4.000012687,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "smp1",
+              "action": "stop",
+              "x": 104.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 54.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": 0.000805961,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ]
+}

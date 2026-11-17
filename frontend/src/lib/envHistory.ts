@@ -213,8 +213,8 @@ export function excludedCount(points: readonly EnvPointLike[]): number {
  * A bare "1521 readings excluded" reads like data loss. It is only interpretable
  * next to how many DID count: 1521-of-1800 is a sensor that is barely being
  * read, 1521-of-43779 is a normal duty cycle. `drawable` separates a third case
- * the page could not express: buckets exist, so the series is offered in the
- * dropdown, but every one of them is empty and the chart renders blank with no
+ * the page could not express: buckets exist, so the sensor gets a strip,
+ * but every one of them is empty and the chart would render blank with no
  * explanation.
  */
 export function coverageOf(points: readonly EnvPointLike[]): {
@@ -401,4 +401,36 @@ export function toAsd(psd: readonly number[]): number[] {
 export function asdUnit(psdUnit: string): string {
   const m = /^([A-Za-z]+)\^2\/Hz$/.exec(psdUnit || "");
   return m ? `${m[1]}/√Hz` : psdUnit || "";
+}
+
+// ── 趋势页：每个传感器一张图 ────────────────────────────────────────────────
+
+/** Sensors the operator most likely wants first, in order of preference. */
+export const PREFERRED_SENSORS = ["temperature", "vacuum", "helium_level", "tunnel_current"];
+
+/**
+ * Order of the stacked trend strips: the preferred sensors first (in that order, when
+ * present), the rest alphabetically. Sorted, not "as the server listed them": the list is
+ * re-fetched on every poll and a strip that jumps because the server's order changed would
+ * look like a fault. Duplicates and empty names are dropped.
+ */
+export function orderSensors(names: readonly string[]): string[] {
+  const uniq = [...new Set(names.filter((n) => typeof n === "string" && n !== ""))];
+  const first = PREFERRED_SENSORS.filter((p) => uniq.includes(p));
+  const rest = uniq.filter((n) => !first.includes(n)).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return [...first, ...rest];
+}
+
+/**
+ * What one strip should show for its points.
+ *   * `empty`      — no buckets at all in this window;
+ *   * `undrawable` — buckets exist but every one is empty (the sensor gave no valid reading);
+ *   * `ok`         — at least one bucket has a value.
+ */
+export type SeriesPanelState = "empty" | "undrawable" | "ok";
+
+export function seriesPanelState(points: readonly EnvPointLike[]): SeriesPanelState {
+  const c = coverageOf(points);
+  if (c.buckets === 0) return "empty";
+  return c.drawable === 0 ? "undrawable" : "ok";
 }

@@ -835,13 +835,17 @@ def test_on_the_optical_station_the_same_word_is_a_prompt(world):
 
 def test_an_unreadable_station_profile_is_an_stm_station_for_requests(world, monkeypatch):
     """No profile information = STM, the profile every existing machine runs: a request is text
-    and a malformed structured field is ignored - in the route and in the body model alike."""
+    and a malformed structured field is ignored - in the route and in the body model alike.
+
+    The profile is made unreadable where it is read (``station.current_profile``, under the
+    capability table, docs/v2/design/generic_station.md), on a station that would otherwise be
+    optical (this file's fixture), so the STM answer can only come from the fallback."""
     from mast import station
 
     def boom():
         raise RuntimeError("settings store is gone")
 
-    monkeypatch.setattr(station, "is_optical", boom)
+    monkeypatch.setattr(station, "current_profile", boom)
     r = ask(world, {"message": "hello", "kind": "confirm", "timeout_s": -5, "options": "junk"})
     assert r.status_code == 200, r.text
     assert r.json()["request"]["id"].startswith("r-") and r.json()["request"]["kind"] == "confirm"

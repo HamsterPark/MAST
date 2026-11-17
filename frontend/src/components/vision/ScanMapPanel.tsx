@@ -1,17 +1,36 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { tr } from "@/lib/i18n";
 import { api } from "@/api/client";
 import { Card, Spinner, ErrorNote, DegradedNote, EmptyNote } from "@/components/ui";
-import { ScanMapCanvas, ScanMapLegend } from "@/components/vision/ScanMapCanvas";
+import { ScanMapCanvas, ScanMapLegend, type FocusRequest } from "@/components/vision/ScanMapCanvas";
 import { ScanMapControls } from "@/components/vision/ScanMapControls";
+import { ScanMapMarkerList, type MarkerRow } from "@/components/vision/ScanMapMarkerList";
+import { ScanMapTimeBar } from "@/components/vision/ScanMapTimeBar";
+import { useLiveScan } from "@/components/vision/LiveScanLayer";
+import { linesDoneLabel } from "@/lib/scanLive";
+import { useCurrentScope } from "@/api/scope";
 import { useUiStore } from "@/store";
+import { useNow } from "@/hooks/useNow";
 import {
   MAX_ANALYSIS_AGE_MS,
   analysisAutoEnabled,
   analysisSignature,
+  drawnHistory,
+  kindCounts,
+  markerKeys,
   nextAnalysisDelayMs,
 } from "@/lib/scanMapView";
+import {
+  isAllTime,
+  latestActionIndex,
+  parseStamp,
+  resolveWindow,
+  summarize,
+  timeDomain,
+  windowLabel,
+  type TimeFilter,
+} from "@/lib/scanMapTime";
 
 // The scan map, everywhere it appears. Two pages embed it (the vision page and
 // the chat page's vision buffer); sharing one component keeps them in step —
@@ -121,7 +140,68 @@ export function ScanMapPanel({
   const layers = useUiStore((s) => s.mapLayers);
   const viewMode = useUiStore((s) => s.mapViewMode);
 
-  const planned = (map?.markers ?? []).filter((m) => (m.status ?? "") === "planned");
+  // The time window is per view and starts at "all" on every visit: persisted,
+  // a "last 1 h" set yesterday would open today's map looking empty.
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>({ kind: "all" });
+  // "Last 1 h" slides with the clock even when no new marker arrives.
+  const now = useNow(30_000);
+  const timeWindow = useMemo(() => resolveWindow(timeFilter, now), [timeFilter, now]);
+
+  const markers = useMemo(() => map?.markers ?? [], [map?.markers]);
+  const keys = useMemo(() => markerKeys(markers), [markers]);
+  // Executed operations that can be drawn at all — the population the time
+  // bar summarises and the legend totals, independent of the layer switches.
+  const executed = useMemo(
+    () =>
+      markers.filter(
+        (m) =>
+          (m.status ?? "") !== "planned" &&
+          m.x_m != null && m.y_m != null && Number.isFinite(m.x_m) && Number.isFinite(m.y_m),
+      ),
+    [markers],
+  );
+  // Marker stamps carry the offset of their own date (the backend adds it), so
+  // they read as the instants they are in any browser (lib/scanMapTime.ts).
+  const stamps = useMemo(() => executed.map((m) => parseStamp(m.timestamp)), [executed]);
+  const domain = useMemo(() => timeDomain(stamps), [stamps]);
+  const summary = useMemo(() => summarize(stamps, timeWindow), [stamps, timeWindow]);
+  // The same selection the canvas draws, so "STS 14" is true of the map below it.
+  const drawn = useMemo(
+    () => drawnHistory(markers, map?.current_epoch, layers, timeWindow),
+    [markers, map?.current_epoch, layers, timeWindow],
+  );
+  const legendCounts = useMemo(() => {
+    const shown = kindCounts(drawn.map((d) => d.m));
+    const total = kindCounts(executed);
+    const out: Record<string, { shown: number; total: number }> = {};
+    for (const k of new Set([...Object.keys(shown), ...Object.keys(total)])) {
+      out[k] = { shown: shown[k] ?? 0, total: total[k] ?? 0 };
+    }
+    return out;
+  }, [drawn, executed]);
+  const latestIndex = latestActionIndex(markers);
+  const latestShown = drawn.some((d) => d.index === latestIndex);
+
+  // The list under the map: its rows are exactly what the map draws.
+  const rows = useMemo<MarkerRow[]>(
+    () => drawn.map((d) => ({ key: keys[d.index] ?? String(d.index), index: d.index, m: d.m })),
+    [drawn, keys],
+  );
+  const [highlightKey, setHighlightKey] = useState<string | null>(null);
+  const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null);
+
+  // The sample's name for the exported PNG. ScanMapResponse.sample_label is
+  // never filled in by the backend; the scope endpoint is the frontend's
+  // single source for "which sample is this".
+  const scope = useCurrentScope();
+  const sampleName = scope.data?.sample?.name || map?.sample_label || "";
+
+  // The scan in progress, row by row (LiveHub). Subscribed only while the
+  // "live scan" layer is on; the canvas falls back to the 1/8 milestone image
+  // whenever this is not usable.
+  const live = useLiveScan(layers.live);
+
+  const planned = markers.filter((m) => (m.status ?? "") === "planned");
   const upcoming = analysisQ.data?.upcoming ?? [];
 
   return (
@@ -131,9 +211,21 @@ export function ScanMapPanel({
       {q.isError && <ErrorNote error={q.error} />}
       {map && map.degraded && <DegradedNote what={tr("扫描地图", "scan map")} />}
       {map && !map.degraded && (
-        <div className="space-y-3">
+        <div className="space-y-3" data-scanmap="panel">
           <ScanMapControls compact={compact} />
-          <ScanMapLegend />
+          <ScanMapTimeBar
+            filter={timeFilter}
+            onChange={setTimeFilter}
+            timeWindow={timeWindow}
+            domain={domain}
+            summary={summary}
+            now={now}
+          />
+          <ScanMapLegend
+            counts={legendCounts}
+            planSteps={layers.plan ? planned.length : undefined}
+            showLatest={latestShown}
+          />
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-mast-muted">
             {layers.plan && planned.length > 0 && (
               <span>
@@ -148,6 +240,58 @@ export function ScanMapPanel({
                   `候选序列 · 接下来 ${upcoming.length} 个位置`,
                   `Candidate sequence · next ${upcoming.length} positions`,
                 )}
+              </span>
+            )}
+            {layers.live && live.usable && live.status && (
+              <span className="text-mast-text">
+                {tr("实时扫描", "Live scan")} ·{" "}
+                {tr(
+                  `第 ${linesDoneLabel(live.meta, live.status.rowsDone, live.status.rows)} 行`,
+                  `line ${linesDoneLabel(live.meta, live.status.rowsDone, live.status.rows)}`,
+                )}
+                {live.status.intervalS
+                  ? tr(` · 每 ${live.status.intervalS.toFixed(1)} s`, ` · every ${live.status.intervalS.toFixed(1)} s`)
+                  : ""}
+                {live.status.degraded && (
+                  <span className="text-mast-warn">{tr(" · 已限速", " · rate-limited")}</span>
+                )}
+              </span>
+            )}
+            {layers.live && live.usable && live.meta?.scanDir === "up" && (
+              <span
+                className="text-mast-warn"
+                title={tr(
+                  "上扫时，抓到的帧里第 0 行是画面上边还是下边，是按扫描前沿（未采到的行是 NaN）在哪一端推断的，没有在真机上核对过。若图像上下颠倒，请报告。",
+                  "For an up-scan, whether row 0 of the grabbed frame is the top or the bottom of the picture is inferred from which end the scan front (the NaN rows) starts at. It has not been checked on a real controller; please report an upside-down image.",
+                )}
+              >
+                {tr("上扫：行序为推断，未在真机核对", "Up-scan: row order inferred, not verified on hardware")}
+              </span>
+            )}
+            {layers.live && live.lost > 0 && (
+              <span className="text-mast-warn">
+                {live.lostUnit === "row"
+                  ? tr(`实时扫描有 ${live.lost} 行没收到`, `Live scan: ${live.lost} rows not received`)
+                  : tr(`实时扫描有 ${live.lost} 个像素没收到`, `Live scan: ${live.lost} pixels not received`)}
+              </span>
+            )}
+            {layers.live && live.status?.tooLarge && (
+              <span
+                className="text-mast-muted"
+                title={tr(
+                  "每次抓整帧要搬 4 MiB 以上，会长时间占住 data 口；这一帧不实时显示，地图照旧用 1/8 进度快照。1024×1024 及以下照常实时显示。",
+                  "Grabbing the whole frame would move more than 4 MiB each time and hold the data port; this frame is not streamed and the map keeps the 1/8-progress snapshots. 1024×1024 and smaller stream as usual.",
+                )}
+              >
+                {tr(
+                  `帧太大（${live.status.tooLarge.pixels}×${live.status.tooLarge.lines}），退回 1/8 快照`,
+                  `Frame too large (${live.status.tooLarge.pixels}×${live.status.tooLarge.lines}): 1/8 snapshots instead`,
+                )}
+              </span>
+            )}
+            {layers.live && live.status?.commsHold && (
+              <span className="text-mast-warn">
+                {tr("通信熔断中，实时扫描暂停", "Link breaker open: live scan paused")}
               </span>
             )}
             {analysisQ.isFetching && <span>{tr("分析中…", "Analyzing…")}</span>}
@@ -171,10 +315,28 @@ export function ScanMapPanel({
                 analysis={analysisQ.data}
                 layers={layers}
                 viewMode={viewMode}
+                timeWindow={timeWindow}
+                markerKeyList={keys}
+                highlightKey={highlightKey}
+                focusRequest={focusRequest}
+                exportName={sampleName}
+                exportCaption={isAllTime(timeWindow) ? "" : windowLabel(timeWindow, domain, now)}
+                live={live}
               />
+              <div className="mt-3">
+                <ScanMapMarkerList
+                  rows={rows}
+                  currentEpoch={map.current_epoch}
+                  latestIndex={latestIndex}
+                  highlightKey={highlightKey}
+                  onHover={setHighlightKey}
+                  onPick={(key) => setFocusRequest((r) => ({ key, seq: (r?.seq ?? 0) + 1 }))}
+                  defaultOpen={!compact}
+                />
+              </div>
             </div>
             <Card className="min-w-[220px] flex-1 space-y-2 text-sm">
-              <StatRow label={tr("样品", "Sample")} value={map.sample_label || "—"} />
+              <StatRow label={tr("样品", "Sample")} value={sampleName || "—"} />
               <StatRow
                 label={tr("扫描框", "Scan frame")}
                 value={map.frame ? fmtSize(map.frame.width_m, map.frame.height_m) : "—"}

@@ -1,0 +1,271 @@
+{
+  "name": "power_text_cases",
+  "description": "How a power is written, the same in Python (summary.power_text / share_text) and TypeScript (beam.ts): contract optical_layout_v2.md §12.3. Not a trace fixture. A case with `mw` (an absolute power in mW) expects the number and unit (the description puts 'arriving ' / '入射 ' in front); a case with `p` (power relative to the source) expects the whole share text. sig3(x), x > 0: e = the largest exponent in [-15, 15] with POW[e] <= x, POW[e] = the double of the literal '1e{e}' (-15 below that); n = floor(x / POW[e-2] + 0.5); n >= 1000 -> n = 100, e += 1; the value is n x 10^(e-2). Absolute: 0 -> '0 mW'; 0 < mw < 1e-12 (below 0.001 pW) -> '< 0.001 pW', without sig3 (so sig3 is only used for e >= -12 and POW[e-2] is always in the table); else the unit exponent u is the largest of 3 (W), 0 (mW), -3 (µW), -6 (nW), -9 (pW) not above e, and n x 10^((e-2)-u) is written with digits only: k >= 0 appends k zeros, k < 0 puts in a decimal point and drops trailing zeros and a trailing point - no float formatting. Relative: X = p x 100; X <= 0 -> '0 %' (a negative floating-point residue is 0); 0 < X < 0.001 -> '< 0.001 %'; else the digits of sig3(X) (k = e - 2, no unit), as '相对 X %' / 'relative X %'.",
+  "cases": [
+    {
+      "mw": 0.0,
+      "zh": "0 mW",
+      "en": "0 mW"
+    },
+    {
+      "mw": 0.9999999999999998,
+      "zh": "1 mW",
+      "en": "1 mW"
+    },
+    {
+      "mw": 999.7,
+      "zh": "1 W",
+      "en": "1 W"
+    },
+    {
+      "mw": 0.1725,
+      "zh": "172 µW",
+      "en": "172 µW"
+    },
+    {
+      "mw": 0.9665,
+      "zh": "967 µW",
+      "en": "967 µW"
+    },
+    {
+      "mw": 0.03125,
+      "zh": "31.3 µW",
+      "en": "31.3 µW"
+    },
+    {
+      "mw": 10000000.0,
+      "zh": "10000 W",
+      "en": "10000 W"
+    },
+    {
+      "mw": 999.5,
+      "zh": "1 W",
+      "en": "1 W"
+    },
+    {
+      "mw": 999.6,
+      "zh": "1 W",
+      "en": "1 W"
+    },
+    {
+      "mw": 999.99,
+      "zh": "1 W",
+      "en": "1 W"
+    },
+    {
+      "mw": 1000.0,
+      "zh": "1 W",
+      "en": "1 W"
+    },
+    {
+      "mw": 9999.4,
+      "zh": "10 W",
+      "en": "10 W"
+    },
+    {
+      "mw": 9999.6,
+      "zh": "10 W",
+      "en": "10 W"
+    },
+    {
+      "mw": 12345.0,
+      "zh": "12.3 W",
+      "en": "12.3 W"
+    },
+    {
+      "mw": 0.9996,
+      "zh": "1 mW",
+      "en": "1 mW"
+    },
+    {
+      "mw": 0.0009996,
+      "zh": "1 µW",
+      "en": "1 µW"
+    },
+    {
+      "mw": 5e-13,
+      "zh": "< 0.001 pW",
+      "en": "< 0.001 pW"
+    },
+    {
+      "mw": 1e-13,
+      "zh": "< 0.001 pW",
+      "en": "< 0.001 pW"
+    },
+    {
+      "mw": 9.99e-13,
+      "zh": "< 0.001 pW",
+      "en": "< 0.001 pW"
+    },
+    {
+      "mw": 1e-12,
+      "zh": "0.001 pW",
+      "en": "0.001 pW"
+    },
+    {
+      "mw": 3.3e-10,
+      "zh": "0.33 pW",
+      "en": "0.33 pW"
+    },
+    {
+      "mw": 0.0315,
+      "zh": "31.5 µW",
+      "en": "31.5 µW"
+    },
+    {
+      "mw": 50.0,
+      "zh": "50 mW",
+      "en": "50 mW"
+    },
+    {
+      "mw": 49.5,
+      "zh": "49.5 mW",
+      "en": "49.5 mW"
+    },
+    {
+      "mw": 1.875,
+      "zh": "1.88 mW",
+      "en": "1.88 mW"
+    },
+    {
+      "mw": 7.5,
+      "zh": "7.5 mW",
+      "en": "7.5 mW"
+    },
+    {
+      "mw": 5.4,
+      "zh": "5.4 mW",
+      "en": "5.4 mW"
+    },
+    {
+      "mw": 100.0,
+      "zh": "100 mW",
+      "en": "100 mW"
+    },
+    {
+      "mw": 0.017,
+      "zh": "17 µW",
+      "en": "17 µW"
+    },
+    {
+      "mw": 2.5e-05,
+      "zh": "25 nW",
+      "en": "25 nW"
+    },
+    {
+      "mw": 1500.0,
+      "zh": "1.5 W",
+      "en": "1.5 W"
+    },
+    {
+      "mw": 1e-16,
+      "zh": "< 0.001 pW",
+      "en": "< 0.001 pW"
+    },
+    {
+      "mw": 0.0999999,
+      "zh": "100 µW",
+      "en": "100 µW"
+    },
+    {
+      "mw": 123.45,
+      "zh": "123 mW",
+      "en": "123 mW"
+    },
+    {
+      "mw": 0.001,
+      "zh": "1 µW",
+      "en": "1 µW"
+    },
+    {
+      "p": 0.0,
+      "zh": "相对 0 %",
+      "en": "relative 0 %"
+    },
+    {
+      "p": -1e-17,
+      "zh": "相对 0 %",
+      "en": "relative 0 %"
+    },
+    {
+      "p": 5e-06,
+      "zh": "相对 < 0.001 %",
+      "en": "relative < 0.001 %"
+    },
+    {
+      "p": 1e-05,
+      "zh": "相对 0.001 %",
+      "en": "relative 0.001 %"
+    },
+    {
+      "p": 1.0,
+      "zh": "相对 100 %",
+      "en": "relative 100 %"
+    },
+    {
+      "p": 0.99996,
+      "zh": "相对 100 %",
+      "en": "relative 100 %"
+    },
+    {
+      "p": 0.5,
+      "zh": "相对 50 %",
+      "en": "relative 50 %"
+    },
+    {
+      "p": 0.75,
+      "zh": "相对 75 %",
+      "en": "relative 75 %"
+    },
+    {
+      "p": 0.1875,
+      "zh": "相对 18.8 %",
+      "en": "relative 18.8 %"
+    },
+    {
+      "p": 0.246,
+      "zh": "相对 24.6 %",
+      "en": "relative 24.6 %"
+    },
+    {
+      "p": 0.0001,
+      "zh": "相对 0.01 %",
+      "en": "relative 0.01 %"
+    },
+    {
+      "p": 4.17e-06,
+      "zh": "相对 < 0.001 %",
+      "en": "relative < 0.001 %"
+    },
+    {
+      "p": 1e-07,
+      "zh": "相对 < 0.001 %",
+      "en": "relative < 0.001 %"
+    },
+    {
+      "p": 1e-09,
+      "zh": "相对 < 0.001 %",
+      "en": "relative < 0.001 %"
+    },
+    {
+      "p": 0.00125,
+      "zh": "相对 0.125 %",
+      "en": "relative 0.125 %"
+    },
+    {
+      "p": 0.001125,
+      "zh": "相对 0.112 %",
+      "en": "relative 0.112 %"
+    },
+    {
+      "p": 0.0009999999,
+      "zh": "相对 0.1 %",
+      "en": "relative 0.1 %"
+    },
+    {
+      "p": 0.017032522,
+      "zh": "相对 1.7 %",
+      "en": "relative 1.7 %"
+    }
+  ]
+}

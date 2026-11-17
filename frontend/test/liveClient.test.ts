@@ -12,6 +12,8 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 
 import {
+  LIVE_BACKFILL_MAX_PAGES,
+  LIVE_BACKFILL_PAGE,
   LIVE_BACKOFF_MAX_MS,
   LIVE_FAIL_AFTER_ATTEMPTS,
   LIVE_HIDDEN_SLOW_AFTER_MS,
@@ -20,6 +22,7 @@ import {
   LIVE_POLL_START_AFTER_MS,
   LIVE_STREAMS_WAIT_MS,
   configureLiveEnv,
+  ensureBackfill,
   framesUrl,
   getLiveConnState,
   getLiveStore,
@@ -486,5 +489,82 @@ describe("后台标签页", () => {
     }
     assert.equal(FakeSocket.instances.length, 1);
     assert.equal(getLiveConnState().slow, false);
+  });
+});
+
+// ── 扫描地图实时扫描（docs/v2/design/scan_map_live.md）────────────────
+//
+// 远程浏览器（tailnet）连接慢：服务端积压超限报 dropped，客户端按页补。一次补齐
+// 最多 LIVE_BACKFILL_MAX_PAGES 页，平时靠新帧再触发 —— 扫描一结束就不再有新帧，
+// 缺的那几行会永远缺着。地图的实时扫描在流安静且还缺时调 ensureBackfill。
+
+describe("扫描结束后，实时扫描的缺口还能补齐", () => {
+  async function settleLong(): Promise<void> {
+    for (let i = 0; i < 400; i++) await new Promise((r) => setImmediate(r));
+  }
+
+  it("一次补齐跑满页数就停；流不再来新帧时，ensureBackfill 接着补到齐", async () => {
+    const id = "local/scan/live/1";
+    const M = {
+      id, kind: "map2d", title: id, source: "local/scan", last_seq: -1,
+      meta: { nx: 100, ny: 120, x0: 0, y0: 0, dx: 1, dy: 1, x_unit: "m", y_unit: "m" },
+    };
+    const px = (k: number) => ({ t: 100, ix: (k - 1) % 100, iy: Math.floor((k - 1) / 100), values: { Z: k } });
+    const total = 1 + LIVE_BACKFILL_PAGE * LIVE_BACKFILL_MAX_PAGES + 300;
+    keep(watchStream(id));
+    const s = await connect([M]);
+    s.deliver({ kind: "frame", stream: id, seq: 1, frame: px(1) });
+    route = (u) => {
+      if (u.pathname !== `/api/live/streams/${id}`) return undefined;
+      const since = Number(u.searchParams.get("since"));
+      const limit = Number(u.searchParams.get("limit"));
+      const frames = [];
+      for (let k = since + 1; k <= Math.min(total, since + limit); k++) frames.push({ seq: k, frame: px(k) });
+      return { meta: { ...M, last_seq: total }, axis: null, frames, more: since + limit < total };
+    };
+    s.deliver({ kind: "dropped", stream: id, from: 2, to: total });
+    await settleLong();
+    const before = getLiveStore().get(id)!;
+    assert.equal(before.missing.isEmpty(), false, "前提：一次补齐补不完（否则这条测试什么也没测）");
+
+    ensureBackfill(id);
+    await settleLong();
+    const after = getLiveStore().get(id)!;
+    assert.equal(after.missing.isEmpty(), true, "扫描结束后缺的行还缺着");
+    assert.equal(after.lost, 0);
+  });
+
+  it("什么都不缺时 ensureBackfill 不发请求", async () => {
+    const id = "local/scan/live/2";
+    keep(watchStream(id));
+    const s = await connect([{ id, kind: "map2d", title: id, source: "t", last_seq: -1,
+      meta: { nx: 2, ny: 2, x0: 0, y0: 0, dx: 1, dy: 1, x_unit: "m", y_unit: "m" } }]);
+    s.deliver({ kind: "frame", stream: id, seq: 1, frame: { t: 1, ix: 0, iy: 0, values: { Z: 1 } } });
+    await settle();
+    const n = fetched.length;
+    ensureBackfill(id);
+    await settle();
+    assert.equal(fetched.length, n);
+  });
+});
+
+// ── 服务端不再列、也没人看的流，本地也忘掉 ────────────────────
+
+describe("忘掉 gone 的流", () => {
+  const M = (id: string) => ({
+    id, kind: "map2d_rows", title: id, source: "t", last_seq: 0,
+    meta: { nx: 2, ny: 2, x0: 0, y0: 0, dx: 1, dy: 1, x_unit: "m", y_unit: "m" },
+  });
+
+  it("目录里没了、也没人看的流删掉；有人看的等最后一个视图走了再删", async () => {
+    const unwatch = watchStream("w");
+    const s = await connect([M("w"), M("u")]);
+    assert.ok(getLiveStore().get("w") && getLiveStore().get("u"));
+    s.deliver({ kind: "streams", items: [] });
+    await settle();
+    assert.equal(getLiveStore().get("u"), undefined, "an unwatched gone stream stayed");
+    assert.ok(getLiveStore().get("w")?.gone, "a watched one must stay until its view leaves");
+    unwatch();
+    assert.equal(getLiveStore().get("w"), undefined);
   });
 });

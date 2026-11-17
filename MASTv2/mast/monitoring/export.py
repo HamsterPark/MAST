@@ -63,13 +63,14 @@ _ANCHOR_PRECISION_S = 1.0
 
 
 def _default_out_root() -> Path:
-    from mast._runtime_paths import project_root
-    return Path(project_root()) / "artifacts" / "current_corpus"
+    from mast._runtime_paths import data_root
+    return Path(data_root()) / "artifacts" / "current_corpus"
 
 
 def _vision_wal_path() -> Path:
-    from mast._runtime_paths import project_root
-    return Path(project_root()) / "experiments" / "vision_buffer.wal.sqlite"
+    # Same root the runtime's BufferService writes it under (core/runtime.py).
+    from mast._runtime_paths import data_root
+    return Path(data_root()) / "experiments" / "vision_buffer.wal.sqlite"
 
 
 # ── weak labels ─────────────────────────────────────────────────────────────

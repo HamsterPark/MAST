@@ -116,6 +116,33 @@ class TestDeriveHitlMap:
     #                        thing MAST cannot see. Switching HV OFF (volts=0) is the
     #                        de-escalating direction; it is the same skill only because
     #                        the satellite takes both on one device.
+    #   RampMagnetField      (7.2.0, superconducting_magnet) ramps a superconducting
+    #                        magnet. Nanonis bounds nothing about it. SETI starts the
+    #                        ramp the moment it is parsed and the supply has no
+    #                        watchdog, so the change cannot be taken back. The module
+    #                        is switched on by DETECTION of a Model 625, not by the
+    #                        operator's switch, and the controller's own gates come on
+    #                        top. The HITL card stops MAST's own agent before every
+    #                        field change; external agents run it with a notification.
+    #   SetSampleTemperature (temperature_control) turns a sample-stage heater on through
+    #                        a Lake Shore 335. Nanonis bounds nothing about it, the 335
+    #                        has no communication watchdog, and near liquid-helium
+    #                        temperature a watt is a lot. Switched on by DETECTION of a
+    #                        Model 335; the controller's gates (initialization limits,
+    #                        the instrument's own TLIMIT, the user's authorization for a
+    #                        raise) come on top. Turning the heater OFF (HeaterOff) and
+    #                        holding a ramp are AUTO: the de-escalating direction.
+    #   SetHeaterZoneTable   (temperature_control) writes the 335's zone table.
+    #   SetHeaterControlMode switches the heater output between closed-loop PID and zone
+    #                        mode. Neither turns a heater on, but in zone mode the 335 itself
+    #                        loads each zone's heater range, ramp rate and PID as the setpoint
+    #                        crosses into it, with nobody asking again: the table decides
+    #                        how much power a later heating gets, and the mode decides
+    #                        whether the table is used at all. Same reasoning as the
+    #                        trusted-default ground, on hardware Nanonis does not bound. The
+    #                        values are commissioning decisions made with the operator;
+    #                        the controller refuses tables
+    #                        outside the initialization limits and needs the heater off.
     #
     # Everything else in the optional set is CONFIRM: a bias sweep is bounded like
     # SetBias, a per-probe Z loop is bounded like the core one. Note in particular
@@ -127,10 +154,14 @@ class TestDeriveHitlMap:
     # the agent to ask).
     DANGEROUS_UNBOUNDED_HARDWARE = [
         "MoveProbeXY",
+        "RampMagnetField",
         "RunRfFrequencySweep",
+        "SetHeaterControlMode",
+        "SetHeaterZoneTable",
         "SetLaserOnOff",
         "SetPiControllerOnOff",
         "SetPmtHighVoltage",
+        "SetSampleTemperature",
         "StartRfGenerator",
     ]
 

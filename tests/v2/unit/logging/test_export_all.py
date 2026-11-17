@@ -30,6 +30,9 @@ def _make_db(path: Path, rows: int) -> None:
 @pytest.fixture()
 def fake_root(tmp_path, monkeypatch):
     monkeypatch.setenv("MAST2_PROJECT_ROOT", str(tmp_path))
+    # The data lives under data_root(); with MAST_DATA_DIR unset (the production
+    # default) that is the project root. conftest sets it for every test.
+    monkeypatch.delenv("MAST_DATA_DIR", raising=False)
     exp = tmp_path / "experiments"
     exp.mkdir()
     _make_db(exp / "mast_experiments_v2.db", rows=5)
@@ -117,6 +120,7 @@ def test_missing_dirs_do_not_crash(tmp_path, monkeypatch):
     # A pristine project root with no experiments/ or artifacts/ must still
     # produce a valid (near-empty) zip rather than raising.
     monkeypatch.setenv("MAST2_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.delenv("MAST_DATA_DIR", raising=False)
     from mast.logging.export_all import export_all_history
 
     dest = tmp_path / "exports" / "empty.zip"
@@ -124,3 +128,32 @@ def test_missing_dirs_do_not_crash(tmp_path, monkeypatch):
     assert dest.exists()
     assert "MANIFEST.json" in set(zipfile.ZipFile(dest).namelist())
     assert man["databases"] == []
+
+
+def test_the_history_comes_from_the_data_root(tmp_path, monkeypatch):
+    """MAST_DATA_DIR moves where the runtime writes experiments/ and artifacts/,
+    so the export must read them there — and keep the same layout in the zip
+    (paths relative to the data root, not a bare file name)."""
+    proj, data = tmp_path / "proj", tmp_path / "data"
+    proj.mkdir()
+    monkeypatch.setenv("MAST2_PROJECT_ROOT", str(proj))
+    monkeypatch.setenv("MAST_DATA_DIR", str(data))
+    _make_db(data / "experiments" / "mast_experiments_v2.db", rows=3)
+    (data / "experiments" / "logs").mkdir()
+    (data / "experiments" / "logs" / "run.log").write_text("x", encoding="utf-8")
+    (data / "artifacts" / "current_traces").mkdir(parents=True)
+    (data / "artifacts" / "current_traces" / "t1.csv").write_text(
+        "t_s\n0\n", encoding="utf-8")
+    # A decoy under the project root: it must NOT be what gets exported.
+    (proj / "experiments").mkdir()
+    (proj / "experiments" / "decoy.jsonl").write_text("{}", encoding="utf-8")
+    from mast.logging.export_all import export_all_history
+
+    dest = tmp_path / "out" / "x.zip"
+    man = export_all_history(dest)
+    names = set(zipfile.ZipFile(dest).namelist())
+    assert "databases/mast_experiments_v2.db" in names
+    assert "experiments/logs/run.log" in names
+    assert "artifacts/current_traces/t1.csv" in names
+    assert not any("decoy" in n for n in names), names
+    assert man["data_root"] == str(data)

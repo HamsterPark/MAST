@@ -51,7 +51,7 @@ import pytest
 # Module-level import so the cached `mast` resolves to the MASTv2 copy.
 from mast.agents.data_processing import tools as dp_tools
 from mast.agents.data_processing.tools import run_numpy_snippet
-from mast._runtime_paths import project_root
+from mast._runtime_paths import data_root
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
@@ -279,8 +279,10 @@ def test_elementwise_math_and_builtins():
 
 @pytest.fixture()
 def data_dir():
-    d = project_root() / "data"
-    d.mkdir(exist_ok=True)
+    # data_root()/data is an allowed root, and in tests data_root() is tmp
+    # (conftest). Before 2026-11-09 this wrote into the checkout's real data/.
+    d = data_root() / "data"
+    d.mkdir(parents=True, exist_ok=True)
     return d
 
 

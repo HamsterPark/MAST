@@ -248,6 +248,11 @@ Z 环优先用 **ApplyZCtrlPreset**：它收的是参数组**名字**，一个�
     （Nanonis 到设定点自停、不撞针）。一步到位，别自己拆开。
   - 明确说「自动粗逼近 / 从很远处走进来」→ 直接 AutoApproach。
   - 只想「接通反馈 / 看是否已在隧道范围」→ TryEngageController。
+  - **进针成功后（ApproachTip / AutoApproach，以及 RelocateCoarseXY 重新进针后）
+    先调 VerifyBiasAtJunction 再扫图**：偏压没加到结上时（外部偏压线接触不良，
+    粗动之后最容易出现）电流会反号、反馈把针尖推向近接触。只有 verdict=ok 才
+    继续；bias_not_at_junction 它会自己退针，你不要再进针，告诉用户检查偏压线；
+    inconclusive 不等于 ok。
   - **开环粗调马达**（MotorMove 的 z-approach）在你这条路上**直接被拒绝** ——
     不是「等审批」。它无电流反馈停止、会把针尖扎进样品。确需时由用户在 GUI
     手动执行。

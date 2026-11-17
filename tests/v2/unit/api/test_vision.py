@@ -454,6 +454,21 @@ def test_scan_map_import_places_operator_files(tmp_path) -> None:
         assert smap["scan_images"], "imported scan not shown as a surface thumbnail"
 
 
+def test_scan_map_markers_leave_with_the_offset_of_their_own_date(tmp_path) -> None:
+    """Storage stamps naive local time; the map API hands each
+    marker out with the UTC offset in force on its date (DST-correct), so no
+    client has to guess the zone — or use the PC's CURRENT offset for all."""
+    import datetime as _dt
+
+    client, storage = _import_client(tmp_path)
+    storage.log_marker(kind="sts", x_m=1e-9, y_m=2e-9, experiment_id="imp-e", sample_id="imp-s")
+    stored = storage.get_markers("imp-e", "imp-s")[0]["timestamp"]
+    assert _dt.datetime.fromisoformat(stored).tzinfo is None, "test premise: storage stamps naive local time"
+    got = [m["timestamp"] for m in client.get("/api/scan-map").json()["markers"] if m["status"] != "planned"]
+    assert got == [_dt.datetime.fromisoformat(stored).astimezone().isoformat()]
+    assert _dt.datetime.fromisoformat(got[0]).utcoffset() is not None
+
+
 def test_scan_map_import_requires_active_experiment(tmp_path) -> None:
     client, _ = _import_client(tmp_path, exp_id=None)
     body = client.post("/api/scan-map/import", json={"path": str(tmp_path)}).json()

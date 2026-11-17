@@ -8,7 +8,9 @@ that behind for the next test.
     python _boot_probe.py <stm|optical> <project_root>
 
 Prints one JSON line on stdout. **Nothing here dials a socket**: ``ConnectionPool.connect_all``
-is replaced by a recorder (a test must never reach a real Nanonis on the machine it runs on).
+is replaced by a recorder (a test must never reach a real Nanonis on the machine it runs on); the
+serial auto-detection scan is a recorder returning no sensors, the vision warm-up's scorer is a stub
+(no model is loaded), and ``_io_guard`` refuses any connect beyond loopback and any serial open.
 The other Nanonis-bound starts are wrapped, not replaced: they are recorded and still run.
 """
 from __future__ import annotations
@@ -34,6 +36,10 @@ except Exception:  # the real vendor package is not needed
 logging.disable(logging.CRITICAL)
 calls: list[str] = []
 
+import _io_guard  # noqa: E402  (next to this file)
+
+_io_guard.install()
+
 import mast.core.connection as conn  # noqa: E402
 import mast.core.state as state_mod  # noqa: E402
 import mast.core.watchdog as watchdog_mod  # noqa: E402
@@ -46,6 +52,28 @@ def _no_dial(self):
 
 
 conn.ConnectionPool.connect_all = _no_dial
+
+import mast.environment.autodetect as autodetect_mod  # noqa: E402
+
+
+def _no_scan(*a, **k):
+    calls.append("autodetect_sensors")
+    return []
+
+
+autodetect_mod.autodetect_sensors = _no_scan
+
+try:                                    # the vision warm-up decides, but never loads a model
+    import mast.vision.module as vision_module
+    import mast.vision.quality_model as quality_model
+
+    class _Scorer:
+        def preload(self):
+            pass
+
+    quality_model.get_scorer = lambda: _Scorer()
+except Exception:  # noqa: BLE001
+    pass
 
 _orig_refresh = state_mod.InstrumentState.start_background_refresh
 

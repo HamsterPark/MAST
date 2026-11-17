@@ -1,13 +1,17 @@
-"""A read-only picture of the optical station, for the briefing and for ``observe``.
+"""A read-only picture of a station without Nanonis, for the briefing and for ``observe``.
 
-Three things an AI on an optical station needs to see and cannot get from an STM's
-live readings:
+Three things an AI on an optical (or generic) station needs to see and cannot get from an
+STM's live readings:
 
 * the **devices**: what is configured (WITec, lasers, power meter, temperature
   controller, stages), which of them MAST has open, and what an open one reports;
 * the **manual optical state**: what a person has physically set up (which λ/2 plate is
   in, the objective, the laser-area attestation), signed by the operator;
 * the **open operator prompts**: what is waiting for a person.
+
+A generic station (``docs/v2/design/generic_station.md``) adds a fourth: the newest readings of
+its **environment sensors** (:func:`environment_readings`), taken from the environment monitor's
+cache - never from the sensors themselves.
 
 The rule that shapes this module is the one in ``api/routes/optics.py``: *a read never
 opens a device*. The briefing and ``observe`` are called constantly, from many clients;
@@ -26,6 +30,7 @@ from __future__ import annotations
 import logging
 import math
 import threading
+from datetime import datetime
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
@@ -198,5 +203,59 @@ def open_prompts(limit: int = 8) -> dict:
     return {"count": len(rows), "items": items}
 
 
-__all__ = ["STATUS_TIMEOUT_S", "bounded", "device_status", "inventory", "manual_state",
-           "open_prompts", "plain"]
+def _age_s(timestamp: Any, now: datetime) -> float | None:
+    """Seconds since a ``SensorReading.timestamp`` (local ISO time, as the monitor writes it)."""
+    try:
+        t = datetime.fromisoformat(str(timestamp))
+    except (TypeError, ValueError):
+        return None
+    if t.tzinfo is not None:
+        t = t.astimezone().replace(tzinfo=None)
+    return round(max(0.0, (now - t).total_seconds()), 1)
+
+
+def environment_readings(monitor: Any) -> dict:
+    """``{"sensors": {name: {value, unit, status, age_s}}}`` or ``{"error": ...}``: the newest
+    reading of every real environment sensor, from the monitor's cache. **Never reads a
+    sensor** (the cache is what the monitor's own loop last read), never raises.
+
+    A placeholder (a kind of sensor the station does not have, see
+    ``environment.autodetect.is_real_sensor``) is not listed; a configured sensor the loop has not
+    read yet is listed with ``status: "not read yet"``."""
+    if monitor is None:
+        return {"error": "environment monitoring is not wired"}
+    try:
+        latest = dict(monitor.get_latest() or {})
+        sensors = dict(getattr(monitor, "_sensors", {}) or {})
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"{type(exc).__name__}: {exc}"[:300]}
+    try:
+        from mast.environment.autodetect import is_real_sensor
+    except Exception:  # noqa: BLE001 - cannot tell placeholders apart: list everything
+        is_real_sensor = None  # type: ignore[assignment]
+    now = datetime.now()
+    out: dict[str, dict] = {}
+    for name in dict.fromkeys(list(sensors) + list(latest)):
+        sensor = sensors.get(name)
+        if sensor is not None and is_real_sensor is not None:
+            try:
+                if not is_real_sensor(sensor):
+                    continue
+            except Exception:  # noqa: BLE001
+                pass
+        reading = latest.get(name)
+        if reading is None:
+            out[str(name)] = {"status": "not read yet"}
+            continue
+        row: dict[str, Any] = {"value": plain(getattr(reading, "value", None)),
+                               "unit": str(getattr(reading, "unit", "") or ""),
+                               "status": str(getattr(reading, "status", "") or "")}
+        age = _age_s(getattr(reading, "timestamp", None), now)
+        if age is not None:
+            row["age_s"] = age
+        out[str(name)] = row
+    return {"sensors": out}
+
+
+__all__ = ["STATUS_TIMEOUT_S", "bounded", "device_status", "environment_readings", "inventory",
+           "manual_state", "open_prompts", "plain"]

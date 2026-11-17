@@ -12,7 +12,18 @@ The model is strict on purpose - it is the only door through which a layout reac
 * numbers are finite and bounded, positions are rounded to 0.01 mm, angles are brought into
   [0, 360) and rounded to 0.01 degrees; text is cleaned of control characters and refused (never
   cut) when it is too long;
-* ``props`` are checked against the component type (§4), unknown keys refused;
+* ``props`` are checked against the component type (§4), unknown keys refused; the beam props of
+  the v2 contract (``docs/v2/design/optical_layout_v2.md`` §3: ``polarization``,
+  ``pol_angle_deg``, ``beam_diameter_mm``, ``m2`` of a source, ``coupling`` of a fibre coupler,
+  ``throughput`` of most passive parts) are in the same table, with two cross checks
+  (``pol_angle_deg`` needs ``polarization = linear``, ``m2`` needs ``beam_diameter_mm``); a number
+  with an open lower bound is checked again after rounding, so that what is stored is accepted
+  when it is read back;
+* heights (``docs/v2/design/optical_layout_3d.md`` §2): every component takes ``props.z_mm``, the
+  height of its optical axis above the table top (:data:`COMMON_PROPS`), a periscope also
+  ``z_out_mm``, the height of its exit; the table takes ``beam_height_mm``, the height of every
+  component and source without a ``z_mm`` (75 mm when not given, and then not written at all, so
+  that a layout that uses no height is stored exactly as before);
 * ids are ``[A-Za-z0-9_-]{1,40}`` and unique in one layout; counts and the document size are
   bounded.
 
@@ -98,6 +109,7 @@ TYPES: dict[str, TypeInfo] = _types(
     ("led", "LED", "LED", 5.0, "source"),
     ("mirror", "反射镜", "mirror", 25.4, "mirror"),
     ("beam_splitter", "分束器", "beam splitter", 25.4, "splitter"),
+    ("pbs", "偏振分束器", "polarizing beam splitter", 25.4, "splitter"),
     ("dichroic", "二向色镜", "dichroic mirror", 25.4, "dichroic"),
     ("grating", "光栅", "grating", 25.0, "mirror"),
     ("lens", "透镜", "lens", 25.4, "transmit"),
@@ -124,7 +136,7 @@ TYPES: dict[str, TypeInfo] = _types(
 )
 
 ComponentType = Literal[
-    "laser", "fiber_out", "lamp", "led", "mirror", "beam_splitter", "dichroic", "grating",
+    "laser", "fiber_out", "lamp", "led", "mirror", "beam_splitter", "pbs", "dichroic", "grating",
     "lens", "objective", "waveplate", "polarizer", "filter", "window", "nd", "aotf", "prism",
     "periscope", "iris", "shutter", "sample", "detector", "camera", "spectrometer",
     "power_meter", "beam_dump", "blocker", "fiber_in", "custom",
@@ -159,28 +171,60 @@ _WAVELENGTHS = Prop("nums", lo=0.0, hi=1e7, lo_open=True, max_items=16)
 _POWER = Prop("num", lo=0.0, hi=1e7)                           # mW
 _FRACTION = Prop("num", lo=0.0, hi=1.0, decimals=6)
 _AXIS = Prop("num", lo=-360.0, hi=360.0, decimals=2)
+#: the share of the power that goes on after one interaction (v2 contract §3.2): a mirror's
+#: reflectance, a transmitting part's transmittance, a polarizer's along its axis, a grating's
+#: zero-order efficiency
+_THROUGHPUT = Prop("num", lo=0.0, hi=1.0, decimals=6)
+#: how a light source emits (v2 contract §3.2, §4): its polarization (``linear`` along
+#: ``pol_angle_deg``, measured from ``e_h`` to ``e_v``), the 1/e^2 diameter of its waist (at its
+#: exit) and its beam quality factor M^2
+_SOURCE_BEAM: dict[str, Prop] = {
+    "polarization": Prop("enum", choices=("unpolarized", "linear")),
+    "pol_angle_deg": _AXIS,
+    "beam_diameter_mm": Prop("num", lo=0.0, hi=1000.0, lo_open=True, decimals=6),
+    "m2": Prop("num", lo=1.0, hi=1000.0, decimals=3),
+}
+
+#: a height above the table top (contract 3D §2): the optical axis of a component, the exit of a
+#: periscope; below 0 is below the top (a lower table next to this one)
+_HEIGHT = Prop("num", lo=-10000.0, hi=10000.0, decimals=2)
+
+#: the props every component takes, whatever its type (contract 3D §2): the height of its optical
+#: axis (a source: of its exit) above the table top; not given = the table's beam height
+COMMON_PROPS: dict[str, Prop] = {"z_mm": _HEIGHT}
+
+#: the table's beam height when ``table.beam_height_mm`` is not given (contract 3D §2), mm
+DEFAULT_BEAM_HEIGHT_MM = 75.0
+MAX_BEAM_HEIGHT_MM = 10000.0
 
 PROPS: dict[str, dict[str, Prop]] = {
-    "laser": {"wavelength_nm": _WAVELENGTH, "wavelengths_nm": _WAVELENGTHS, "power_mw": _POWER},
+    "laser": {"wavelength_nm": _WAVELENGTH, "wavelengths_nm": _WAVELENGTHS, "power_mw": _POWER,
+              **_SOURCE_BEAM},
     "fiber_out": {"wavelength_nm": _WAVELENGTH, "wavelengths_nm": _WAVELENGTHS,
-                  "power_mw": _POWER},
+                  "power_mw": _POWER, **_SOURCE_BEAM},
     "lamp": {"wavelength_nm": _WAVELENGTH},
     "led": {"wavelength_nm": _WAVELENGTH},
+    "mirror": {"throughput": _THROUGHPUT},
     "beam_splitter": {"reflect_fraction": _FRACTION},
     "dichroic": {"edge_nm": _WAVELENGTH, "reflects": Prop("enum", choices=("short", "long"))},
-    "grating": {"lines_per_mm": Prop("num", lo=0.0, hi=1e5, lo_open=True)},
-    "lens": {"focal_mm": Prop("num", lo=-1e5, hi=1e5)},
-    "objective": {"focal_mm": Prop("num", lo=-1e5, hi=1e5)},
+    "grating": {"lines_per_mm": Prop("num", lo=0.0, hi=1e5, lo_open=True), "throughput": _THROUGHPUT},
+    "lens": {"focal_mm": Prop("num", lo=-1e5, hi=1e5), "throughput": _THROUGHPUT},
+    "objective": {"focal_mm": Prop("num", lo=-1e5, hi=1e5), "throughput": _THROUGHPUT},
     "waveplate": {"retardance": Prop("enum", choices=("half", "quarter")),
-                  "fast_axis_deg": _AXIS},
-    "polarizer": {"axis_deg": _AXIS},
-    "filter": {"pass_min_nm": _WAVELENGTH, "pass_max_nm": _WAVELENGTH},
+                  "fast_axis_deg": _AXIS, "throughput": _THROUGHPUT},
+    "polarizer": {"axis_deg": _AXIS, "throughput": _THROUGHPUT},
+    "filter": {"pass_min_nm": _WAVELENGTH, "pass_max_nm": _WAVELENGTH, "throughput": _THROUGHPUT},
+    "window": {"throughput": _THROUGHPUT},
     "nd": {"od": Prop("num", lo=0.0, hi=20.0)},
+    "aotf": {"throughput": _THROUGHPUT},
+    "prism": {"throughput": _THROUGHPUT},
+    # z_out_mm: the height of the exit (contract 3D §2, §3.4); not given = the height of the entrance
+    "periscope": {"throughput": _THROUGHPUT, "z_out_mm": _HEIGHT},
     "iris": {"open_mm": Prop("num", lo=0.0, hi=500.0, lo_open=True)},
     "shutter": {"closed": Prop("bool")},
-    "sample": {"reflects": Prop("bool")},
-    "fiber_in": {"continues_at": Prop("id")},
-    "custom": {"behavior": Prop("enum", choices=("transmit", "reflect", "stop"))},
+    "sample": {"reflects": Prop("bool"), "throughput": _THROUGHPUT},
+    "fiber_in": {"continues_at": Prop("id"), "coupling": Prop("num", lo=0.0, hi=1.0, decimals=6)},
+    "custom": {"behavior": Prop("enum", choices=("transmit", "reflect", "stop")), "throughput": _THROUGHPUT},
 }
 
 #: the props that must be there (``laser`` / ``fiber_out`` additionally need one of the two
@@ -223,12 +267,22 @@ def _prop_value(type_id: str, key: str, spec: Prop, value: Any) -> Any:
     v = float(value)
     if not math.isfinite(v):
         raise ValueError(tr(f"{where} 必须是有限的数字", f"{where} must be a finite number"))
-    if spec.lo is not None and (v <= spec.lo if spec.lo_open else v < spec.lo):
+    stored = _zero(round(v, spec.decimals))
+    # An open lower bound is checked on the stored value as well: 0.0001 nm would be stored as 0.0,
+    # which the next read refuses (normalising twice must change nothing) and the beam physics
+    # would divide by (a wavelength, a waist).
+    if spec.lo is not None and ((v <= spec.lo or stored <= spec.lo) if spec.lo_open else v < spec.lo):
         bound = f"> {spec.lo:g}" if spec.lo_open else f">= {spec.lo:g}"
         raise ValueError(tr(f"{where} 必须 {bound}", f"{where} must be {bound}"))
     if spec.hi is not None and v > spec.hi:
         raise ValueError(tr(f"{where} 必须 <= {spec.hi:g}", f"{where} must be <= {spec.hi:g}"))
-    return _zero(round(v, spec.decimals))
+    return stored
+
+
+def prop_specs(type_id: str) -> dict[str, Prop]:
+    """Every prop a component of *type_id* takes: those of its type (:data:`PROPS`) and those of every
+    component (:data:`COMMON_PROPS`)."""
+    return {**PROPS.get(type_id, {}), **COMMON_PROPS}
 
 
 def validate_props(type_id: str, props: Any) -> dict[str, Any]:
@@ -236,7 +290,7 @@ def validate_props(type_id: str, props: Any) -> dict[str, Any]:
     "not given"), numbers rounded, unknown keys, wrong types and out-of-range values refused."""
     if not isinstance(props, dict):
         raise ValueError(tr("props 必须是对象", "props must be an object"))
-    specs = PROPS.get(type_id, {})
+    specs = prop_specs(type_id)
     unknown = sorted(str(k) for k in props if k not in specs)
     if unknown:
         allowed = ", ".join(sorted(specs)) or tr("（无）", "(none)")
@@ -258,6 +312,13 @@ def validate_props(type_id: str, props: Any) -> dict[str, Any]:
         if has_one == has_list:
             raise ValueError(tr(f"{type_id} 要给 props.wavelength_nm 或 props.wavelengths_nm（二选一）",
                                 f"{type_id} needs props.wavelength_nm or props.wavelengths_nm (exactly one)"))
+        # the two props that only mean something next to another one (v2 contract §3.2)
+        if "pol_angle_deg" in out and out.get("polarization") != "linear":
+            raise ValueError(tr("props.pol_angle_deg 只能和 props.polarization = linear 一起给",
+                                "props.pol_angle_deg is only allowed with props.polarization = linear"))
+        if "m2" in out and "beam_diameter_mm" not in out:
+            raise ValueError(tr("props.m2 只能和 props.beam_diameter_mm 一起给",
+                                "props.m2 is only allowed with props.beam_diameter_mm"))
     if type_id == "filter" and "pass_min_nm" in out and "pass_max_nm" in out \
             and out["pass_min_nm"] > out["pass_max_nm"]:
         raise ValueError(tr("props.pass_min_nm 不能大于 props.pass_max_nm",
@@ -419,6 +480,24 @@ class Table(_Strict):
     hole_pitch_mm: Num = 25.0
     hole_offset_mm: Num = 12.5
     grid: Literal["metric", "imperial", "none"] = "metric"
+    # Not written when not given (``exclude_if``): a layout that uses no height is stored, and sent,
+    # exactly as before, so that an older MAST still reads it (contract 3D §0.3).
+    beam_height_mm: Optional[Num] = Field(
+        None, exclude_if=lambda v: v is None,
+        description="height of the beam above the table top, mm (0-10000, 0.01 resolution): the height of "
+                    "every component and source without props.z_mm; not given = 75")
+
+    @field_validator("beam_height_mm")
+    @classmethod
+    def _beam_height(cls, v: Optional[float]) -> Optional[float]:
+        if v is None:
+            return None
+        stored = _zero(round(v, 2))
+        # an open lower bound, checked on the stored value as well (0.004 would be stored as 0.0)
+        if v <= 0.0 or stored <= 0.0 or v > MAX_BEAM_HEIGHT_MM:
+            raise ValueError(tr(f"台面光束高度必须 > 0 且 <= {MAX_BEAM_HEIGHT_MM:g} mm",
+                                f"the beam height must be > 0 and <= {MAX_BEAM_HEIGHT_MM:g} mm"))
+        return stored
 
     @field_validator("width_mm", "height_mm")
     @classmethod
@@ -497,9 +576,41 @@ def is_valid_id(value: Any) -> bool:
     return isinstance(value, str) and bool(_ID_RE.fullmatch(value)) and value.lower() not in _WINDOWS_RESERVED
 
 
+# ── heights (contract 3D §2) ───────────────────────────────────────────────────
+
+
+def beam_height(table: Table) -> float:
+    """The table's beam height H (mm): ``beam_height_mm``, else :data:`DEFAULT_BEAM_HEIGHT_MM`."""
+    return DEFAULT_BEAM_HEIGHT_MM if table.beam_height_mm is None else table.beam_height_mm
+
+
+def component_z(c: Component, h: float) -> float:
+    """The height (mm) of a component's optical axis (a source: its exit): ``props.z_mm``, else *h*,
+    the table's beam height."""
+    z = c.props.get("z_mm")
+    return h if z is None else z
+
+
+def periscope_heights(c: Component, h: float) -> tuple[float, float]:
+    """``(z_in, z_out)`` of a periscope (mm): ``z_in`` = :func:`component_z`, ``z_out`` =
+    ``props.z_out_mm``, else ``z_in``. Light that travels along the periscope's +x enters at ``z_in``
+    and leaves at ``z_out``; the other way round, the other way round (contract 3D §3.4)."""
+    z_in = component_z(c, h)
+    z_out = c.props.get("z_out_mm")
+    return z_in, (z_in if z_out is None else z_out)
+
+
+def uses_heights(layout: Layout) -> bool:
+    """Whether *layout* says anything about heights: a table beam height, or a ``z_mm`` / ``z_out_mm``
+    on some component. A layout that does not is described exactly as before (contract 3D §6.1)."""
+    return layout.table.beam_height_mm is not None or any(
+        "z_mm" in c.props or "z_out_mm" in c.props for c in layout.components)
+
+
 __all__ = [
-    "Annotations", "Component", "ComponentType", "ExtraPair", "ID_PATTERN", "Layout", "Links",
-    "MAX_COMPONENTS", "MAX_DOCUMENT_BYTES", "MAX_SOURCES", "MAX_TEXTS", "PROPS", "SCHEMA_VERSION",
-    "SOURCE_TYPES", "TYPES", "Table", "TextLabel", "TypeInfo", "is_valid_id", "normalize_layout",
-    "type_name", "validate_props",
+    "Annotations", "COMMON_PROPS", "Component", "ComponentType", "DEFAULT_BEAM_HEIGHT_MM", "ExtraPair",
+    "ID_PATTERN", "Layout", "Links", "MAX_BEAM_HEIGHT_MM", "MAX_COMPONENTS", "MAX_DOCUMENT_BYTES",
+    "MAX_SOURCES", "MAX_TEXTS", "PROPS", "SCHEMA_VERSION", "SOURCE_TYPES", "TYPES", "Table", "TextLabel",
+    "TypeInfo", "beam_height", "component_z", "is_valid_id", "normalize_layout", "periscope_heights",
+    "prop_specs", "type_name", "uses_heights", "validate_props",
 ]

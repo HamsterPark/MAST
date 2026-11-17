@@ -14,6 +14,10 @@
 第三条是结构闸门：这个翻转的规则只允许有**一份**。#94 的直接成因就是它有三种私人
 拼写（``sxm_oriented_frames`` / ``mosaic`` / 而缩略图那条路一份都没有）。
 
+第四组（2026-11-12，扫描地图改进）：每张底图带上文件的修改时间 ``mtime``（ISO 8601
+UTC）。缩略图详情要显示它，时间筛选要按它筛；读不到时必须是 ``""``（没有时间），
+不能是 1970 —— 那会让筛选把它当成地图上最旧的东西。
+
 Run from repo root:
     .venv-v2-py313/Scripts/python.exe -m pytest tests/v2/unit/io/test_scan_map_underlay.py -q
 """
@@ -331,3 +335,133 @@ def test_every_sxm_display_path_goes_through_the_rule(consumer):
     code = _blank_comments_and_docstrings(
         (_MAST_SRC / consumer).read_text(encoding="utf-8"))
     assert "rows_top_first" in code, f"{consumer} 没走单一真源"
+
+
+# ── 四、修改时间：缩略图详情与时间筛选读的就是它 ───────────────────────────────
+
+def _iso(ts: float) -> str:
+    import datetime as _dt
+    return (_dt.datetime.fromtimestamp(ts, tz=_dt.timezone.utc)
+            .strftime("%Y-%m-%dT%H:%M:%SZ"))
+
+
+def test_underlay_carries_each_files_mtime_in_utc(isolated_root):
+    from mast.api.routes.vision import _recent_scan_images
+
+    p = _write_sxm(isolated_root / "a.sxm", fwd=_surface())
+    _touch(p, 1_700_000_000)
+    out = _recent_scan_images(_StubApp(isolated_root), limit=12)
+    assert [s.mtime for s in out] == ["2023-11-14T22:13:20Z"]
+
+
+def test_a_stale_scan_still_has_its_time(isolated_root):
+    """旧坐标的图照样有时间：stale_epoch 和 mtime 从同一个文件时间推出来。"""
+    from mast.api.routes.vision import _recent_scan_images
+
+    old = _write_sxm(isolated_root / "old.sxm", fwd=_surface())
+    new = _write_sxm(isolated_root / "new.sxm", fwd=_surface(), offset=(1e-7, 0.0))
+    _touch(old, 1_700_000_000)
+    _touch(new, 1_700_000_600)
+    out = _recent_scan_images(_StubApp(isolated_root), limit=12,
+                              epoch_boundary_ts=1_700_000_300)
+    by = {Path(s.path).stem: s for s in out}
+    assert (by["old"].stale_epoch, by["new"].stale_epoch) == (True, False)
+    assert by["old"].mtime == "2023-11-14T22:13:20Z"
+    assert by["new"].mtime == "2023-11-14T22:23:20Z"
+
+
+@pytest.mark.parametrize("bad", [0.0, -1.0, float("nan"), float("inf"), 1e20, None, "x"])
+def test_an_unreadable_mtime_is_undated_not_1970(bad):
+    """``_safe_mtime`` 把读不到报成 0.0 —— 那是排序键，不是时间。"""
+    from mast.api.routes.vision import _iso_utc
+
+    assert _iso_utc(bad) == ""
+
+
+def test_the_scan_in_progress_carries_its_mtime(tmp_path):
+    import time
+    from types import SimpleNamespace
+
+    from mast.api.routes.vision import _live_scan_image
+    from mast.api.schemas_vision import ScanFrame
+
+    png = tmp_path / "milestone.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+    t = int(time.time()) - 30          # 必须在 _LIVE_FRAME_MAX_AGE_S 之内
+    _touch(png, t)
+    ev = SimpleNamespace(payload={"frame_path": str(png)})
+    app = SimpleNamespace(
+        _state=SimpleNamespace(snapshot=lambda: SimpleNamespace(scan_running=True)),
+        _buffer=SimpleNamespace(
+            get_event_history=lambda since_seqno=-1, limit=200: [ev]),
+    )
+    frame = ScanFrame(center_x_m=0.0, center_y_m=0.0, width_m=1e-7, height_m=1e-7)
+    im = _live_scan_image(app, frame)
+    assert im is not None, "进行中的那一帧没拼出来 —— 测试前提失效"
+    assert im.mtime == _iso(t)
+    # 前端靠这个标记认出「正在扫的那一帧」：时间窗只筛已保存的扫描，它照画
+    # （上端闭合的时间窗曾把它藏掉）；逐行实时流可用时藏起这张 1/8 快照、不可用时用它
+    # （docs/v2/design/scan_map_live.md）。
+    assert im.live is True
+
+
+def test_a_saved_scan_is_not_marked_live(isolated_root):
+    from mast.api.routes.vision import _recent_scan_images
+
+    p = _write_sxm(isolated_root / "a.sxm", fwd=_surface())
+    _touch(p, 1_700_000_000)
+    out = _recent_scan_images(_StubApp(isolated_root), limit=12)
+    assert [s.live for s in out] == [False]
+
+
+def test_the_map_response_serialises_mtime(isolated_root):
+    """字段真的到了 HTTP 响应里，不只是模型上有。"""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from mast.api.context import AppContext
+    from mast.api.routes.vision import router
+
+    p = _write_sxm(isolated_root / "a.sxm", fwd=_surface())
+    _touch(p, 1_700_000_000)
+    ctx = AppContext()
+    ctx.app = _StubApp(isolated_root)
+    app = FastAPI()
+    app.state.ctx = ctx
+    app.include_router(router, prefix="/api")
+    body = TestClient(app).get("/api/scan-map").json()
+    assert body["degraded"] is False
+    assert [s["mtime"] for s in body["scan_images"]] == ["2023-11-14T22:13:20Z"]
+    assert [s["live"] for s in body["scan_images"]] == [False]
+
+
+def test_a_marker_stamp_gets_the_offset_of_its_own_date():
+    """按「当前」偏移读所有 naive 时间戳，在夏令时时区里另一半年的
+    标记差 1 h，同时区的浏览器也由对变错。每条按它那一天的规则带上偏移。
+    时区用 zoneinfo 构造，不改进程时区。"""
+    from zoneinfo import ZoneInfo
+
+    from mast.api.routes.vision import _stamp_with_offset
+
+    berlin = ZoneInfo("Europe/Berlin")
+    assert _stamp_with_offset("2026-07-01T12:00:00.123456", berlin) == "2026-07-01T12:00:00.123456+02:00"
+    assert _stamp_with_offset("2026-01-15T09:30:00", berlin) == "2026-01-15T09:30:00+01:00"
+    # 同一个 tz、相隔半年的两条，偏移不同 —— 这正是「当前偏移」做不到的
+    summer = _stamp_with_offset("2026-07-01T12:00:00", berlin)
+    winter = _stamp_with_offset("2026-01-15T12:00:00", berlin)
+    assert summer[-6:] != winter[-6:]
+
+
+@pytest.mark.parametrize("ts", [
+    "",                                   # 计划步骤没有时间
+    "not-a-time",                         # 读不出来的原样交出去，前端当「无时间」
+    "2026-13-01T00:00:00",
+    "2026-07-01T12:00:00+08:00",          # 已经带偏移的不动
+    "2026-07-01T04:00:00Z",
+])
+def test_a_stamp_that_cannot_or_need_not_be_converted_passes_through(ts):
+    from zoneinfo import ZoneInfo
+
+    from mast.api.routes.vision import _stamp_with_offset
+
+    assert _stamp_with_offset(ts, ZoneInfo("Europe/Berlin")) == ts

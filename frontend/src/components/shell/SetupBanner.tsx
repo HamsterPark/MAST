@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import clsx from "clsx";
 import { useInstrumentInit } from "@/hooks/useInstrumentInit";
-import { useStationProfile } from "@/hooks/useStationProfile";
+import { useStationCapabilities } from "@/hooks/useStationCapabilities";
 import { SETUP_PATH, isSetupPath } from "@/lib/setupNav";
 import { tr } from "@/lib/i18n";
 
@@ -28,16 +28,19 @@ import { tr } from "@/lib/i18n";
 // that presents as a red warning gets ignored within a week, which defeats it when a
 // value really is missing.
 //
-// It is never shown on an optical station (station profile "optical"): that machine
-// has no STM, so the required items below (preamp gain, bias polarity, safety
-// envelope, approach preset, ...) do not apply to it and the banner would nag about
-// quantities that do not exist there.
+// It is only shown on a station with the STM safety parameters (capability
+// `stm_safety`): an optical or a generic station has no STM, so the required items below
+// (preamp gain, bias polarity, safety envelope, approach preset, ...) do not apply to it
+// and the banner would nag about quantities that do not exist there. There the checklist
+// is not even asked for, and on any station it is asked for only once the station has
+// said what it has.
 
 export function SetupBanner() {
   const [collapsed, setCollapsed] = useState(false);
   const loc = useLocation();
-  const q = useInstrumentInit();
-  const station = useStationProfile();
+  const station = useStationCapabilities();
+  const stmSafety = station.ready && station.has("stm_safety");
+  const q = useInstrumentInit({ enabled: stmSafety });
   const d = q.data;
 
   // Do not nag when the user is already on the setup page.
@@ -48,7 +51,7 @@ export function SetupBanner() {
   // lives in router.tsx.
   if (isSetupPath(loc.pathname)) return null;
   // All hooks above run on every render; only now may the component bail out.
-  if (station.isOptical) return null;
+  if (!stmSafety) return null;
   if (q.isLoading || q.error || !d || d.degraded) return null;
   if (!d.should_prompt) return null;
 

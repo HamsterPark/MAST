@@ -15,25 +15,74 @@ Contract: ``docs/v2/design/optical_layout.md`` §7. In order:
    links that point nowhere, and the unresolved comments;
 4. with no light source at all: the components and their annotations instead.
 
+The beam (contract ``docs/v2/design/optical_layout_v2.md`` §5): every component along a beam also
+says what arrives there - the power (``arriving 12.3 mW``, or ``relative 24.6 %`` without an
+absolute power), the 1/e^2 spot (``spot Ø1.20 mm``, µm below 0.1 mm) and the polarization in words
+(:func:`polarization_text`); a segment with a waist in it gets a line ``focus: 4.00 mm after OBJ,
+Ø0.81 µm``. A line of assumptions comes first when one applies (sources without a polarization are
+taken as unpolarized; each wavelength of a source gets all of ``power_mw``; a fibre takes the power
+of the first beam that reaches it). Three more kinds of problem: a spot larger than the aperture, a
+beam that a component (almost) extinguishes - both grouped by component, the worst hit written with
+how many hits there were - and waveplates without a retardance (taken as transparent), one line each;
+the things to look at come in the order of contract v2 §12.3, which the front end's check panel
+shares.
+
+Heights (contract ``docs/v2/design/optical_layout_3d.md`` §6), only for a layout that names one (a table
+beam height, a ``z_mm`` or ``z_out_mm`` anywhere; every other layout is described word for word as
+before): the table line gives the beam height and a line after the coordinates says how heights are
+measured; a component's parenthesis gives its height (a periscope: its entrance, exit and how far it
+goes up or down), every component along a beam the height of the beam there and how far that is off its
+axis; a component the beam passes over or under gets a line of its own, ``↷ passes over M3 mirror (beam
+at 250 mm, its axis at 75 mm)``. Three more kinds of problem: a hit off its axis in height by more than
+20 % of the aperture (line by line, as in the plane), a beam that passes over or under a component
+nothing lights (grouped by component, the closest pass written) and a spot larger than the aperture in
+height (grouped, the largest overflow written).
+
 The text is in the language ``tr`` picks (the request's, else ``MAST_LANG``), or the one asked for
-with ``lang``. Longer than :data:`MAX_CHARS` it is cut and says so. Numbers: positions as they are
-stored (0.01 mm), offsets, incidence angles and path lengths to 0.1.
+with ``lang``. Each kind of thing to look at shows at most :data:`MAX_LINES_PER_KIND` lines and one more
+counting the rest; no kind ever disappears. Longer than :data:`MAX_CHARS` the text first leaves out the
+spot sizes and the foci, then shows one line of each kind of problem, then cuts the beam paths (saying
+so); only when even that does not fit is it cut from the end. Numbers: positions as they are stored (0.01 mm), offsets, incidence
+angles and path lengths to 0.1, powers to three significant digits.
 
 Everything here is derived: it never writes anything and never touches an instrument.
 """
 from __future__ import annotations
 
+import math
 from typing import Any, Optional, Sequence
 
 from mast.i18n import is_zh, tr, use_lang
-from mast.optical_layout.model import SOURCE_TYPES, Component, Layout, normalize_layout, type_name
-from mast.optical_layout.trace import lit_components, near_misses, trace_layout, truncation
+from mast.optical_layout.model import (
+    DEFAULT_BEAM_HEIGHT_MM,
+    SOURCE_TYPES,
+    Component,
+    Layout,
+    beam_height,
+    normalize_layout,
+    periscope_heights,
+    type_name,
+    uses_heights,
+)
+from mast.optical_layout.trace import MAX_TRACE_PASSES, lit_components, near_misses, trace_layout, truncation
 
 MAX_CHARS = 8000
 #: a hit further than this share of the aperture from the centre is worth a line
 OFF_CENTER_SHARE = 0.20
-_MAX_PROBLEM_LINES = 12
+#: a relative power below this is "almost no light" (contract v2 §5)
+DARK_SHARE = 1e-6
+#: a waist at most this far past the end of a segment still belongs to it - the component there
+#: sits at it (coordinates are kept to 0.001 mm)
+WAIST_SLACK_MM = 1e-3
+#: lines of one kind of problem in the things to look at; the rest is counted in one more line (contract v2 §12.3)
+MAX_LINES_PER_KIND = 3
+#: lines of components one segment passes over or under; the rest is counted in one more line (contract 3D §6.2)
+MAX_PASS_LINES = 3
 _MAX_COMMENT_LINES = 10
+#: the types a spot larger than the aperture is not reported for (contract v2 §5)
+_NO_SPOT_CHECK = frozenset({"sample", "beam_dump", "blocker"})
+#: the hits a spot larger than the aperture is looked for on (contract v2 §12.3: not backs, not blocks)
+_SPOT_ACTIONS = frozenset({"reflect", "transmit", "split", "stop"})
 
 
 # ── small formatting helpers ─────────────────────────────────────────────────────────────────
@@ -88,16 +137,284 @@ def _source_wavelengths(c: Component) -> str:
     return ", ".join(_wl(v) for v in values) if values else tr("波长未知", "wavelength unknown")
 
 
+# ── heights (contract 3D §6) ─────────────────────────────────────────────────────────────────
+
+
+class _Heights:
+    """What the description says about heights: nothing at all for a layout that names none (``on`` is
+    False), so that its description stays word for word what it was. ``h`` is the table's beam height."""
+
+    __slots__ = ("on", "h", "given")
+
+    def __init__(self, lay: Optional[Layout]) -> None:
+        self.on = lay is not None and uses_heights(lay)
+        self.h = beam_height(lay.table) if lay is not None else DEFAULT_BEAM_HEIGHT_MM
+        self.given = lay is not None and lay.table.beam_height_mm is not None
+
+
+_NO_HEIGHTS = _Heights(None)
+
+
+def _port_word(c: Component) -> tuple[str, str]:
+    """What the height of a component is measured to, ``(zh, en)``: a periscope's entrance, else its axis."""
+    return ("入口", "entrance") if c.type == "periscope" else ("光轴", "axis")
+
+
+def _height_props(c: Component, hs: _Heights) -> list[str]:
+    """A component's height in its parenthesis: ``height 120 mm``; a periscope that goes up or down
+    ``entrance 75 mm, exit 250 mm (up 175 mm)``. Nothing for a component at the table's beam height that
+    does not name one."""
+    if not hs.on:
+        return []
+    p = c.props
+    if c.type == "periscope":
+        z_in, z_out = periscope_heights(c, hs.h)
+        if z_out != z_in:
+            up, rise = z_out > z_in, _g(abs(z_out - z_in))
+            return [tr(f"入口 {_g(z_in)} mm、出口 {_g(z_out)} mm（{'升' if up else '降'} {rise} mm）",
+                       f"entrance {_g(z_in)} mm, exit {_g(z_out)} mm ({'up' if up else 'down'} {rise} mm)")]
+    if p.get("z_mm") is not None:
+        return [tr(f"高度 {_g(p['z_mm'])} mm", f"height {_g(p['z_mm'])} mm")]
+    return []
+
+
+def _beam_height_bit(c: Component, ev: dict) -> str:
+    """The height of the beam at a hit and how far that is off the component's axis (its entrance for a
+    periscope): ``beam at 120 mm, 5.0 mm above its axis``."""
+    z = _g(ev["z_mm"])
+    dz = ev.get("dz_mm") or 0.0
+    off = _f1(abs(dz))
+    if off == "0.0":
+        return tr(f"光高 {z} mm", f"beam at {z} mm")
+    zh, en = _port_word(c)
+    if dz > 0:
+        return tr(f"光高 {z} mm、高出{zh} {off} mm", f"beam at {z} mm, {off} mm above its {en}")
+    return tr(f"光高 {z} mm、低于{zh} {off} mm", f"beam at {z} mm, {off} mm below its {en}")
+
+
+def _pass_lines(lay: Layout, pad: str, seg: dict) -> list[str]:
+    """The components a segment passes over or under (contract 3D §6.2), a line each for the first
+    :data:`MAX_PASS_LINES` and one line counting the rest: a 3D layout passes many, and the text is read by
+    an agent."""
+    out: list[str] = []
+    z = seg.get("z_mm")
+    passes = seg.get("passes") or []
+    if z is None:
+        return out
+    for ps in passes[:MAX_PASS_LINES]:
+        c = lay.component(ps["component"])
+        if c is None:
+            continue
+        zh, en = _port_word(c)
+        over = ps["dz_mm"] > 0
+        port = _g(z - ps["dz_mm"])
+        out.append(pad + "↷ " + tr(f"从 {_name(c)} {'上方' if over else '下方'}越过（光高 {_g(z)} mm，它的{zh}在 {port} mm）",
+                                   f"passes {'over' if over else 'under'} {_name(c)} (beam at {_g(z)} mm, its {en} at {port} mm)"))
+    if len(passes) > MAX_PASS_LINES:
+        more = len(passes) - MAX_PASS_LINES
+        out.append(pad + "↷ " + tr(f"（另有 {more} 处越过）", f"({more} more passed over or under)"))
+    return out
+
+
+# ── the beam in words (contract v2 §5; the front end's inspector follows the same rules) ─────
+
+
+# Powers are written with one algorithm in both languages (contract v2 §12.3): no float formatting,
+# only a table of decimal powers that both parse alike, a floor, and digits put together as text. The
+# shared cases are tests/fixtures/optical_layout/power_text_cases.json.
+
+#: ``10 ** e`` as the decimal literal ``"1e{e}"`` parses (JavaScript: ``Number(`1e${e}`)``, the same double)
+_POW = {e: float(f"1e{e}") for e in range(-17, 16)}
+#: the unit of a power by the exponent it starts at (mW)
+_UNITS = ((3, "W"), (0, "mW"), (-3, "µW"), (-6, "nW"), (-9, "pW"))
+
+
+def _sig3(x: float) -> tuple[int, int]:
+    """``(n, e)`` with ``x ≈ n × 10^(e − 2)`` to three significant digits, for ``x > 0``: ``e`` is the
+    largest exponent in [-15, 15] with ``POW[e] <= x`` (-15 below that), ``n = floor(x / POW[e − 2] + 0.5)``,
+    and ``n >= 1000`` becomes ``(100, e + 1)``."""
+    e = -15
+    for k in range(15, -16, -1):
+        if _POW[k] <= x:
+            e = k
+            break
+    n = math.floor(x / _POW[e - 2] + 0.5)
+    if n >= 1000:
+        n, e = 100, e + 1
+    return n, e
+
+
+def _digits(n: int, k: int) -> str:
+    """``n × 10^k`` written with digits only: zeros appended for ``k >= 0``, else a decimal point put in
+    and trailing zeros (and a trailing point) dropped."""
+    text = str(n)
+    if k >= 0:
+        return text + "0" * k
+    if len(text) <= -k:
+        text = "0" * (-k - len(text) + 1) + text
+    return (text[:k] + "." + text[k:]).rstrip("0").rstrip(".")
+
+
+#: an absolute power below this (mW, i.e. 0.001 pW) is written "< 0.001 pW": sig3 is only used for e >= -12
+_LEAST_MW = 1e-12
+
+
+def power_text(mw: float) -> str:
+    """A power given in mW, three significant digits in the unit a person would use (W, mW, µW, nW, pW):
+    ``1 mW``, ``172 µW``, ``1 W``, ``0 mW``; below 0.001 pW ``< 0.001 pW`` (contract v2 §12.3.2)."""
+    if mw == 0:
+        return "0 mW"
+    if mw < _LEAST_MW:
+        return "< 0.001 pW"
+    n, e = _sig3(mw)
+    u, unit = next(((u, name) for u, name in _UNITS if u <= e), _UNITS[-1])
+    return f"{_digits(n, (e - 2) - u)} {unit}"
+
+
+def share_number(p: float) -> str:
+    """The share of the source, ``p × 100`` as a number for a percentage: ``0`` (also for a negative
+    floating-point residue), ``< 0.001`` or three significant digits (``24.6``, ``100``, ``0.001``)."""
+    x = p * 100
+    if x <= 0:
+        return "0"
+    if x < 0.001:
+        return "< 0.001"
+    n, e = _sig3(x)
+    return _digits(n, e - 2)
+
+
+def share_text(p: float) -> str:
+    """``相对 24.6 %`` / ``relative 24.6 %``."""
+    number = share_number(p)
+    return tr(f"相对 {number} %", f"relative {number} %")
+
+
+def spot_text(d_mm: float) -> str:
+    """``Ø1.20 mm``; below 0.1 mm in µm (``Ø0.81 µm``)."""
+    return f"Ø{d_mm:.2f} mm" if d_mm >= 0.1 else f"Ø{d_mm * 1e3:.2f} µm"
+
+
+def _angle(v: float) -> str:
+    """An angle to 0.1 degree without a trailing ``.0`` (``45``, ``22.5``, ``37``), ``-0`` as ``0``."""
+    return _g(v, 1)
+
+
+def _signed(v: float) -> str:
+    """:func:`_angle` with its sign always written (``+20``, ``-12.5``); ASCII ``+`` / ``-``."""
+    text = _angle(v)
+    return text if text.startswith("-") else "+" + text
+
+
+def polarization_text(s: Optional[Sequence[float]]) -> str:
+    """The polarization of a beam in words, from the normalised Stokes vector ``s`` of the trace
+    (``[S1/S0, S2/S0, S3/S0]``, ``None`` when no light): ``no light``; ``unpolarised`` (degree of
+    polarization below 0.01); ``linear ψ°`` with ``(p)`` / ``(s)`` within 1° of 0 / 90 (|χ| < 1°);
+    ``circular (χ = +45°)`` / ``(χ = -45°)`` (|χ| > 44°); ``elliptical ψ°, χ = +x°`` otherwise; and
+    ``(degree of polarisation 0.xx)`` below 0.99. ψ = ½ atan2(s2, s1) in [0, 180), χ = ½ asin(s3 / DOP)
+    (clamped). Angles to 0.1° without a trailing ``.0``; ψ is brought into [0, 180) again after rounding
+    (179.96 reads 0); the p / s tags look at the unrounded ψ; signs of χ always written, ASCII.
+    Contract v2 §5 and §12.3 - the front end's inspector says the same."""
+    if s is None:
+        return tr("无光", "no light")
+    s1, s2, s3 = s
+    dop = math.sqrt(s1 * s1 + s2 * s2 + s3 * s3)
+    if dop < 0.01:
+        return tr("非偏振", "unpolarised")
+    psi = math.degrees(0.5 * math.atan2(s2, s1)) % 180.0
+    psi_r = round(psi, 1)
+    if psi_r >= 180.0:
+        psi_r -= 180.0
+    chi = math.degrees(0.5 * math.asin(max(-1.0, min(1.0, s3 / dop))))
+    if abs(chi) < 1.0:
+        tag = ""
+        if psi < 1.0 or psi > 179.0:
+            tag = tr("（p）", " (p)")
+        elif abs(psi - 90.0) < 1.0:
+            tag = tr("（s）", " (s)")
+        text = tr(f"线偏 {_angle(psi_r)}°{tag}", f"linear {_angle(psi_r)}°{tag}")
+    elif abs(chi) > 44.0:
+        sign = "+" if chi > 0 else "-"
+        text = tr(f"圆偏（χ = {sign}45°）", f"circular (χ = {sign}45°)")
+    else:
+        text = tr(f"椭圆偏 {_angle(psi_r)}°、χ = {_signed(chi)}°", f"elliptical {_angle(psi_r)}°, χ = {_signed(chi)}°")
+    if dop < 0.99:
+        text += tr(f"（偏振度 {dop:.2f}）", f" (degree of polarisation {dop:.2f})")
+    return text
+
+
+def _beam_bits(beam: Optional[dict], *, spot: bool = True) -> list[str]:
+    """What arrives at a component: the power, the spot (when *spot*), the polarization."""
+    if not beam:
+        return []
+    if beam.get("mw") is not None:
+        bits = [tr(f"入射 {power_text(beam['mw'])}", f"arriving {power_text(beam['mw'])}")]
+    else:
+        bits = [share_text(beam["p"])]
+    if spot and beam.get("d_mm") is not None:
+        bits.append(tr(f"光斑 {spot_text(beam['d_mm'])}", f"spot {spot_text(beam['d_mm'])}"))
+    bits.append(polarization_text(beam.get("s")))
+    return bits
+
+
+def _waist(seg: dict, tree: dict, run: float = 0.0) -> Optional[tuple[float, float]]:
+    """``(distance from the start of the segment, 1/e^2 diameter)`` of a waist in the segment, if
+    there is one (contract v2 §4.4: ``z < 0`` at the start and past 0 before the end - or within
+    :data:`WAIST_SLACK_MM` of it). *run* is the vertical run of a periscope just before the segment
+    (contract 3D §3.4): it is path too, so the segment is taken to start that much earlier - a waist in
+    the run is found, and the distance is from where the run starts, the periscope."""
+    beam = seg.get("beam") or {}
+    q = beam.get("q")
+    m2 = (tree.get("beam") or {}).get("m2")
+    if q is None or m2 is None or tree.get("wavelength_nm") is None:
+        return None
+    z, zr = q
+    z0 = z - run
+    length = math.hypot(seg["x1"] - seg["x0"], seg["y1"] - seg["y0"])
+    if not (z0 < 0.0 and z + length > -WAIST_SLACK_MM):
+        return None
+    lam = tree["wavelength_nm"] * 1e-6
+    return -z0, 2.0 * math.sqrt(lam * m2 * zr / math.pi)
+
+
+def _run_before(segments: list[dict], events: list[dict], i: int) -> float:
+    """The vertical run a periscope puts before segment *i* (contract 3D §3.4): the height of the segment against
+    that of the beam arriving at the event before it; 0 elsewhere."""
+    if i <= 0 or i > len(events):
+        return 0.0
+    z0, z1 = events[i - 1].get("z_mm"), segments[i].get("z_mm")
+    return 0.0 if z0 is None or z1 is None else abs(z1 - z0)
+
+
+def _focus_line(pad: str, after: str, seg: dict, tree: dict, run: float = 0.0) -> list[str]:
+    w = _waist(seg, tree, run)
+    if w is None:
+        return []
+    return [pad + tr(f"  焦点：{after} 之后 {w[0]:.2f} mm，{spot_text(w[1])}",
+                     f"  focus: {w[0]:.2f} mm after {after}, {spot_text(w[1])}")]
+
+
 # ── one component, in words ──────────────────────────────────────────────────────────────────
 
 
-def _props_text(c: Component) -> list[str]:
-    """What the type's parameters say."""
+def _props_text(c: Component, own_power: bool = True) -> list[str]:
+    """What the type's parameters say. *own_power* False: a fibre output that continues a fibre - the trace
+    does not use its own ``power_mw`` (the light that reached its coupler is the source), so it is not named."""
     p = c.props
     out: list[str] = []
     t = c.type
-    if t in ("laser", "fiber_out") and p.get("power_mw") is not None:
-        out.append(tr(f"功率 {_g(p['power_mw'])} mW", f"power {_g(p['power_mw'])} mW"))
+    if t in ("laser", "fiber_out"):
+        if p.get("power_mw") is not None and own_power:
+            out.append(tr(f"功率 {_g(p['power_mw'])} mW", f"power {_g(p['power_mw'])} mW"))
+        if p.get("polarization") == "linear":
+            a = _g(p.get("pol_angle_deg", 0.0))
+            out.append(tr(f"线偏 {a}°", f"linear {a} deg"))
+        elif p.get("polarization") == "unpolarized":
+            out.append(tr("非偏振", "unpolarized"))
+        if p.get("beam_diameter_mm") is not None:
+            d = _g(p["beam_diameter_mm"], 6)
+            out.append(tr(f"出口光斑 Ø{d} mm", f"Ø{d} mm beam at the exit"))
+            if p.get("m2") is not None:
+                out.append(f"M² {_g(p['m2'], 3)}")
     elif t == "beam_splitter":
         r = p.get("reflect_fraction", 0.5)
         out.append(tr(f"反射 {_g(r * 100, 1)}%", f"reflects {_g(r * 100, 1)}%"))
@@ -115,10 +432,19 @@ def _props_text(c: Component) -> list[str]:
         if p.get("retardance"):
             half = p["retardance"] == "half"
             out.append(tr("半波" if half else "四分之一波", "half-wave" if half else "quarter-wave"))
+        else:
+            out.append(tr("相位延迟未填，按透明处理", "retardance not given: taken as transparent"))
         if p.get("fast_axis_deg") is not None:
             out.append(tr(f"快轴 {_g(p['fast_axis_deg'])}°", f"fast axis {_g(p['fast_axis_deg'])} deg"))
-    elif t == "polarizer" and p.get("axis_deg") is not None:
-        out.append(tr(f"透光轴 {_g(p['axis_deg'])}°", f"axis {_g(p['axis_deg'])} deg"))
+        elif p.get("retardance"):
+            out.append(tr("快轴未填，按 0° 算", "fast axis not given: taken as 0 deg"))
+    elif t == "polarizer":
+        if p.get("axis_deg") is not None:
+            out.append(tr(f"透光轴 {_g(p['axis_deg'])}°", f"axis {_g(p['axis_deg'])} deg"))
+        else:
+            out.append(tr("轴未填，按 0° 算", "axis not given: taken as 0 deg"))
+    elif t == "pbs":
+        out.append(tr("透射 p、反射 s", "transmits p, reflects s"))
     elif t == "filter":
         lo, hi = p.get("pass_min_nm"), p.get("pass_max_nm")
         if lo is not None and hi is not None:
@@ -138,8 +464,15 @@ def _props_text(c: Component) -> list[str]:
                       "reflecting" if p["reflects"] else "not reflecting (terminal)"))
     elif t == "custom" and p.get("behavior"):
         out.append(tr(f"行为 {p['behavior']}", f"behavior {p['behavior']}"))
-    elif t == "fiber_in" and p.get("continues_at"):
-        out.append(tr(f"光接到 {p['continues_at']}", f"light continues at {p['continues_at']}"))
+    elif t == "fiber_in":
+        if p.get("continues_at"):
+            out.append(tr(f"光接到 {p['continues_at']}", f"light continues at {p['continues_at']}"))
+        if p.get("coupling") is not None:
+            share = _g(p["coupling"] * 100, 4)
+            out.append(tr(f"耦合效率 {share}%", f"coupling {share}%"))
+    if p.get("throughput") is not None:
+        share = _g(p["throughput"] * 100, 4)
+        out.append(tr(f"通过率 {share}%", f"throughput {share}%"))
     return out
 
 
@@ -187,7 +520,8 @@ def _link_text(c: Component, links: Optional[dict[str, dict[str, Any]]]) -> list
 
 
 def _details(c: Component, links: Optional[dict[str, dict[str, Any]]], *, wavelength_text: Optional[str] = None,
-             event: Optional[dict] = None, extra: Sequence[str] = ()) -> str:
+             event: Optional[dict] = None, extra: Sequence[str] = (), own_power: bool = True,
+             hs: _Heights = _NO_HEIGHTS) -> str:
     """The parenthesis after a component's name."""
     bits: list[str] = []
     if wavelength_text:
@@ -195,7 +529,8 @@ def _details(c: Component, links: Optional[dict[str, dict[str, Any]]], *, wavele
     maker = _maker(c)
     if maker:
         bits.append(maker)
-    bits += _props_text(c)
+    bits += _props_text(c, own_power)
+    bits += _height_props(c, hs)
     a = c.annotations
     if a.function:
         bits.append(tr(f"作用：{a.function}", f"function: {a.function}"))
@@ -204,6 +539,8 @@ def _details(c: Component, links: Optional[dict[str, dict[str, Any]]], *, wavele
         bits.append(tr(f"命中偏离中心 {_f1(event['offset_mm'])} mm", f"hit {_f1(event['offset_mm'])} mm off center"))
         bits.append(tr(f"入射 {_f1(event['incidence_deg'])}°", f"incidence {_f1(event['incidence_deg'])} deg"))
         bits.append(tr(f"累计 {_f1(event['path_mm'])} mm", f"path {_f1(event['path_mm'])} mm"))
+        if hs.on and event.get("z_mm") is not None:
+            bits.append(_beam_height_bit(c, event))
     bits += list(extra)
     if a.motorized:
         motor = [tr("电动：是", "motorized: yes")]
@@ -226,34 +563,53 @@ def _details(c: Component, links: Optional[dict[str, dict[str, Any]]], *, wavele
 # ── the beam, in order ───────────────────────────────────────────────────────────────────────
 
 
-def _event_line(c: Component, ev: dict, links: Optional[dict]) -> str:
+def _event_line(c: Component, ev: dict, links: Optional[dict], spot: bool = True, hs: _Heights = _NO_HEIGHTS) -> str:
     action = ev["action"]
     extra: list[str] = []
     if c.type == "dichroic":
         extra.append(tr("反射", "reflects") if action == "reflect" else tr("透射", "transmits"))
-    d = _details(c, links, event=ev, extra=extra)
+    d = _details(c, links, event=ev, extra=extra, hs=hs)
     if action == "blocked":
+        iris = (tr("命中点（平面内或高度方向）偏离中心超过开口半径", "the hit is beyond the open radius, sideways or in height")
+                if hs.on else tr("命中点偏离中心超过开口半径", "the hit is beyond the open radius"))
         why = {"filter": tr("光的波长不在通带内", "the wavelength is outside the passband"),
-               "iris": tr("命中点偏离中心超过开口半径", "the hit is beyond the open radius"),
+               "iris": iris,
                "shutter": tr("快门关着", "the shutter is closed")}.get(c.type)
         tail = (tr("（", " (") + why + tr("）", ")")) if why else ""
-        return tr(f"被 {_name(c)} 挡住{d}{tail}", f"blocked by {_name(c)}{d}{tail}")
-    if action == "back_hit":
-        return tr(f"打在 {_name(c)} 的背面，被挡住{d}", f"hits the back of {_name(c)} and is stopped{d}")
-    if action == "stop":
-        return tr(f"终止于 {_name(c)}{d}", f"ends at {_name(c)}{d}")
-    if action == "split":
-        return f"{_name(c)}{d}" + tr("：分束", ": splits")
-    return f"{_name(c)}{d}"
+        text = tr(f"被 {_name(c)} 挡住{d}{tail}", f"blocked by {_name(c)}{d}{tail}")
+    elif action == "back_hit":
+        text = tr(f"打在 {_name(c)} 的背面，被挡住{d}", f"hits the back of {_name(c)} and is stopped{d}")
+    elif action == "stop":
+        text = tr(f"终止于 {_name(c)}{d}", f"ends at {_name(c)}{d}")
+    elif action == "split":
+        text = f"{_name(c)}{d}" + tr("：分束", ": splits")
+    else:
+        text = f"{_name(c)}{d}"
+    beam = _beam_bits(ev.get("beam"), spot=spot)
+    return text + "".join(" · " + b for b in beam)
 
 
-def _branch_lines(layout: Layout, by_id: dict[str, dict], branch: dict, links: Optional[dict], depth: int) -> list[str]:
+def _branch_lines(layout: Layout, tree: dict, by_id: dict[str, dict], branch: dict, links: Optional[dict], depth: int,
+                  before: str, spot: bool = True, hs: _Heights = _NO_HEIGHTS) -> list[str]:
+    """The lines of *branch* and its children; *before* is the short name of the component its
+    first segment starts at (the source, or the splitter), for a focus in that segment. The components a
+    segment passes over or under come just before the line of the hit that ends it (or of its end)."""
     pad = "  " * depth
     lines: list[str] = []
-    for ev in branch["events"]:
+    segments = branch["segments"]
+    if spot and segments:
+        lines += _focus_line(pad, before, segments[0], tree)
+    for i, ev in enumerate(branch["events"]):
+        if hs.on and i < len(segments):
+            lines += _pass_lines(layout, pad, segments[i])
         c = layout.component(ev["component"])
         if c is not None:
-            lines.append(f"{pad}→ {_event_line(c, ev, links)}")
+            lines.append(f"{pad}→ {_event_line(c, ev, links, spot, hs)}")
+            before = c.label or c.id
+        if spot and i + 1 < len(segments):
+            lines += _focus_line(pad, before, segments[i + 1], tree, _run_before(segments, branch["events"], i + 1))
+    if hs.on and len(segments) > len(branch["events"]):         # the segment out of the table, or to the cut
+        lines += _pass_lines(layout, pad, segments[-1])
     end = branch["end"]
     if end == "left_table":
         last = branch["segments"][-1]
@@ -269,23 +625,30 @@ def _branch_lines(layout: Layout, by_id: dict[str, dict], branch: dict, links: O
             child = by_id.get(branch["branch"] + suffix)
             if child is None:
                 continue
+            # the product of the splitting ratios (the power, with every loss, is on each line below)
             share = _g(child["fraction"] * 100, 1)
-            lines.append(tr(f"{pad}  ↳ {word} {child['branch']}（强度 {share}%）",
-                            f"{pad}  ↳ {word} {child['branch']} (intensity {share}%)"))
-            lines += _branch_lines(layout, by_id, child, links, depth + 2)
+            lines.append(tr(f"{pad}  ↳ {word} {child['branch']}（分光 {share}%）",
+                            f"{pad}  ↳ {word} {child['branch']} (split share {share}%)"))
+            lines += _branch_lines(layout, tree, by_id, child, links, depth + 2, before, spot, hs)
     return lines
 
 
 def _tree_lines(layout: Layout, tree: dict, number: int, links: Optional[dict],
-                continued_from: dict[str, str]) -> list[str]:
+                continued_from: dict[str, str], spot: bool = True, hs: _Heights = _NO_HEIGHTS) -> list[str]:
     src = layout.component(tree["source"])
     if src is None:
         return []
-    head = f"{number}) {_name(src)}{_details(src, links, wavelength_text=_wl(tree['wavelength_nm']))}"
-    if src.id in continued_from:
+    continued = src.id in continued_from
+    head = (f"{number}) {_name(src)}"
+            f"{_details(src, links, wavelength_text=_wl(tree['wavelength_nm']), own_power=not continued, hs=hs)}")
+    if continued:
         head += tr(f"；光从 {continued_from[src.id]} 接过来", f"; the light comes in at {continued_from[src.id]}")
+        fed = (tree.get("beam") or {}).get("source_mw")
+        if fed is not None:
+            head += tr(f"，耦合进来 {power_text(fed)}", f", {power_text(fed)} coupled in")
     by_id = {b["branch"]: b for b in tree["branches"]}
-    return [head] + ["   " + ln for ln in _branch_lines(layout, by_id, tree["branches"][0], links, 0)]
+    body = _branch_lines(layout, tree, by_id, tree["branches"][0], links, 0, src.label or src.id, spot, hs)
+    return [head] + ["   " + ln for ln in body]
 
 
 # ── problems and comments ────────────────────────────────────────────────────────────────────
@@ -305,14 +668,222 @@ def _cut_text(cut: dict) -> str:
               f"Usually there are too many splitters, sources or wavelengths")
 
 
-def _problems(layout: Layout, trace: list[dict]) -> list[str]:
-    out: list[str] = []
+def _beams_in_all(n: int) -> str:
+    """How many hits on a component had the problem, when more than one did."""
+    return tr(f"（共 {n} 束光）", f" ({n} beams in all)") if n > 1 else ""
+
+
+def _beam_problems(layout: Layout, trace: list[dict]) -> tuple[list[str], list[str], list[str]]:
+    """``(spots, extinctions, waveplates)``, the three kinds of contract v2 §5 with the rules of §12.3:
+
+    * a spot larger than the aperture: hits with a known ``d_mm``, an arriving ``p >= 1e-6``, an action
+      ``reflect`` / ``transmit`` / ``split`` / ``stop``, not on a sample, beam dump or blocker, at most
+      89 degrees incidence, with ``|offset| + (d / 2) / cos(incidence) > half aperture + 1e-9`` (an iris
+      with ``open_mm``: half of that);
+    * an extinguished beam: ``reflect`` / ``transmit`` hits with an arriving ``p >= 1e-6`` and the next
+      segment of the branch below 1e-6 (none after a 64th event: not judged);
+    * a waveplate without a retardance that some beam hits (any hit, any power): one line each.
+
+    The first two are grouped by component, in the order first found: the worst hit is written (the
+    largest overflow; the largest arriving relative power; the first among equals) with how many hits
+    had the problem."""
+    spot: dict[str, list] = {}           # component id -> [hits, (overflow, who, d, foot, offset, half)]
+    dark: dict[str, list] = {}           # component id -> [hits, (arriving p, who)]
+    plates: list[str] = []
+    for tree in trace:
+        who = f"{tree['source']} {_wl(tree['wavelength_nm'])}"
+        for br in tree["branches"]:
+            segments = br["segments"]
+            for i, ev in enumerate(br["events"]):
+                c = layout.component(ev["component"])
+                beam = ev.get("beam")
+                if c is None or not beam:
+                    continue
+                if c.type == "waveplate" and not c.props.get("retardance") and c.id not in plates:
+                    plates.append(c.id)
+                d = beam.get("d_mm")
+                if (d is not None and beam["p"] >= DARK_SHARE and ev["action"] in _SPOT_ACTIONS
+                        and c.type not in _NO_SPOT_CHECK and ev["incidence_deg"] <= 89.0):
+                    foot = d / 2.0 / math.cos(math.radians(ev["incidence_deg"]))
+                    half = c.aperture_mm / 2.0
+                    if c.type == "iris" and c.props.get("open_mm") is not None:
+                        half = c.props["open_mm"] / 2.0
+                    over = abs(ev["offset_mm"]) + foot - half
+                    if over > 1e-9:
+                        entry = spot.setdefault(c.id, [0, None])
+                        entry[0] += 1
+                        if entry[1] is None or over > entry[1][0]:
+                            entry[1] = (over, who, d, foot, ev["offset_mm"], half)
+                if ev["action"] in ("reflect", "transmit") and i + 1 < len(segments):
+                    after = (segments[i + 1].get("beam") or {}).get("p")
+                    if after is not None and beam["p"] >= DARK_SHARE and after < DARK_SHARE:
+                        entry = dark.setdefault(c.id, [0, None])
+                        entry[0] += 1
+                        if entry[1] is None or beam["p"] > entry[1][0]:
+                            entry[1] = (beam["p"], who)
+    spots: list[str] = []
+    for cid, (n, (over, who, d, foot, offset, half)) in spot.items():
+        c = layout.component(cid)
+        spots.append(tr(
+            f"光斑超出口径：{who} 在 {_name(c)} 上光斑 {spot_text(d)}，沿作用面的半宽 {foot:.2f} mm、"
+            f"偏离中心 {_f1(offset)} mm，超出口径边缘 {over:.2f} mm（口径半宽 {_g(half)} mm）{_beams_in_all(n)}",
+            f"spot larger than the aperture: the beam {who} is {spot_text(d)} across on {_name(c)}, "
+            f"{foot:.2f} mm half-width along its surface at {_f1(offset)} mm off center, "
+            f"{over:.2f} mm beyond the edge (half aperture {_g(half)} mm){_beams_in_all(n)}"))
+    darks: list[str] = []
+    for cid, (n, (_, who)) in dark.items():
+        c = layout.component(cid)
+        why = {"polarizer": tr("偏振", "polarization"), "nd": "ND"}.get(c.type, tr("通过率", "throughput"))
+        darks.append(tr(f"被消光：{who} 经过 {_name(c)} 之后几乎没有光（{why}）{_beams_in_all(n)}",
+                        f"extinguished: the beam {who} has almost no light after {_name(c)} ({why}){_beams_in_all(n)}"))
+    waveplates = [tr(f"波片没填相位延迟，按透明处理（对偏振不起作用）：{_name(layout.component(cid))}",
+                     f"waveplate without a retardance, taken as transparent (no effect on the polarization): "
+                     f"{_name(layout.component(cid))}") for cid in plates]
+    return spots, darks, waveplates
+
+
+def _usable_width(c: Component) -> tuple[float, bool]:
+    """``(width, is_opening)``: the aperture a beam may use on a component, the opening of an iris that has
+    one (the 3D checks judge an iris by its opening in height as in the plane)."""
+    if c.type == "iris" and c.props.get("open_mm") is not None:
+        return c.props["open_mm"], True
+    return c.aperture_mm, False
+
+
+def _height_problems(layout: Layout, trace: list[dict], lit: set[str],
+                     cut: Optional[dict]) -> tuple[list[str], list[str], list[str]]:
+    """``(off_height, missed_in_height, spot_in_height)``, the three kinds of contract 3D §6.3, on the numbers
+    of the trace (``dz_mm`` and ``d_mm`` as rounded there):
+
+    * off its axis in height by more than 20 % of the aperture (of the opening of an iris that has one): hits
+      ``reflect`` / ``transmit`` / ``split`` / ``stop``; line by line, in trace order, as in the plane;
+    * missed in height: the passes over or under a component no beam lights (not judged on a trace the budget
+      cut); grouped by component, the closest pass written (smallest ``|dz|``, the first among equals) with
+      how many passes there were;
+    * a spot larger than the aperture in height: hits with a known ``d_mm``, an arriving ``p >= 1e-6``, one of
+      the four actions, not on a sample, beam dump or blocker: ``|dz| + d / 2 - half > 1e-9``, half = half the
+      aperture (the opening of an iris); whatever the incidence. Grouped by component, the largest overflow.
+
+    Only for a layout that uses heights (contract 3D §6.1): without them every ``dz`` is 0 and nothing is
+    passed, and a spot too large all round is already the "spot larger than the aperture" of v2 - its
+    description stays word for word what it was."""
+    offs: list[str] = []
+    missed: dict[str, list] = {}         # component id -> [passes, (|dz|, who, z, dz)]
+    spots: dict[str, list] = {}          # component id -> [hits, (over, who, d, dz, half)]
+    if not uses_heights(layout):
+        return [], [], []
+    for tree in trace:
+        who = f"{tree['source']} {_wl(tree['wavelength_nm'])}"
+        for br in tree["branches"]:
+            for seg in br["segments"]:
+                for ps in seg.get("passes") or ():
+                    if cut or ps["component"] in lit or seg.get("z_mm") is None:
+                        continue
+                    entry = missed.setdefault(ps["component"], [0, None])
+                    entry[0] += 1
+                    if entry[1] is None or abs(ps["dz_mm"]) < entry[1][0]:
+                        entry[1] = (abs(ps["dz_mm"]), who, seg["z_mm"], ps["dz_mm"])
+            for ev in br["events"]:
+                c = layout.component(ev["component"])
+                dz = ev.get("dz_mm")
+                if c is None or dz is None or ev["action"] not in _SPOT_ACTIONS:
+                    continue
+                width, opening = _usable_width(c)
+                if abs(dz) > OFF_CENTER_SHARE * width:
+                    zh, en = _port_word(c)
+                    share = abs(dz) / width * 100
+                    wzh, wen = ("开口", "opening") if opening else ("口径", "aperture")
+                    offs.append(tr(
+                        f"高度偏离 > 20% 口径：{who} 在 {_name(c)} 上比{zh}{'高' if dz > 0 else '低'} {_f1(abs(dz))} mm"
+                        f"（{wzh} {_g(width)} mm 的 {share:.0f}%）",
+                        f"off its axis in height by more than 20% of the aperture: {who} hits {_name(c)} "
+                        f"{_f1(abs(dz))} mm {'above' if dz > 0 else 'below'} its {en} ({share:.0f}% of the {_g(width)} mm {wen})"))
+                beam = ev.get("beam") or {}
+                d = beam.get("d_mm")
+                if d is not None and beam["p"] >= DARK_SHARE and c.type not in _NO_SPOT_CHECK:
+                    half = width / 2.0
+                    over = abs(dz) + d / 2.0 - half
+                    if over > 1e-9:
+                        entry = spots.setdefault(c.id, [0, None])
+                        entry[0] += 1
+                        if entry[1] is None or over > entry[1][0]:
+                            entry[1] = (over, who, d, dz, half)
+    missed_lines: list[str] = []
+    for cid, (n, (_, who, z, dz)) in missed.items():
+        c = layout.component(cid)
+        zh, en = _port_word(c)
+        over = dz > 0
+        half = c.aperture_mm / 2.0
+        missed_lines.append(tr(
+            f"高度错过：{_name(c)} 没被任何光照到；{who} 的光从它{'上方' if over else '下方'}越过"
+            f"（光高 {_g(z)} mm，它的{zh}在 {_g(z - dz)} mm，口径半宽 {_g(half)} mm）{_beams_in_all(n)}",
+            f"missed in height: nothing lights {_name(c)}; the beam {who} passes {'over' if over else 'under'} it "
+            f"(beam at {_g(z)} mm, its {en} at {_g(z - dz)} mm, half aperture {_g(half)} mm){_beams_in_all(n)}"))
+    spot_lines: list[str] = []
+    for cid, (n, (over, who, d, dz, half)) in spots.items():
+        c = layout.component(cid)
+        zh, en = _port_word(c)
+        if dz == 0:
+            where_zh, where_en = f"在{zh}上，上下沿各超出 {over:.2f} mm", f"on its {en}, {over:.2f} mm beyond both edges"
+        elif dz > 0:
+            where_zh = f"比{zh}高 {_f1(dz)} mm，超出口径上沿 {over:.2f} mm"
+            where_en = f"{_f1(dz)} mm above its {en}, {over:.2f} mm beyond its upper edge"
+        else:
+            where_zh = f"比{zh}低 {_f1(-dz)} mm，超出口径下沿 {over:.2f} mm"
+            where_en = f"{_f1(-dz)} mm below its {en}, {over:.2f} mm beyond its lower edge"
+        spot_lines.append(tr(
+            f"光斑在高度方向超出口径：{who} 在 {_name(c)} 上光斑 {spot_text(d)}、{where_zh}（口径半宽 {_g(half)} mm）"
+            f"{_beams_in_all(n)}",
+            f"spot beyond the aperture in height: the beam {who} is {spot_text(d)} across on {_name(c)}, {where_en} "
+            f"(half aperture {_g(half)} mm){_beams_in_all(n)}"))
+    return offs, missed_lines, spot_lines
+
+
+def _assumptions(layout: Layout, trace: list[dict]) -> list[str]:
+    """The line of assumptions at the top (contract v2 §5), only those that apply."""
+    bits: list[str] = []
+    polar_parts = any(c.type in ("polarizer", "pbs", "waveplate") for c in layout.components)
+    blank = [c for c in layout.components if c.type in ("laser", "fiber_out") and "polarization" not in c.props]
+    if polar_parts and blank:
+        n = len(blank)
+        bits.append(tr(f"{n} 个光源没填偏振，按非偏振光算（过偏振片或 PBS 时功率减半）",
+                       f"{n} light source{'' if n == 1 else 's'} without a polarization {'is' if n == 1 else 'are'} taken "
+                       f"as unpolarized (a polarizer or a PBS halves {'its' if n == 1 else 'their'} power)"))
+    if any(c.type in ("laser", "fiber_out") and len(c.props.get("wavelengths_nm") or ()) > 1
+           and c.props.get("power_mw") is not None for c in layout.components):
+        bits.append(tr("多波长光源的 power_mw 按每个波长各一份算",
+                       "a source with several wavelengths emits all of its power_mw at each of them"))
+    continued = {c.props["continues_at"] for c in layout.components if c.type == "fiber_in" and c.props.get("continues_at")}
+    if any(t["source"] in continued for t in trace):
+        bits.append(tr("光纤续接的光按第一次到达的那一支计功率，相对功率从 1 重新算",
+                       "a fiber output gets the power of the first beam that reaches its coupler, and its relative "
+                       "power starts again at 1"))
+    if not bits:
+        return []
+    return [tr("假设：", "Assumptions: ") + ("；" if is_zh() else "; ").join(bits)]
+
+
+def _problems(layout: Layout, trace: list[dict]) -> list[list[str]]:
+    """The things to look at, kind by kind, in the order of contract v2 §12.3 with the kinds of contract 3D
+    §6.3 put in (the check panel may order them its own way): the cut notice, backs, hits off center, hits
+    off their axis in height, near misses, misses in height, spots larger than the aperture, spots larger
+    than the aperture in height, extinguished beams, beams that leave the table, components no beam reaches
+    (or: no light source), the event cap, fibres, waveplates without a retardance. Inside a kind, in trace
+    order; a kind may be empty (the three of the heights always are for a layout without heights)."""
+    cuts: list[str] = []
+    backs: list[str] = []
+    offs: list[str] = []
+    nears: list[str] = []
+    lefts: list[str] = []
+    unlit: list[str] = []
+    capped: list[str] = []
+    fibres: list[str] = []
     lit = lit_components(trace)
     sources = [c for c in layout.components if c.type in SOURCE_TYPES]
     targets = [c for c in layout.components if c.type not in SOURCE_TYPES]
     cut = truncation(trace)
     if cut:
-        out.append(_cut_text(cut))
+        cuts.append(_cut_text(cut))
 
     for tree in trace:
         who = f"{tree['source']} {_wl(tree['wavelength_nm'])}"
@@ -322,22 +893,22 @@ def _problems(layout: Layout, trace: list[dict]) -> list[str]:
                 if c is None:
                     continue
                 if ev["action"] == "back_hit":
-                    out.append(tr(f"打在背面：{who} 的光打在 {_name(c)} 的背面（被挡住，没有继续）",
-                                  f"back side: the beam {who} hits the back of {_name(c)} (stopped)"))
+                    backs.append(tr(f"打在背面：{who} 的光打在 {_name(c)} 的背面（被挡住，没有继续）",
+                                    f"back side: the beam {who} hits the back of {_name(c)} (stopped)"))
                 elif ev["action"] in ("reflect", "transmit", "split", "stop") and \
                         abs(ev["offset_mm"]) > OFF_CENTER_SHARE * c.aperture_mm:
                     share = abs(ev["offset_mm"]) / c.aperture_mm * 100
-                    out.append(tr(f"命中偏离 > 20% 口径：{who} 在 {_name(c)} 上偏离中心 {_f1(ev['offset_mm'])} mm"
-                                  f"（口径 {_g(c.aperture_mm)} mm 的 {share:.0f}%）",
-                                  f"off center by more than 20% of the aperture: {who} hits {_name(c)} "
-                                  f"{_f1(ev['offset_mm'])} mm from its center ({share:.0f}% of the {_g(c.aperture_mm)} mm aperture)"))
+                    offs.append(tr(f"命中偏离 > 20% 口径：{who} 在 {_name(c)} 上偏离中心 {_f1(ev['offset_mm'])} mm"
+                                   f"（口径 {_g(c.aperture_mm)} mm 的 {share:.0f}%）",
+                                   f"off center by more than 20% of the aperture: {who} hits {_name(c)} "
+                                   f"{_f1(ev['offset_mm'])} mm from its center ({share:.0f}% of the {_g(c.aperture_mm)} mm aperture)"))
             if br["end"] == "left_table":
                 last = br["segments"][-1]
-                out.append(tr(f"光线离开平台：{who}（支 {br['branch']}）在 ({_g(last['x1'])}, {_g(last['y1'])}) mm 处出界",
-                              f"leaves the table: {who} (branch {br['branch']}) goes out at ({_g(last['x1'])}, {_g(last['y1'])}) mm"))
+                lefts.append(tr(f"光线离开平台：{who}（支 {br['branch']}）在 ({_g(last['x1'])}, {_g(last['y1'])}) mm 处出界",
+                                f"leaves the table: {who} (branch {br['branch']}) goes out at ({_g(last['x1'])}, {_g(last['y1'])}) mm"))
             elif br["end"] == "max_events":
-                out.append(tr(f"作用次数达到上限：{who}（支 {br['branch']}）超过 64 次作用，可能有回环",
-                              f"event limit reached: {who} (branch {br['branch']}) passed 64 interactions; it may be looping"))
+                capped.append(tr(f"作用次数达到上限：{who}（支 {br['branch']}）超过 64 次作用，可能有回环",
+                                 f"event limit reached: {who} (branch {br['branch']}) passed 64 interactions; it may be looping"))
 
     if sources and cut:
         pass        # what no beam does cannot be told from a trace that stops short
@@ -350,16 +921,16 @@ def _problems(layout: Layout, trace: list[dict]) -> list[str]:
             if c is None or c.id in lit or key in seen:
                 continue
             seen.add(key)
-            out.append(tr(f"错过口径：{_name(c)} 没被任何光照到；{m['source']} {_wl(m['wavelength_nm'])} 的光从它的作用面旁边经过，"
-                          f"落点偏出口径边缘 {_f1(m['outside_mm'])} mm（离中心 {_f1(abs(m['offset_mm']))} mm）",
-                          f"missed aperture: nothing lights {_name(c)}; the beam {m['source']} {_wl(m['wavelength_nm'])} passes "
-                          f"its surface {_f1(m['outside_mm'])} mm beyond the edge of the aperture ({_f1(abs(m['offset_mm']))} mm from the center)"))
+            nears.append(tr(f"错过口径：{_name(c)} 没被任何光照到；{m['source']} {_wl(m['wavelength_nm'])} 的光从它的作用面旁边经过，"
+                            f"落点偏出口径边缘 {_f1(m['outside_mm'])} mm（离中心 {_f1(abs(m['offset_mm']))} mm）",
+                            f"missed aperture: nothing lights {_name(c)}; the beam {m['source']} {_wl(m['wavelength_nm'])} passes "
+                            f"its surface {_f1(m['outside_mm'])} mm beyond the edge of the aperture ({_f1(abs(m['offset_mm']))} mm from the center)"))
         dark = [c for c in targets if c.id not in lit]
         if dark:
             names = ", ".join(c.label or c.id for c in dark[:20]) + (f" ... (+{len(dark) - 20})" if len(dark) > 20 else "")
-            out.append(tr(f"没被任何光照到的器件（{len(dark)} 个）：{names}", f"components no beam reaches ({len(dark)}): {names}"))
+            unlit.append(tr(f"没被任何光照到的器件（{len(dark)} 个）：{names}", f"components no beam reaches ({len(dark)}): {names}"))
     else:
-        out.append(tr("图里没有光源（激光器、光纤输出、灯、LED）", "the layout has no light source (laser, fiber output, lamp, LED)"))
+        unlit.append(tr("图里没有光源（激光器、光纤输出、灯、LED）", "the layout has no light source (laser, fiber output, lamp, LED)"))
 
     continued = {c.props["continues_at"] for c in layout.components if c.type == "fiber_in" and c.props.get("continues_at")}
     for c in layout.components:
@@ -367,14 +938,17 @@ def _problems(layout: Layout, trace: list[dict]) -> list[str]:
         if target:
             tc = layout.component(target)
             if tc is None or tc.type != "fiber_out":
-                out.append(tr(f"光纤指向错了：{_name(c)} 接到 {target!r}，但图里没有这个光纤输出",
-                              f"broken fiber link: {_name(c)} continues at {target!r}, which is not a fiber output of this layout"))
+                fibres.append(tr(f"光纤指向错了：{_name(c)} 接到 {target!r}，但图里没有这个光纤输出",
+                                 f"broken fiber link: {_name(c)} continues at {target!r}, which is not a fiber output of this layout"))
     traced = {t["source"] for t in trace}
     for c in layout.components:
         if c.type == "fiber_out" and c.id in continued and c.id not in traced and not cut:
-            out.append(tr(f"光纤输出 {c.label or c.id} 没有光进来（接它的光纤耦合没被光照到）",
-                          f"fiber output {c.label or c.id} gets no light (the fiber coupler feeding it is not lit)"))
-    return out
+            fibres.append(tr(f"光纤输出 {c.label or c.id} 没有光进来（接它的光纤耦合没被光照到）",
+                             f"fiber output {c.label or c.id} gets no light (the fiber coupler feeding it is not lit)"))
+    spots, darks, waveplates = _beam_problems(layout, trace)
+    off_heights, missed_heights, spot_heights = _height_problems(layout, trace, lit, cut)
+    return [cuts, backs, offs, off_heights, nears, missed_heights, spots, spot_heights, darks, lefts, unlit, capped,
+            fibres, waveplates]
 
 
 def _comment_lines(comments: list[dict]) -> list[str]:
@@ -390,12 +964,12 @@ def _comment_lines(comments: list[dict]) -> list[str]:
     return out
 
 
-def _component_list(layout: Layout, links: Optional[dict]) -> list[str]:
+def _component_list(layout: Layout, links: Optional[dict], hs: _Heights = _NO_HEIGHTS) -> list[str]:
     out = []
     for c in layout.components:
         wl = _source_wavelengths(c) if c.type in SOURCE_TYPES else None
         facing = tr(f"朝向 {_g(c.angle_deg)}°", f"facing {_g(c.angle_deg)} deg")
-        out.append(f"- {_name(c)}{_details(c, links, wavelength_text=wl, extra=[facing])}")
+        out.append(f"- {_name(c)}{_details(c, links, wavelength_text=wl, extra=[facing], hs=hs)}")
     return out
 
 
@@ -416,63 +990,127 @@ def summarize(layout: Any, trace: Optional[list[dict]] = None, *, links: Optiona
 def _summarize(lay: Layout, trace: list[dict], links: Optional[dict], comments: list[dict], limit: int) -> str:
     sources = [c for c in lay.components if c.type in SOURCE_TYPES]
     t = lay.table
+    hs = _Heights(lay)
     title = lay.title or lay.id
     stamp = lay.updated_at[:16].replace("T", " ") + " UTC" if lay.updated_at else ""
     saved = ""
     if lay.updated_by or stamp:
         saved = tr(f"；最近一次保存：{lay.updated_by} {stamp}".rstrip(), f"; last saved by {lay.updated_by} {stamp}".rstrip())
+    beam = ""
+    if hs.on:                   # contract 3D §6.2: the table's beam height, said where it is not given
+        beam = (tr(f"，台面光束高度 {_g(hs.h)} mm", f", beam height {_g(hs.h)} mm") if hs.given
+                else tr(f"，台面光束高度 {_g(hs.h)} mm（没填，按缺省）", f", beam height {_g(hs.h)} mm (not given: the default)"))
     lines = [
         tr(f"光路图「{title}」（id {lay.id}，第 {lay.revision} 版）", f'Optical layout "{title}" (id {lay.id}, revision {lay.revision})'),
-        tr(f"平台 {_g(t.width_mm)} × {_g(t.height_mm)} mm，孔距 {_g(t.hole_pitch_mm)} mm（{_grid(t.grid)}）；"
+        tr(f"平台 {_g(t.width_mm)} × {_g(t.height_mm)} mm，孔距 {_g(t.hole_pitch_mm)} mm（{_grid(t.grid)}）{beam}；"
            f"器件 {len(lay.components)} 个，其中光源 {len(sources)} 个{saved}",
-           f"Table {_g(t.width_mm)} x {_g(t.height_mm)} mm, hole pitch {_g(t.hole_pitch_mm)} mm ({_grid(t.grid)}); "
+           f"Table {_g(t.width_mm)} x {_g(t.height_mm)} mm, hole pitch {_g(t.hole_pitch_mm)} mm ({_grid(t.grid)}){beam}; "
            f"{len(lay.components)} components, {len(sources)} light source{'' if len(sources) == 1 else 's'}{saved}"),
         tr("坐标：平台左下角为原点，x 向右，y 向上，单位 mm；角度从 +x 逆时针量。",
            "Coordinates: origin at the table's lower left, x to the right, y up, in mm; angles counter-clockwise from +x."),
     ]
+    if hs.on:
+        lines.append(tr("高度 z 从台面量起，单位 mm；没填高度的器件和光源在台面光束高度。",
+                        "Heights z are measured from the table top, in mm; a component or source without one sits at the "
+                        "table's beam height."))
     cut = truncation(trace)
-    if cut:         # at the top as well as the first problem: the text is cut at MAX_CHARS, from the end
+    if cut:         # at the top as well as the first problem: a text that is still too long is cut from the end
         lines.append(_cut_text(cut))
+    if sources:
+        lines += _assumptions(lay, trace)
     if lay.notes:
         note = " ".join(lay.notes.split())
         lines.append(tr("备注：", "Note: ") + (note if len(note) <= 400 else note[:397] + "..."))
     lines.append("")
 
-    if sources:
-        lines.append(tr("光路（沿光束的顺序）：", "Beam paths (in the order along the beam):"))
-        continued_from: dict[str, str] = {}
-        for tree in trace:
-            for br in tree["branches"]:
-                if br["end"] == "stop" and br["events"]:
-                    last = lay.component(br["events"][-1]["component"])
-                    if last is not None and last.type == "fiber_in" and last.props.get("continues_at"):
-                        continued_from.setdefault(last.props["continues_at"], last.label or last.id)
-        for n, tree in enumerate(trace, 1):
-            lines += _tree_lines(lay, tree, n, links, continued_from)
-        if not trace:
-            lines.append(tr("（没有光线：光源都是被某个光纤接过来的，而它们没被照到）", "(no rays: every source is fed by a fiber that no light reaches)"))
-    else:
-        lines.append(tr("图里还没有光源，下面直接列出器件和注释：", "The layout has no light source yet; its components and annotations:"))
-        lines += _component_list(lay, links) or [tr("（没有器件）", "(no components)")]
-    lines.append("")
+    def paths(spot: bool) -> list[str]:
+        out: list[str] = []
+        if sources:
+            out.append(tr("光路（沿光束的顺序）：", "Beam paths (in the order along the beam):"))
+            if not spot:
+                out.append(tr("（篇幅所限，下面省略了光斑与焦点）", "(spot sizes and foci are left out below to keep this short)"))
+            if hs.on and passes >= MAX_TRACE_PASSES:
+                out.append(tr(f"（越过的器件记满了 {MAX_TRACE_PASSES} 条，之后的可能没有记）",
+                              f"({MAX_TRACE_PASSES} components passed over or under were recorded, the limit; later ones "
+                              f"may be missing)"))
+            continued_from: dict[str, str] = {}
+            for tree in trace:
+                for br in tree["branches"]:
+                    if br["end"] == "stop" and br["events"]:
+                        last = lay.component(br["events"][-1]["component"])
+                        if last is not None and last.type == "fiber_in" and last.props.get("continues_at"):
+                            continued_from.setdefault(last.props["continues_at"], last.label or last.id)
+            for n, tree in enumerate(trace, 1):
+                out += _tree_lines(lay, tree, n, links, continued_from, spot, hs)
+            if not trace:
+                out.append(tr("（没有光线：光源都是被某个光纤接过来的，而它们没被照到）", "(no rays: every source is fed by a fiber that no light reaches)"))
+        else:
+            out.append(tr("图里还没有光源，下面直接列出器件和注释：", "The layout has no light source yet; its components and annotations:"))
+            out += _component_list(lay, links, hs) or [tr("（没有器件）", "(no components)")]
+        return out
 
-    problems = _problems(lay, trace)
-    if problems:
-        lines.append(tr(f"需要注意（{len(problems)} 条）：", f"Things to look at ({len(problems)}):"))
-        lines += [f"- {p}" for p in problems[:_MAX_PROBLEM_LINES]]
-        if len(problems) > _MAX_PROBLEM_LINES:
-            lines.append(tr(f"- … 另有 {len(problems) - _MAX_PROBLEM_LINES} 条", f"- ... {len(problems) - _MAX_PROBLEM_LINES} more"))
-    else:
-        lines.append(tr("需要注意：没有发现问题。", "Things to look at: none found."))
-    if comments:
-        lines.append("")
-        lines.append(tr(f"未解决的评论（{len(comments)} 条）：", f"Unresolved comments ({len(comments)}):"))
-        lines += _comment_lines(comments)
-    text = "\n".join(lines).rstrip() + "\n"
-    if len(text) > limit:
-        tail = tr(f"\n…（摘要在 {limit} 字符处截断）", f"\n... (summary cut at {limit} characters)")
-        text = text[:max(0, limit - len(tail))] + tail
-    return text
+    passes = sum(len(s.get("passes") or ()) for tree in trace for br in tree["branches"] for s in br["segments"])
+
+    kinds = [k for k in _problems(lay, trace) if k]
+    total = sum(len(k) for k in kinds)
+
+    def tail(per_kind: int) -> list[str]:
+        """The things to look at, at most *per_kind* lines of each kind (and one counting the rest), and
+        the comments. No kind ever disappears: *per_kind* is at least 1."""
+        out = [""]
+        if total:
+            out.append(tr(f"需要注意（{total} 条）：", f"Things to look at ({total}):"))
+            for found in kinds:
+                out += [f"- {p}" for p in found[:per_kind]]
+                if len(found) > per_kind:
+                    more = len(found) - per_kind
+                    out.append(tr(f"- （同类另有 {more} 条）", f"- ({more} more of this kind)"))
+        else:
+            out.append(tr("需要注意：没有发现问题。", "Things to look at: none found."))
+        if comments:
+            out.append("")
+            out.append(tr(f"未解决的评论（{len(comments)} 条）：", f"Unresolved comments ({len(comments)}):"))
+            out += _comment_lines(comments)
+        return out
+
+    return _fit(lines, paths, tail, limit)
 
 
-__all__ = ["MAX_CHARS", "OFF_CENTER_SHARE", "summarize"]
+def _join(lines: list[str]) -> str:
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _fit(head: list[str], paths: Any, tail: Any, limit: int) -> str:
+    """The text within *limit* characters (contract v2 §5, §12.3): whole, with up to
+    :data:`MAX_LINES_PER_KIND` lines of each kind of problem; else without the spot sizes and foci; else
+    also with one line of each kind of problem; else also with the beam paths cut where they no longer fit
+    (saying so) - the things to look at (every kind of them) and the comments stay; only when even that
+    does not fit, cut from the end."""
+    wide, narrow = tail(MAX_LINES_PER_KIND), tail(1)
+    full = paths(True)
+    text = _join(head + full + wide)
+    if len(text) <= limit:
+        return text
+    lean = paths(False)
+    for kept_tail in (wide, narrow):
+        text = _join(head + lean + kept_tail)
+        if len(text) <= limit:
+            return text
+    note = tr("…（光路叙述在这里截断，下面的“需要注意”每一类都在）",
+              "... (the beam paths are cut here; every kind of thing to look at is below)")
+    room = limit - len(_join(head + [note] + narrow))
+    if room >= 0:
+        kept: list[str] = []
+        for ln in lean:
+            if len(ln) + 1 > room:
+                break
+            kept.append(ln)
+            room -= len(ln) + 1
+        return _join(head + kept + [note] + narrow)
+    text = _join(head + lean + narrow)
+    end = tr(f"\n…（摘要在 {limit} 字符处截断）", f"\n... (summary cut at {limit} characters)")
+    return text[:max(0, limit - len(end))] + end
+
+
+__all__ = ["DARK_SHARE", "MAX_CHARS", "MAX_LINES_PER_KIND", "MAX_PASS_LINES", "OFF_CENTER_SHARE", "WAIST_SLACK_MM", "polarization_text", "power_text",
+           "share_number", "share_text", "spot_text", "summarize"]

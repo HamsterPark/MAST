@@ -60,7 +60,12 @@ interface Fixture {
 const optionsOf = (f: Fixture) => (f.trace_options?.max_trace_events === undefined ? undefined : { maxTraceEvents: f.trace_options.max_trace_events });
 
 const DIR = findFixtureDir();
-const FILES = readdirSync(DIR).filter((f) => f.endsWith(".json")).sort();
+/**
+ * Files in the directory that are not trace fixtures: the shared cases of the power text (read by
+ * opticalLayoutBeam.test.ts). Skipped by name, as the Python side does; a new kind of file has to be added here.
+ */
+const NOT_TRACE_FIXTURES = new Set(["power_text_cases.json"]);
+const FILES = readdirSync(DIR).filter((f) => f.endsWith(".json") && !NOT_TRACE_FIXTURES.has(f)).sort();
 const FIXTURES: Fixture[] = FILES.map((file) => ({ ...(JSON.parse(readFileSync(join(DIR, file), "utf8")) as Omit<Fixture, "file">), file }));
 
 /** Fixtures the contract (section 4) and its README name; deleting one must be noticed. */
@@ -81,6 +86,27 @@ const REQUIRED = [
   "trace_budget_exact",
   "trace_budget_cut",
   "nearest_hit_ties",
+  // v2 section 7: the anchors of the beam physics
+  "pol_malus_two_polarizers",
+  "pol_hwp_rotates",
+  "pol_qwp_isolator",
+  "pol_mirror_flips_diagonal",
+  "pol_pbs_unpolarized_split",
+  "pol_pbs_p_only",
+  "pol_waveplate_oblique",
+  "power_nd_throughput_fibre",
+  "gauss_free_space",
+  "gauss_kepler_3x",
+  "gauss_objective_focus",
+  "gauss_multi_wavelength",
+  "beam_crossed_polarizers_no_light",
+  // the 3D contract, section 9: heights
+  "height_periscope_up",
+  "height_periscope_down",
+  "height_passes_over_and_under",
+  "height_source_heights",
+  "height_iris_in_height",
+  "height_mixed",
 ];
 
 describe("the shared trace fixtures", () => {
@@ -96,10 +122,20 @@ describe("the shared trace fixtures", () => {
 
   for (const f of FIXTURES) {
     describe(f.file, () => {
-      it("the TypeScript trace equals the Python trace (1e-6, keys and strings exactly)", () => {
+      it("the TypeScript trace equals the Python trace (geometry 1e-6, beam numbers 1e-6 mixed, keys, strings and nulls exactly)", () => {
         const actual = traceLayout(f.layout, optionsOf(f));
         const diff = firstDifference(actual, f.expected_trace, 1e-6);
         assert.equal(diff, null, `${f.file} (${f.description})\n${diff}`);
+      });
+
+      it("carries the beam of v2 section 4.7 on every tree, segment and event (a fixture without it is still in the v1 format)", () => {
+        for (const tree of f.expected_trace) {
+          assert.ok(tree.beam, `${f.file} ${tree.source}: a tree without beam`);
+          for (const b of tree.branches) {
+            for (const g of b.segments) assert.ok(g.beam, `${f.file} ${tree.source} ${b.branch}: a segment without beam`);
+            for (const e of b.events) assert.ok(e.beam, `${f.file} ${tree.source} ${b.branch}: an event without beam`);
+          }
+        }
       });
 
       it("has the shape the contract gives a trace: one segment per event, one more for a branch that left the table or ran out of budget", () => {

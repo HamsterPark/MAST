@@ -1,20 +1,26 @@
-// Confirmation for switching the station profile (STM station <-> optical station).
+// Confirmation for saving the station profile (STM station / optical station / generic station).
 //
 // The profile is an admin-PIN setting (backend `admin_pin.GUARDED_KEYS`): it decides at the
 // next start whether this process dials Nanonis and runs the tip-crash watchdog, and whether
 // serial auto-detection probes every idle port. A mis-click costs nothing until the restart,
 // which is why the click does not save. This dialog is the only way to save a choice:
 //
-//   1. it spells out what each profile means, what a wrong choice does, and that nothing
-//      changes before the service restarts;
+//   1. it spells out, for all three profiles side by side, what each one is and what it
+//      starts and switches off, what a wrong choice does, and whether anything changes
+//      before the service restarts;
 //   2. it asks for the admin PIN. The PIN is state of this component only: it goes out once,
 //      with the confirm, and is cleared when the dialog closes or the backend refuses it.
 //      Nothing here writes it to a store or to storage;
 //   3. on a refusal (wrong PIN, no PIN set yet) the dialog stays open and shows the backend's
 //      own reason, so "believing it saved" never happens (ConfirmDialog's contract).
 //
+// On a machine with no admin PIN yet (first use) the PIN cannot be typed, because there is
+// none: the dialog then shows the same first-PIN form as Settings → Advanced (PinGate's
+// SetPinForm, POST /api/admin/set-pin, same rules), and the PIN field appears once the PIN
+// exists. Typing it once more is the confirmation that the operator knows it.
+//
 // The wording and the rule for when the confirm button may be pressed are pure functions in
-// lib/stationProfile.ts (confirmCopy, switchBlocker), read by test/stationProfile.test.ts.
+// lib/stationProfile.ts (confirmCopy, switchBlocker), read by test/stationProfile*.test.ts.
 
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -22,6 +28,7 @@ import { Link } from "react-router-dom";
 import clsx from "clsx";
 
 import { api } from "@/api/client";
+import { SetPinForm } from "@/components/admin/PinGate";
 import { ConfirmDialog } from "@/components/scope/ConfirmDialog";
 import { tr } from "@/lib/i18n";
 import {
@@ -39,17 +46,23 @@ export function StationProfileDialog({
   from,
   to,
   source,
+  active,
+  firstRun = false,
   busy,
   error,
   onConfirm,
   onClose,
 }: {
   open: boolean;
-  /** The profile saved now. */
+  /** The profile saved now (the default when nothing is saved). */
   from: StationProfile;
-  /** The profile being switched to. */
+  /** The profile being saved. Equal to `from` only on first use (confirming the default). */
   to: StationProfile;
   source: ProfileSource;
+  /** The profile the running service is; undefined while not known. */
+  active?: StationProfile;
+  /** No profile was ever chosen on this machine. */
+  firstRun?: boolean;
   busy: boolean;
   /** The backend's reason when the last attempt was refused; the dialog stays open on it. */
   error: string | null;
@@ -58,7 +71,8 @@ export function StationProfileDialog({
 }) {
   const [pin, setPin] = useState("");
 
-  // Same query key as the Advanced tab's PIN gate, so one request serves both.
+  // Same query key as the Advanced tab's PIN gate, so one request serves both, and the
+  // first-PIN form below refreshes it when it has set one.
   const status = useQuery({
     queryKey: ["admin", "pin-status"],
     queryFn: async () => {
@@ -78,7 +92,7 @@ export function StationProfileDialog({
     if (error) setPin("");
   }, [error]);
 
-  const copy = confirmCopy(from, to, source);
+  const copy = confirmCopy(from, to, source, { active, firstRun });
   const blocker = switchBlocker({ pin, pinIsSet, busy });
 
   return (
@@ -99,7 +113,7 @@ export function StationProfileDialog({
     >
       <p className="text-sm text-mast-text">{copy.intro}</p>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-3">
         {copy.profiles.map((p) => (
           <div
             key={p.profile}
@@ -114,8 +128,9 @@ export function StationProfileDialog({
           >
             <p className="font-semibold text-mast-text">
               {p.label}
-              {p.selected ? tr("（要改成这个）", " (switching to this)") : ""}
+              {p.selected ? tr("（要存成这个）", " (saving this)") : ""}
             </p>
+            <p className="mt-1 text-mast-text">{p.blurb}</p>
             <ul className="mt-1 list-disc space-y-1 pl-4 text-mast-muted">
               {p.lines.map((line) => (
                 <li key={line}>{line}</li>
@@ -135,47 +150,50 @@ export function StationProfileDialog({
         </p>
       )}
 
-      {pinIsSet === false && (
-        <div
-          role="alert"
-          className="rounded border border-mast-warn/40 bg-mast-warn/10 px-3 py-2 text-sm text-mast-warn"
-        >
-          {tr(
-            "这台机器还没有设置管理 PIN，站点画像是受 PIN 保护的设置，没有 PIN 就改不了。先到",
-            "No admin PIN is set on this machine, and the station profile is a PIN-protected setting, so it cannot be changed yet. Set one first under ",
-          )}
-          <Link to="/settings/admin" className="mx-1 underline">
-            {tr("设置 → 高级", "Settings → Advanced")}
-          </Link>
-          {tr(
-            "（或桌面启动器的“设置高级管理密码”）设置一个。",
-            " (or with the “Set admin password” button of the desktop launcher).",
-          )}
+      {pinIsSet === false ? (
+        <div>
+          <div
+            role="alert"
+            className="rounded border border-mast-warn/40 bg-mast-warn/10 px-3 py-2 text-sm text-mast-warn"
+          >
+            {tr(
+              "这台机器还没有设置管理 PIN，站点画像是受 PIN 保护的设置，没有 PIN 就存不了。可以就在下面设一个，也可以到",
+              "No admin PIN is set on this machine, and the station profile is a PIN-protected setting, so it cannot be saved yet. Set one right below, or under ",
+            )}
+            <Link to="/settings/admin" className="mx-1 underline">
+              {tr("设置 → 高级", "Settings → Advanced")}
+            </Link>
+            {tr(
+              "（或桌面启动器的“设置高级管理密码”）设置。设好之后再在这里输入一次。",
+              " (or with the “Set admin password” button of the desktop launcher). Then type it here once more.",
+            )}
+          </div>
+          <SetPinForm onDone={() => setPin("")} />
         </div>
+      ) : (
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-mast-muted">{tr("管理 PIN", "Admin PIN")}</span>
+          <input
+            type="password"
+            value={pin}
+            autoComplete="off"
+            autoFocus
+            disabled={busy}
+            placeholder={tr("保存需要管理 PIN", "The admin PIN is needed to save")}
+            onChange={(e) => setPin(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && blocker === null) onConfirm(pin);
+            }}
+            className={PIN_INPUT}
+          />
+          <span className="text-xs text-mast-faint">
+            {tr(
+              "PIN 只随这一次保存发送，不会被存下来。",
+              "The PIN is sent once with this save and is not stored.",
+            )}
+          </span>
+        </label>
       )}
-
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-mast-muted">{tr("管理 PIN", "Admin PIN")}</span>
-        <input
-          type="password"
-          value={pin}
-          autoComplete="off"
-          autoFocus
-          disabled={busy}
-          placeholder={tr("保存需要管理 PIN", "The admin PIN is needed to save")}
-          onChange={(e) => setPin(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && blocker === null) onConfirm(pin);
-          }}
-          className={PIN_INPUT}
-        />
-        <span className="text-xs text-mast-faint">
-          {tr(
-            "PIN 只随这一次保存发送，不会被存下来。",
-            "The PIN is sent once with this save and is not stored.",
-          )}
-        </span>
-      </label>
     </ConfirmDialog>
   );
 }

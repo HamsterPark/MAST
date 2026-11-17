@@ -2003,6 +2003,17 @@ def run_service() -> int:
     ctx = build_live_context(config)
     app = create_app(context=ctx, dev_cors=False, auth=auth)
 
+    # 数据图库的自动增量更新（docs/v2/design/data_gallery.md）：定时线程 + 关停钩子。
+    # 串口识别在 build_live_context 里同步做完了；线程自己还会再等几分钟才起第一轮。
+    # 任何失败都只记一行日志，不挡服务启动。
+    try:
+        from mast.api.direct_exec import live_runtime
+        from mast.gallery.autobuild import start_for_runtime
+
+        start_for_runtime(getattr(live_runtime(ctx), "add_shutdown_hook", None))
+    except Exception as exc:
+        log.warning("gallery auto build not started: %s", exc)
+
     ssl_kw: dict = {}
     if host != "127.0.0.1":
         cert, key = _lan_cert_files(user_root)
@@ -2048,7 +2059,27 @@ def run_service() -> int:
         app.state.uvicorn_server = server
     except Exception:
         pass
+    # After Config(): uvicorn has by now given its own loggers their handlers. Log
+    # records then go through a queue (no sink write on the event-loop thread), and a
+    # reset-while-closing client is one rate-limited line instead of a traceback each.
+    flush_log_queue = None
+    try:
+        from mast.core.log_hygiene import flush_log_queue, guard_server, install_log_queue
+        install_log_queue()
+        guard_server(server)
+    except Exception as exc:  # noqa: BLE001 — logging hygiene must never block boot
+        # A partial install would leave some loggers on a queue nobody flushes at the
+        # end: give every logger its own handlers back and run as before.
+        if flush_log_queue is not None:
+            try:
+                flush_log_queue(0.5)
+            except Exception:  # noqa: BLE001
+                pass
+        flush_log_queue = None
+        log.warning("log queue / loop guard not installed: %s", exc)
     server.run()
+    if flush_log_queue is not None:
+        flush_log_queue()
     return 0
 
 
@@ -3303,6 +3334,11 @@ class OperatorApi:
             if exc.kind in ("network", "auth"):
                 raise
             return "stm"
+        # A service that lists its capabilities decides by the "operator_prompts" one (a generic
+        # station has prompts without being "optical"); one that does not, by the profile.
+        caps = data.get("station_capabilities") if isinstance(data, dict) else None
+        if isinstance(caps, list):
+            return "optical" if "operator_prompts" in caps else "stm"
         profile = data.get("station_profile") if isinstance(data, dict) else None
         return "optical" if str(profile or "").strip().lower() == "optical" else "stm"
 

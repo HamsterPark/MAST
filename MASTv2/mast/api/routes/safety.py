@@ -44,6 +44,9 @@ def get_safety_limits(request: Request, response: Response) -> SafetyLimits:
 
       * ``x-safety-limits-source``   — live_guard | merged | defaults
       * ``x-safety-restart-pending`` — true | false | unknown
+      * ``x-safety-envelope-narrower`` — fields (comma-separated) the last
+        reconciliation found NARROWER than the measured instrument travel;
+        ``none`` | ``unknown`` (never reconciled)
 
     Never raises: "what are the limits" degrades to the code defaults rather
     than 500-ing, because a caller who gets no answer here will assume the
@@ -56,6 +59,22 @@ def get_safety_limits(request: Request, response: Response) -> SafetyLimits:
     except Exception as exc:  # noqa: BLE001
         logger.warning("safety limits resolve failed, serving code defaults: %s", exc)
         limits, source, pending = SafetyLimits(), SOURCE_DEFAULTS, None
+    # 配置的包络是否比最近一次对账测到的仪器行程窄：逗号分隔的字段名；
+    # none = 对过账且一致；unknown = 还没对过账（不是「一致」）。
+    try:
+        from mast.core.envelope_reconcile import (
+            active_narrower_findings,
+            last_reconciliation,
+        )
+
+        if last_reconciliation() is None:
+            narrower = "unknown"
+        else:
+            names = [f.field_name for f in active_narrower_findings(limits)]
+            narrower = ",".join(names) if names else "none"
+    except Exception:  # noqa: BLE001
+        narrower = "unknown"
+    response.headers["x-safety-envelope-narrower"] = narrower
     response.headers["x-safety-limits-source"] = source
     response.headers["x-safety-restart-pending"] = (
         "unknown" if pending is None else ("true" if pending else "false")
@@ -213,10 +232,14 @@ class ReconnectRoleResponse(BaseModel):
 def reconnect_role(request: Request,
                    body: ReconnectRoleRequest) -> ReconnectRoleResponse:
     """优雅地重建指定角色的 Nanonis TCP 连接。
-    
+
     为自动重连未能识别或恢复的连接故障提供显式入口。它只更换连接，
     不进针、不开反馈、不改变扫描。沿连接池的 FIN、排空迟到字节、关闭和新建
-    流程执行，避免强制关闭影响单客户端端口的恢复。"""
+    流程执行，避免强制关闭影响单客户端端口的恢复。
+
+    通信熔断器没闭合时，同时结束冷却、重新放一个探针：下一次计数调用就验证
+    链路（见 ``ConnectionPool.reconnect_role``）。之后的状态看
+    ``GET /api/safety/latches`` 的 ``comms_breaker``。"""
     ctx = request.app.state.ctx
     app = getattr(ctx, "live_app", None) or getattr(ctx, "app", None)
     pool = getattr(app, "_pool", None)
@@ -350,9 +373,17 @@ def _comms_latch(app) -> LatchState:
     消费方不存在的那一族)。这里是它的第一个读者。"""
     st = LatchState(
         id="comms_breaker", name=tr("Nanonis TCP 通信熔断", "Nanonis TCP comms breaker"),
-        effect=tr("短路一切 safe_call:立即返回「通信中断」而不再碰 socket"
-               "（刻意的 —— 端口很脆,重锤会把它锤到要重启 Nanonis）", "Short-circuits every safe_call: returns \"communication lost\" immediately without touching the socket again (deliberate: the port is fragile, and hammering it can force a Nanonis restart)"),
-        release=tr("冷却到期自动放一个探针;或 POST /api/safety/reconnect-role", "A probe is let through automatically when the cooldown expires; or POST /api/safety/reconnect-role"),
+        effect=tr("短路一切常规 safe_call:立即返回「通信中断」而不再碰 socket"
+               "（刻意的 —— 端口很脆,重锤会把它锤到要重启 Nanonis）;"
+               "急停口与 urgent_call(急停、看门狗退针)不受它拦,照常尝试并计入统计",
+               "Short-circuits every routine safe_call: returns \"communication lost\" immediately without touching the socket again (deliberate: the port is fragile, and hammering it can force a Nanonis restart); "
+               "the emergency port and urgent_call (E-STOP, watchdog withdraw) are never held back by it, are always attempted, and still count"),
+        release=tr("冷却到期自动放一个探针;或 POST /api/safety/reconnect-role"
+                   "(重连并立即重新放一个探针,由下一次计数调用验证链路,不直接判为正常)",
+                   "A probe is let through automatically when the cooldown expires; or "
+                   "POST /api/safety/reconnect-role (reconnects and lets a probe through at "
+                   "once, so the next counted call verifies the link; it does not declare "
+                   "the link healthy)"),
         release_actor=tr("自动(冷却) + operator", "Automatic (cooldown) + operator"))
     pool = getattr(app, "_pool", None)
     fn = getattr(pool, "comms_snapshot", None)
@@ -372,9 +403,36 @@ def _comms_latch(app) -> LatchState:
     if st.latched:
         st.why = (tr(f"连续 {snap.get('streak')} 次 TCP 级失败"
                   f"（阈值 {snap.get('fail_threshold')}）", f"{snap.get('streak')} consecutive TCP-level failures (threshold {snap.get('fail_threshold')})")
-                  + (tr(f"：{snap.get('last_reason')}", f": {snap.get('last_reason')}") if snap.get("last_reason") else ""))
+                  + (tr(f"：{snap.get('last_reason')}", f": {snap.get('last_reason')}") if snap.get("last_reason") else "")
+                  + _comms_phase_text(snap))
     st.detail = snap
     return st
+
+
+def _comms_phase_text(snap: dict) -> str:
+    """熔断器处在哪一段:冷却中 / 恢复中(探针在途) / 恢复中(等下一次计数调用)。
+
+    「恢复中」和「已熔断」对读的人是两件事:前者通常一两秒内自己好(看门狗和
+    状态刷新每秒都在发计数调用),后者要等冷却。只报 ``latched`` 的话两者同形。"""
+    def _num(key: str) -> float:
+        try:
+            return float(snap.get(key) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    phase = str(snap.get("state") or "").lower()
+    if phase == "open":
+        cd = _num("cooldown_remaining_s")
+        return tr(f"；冷却中，约 {cd:.0f} s 后放一个探针",
+                  f"; cooling down, a probe goes out in about {cd:.0f} s")
+    if phase == "half_open":
+        if snap.get("probe_in_flight"):
+            age = _num("probe_age_s")
+            return tr(f"；恢复中：探针在途 {age:.1f} s",
+                      f"; recovering: a probe has been out for {age:.1f} s")
+        return tr("；恢复中：冷却已过，下一次计数调用即作探针验证链路",
+                  "; recovering: the cooldown is over, the next counted call probes the link")
+    return ""
 
 
 def _watchdog_latch(app) -> LatchState:

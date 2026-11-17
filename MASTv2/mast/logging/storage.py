@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from mast.core.types import ActionRecord, SampleRecord
+from mast.logging import db_keepalive
 from mast.logging.action_record import action_to_dict, dict_to_action
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,19 @@ class ExperimentStorage:
         self._ensure_tables()
 
     def _connect(self) -> sqlite3.Connection:
+        """This thread's long-lived connection to the database.
+
+        One connection per thread, shared by every ``ExperimentStorage`` on the
+        same file, plus a process-wide keeper (see :mod:`mast.logging.db_keepalive`):
+        no call closes the last connection any more, so WAL checkpoints stay
+        PASSIVE instead of an EXCLUSIVE checkpoint + fsync + file delete per call.
+        ``with self._connect() as conn:`` still commits / rolls back; it just
+        does not close.  Nothing here nests two ``_connect()`` blocks on one
+        thread (an inner ``with`` would commit the outer transaction).
+        """
+        return db_keepalive.pool_for(self._db_path, self._open_connection).connection()
+
+    def _open_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
@@ -51,6 +65,10 @@ class ExperimentStorage:
         # vetoed the same change on the v2 store for the same reason.)
         conn.execute("PRAGMA busy_timeout=5000")
         conn.execute("PRAGMA foreign_keys=ON")
+        # WAL + NORMAL: a commit no longer fsyncs the WAL (each flush is 10-30 ms
+        # on a busy spinning disk).  The database cannot corrupt; a power cut may
+        # lose the last commits since the last checkpoint.
+        conn.execute("PRAGMA synchronous=NORMAL")
         return conn
 
     def _ensure_tables(self) -> None:
@@ -1079,6 +1097,42 @@ class ExperimentStorage:
                  experiment_id, sample_id),
             )
 
+    def log_environment_many(
+        self, rows, *, timestamp: float | str | None = None,
+        experiment_id: str | None = None, sample_id: str | None = None,
+    ) -> int:
+        """Log one monitor cycle (every sensor's reading) in ONE transaction.
+
+        ``rows`` is ``[(sensor_name, value, unit, status), ...]``. ``timestamp``
+        is when the cycle was READ, as epoch seconds or an ISO string: the
+        monitor writes from a queue, so "now" can be later than the reading. It
+        is stored in the same local, naive ``isoformat()`` form as
+        :meth:`log_environment`, because :meth:`prune_environment_log` compares
+        the column as text.
+
+        One connection and one commit per cycle instead of one per sensor (each
+        its own WAL sync). Returns the number of rows written; raises on a
+        database error so the caller can report it.
+        """
+        rows = [tuple(r) for r in (rows or ())]
+        if not rows:
+            return 0
+        if timestamp is None:
+            ts = datetime.now().isoformat()
+        elif isinstance(timestamp, (int, float)):
+            ts = datetime.fromtimestamp(float(timestamp)).isoformat()
+        else:
+            ts = str(timestamp)
+        with self._connect() as conn:
+            conn.executemany(
+                "INSERT INTO environment_log "
+                "(timestamp, sensor_name, value, unit, status, experiment_id, sample_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [(ts, name, value, unit, status, experiment_id, sample_id)
+                 for name, value, unit, status in rows],
+            )
+        return len(rows)
+
     def get_environment_history(
         self,
         sensor_name: str,
@@ -1115,8 +1169,8 @@ class ExperimentStorage:
     def prune_environment_log(
         self, cutoff: str, *,
         keep_statuses: tuple[str, ...] = ("alarm", "error"),
-        batch_rows: int = 20000,
-        max_batches: int = 200,
+        batch_rows: int = 2000,
+        max_batches: int = 2000,
         pause_s: float = 0.05,
     ) -> int:
         """删掉 *cutoff* 之前的原始环境读数。返回删除行数。
@@ -1140,28 +1194,65 @@ class ExperimentStorage:
           —— 表现是"清扫跑了但一行没删"，或者更糟，删掉不该删的。
         """
         placeholders = ",".join("?" * len(keep_statuses)) or "''"
-        sql = (
-            "DELETE FROM environment_log WHERE id IN ("
-            " SELECT id FROM environment_log"
-            f" WHERE timestamp < ? AND status NOT IN ({placeholders})"
-            " LIMIT ?)"
-        )
-        params = [str(cutoff), *keep_statuses, int(max(1, batch_rows))]
+        cut = str(cutoff)
+        # DELETE ... WHERE timestamp < ? scans the whole table (no index leads with
+        # timestamp) while holding the write lock: ~2 s on a 5 M-row table, minutes
+        # on a cold spinning disk, and every other writer times out meanwhile.
+        # The table is AUTOINCREMENT and appended in time order, so id order is
+        # time order: find the first id at or after the cutoff by binary search
+        # (a few dozen point lookups), then delete in id ranges of ``batch_rows``
+        # rows.  Each batch reads only its own rows and holds the lock briefly.
+        # The ``timestamp < ?`` condition stays in the DELETE: a clock stepped
+        # backwards can leave an old row for the next sweep, never delete a new one.
         deleted = 0
         try:
+            boundary = self._env_prune_boundary(cut)
+            if boundary is None:
+                return 0
+            last = -1  # ids are positive; start below the first
             for _ in range(max(1, int(max_batches))):
                 with self._connect() as conn:
-                    cur = conn.execute(sql, params)
-                    n = int(cur.rowcount or 0)
-                deleted += n
-                if n <= 0:
-                    break
+                    row = conn.execute(
+                        "SELECT MAX(id) FROM (SELECT id FROM environment_log"
+                        " WHERE id > ? AND id < ? ORDER BY id LIMIT ?)",
+                        (last, boundary, int(max(1, batch_rows))),
+                    ).fetchone()
+                    top = row[0] if row else None
+                    if top is None:
+                        break
+                    cur = conn.execute(
+                        "DELETE FROM environment_log WHERE id > ? AND id <= ?"
+                        f" AND timestamp < ? AND status NOT IN ({placeholders})",
+                        (last, top, cut, *keep_statuses),
+                    )
+                    deleted += int(cur.rowcount or 0)
+                last = top
                 if pause_s > 0:
                     time.sleep(float(pause_s))
         except sqlite3.Error as exc:
             # 清扫失败不是事故：下一轮会再来。已经删掉的那些批次是已提交的。
             logger.warning("environment_log 清扫中断（已删 %d 行）：%s", deleted, exc)
         return deleted
+
+    def _env_prune_boundary(self, cutoff: str) -> int | None:
+        """First ``environment_log`` id whose timestamp is >= *cutoff* (exclusive
+        upper bound for pruning), or None if the table is empty.  Binary search
+        over id: O(log n) point lookups, no scan."""
+        with self._connect() as conn:
+            lo_row = conn.execute("SELECT MIN(id), MAX(id) FROM environment_log").fetchone()
+            if lo_row is None or lo_row[0] is None:
+                return None
+            a, b = int(lo_row[0]), int(lo_row[1]) + 1
+            while a < b:
+                mid = (a + b) // 2
+                row = conn.execute(
+                    "SELECT id, timestamp FROM environment_log WHERE id >= ?"
+                    " ORDER BY id LIMIT 1", (mid,)).fetchone()
+                if row is None or str(row[1]) >= cutoff:
+                    b = mid
+                else:
+                    a = int(row[0]) + 1
+            return a
 
     def list_environment_sensors(self, experiment_id: str | None = None) -> list[dict]:
         """本实验（或全库）出现过的传感器 + 采样数 + 时间范围。"""

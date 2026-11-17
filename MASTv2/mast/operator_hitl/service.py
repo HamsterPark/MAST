@@ -91,9 +91,14 @@ def _on_slot_event(slot_id: str, record: dict | None) -> None:
 # ── install / uninstall ────────────────────────────────────────────────────────
 
 
-def install(project_root: str | os.PathLike | None = None) -> Installed:
+def install(project_root: str | os.PathLike | None = None, *,
+            default_slots: tuple | None = None) -> Installed:
     """Make the persistent backends the active ones. Idempotent for the same root; a
     different root replaces the previous install. Returns what is installed.
+
+    ``default_slots``: the manual-state slots when ``config/optical_station.json`` defines none
+    (``None`` = ``optical_state.DEFAULT_SLOTS``, the WITec bench's; the generic station passes
+    ``optical_state.GENERIC_DEFAULT_SLOTS``).
 
     The store this installs is a new object: listeners somebody registered on the store it
     replaces (``OpticalStateStore.add_listener``) are not carried over. Register them on
@@ -110,7 +115,7 @@ def install(project_root: str | os.PathLike | None = None) -> Installed:
         if _installed is not None:
             _detach(_installed)
         backend = PersistentPromptBackend(root)
-        store = PersistentOpticalStateStore(root)
+        store = PersistentOpticalStateStore(root, default_slots=default_slots)
         backend.listeners.append(_on_prompt_event)
         store.add_listener(_on_slot_event)
         old_backend = prompts.set_backend(backend)

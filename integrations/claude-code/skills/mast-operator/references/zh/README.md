@@ -72,3 +72,4 @@ agent 可以把任何一张旧帧调回来、放大其中一块、读出精确�
 | [08-troubleshooting.md](08-troubleshooting.md) | 出问题时查：现象、原因、处理办法 |
 | [09-optical-station.md](09-optical-station.md) | 在光学站（拉曼 / SHG）上运行 MAST：和 STM 有什么不同、哪些事要操作员做、`mast_observe` 返回什么 |
 | [10-optical-layout.md](10-optical-layout.md) | 操作员的光路图：怎么读（`mast_optical_layout`）、追迹和叙述说了什么、怎么评论、为什么你不能改图 |
+| [11-generic-station.md](11-generic-station.md) | 在通用站（没有 STM，也没有 WITec）上运行 MAST：仪器就是配置的设备和传感器、有什么不同、`mast_observe` 返回什么、串口自动探测 |

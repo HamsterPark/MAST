@@ -1,39 +1,49 @@
 /**
- * Station profile ("stm" | "optical") and the optical-bench device roll-ups the
- * optical-station pages show. Pure functions only: no React, no fetch, so
- * `node --test` can run them (test/stationProfile.test.ts).
+ * Station profile ("stm" | "optical" | "generic") and the optical-bench device roll-ups
+ * the non-STM pages show. Pure functions only: no React, no fetch, so `node --test` can
+ * run them (test/stationProfile.test.ts).
  *
  * ── What a profile is ──
- * The same MAST build runs on two kinds of machine. An STM station has a Nanonis
+ * The same MAST build runs on three kinds of machine. An STM station has a Nanonis
  * controller; an optical station (the WITec Raman computer) has no STM at all and
  * drives the optical bench (WITec, laser, power meter, temperature controller)
- * instead. The backend decides which one it is (`mast/station.py`: environment
- * variable > the stored setting `station_profile` > "stm") and reports it in
- * `GET /api/health` (`station_profile`, `station_restart_pending`). The stored
+ * instead; a generic station (another lab's machine) has neither, and uses MAST for
+ * its environment sensors, its configured devices, the data gallery and the records.
+ * The backend decides which one it is (`mast/station.py`: environment variable > the
+ * stored setting `station_profile` > "stm") and reports it in `GET /api/health`
+ * (`station_profile`, `station_profile_source`, `station_restart_pending`). The stored
  * value is `GET /api/settings` `station_profile`.
+ *
+ * What the UI shows is decided by the station's capabilities, not by the profile name
+ * (lib/stationCapabilities.ts); the profile is what the operator chooses and what the
+ * capabilities default to.
  *
  * Whatever is unreadable falls back to "stm": every machine that existed before
  * profiles keeps behaving exactly as it did, and a typo never turns a working STM
- * station into an optical one. This mirrors `station.normalize()` on the backend.
+ * station into another kind. This mirrors `station.normalize()` on the backend.
  *
- * "stm" / "optical" are identity strings (stored, compared, sent over the API).
- * They are never wrapped in `tr()`; only the labels below are.
+ * "stm" / "optical" / "generic" are identity strings (stored, compared, sent over the
+ * API). They are never wrapped in `tr()`; only the labels below are.
  */
 
 import { tr } from "./i18n.ts";
 
-export type StationProfile = "stm" | "optical";
+export type StationProfile = "stm" | "optical" | "generic";
+
+/** Every profile, in the order the Settings card and the confirmation list them. */
+export const PROFILES: readonly StationProfile[] = Object.freeze(["stm", "optical", "generic"] as const);
 
 export const DEFAULT_PROFILE: StationProfile = "stm";
 
 /**
- * Any value -> a profile. Only "stm" / "optical" are recognised (case and
- * surrounding whitespace ignored); everything else, including non-strings and
- * the empty string, is the default.
+ * Any value -> a profile. Only "stm" / "optical" / "generic" are recognised (case and
+ * surrounding whitespace ignored); everything else, including non-strings and the
+ * empty string, is the default.
  */
 export function normalizeProfile(v: unknown): StationProfile {
   if (typeof v !== "string") return DEFAULT_PROFILE;
-  return v.trim().toLowerCase() === "optical" ? "optical" : "stm";
+  const s = v.trim().toLowerCase();
+  return (PROFILES as readonly string[]).includes(s) ? (s as StationProfile) : DEFAULT_PROFILE;
 }
 
 /** Where the configured profile comes from (`GET /api/health` `station_profile_source`):
@@ -45,21 +55,81 @@ export function normalizeSource(v: unknown): ProfileSource {
   return v === "env" || v === "settings" ? v : "default";
 }
 
+/**
+ * Nobody has chosen a profile for this machine yet: no stored setting and no environment
+ * variable. Only an explicit `station_profile_source: "default"` from the service counts. A
+ * service that does not send the field at all (a build from before profiles had a source)
+ * says nothing about it, and must not make every existing station look brand new.
+ */
+export function profileNeverChosen(rawSource: unknown): boolean {
+  return rawSource === "default";
+}
+
+/**
+ * What the instrument-init record (`GET /api/instrument-init`) says about this machine's past:
+ *
+ *   "used"     it was set up at some point: a completion stamp (`completed_at`), or the rig
+ *              fingerprint a completion leaves behind (it survives "remind me again", which only
+ *              clears the stamp), or items someone acknowledged;
+ *   "never"    a readable record with none of those: a fresh installation;
+ *   "unknown"  the request failed, the record is degraded, or the answer has no completion
+ *              field at all (a build from before the stamp existed).
+ */
+export type InitHistory = "never" | "used" | "unknown";
+
+export function initHistory(init: unknown, failed = false): InitHistory {
+  if (failed || typeof init !== "object" || init === null) return "unknown";
+  const r = init as { degraded?: unknown; completed_at?: unknown; rig_fingerprint?: unknown; acknowledged?: unknown };
+  if (r.degraded === true) return "unknown";
+  if (typeof r.completed_at === "number" && r.completed_at > 0) return "used";
+  if (typeof r.rig_fingerprint === "string" && r.rig_fingerprint.trim()) return "used";
+  if (Array.isArray(r.acknowledged) && r.acknowledged.length > 0) return "used";
+  if (!("completed_at" in r)) return "unknown";
+  return "never";
+}
+
+/**
+ * The first-use banner: nobody has chosen a profile (`neverChosen`, see profileNeverChosen)
+ * AND this machine provably was never set up. An STM station that has been running for months
+ * also has no stored profile after an upgrade, but it has been set up, so it is left alone;
+ * and when the record cannot be read the banner stays away too (better one reminder too few
+ * than one too many). The two steps on the Settings card are not bound by this: they show
+ * whenever no profile was chosen.
+ */
+export function firstRunBannerShown(o: { neverChosen: boolean; init: unknown; initFailed: boolean }): boolean {
+  return o.neverChosen && initHistory(o.init, o.initFailed) === "never";
+}
+
 export function profileLabel(p: StationProfile): string {
-  return p === "optical" ? tr("光学站", "Optical station") : tr("STM 站", "STM station");
+  switch (p) {
+    case "optical":
+      return tr("光学站", "Optical station");
+    case "generic":
+      return tr("通用站", "Generic station");
+    default:
+      return tr("STM 站", "STM station");
+  }
 }
 
 /** One sentence on what the profile is, for the Settings card. */
 export function profileBlurb(p: StationProfile): string {
-  return p === "optical"
-    ? tr(
+  switch (p) {
+    case "optical":
+      return tr(
         "光学站：没有 STM / Nanonis；AI 通过 MCP 编排 WITec 拉曼与激光、功率计、温控。",
         "Optical station: no STM / Nanonis; the AI orchestrates the WITec Raman system, the laser, the power meter and the temperature controller through MCP.",
-      )
-    : tr(
+      );
+    case "generic":
+      return tr(
+        "通用站：既没有 STM / Nanonis，也没有 WITec，给其他实验室用；仪器就是配置的外部设备（光谱仪、光源、功率计、温控、位移台、相机）和环境传感器，AI 通过 MCP 使用它们的技能。",
+        "Generic station: neither an STM / Nanonis nor a WITec, for other labs; the instruments are the configured devices (spectrometers, light sources, power meters, temperature controllers, stages, cameras) and the environment sensors, and the AI uses their skills through MCP.",
+      );
+    default:
+      return tr(
         "STM 站：连接 Nanonis 控制器，提供扫描、谱学、退针等 STM 技能。",
         "STM station: connects to a Nanonis controller and offers the STM skills (scanning, spectroscopy, withdrawing the tip, ...).",
       );
+  }
 }
 
 /**
@@ -79,10 +149,16 @@ export function restartNeeded(configured: unknown, active: unknown): boolean {
 // profile means, what a wrong choice does and that nothing happens before a restart, and
 // only that dialog's confirm button, with the PIN typed into it, writes.
 
-/** What a profile means for the machine that runs it, as the confirmation lists it. */
+/**
+ * What a profile means for the machine that runs it, as the confirmation lists it: what it
+ * starts and, just as much, what it switches off. The confirmation shows all three side by
+ * side, so each list says it in the same terms (Nanonis and its threads, serial
+ * auto-detection, what the AI sees, the operator service).
+ */
 export function profileEffects(p: StationProfile): string[] {
-  return p === "optical"
-    ? [
+  switch (p) {
+    case "optical":
+      return [
         tr(
           "不连接 Nanonis，也不启动它的线程：状态轮询、撞针看门狗、隧道电流监控都不起。",
           "Does not connect to Nanonis or start its threads: no state polling, no tip-crash watchdog, no tunnelling-current monitor.",
@@ -96,8 +172,29 @@ export function profileEffects(p: StationProfile): string[] {
           "安装操作员提示服务和激光撤销监听。",
           "Installs the operator prompt service and the laser revocation listener.",
         ),
-      ]
-    : [
+      ];
+    case "generic":
+      // generic_station.md §1.2 / §1.4 / §3.1-3.3
+      return [
+        tr(
+          "不连接 Nanonis，也不启动它的线程：状态轮询、撞针看门狗、隧道电流监控都不起。",
+          "Does not connect to Nanonis or start its threads: no state polling, no tip-crash watchdog, no tunnelling-current monitor.",
+        ),
+        tr(
+          "串口自动探测默认关闭；需要时可以在设置里打开（要管理 PIN）。",
+          "Serial auto-detection is off by default; it can be switched on in the settings when needed (admin PIN).",
+        ),
+        tr(
+          "AI 看到通用技能和外部设备的技能（光谱、光源、功率计、温控、协议），看不到 STM 技能和 WITec 技能；简报和观察多一段环境读数，首页换成通用站内容。",
+          "The AI sees the generic skills and the configured devices' skills (spectra, light sources, power meters, temperature, protocols), but neither the STM nor the WITec skills; the briefing and the observation add the environment readings, and the home page shows the generic station.",
+        ),
+        tr(
+          "安装操作员提示服务和激光撤销监听。",
+          "Installs the operator prompt service and the laser revocation listener.",
+        ),
+      ];
+    default:
+      return [
         tr(
           "连接 Nanonis，启动状态轮询、撞针看门狗和隧道电流监控。",
           "Connects to Nanonis and starts state polling, the tip-crash watchdog and the tunnelling-current monitor.",
@@ -115,26 +212,35 @@ export function profileEffects(p: StationProfile): string[] {
           "Does not install the operator prompt service or the laser revocation listener.",
         ),
       ];
+  }
 }
 
-/** What choosing `to` does if this machine is really the other kind of station. */
+/** What choosing `to` does if this machine is really another kind of station. */
 export function switchRisk(to: StationProfile): string {
-  return to === "optical"
-    ? tr(
-        "如果这台机器其实是 STM 站：下次启动后它不会连接 Nanonis，撞针看门狗和电流监控都不会起来。",
-        "If this machine is really an STM station: after the next start it will not connect to Nanonis, and neither the tip-crash watchdog nor the current monitor will run.",
-      )
-    : tr(
-        "如果这台机器其实是光学站：串口自动探测会恢复，向每个空闲串口发送 *IDN? 和 Modbus 帧；操作员提示服务和激光撤销监听也不再安装。",
-        "If this machine is really an optical station: serial auto-detection comes back and sends *IDN? and Modbus frames to every idle serial port, and the operator prompt service and the laser revocation listener are no longer installed.",
+  switch (to) {
+    case "optical":
+      return tr(
+        "如果这台机器其实是 STM 站：下次启动后它不会连接 Nanonis，撞针看门狗和隧道电流监控都不会起来。如果其实是通用站：串口自动探测被强制关闭，在设置里也打不开。",
+        "If this machine is really an STM station: after the next start it will not connect to Nanonis, and neither the tip-crash watchdog nor the tunnelling-current monitor will run. If it is really a generic station: serial auto-detection is forced off and cannot be switched on in the settings.",
       );
+    case "generic":
+      return tr(
+        "如果这台机器其实是 STM 站：下次启动后它不会连接 Nanonis，撞针看门狗和隧道电流监控都不会起来。如果其实是光学站：AI 看不到 WITec 技能，手动光学状态也只剩激光区域签署这一项。",
+        "If this machine is really an STM station: after the next start it will not connect to Nanonis, and neither the tip-crash watchdog nor the tunnelling-current monitor will run. If it is really an optical station: the AI no longer sees the WITec skills, and the manual optical state keeps only the laser-area attestation.",
+      );
+    default:
+      return tr(
+        "如果这台机器其实是光学站或通用站：串口自动探测会恢复，向每个空闲串口发送 *IDN? 和 Modbus 帧，下次启动还会去连接 Nanonis；操作员提示服务和激光撤销监听也不再安装。",
+        "If this machine is really an optical or a generic station: serial auto-detection comes back and sends *IDN? and Modbus frames to every idle serial port, the next start dials Nanonis, and the operator prompt service and the laser revocation listener are no longer installed.",
+      );
+  }
 }
 
 export type SwitchCopy = {
   title: string;
   intro: string;
-  /** Both profiles, in a fixed order (stm, optical); `selected` marks the one being switched to. */
-  profiles: { profile: StationProfile; label: string; selected: boolean; lines: string[] }[];
+  /** Every profile, in PROFILES order; `selected` marks the one being saved. */
+  profiles: { profile: StationProfile; label: string; blurb: string; selected: boolean; lines: string[] }[];
   risk: string;
   restart: string;
   /** Only when the environment variable pins the profile: saving cannot change what runs. */
@@ -142,30 +248,61 @@ export type SwitchCopy = {
   confirmLabel: string;
 };
 
-/** Everything the confirmation dialog says, in one place so a test can read all of it. */
+/** What the confirmation knows besides the two profiles. */
+export type ConfirmContext = {
+  /** The profile the running service is (GET /api/health); saving that one needs no restart. */
+  active?: StationProfile;
+  /** No profile was ever chosen on this machine (`profileNeverChosen`): this save chooses one. */
+  firstRun?: boolean;
+};
+
+/**
+ * Everything the confirmation dialog says, in one place so a test can read all of it.
+ *
+ * `from === to` happens only on first use: nothing is stored yet, the machine runs the
+ * default, and the operator confirms that the default is right. Saving it is still a real
+ * write (the choice stops being an accident of the default), so it gets the same dialog,
+ * worded as a confirmation rather than a switch.
+ */
 export function confirmCopy(
   from: StationProfile,
   to: StationProfile,
   source: ProfileSource = "default",
+  ctx: ConfirmContext = {},
 ): SwitchCopy {
   const target = profileLabel(to);
+  const same = from === to;
+  const noRestart = ctx.active !== undefined && ctx.active === to;
   return {
-    title: tr(`把这台机器改成「${target}」？`, `Make this machine an "${target}"?`),
-    intro: tr(
-      `现在保存的是「${profileLabel(from)}」。这个选择决定下次启动时这个进程是什么，所以要先确认，再输入管理 PIN。`,
-      `The saved profile is "${profileLabel(from)}". This choice decides what this process is at the next start, so it needs a confirmation and the admin PIN.`,
-    ),
-    profiles: (["stm", "optical"] as const).map((p) => ({
+    title: same
+      ? tr(`确认这台机器是「${target}」？`, `Confirm this machine as "${target}"?`)
+      : tr(`把这台机器改成「${target}」？`, `Switch this machine to "${target}"?`),
+    intro: ctx.firstRun
+      ? tr(
+          `这台机器还没有保存过站点类型，现在按默认的「${profileLabel(from)}」运行。这个选择决定下次启动时这个进程是什么，所以要先确认，再输入管理 PIN。`,
+          `No station profile has been saved on this machine yet; it runs as the default "${profileLabel(from)}". This choice decides what this process is at the next start, so it needs a confirmation and the admin PIN.`,
+        )
+      : tr(
+          `现在保存的是「${profileLabel(from)}」。这个选择决定下次启动时这个进程是什么，所以要先确认，再输入管理 PIN。`,
+          `The saved profile is "${profileLabel(from)}". This choice decides what this process is at the next start, so it needs a confirmation and the admin PIN.`,
+        ),
+    profiles: PROFILES.map((p) => ({
       profile: p,
       label: profileLabel(p),
+      blurb: profileBlurb(p),
       selected: p === to,
       lines: profileEffects(p),
     })),
     risk: switchRisk(to),
-    restart: tr(
-      "保存后不会立刻改变任何东西：重启 MAST 服务之后才生效，在那之前仍按现在的画像运行。",
-      "Nothing changes when you save: the new profile takes effect when the MAST service restarts, and until then it keeps running as it is now.",
-    ),
+    restart: noRestart
+      ? tr(
+          "当前运行的就是这个画像：保存只是把它记下来，不需要重启。",
+          "The running service already is this profile: saving only records it, no restart is needed.",
+        )
+      : tr(
+          "保存后不会立刻改变任何东西：重启 MAST 服务之后才生效，在那之前仍按现在的画像运行。",
+          "Nothing changes when you save: the new profile takes effect when the MAST service restarts, and until then it keeps running as it is now.",
+        ),
     envNote:
       source === "env"
         ? tr(
@@ -173,7 +310,9 @@ export function confirmCopy(
             "This machine's station profile is pinned by the MAST_STATION_PROFILE environment variable: after a restart the variable still wins, so the saved choice does not change the profile that runs.",
           )
         : null,
-    confirmLabel: tr(`确认改为「${target}」并保存`, `Save as "${target}"`),
+    confirmLabel: same
+      ? tr(`确认是「${target}」并保存`, `Save as "${target}"`)
+      : tr(`确认改为「${target}」并保存`, `Save as "${target}"`),
   };
 }
 

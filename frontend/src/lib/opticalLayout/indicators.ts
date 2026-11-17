@@ -14,15 +14,22 @@
 // backend uses (trace.py near_misses, section 11.2 point 12): a segment crosses the line of
 // a component's active surface, at least 1e-3 mm from its start and 1e-6 mm from its end,
 // outside the aperture (|offset| > aperture/2) but within one aperture of the centre
-// (|offset| <= aperture).
+// (|offset| <= aperture), at the component's height (docs/v2/design/optical_layout_3d.md section 3.6:
+// |z - z_port| <= aperture/2; at another height a crossing beside it means nothing).
+//
+// Heights (the 3D contract, section 6): a hit off its axis in height by more than 20 % of the aperture
+// is yellow like one off centre ("off_height"), and a component no beam reaches that a beam passes
+// over or under is a problem of its own ("height_miss", grouped by component as the server's summary
+// groups it: the closest pass, and how many). Both only for a layout that uses heights.
 
 import { tr } from "../i18n.ts";
 import type { LayoutComponent, OpticalLayout, Truncation } from "./types.ts";
 import { isSourceType } from "./types.ts";
 import type { DetailedBranch, DetailedTrace } from "./trace.ts";
 import { TRACE_LIMITS, eventsByComponent, truncation } from "./trace.ts";
-import { frameOf } from "./geometry.ts";
+import { frameOf, pyRound } from "./geometry.ts";
 import { wavelengthLabel } from "./colors.ts";
+import { heightText, portsOf, segmentZ, usesHeights } from "./heights.ts";
 
 /** |offset| beyond this share of the aperture turns the indicator yellow. */
 export const OFFSET_WARN_FRACTION = 0.2;
@@ -30,7 +37,7 @@ export const OFFSET_WARN_FRACTION = 0.2;
 export const NEAR_MISS_APERTURES = 1;
 
 export type AlignLevel = "ok" | "warn" | "bad";
-export type AlignReason = "ok" | "off_center" | "back_hit" | "blocked";
+export type AlignReason = "ok" | "off_center" | "off_height" | "back_hit" | "blocked";
 
 const RANK: Record<AlignLevel, number> = { ok: 0, warn: 1, bad: 2 };
 
@@ -46,6 +53,8 @@ export interface HitIndicator {
   fraction: number;
   action: string;
   offset_mm: number;
+  /** the beam's height minus the component's axis (3D section 4), 0 in a trace without heights */
+  dz_mm: number;
   incidence_deg: number;
   /** cumulative path from the source */
   path_mm: number;
@@ -66,10 +75,20 @@ export function effectiveAperture(c: LayoutComponent): number {
   return c.aperture_mm;
 }
 
-export function judgeHit(c: LayoutComponent, action: string, offset: number): { level: AlignLevel; reason: AlignReason } {
+/**
+ * Whether a hit is off its axis in height by more than 20 % of the usable aperture (3D section 6.3, the server's rule):
+ * reflect / transmit / split / stop only, on the dz the trace writes out (0.001 mm).
+ */
+export function offHeight(c: LayoutComponent, action: string, dz: number): boolean {
+  if (action !== "reflect" && action !== "transmit" && action !== "split" && action !== "stop") return false;
+  return Math.abs(pyRound(dz, 3)) > OFFSET_WARN_FRACTION * effectiveAperture(c);
+}
+
+export function judgeHit(c: LayoutComponent, action: string, offset: number, dz = 0): { level: AlignLevel; reason: AlignReason } {
   if (action === "back_hit") return { level: "bad", reason: "back_hit" };
   if (action === "blocked") return { level: "warn", reason: "blocked" };
   if (Math.abs(offset) > OFFSET_WARN_FRACTION * effectiveAperture(c)) return { level: "warn", reason: "off_center" };
+  if (offHeight(c, action, dz)) return { level: "warn", reason: "off_height" };
   return { level: "ok", reason: "ok" };
 }
 
@@ -82,7 +101,8 @@ export function hitIndicators(layout: OpticalLayout, trace: DetailedTrace): Map<
     if (!c) continue;
     const list: HitIndicator[] = hits.map(({ source, wavelength_nm, branch, index, event }) => {
       const before = index > 0 ? (branch.events[index - 1]?.path_mm ?? branch.startPath) : branch.startPath;
-      const j = judgeHit(c, event.action, event.offset_mm);
+      const dz = event.dz_mm ?? 0;
+      const j = judgeHit(c, event.action, event.offset_mm, dz);
       return {
         componentId: id,
         source,
@@ -91,6 +111,7 @@ export function hitIndicators(layout: OpticalLayout, trace: DetailedTrace): Map<
         fraction: branch.fraction,
         action: event.action,
         offset_mm: event.offset_mm,
+        dz_mm: dz,
         incidence_deg: event.incidence_deg,
         path_mm: event.path_mm,
         leg_mm: event.path_mm - before,
@@ -124,10 +145,13 @@ export interface NearMiss {
   beyond_mm: number;
 }
 
-/** Beams that pass just outside the aperture of a component they cross. None for a cut trace (see the header). */
+/**
+ * Beams that pass just outside the aperture of a component they cross, at its height (3D section 3.6). None for a
+ * cut trace (see the header).
+ */
 export function nearMisses(layout: OpticalLayout, trace: DetailedTrace): NearMiss[] {
   if (truncation(trace)) return [];
-  const targets = layout.components.filter((c) => !isSourceType(c.type)).map((c) => ({ c, f: frameOf(c) }));
+  const targets = layout.components.filter((c) => !isSourceType(c.type)).map((c) => ({ c, f: frameOf(c), along: portsOf(c, layout.table, 1).entry, against: portsOf(c, layout.table, -1).entry }));
   const out: NearMiss[] = [];
   const seen = new Set<string>();
   for (const s of trace) {
@@ -137,9 +161,11 @@ export function nearMisses(layout: OpticalLayout, trace: DetailedTrace): NearMis
         if (len <= TRACE_LIMITS.selfT) continue;
         const dx = (g.x1 - g.x0) / len;
         const dy = (g.y1 - g.y0) / len;
-        for (const { c, f } of targets) {
+        const z = segmentZ(g, layout.table);
+        for (const { c, f, along, against } of targets) {
           const dn = dx * f.n.x + dy * f.n.y;
           if (Math.abs(dn) < TRACE_LIMITS.parallelEps) continue;
+          if (Math.abs(z - (dn > 0 ? along : against)) > f.half + TRACE_LIMITS.apertureEps) continue;
           const t = ((f.c.x - g.x0) * f.n.x + (f.c.y - g.y0) * f.n.y) / dn;
           if (!(t > TRACE_LIMITS.selfT && t < len - TRACE_LIMITS.minT)) continue;
           const px = g.x0 + dx * t;
@@ -177,7 +203,50 @@ export function shownNearMisses(layout: OpticalLayout, trace: DetailedTrace, pre
   return previewing ? NO_MISSES : nearMisses(layout, trace);
 }
 
-export type DiagnosticKind = "back_hit" | "off_center" | "blocked" | "miss" | "left_table" | "max_events" | "unlit" | "trace_cut";
+export type DiagnosticKind = "back_hit" | "off_center" | "off_height" | "blocked" | "miss" | "height_miss" | "left_table" | "max_events" | "unlit" | "trace_cut";
+
+/** A component no beam reaches that some beam passes over or under (3D section 6.3), with its closest pass. */
+export interface HeightMiss {
+  componentId: string;
+  /** the beam of the closest pass (smallest |dz|; the first in the trace among equals) */
+  source: string;
+  wavelength_nm: number | null;
+  branch: string;
+  x: number;
+  y: number;
+  /** the beam's height there and how far that is from the component's axis (its entrance for a periscope), mm */
+  z_mm: number;
+  dz_mm: number;
+  /** how many passes over or under it the trace has */
+  beams: number;
+}
+
+/**
+ * The components no beam reaches that a beam passes over or under, one per component in the order of its first pass,
+ * the closest pass written (the server's summary: "missed in height", grouped the same way, on the numbers its trace
+ * writes out, 0.001 mm). None for a layout without heights or for a cut trace (see the header).
+ */
+export function heightMisses(layout: OpticalLayout, trace: DetailedTrace): HeightMiss[] {
+  if (!usesHeights(layout) || truncation(trace)) return [];
+  const lit = eventsByComponent(trace);
+  const found = new Map<string, HeightMiss>();
+  for (const s of trace) {
+    for (const br of s.branches) {
+      for (const g of br.segments) {
+        const z = pyRound(segmentZ(g, layout.table), 3) + 0;
+        for (const p of g.passes ?? []) {
+          if (lit.has(p.component)) continue;
+          const dz = pyRound(p.dz_mm, 3) + 0;
+          const old = found.get(p.component);
+          const mine: HeightMiss = { componentId: p.component, source: s.source, wavelength_nm: s.wavelength_nm, branch: br.branch, x: p.x, y: p.y, z_mm: z, dz_mm: dz, beams: (old?.beams ?? 0) + 1 };
+          if (!old || Math.abs(dz) < Math.abs(old.dz_mm)) found.set(p.component, mine);
+          else old.beams += 1;
+        }
+      }
+    }
+  }
+  return [...found.values()];
+}
 
 /**
  * The sentence for a trace the budget cut, in both languages (apart from tr() so that the English one can be
@@ -223,6 +292,7 @@ export function diagnostics(
 ): Diagnostic[] {
   const out: Diagnostic[] = [];
   const cut = truncation(trace);
+  const heights = usesHeights(layout);
   const byId = new Map(layout.components.map((c) => [c.id, c]));
   const seen = new Set<string>();
   const once = (key: string): boolean => {
@@ -253,6 +323,21 @@ export function diagnostics(
       } else if (h.reason === "blocked" && once(`blk|${id}`)) {
         out.push({ kind: "blocked", level: "warn", componentId: id, message: tr(`${name}：光在此被挡住（${beam}）。`, `${name}: the beam is blocked here (${beam}).`) });
       }
+      // in height (3D section 6.3), whatever the reason the indicator gives (off centre comes first there)
+      if (heights && offHeight(c, h.action, h.dz_mm) && once(`offz|${id}`)) {
+        const ap = effectiveAperture(c);
+        const dz = pyRound(h.dz_mm, 3);
+        const port = c.type === "periscope" ? { zh: "入口", en: "entrance" } : { zh: "光轴", en: "axis" };
+        out.push({
+          kind: "off_height",
+          level: "warn",
+          componentId: id,
+          message: tr(
+            `${name}：光比${port.zh}${dz > 0 ? "高" : "低"} ${Math.abs(dz).toFixed(2)} mm（口径的 ${percent(dz, ap)}%，${beam}）。`,
+            `${name}: hit ${Math.abs(dz).toFixed(2)} mm ${dz > 0 ? "above" : "below"} its ${port.en} (${percent(dz, ap)}% of the aperture, ${beam}).`,
+          ),
+        });
+      }
     }
   }
   for (const m of cut ? [] : (pre.misses ?? nearMisses(layout, trace))) {
@@ -264,6 +349,22 @@ export function diagnostics(
       message: tr(
         `${nameOf(layout, m.componentId)}：光从口径边缘外 ${m.beyond_mm.toFixed(1)} mm 处擦过（${m.source} ${wavelengthLabel(m.wavelength_nm)}）。`,
         `${nameOf(layout, m.componentId)}: the beam passes ${m.beyond_mm.toFixed(1)} mm outside the aperture (${m.source} ${wavelengthLabel(m.wavelength_nm)}).`,
+      ),
+    });
+  }
+  for (const m of heightMisses(layout, trace)) {
+    const c = byId.get(m.componentId);
+    const port = c?.type === "periscope" ? { zh: "入口", en: "entrance" } : { zh: "光轴", en: "axis" };
+    const over = m.dz_mm > 0;
+    const axis = heightText(m.z_mm - m.dz_mm);
+    const beam = `${m.source} ${wavelengthLabel(m.wavelength_nm)}`;
+    out.push({
+      kind: "height_miss",
+      level: "bad",
+      componentId: m.componentId,
+      message: tr(
+        `${nameOf(layout, m.componentId)}：没有任何光照到；${beam} 的光从它${over ? "上方" : "下方"}越过（光高 ${heightText(m.z_mm)} mm，它的${port.zh}在 ${axis} mm）${m.beams > 1 ? `（共 ${m.beams} 束光）` : ""}。`,
+        `${nameOf(layout, m.componentId)}: no beam reaches it; ${beam} passes ${over ? "over" : "under"} it (beam at ${heightText(m.z_mm)} mm, its ${port.en} at ${axis} mm)${m.beams > 1 ? ` (${m.beams} beams in all)` : ""}.`,
       ),
     });
   }

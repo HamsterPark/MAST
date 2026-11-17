@@ -9,6 +9,7 @@ import { Link } from "react-router-dom";
 import clsx from "clsx";
 import type { GalleryItem } from "@/lib/gallery/types";
 import { RSYM, autoTags, caption, dirShort } from "@/lib/gallery/format";
+import { envParts, envPresence } from "@/lib/gallery/env";
 import { ratingToggle } from "@/lib/gallery/marks";
 import { seriesOf, shortFn } from "@/lib/gallery/series";
 import { viewSearch } from "@/lib/gallery/route";
@@ -52,6 +53,8 @@ export const GalleryCard = memo(function GalleryCard({
   const sids = seriesOf(series, item.id);
   const cap = caption(item);
   const tags = autoTags(item, lastBatch, numOf);
+  const env = envParts(item);
+  const inferred = envPresence(item) === "inf";
   const r = m?.r ?? 0;
   const spectrumLike = item.k === "s" || item.k === "g";
 
@@ -100,6 +103,32 @@ export const GalleryCard = memo(function GalleryCard({
         {cap.lines.map((line, i) => (
           <div key={i}>{line}</div>
         ))}
+        {env.length > 0 && (
+          <div data-gallery-env-line className={clsx(inferred && "italic text-mast-faint")}>
+            {inferred && (
+              <Chip
+                kind="env"
+                title={tr(
+                  "按环境历史推断：这个文件存的时候还没有记录环境",
+                  "Inferred from the environment history: environment was not recorded when this file was saved",
+                )}
+              >
+                {tr("推断", "inferred")}
+              </Chip>
+            )}
+            {env.map((p, i) => (
+              <span
+                key={p.key}
+                title={p.title}
+                className={clsx(p.changed && "text-mast-warn", p.state === "o" && "text-mast-faint")}
+              >
+                {i > 0 && <span className="text-mast-faint"> · </span>}
+                {p.text}
+                {p.stale && <span className="text-[10.5px]"> ({p.stale})</span>}
+              </span>
+            ))}
+          </div>
+        )}
         {tags.length > 0 && (
           <div>
             {tags.map((t) => (

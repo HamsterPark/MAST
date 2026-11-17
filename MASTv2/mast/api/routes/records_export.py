@@ -234,14 +234,14 @@ def export_experiments(
     try:
         from datetime import datetime
 
-        from mast._runtime_paths import project_root
+        from mast._runtime_paths import data_root
         from mast.logging.export_all import export_all_history
 
         if body.dest:
             dest = Path(body.dest)
         else:
             stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
-            dest = project_root() / "exports" / f"mast_full_export_{stamp}.zip"
+            dest = data_root() / "exports" / f"mast_full_export_{stamp}.zip"
 
         manifest = export_all_history(dest, include_heavy=body.include_heavy)
     except Exception as exc:

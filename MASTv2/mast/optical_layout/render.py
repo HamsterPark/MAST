@@ -3,10 +3,16 @@
 ``render_png(layout)`` draws the table with its holes, every component as a simple shape of its
 own (nothing copied from an icon library: the shapes are lines, polygons and arcs), the beams of the
 trace coloured by wavelength (visible light by its approximate colour; infrared and ultraviolet in
-a fixed colour and dashed; an unknown wavelength grey) with the line weight following the intensity
-of a branch, and the places that deserve a look marked: a ring where a beam hits more than 20 % of
+a fixed colour and dashed; an unknown wavelength grey) with the line weight following the power of
+each segment (contract v2 §6: the relative power ``p`` from 1e-3 to 1 mapped on a log scale to
+0.6-2.4 pt; below 1e-6 - no light - a thin grey dotted line), the power that arrives at every
+terminal component written next to it (mW when the source's power is known, else the share of the
+source), and the places that deserve a look marked: a ring where a beam hits more than 20 % of
 the aperture off centre, a cross where a beam meets the back of something or just misses a
-component. Labels are drawn next to the components; a text label of the drawing at its place.
+component. Labels are drawn next to the components; a text label of the drawing at its place. In a layout
+that uses heights (contract ``docs/v2/design/optical_layout_3d.md`` §8) a label also gives the height of a
+component off the table's beam height (``M3 z120``) and the exit of a periscope that goes up or down
+(``P1 ▲250``); every other picture is the same as before, byte for byte.
 
 Only the Object-Oriented API is used (``Figure`` + ``FigureCanvasAgg``): no ``pyplot`` global
 state, so it is safe in a server thread and without a display. A lock serialises renders (font
@@ -22,8 +28,17 @@ import math
 import threading
 from typing import Any, Optional
 
-from mast.optical_layout.model import SOURCE_TYPES, Component, Layout, normalize_layout
-from mast.optical_layout.summary import OFF_CENTER_SHARE
+from mast.optical_layout.model import (
+    SOURCE_TYPES,
+    Component,
+    Layout,
+    beam_height,
+    component_z,
+    normalize_layout,
+    periscope_heights,
+    uses_heights,
+)
+from mast.optical_layout.summary import DARK_SHARE, OFF_CENTER_SHARE, power_text, share_number
 from mast.optical_layout.trace import near_misses, lit_components, trace_layout, truncation
 
 MIN_WIDTH_PX = 200
@@ -34,6 +49,34 @@ _LOCK = threading.Lock()
 _CJK_FONTS = ("Microsoft YaHei", "SimHei", "Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Micro Hei",
               "PingFang SC", "Arial Unicode MS")
 _MAX_HOLES = 9000
+#: line widths (pt) of a beam: relative power 1e-3 and below -> the thinnest, 1 -> the thickest (log scale)
+BEAM_WIDTH_PT = (0.6, 2.4)
+#: a terminal component gets at most this many power labels (one artist each)
+_MAX_POWER_LABELS = 80
+_DARK_COLOR = (0.55, 0.55, 0.55, 0.9)
+
+
+def beam_weight(p: Optional[float]) -> float:
+    """0 for a relative power of 1e-3 or less, 1 for full power, linear in log10 between."""
+    if p is None:
+        return 1.0
+    if p <= 1e-3:
+        return 0.0
+    return min(1.0, (math.log10(p) + 3.0) / 3.0)
+
+
+def beam_width(p: Optional[float]) -> float:
+    lo, hi = BEAM_WIDTH_PT
+    return lo + (hi - lo) * beam_weight(p)
+
+
+def _arrived(beam: Optional[dict]) -> str:
+    """What arrives, for a label: mW when the absolute power is known, else the share of the source."""
+    if not beam:
+        return ""
+    if beam.get("mw") is not None:
+        return power_text(beam["mw"])
+    return f"{share_number(beam['p'])} %"           # the same digits as the description (contract v2 §12.3)
 
 
 # ── colours ──────────────────────────────────────────────────────────────────────────────────
@@ -106,7 +149,22 @@ class _Frame:
         return [self.p(a0, b0), self.p(a1, b1)]
 
 
-def _draw_component(ax: Any, c: Component, fp: Any, label: bool) -> None:
+def _height_suffix(c: Component, h: float) -> str:
+    """What the label of a component says about its height (contract 3D §8), for a layout that uses heights:
+    `` z120`` off the table's beam height *h*; a periscope that goes up or down `` ▲250`` / `` ▼60`` (its exit)."""
+    def g(v: float) -> str:
+        text = f"{v:.2f}".rstrip("0").rstrip(".")
+        return "0" if text in ("", "-0") else text
+
+    if c.type == "periscope":
+        z_in, z_out = periscope_heights(c, h)
+        if z_out != z_in:
+            return f" {'▲' if z_out > z_in else '▼'}{g(z_out)}"
+    z = component_z(c, h)
+    return "" if z == h else f" z{g(z)}"
+
+
+def _draw_component(ax: Any, c: Component, fp: Any, label: bool, suffix: str = "") -> None:
     from matplotlib.patches import Circle, Polygon
 
     f = _Frame(c)
@@ -132,9 +190,14 @@ def _draw_component(ax: Any, c: Component, fp: Any, label: bool) -> None:
             for k in range(-4, 5):
                 b = h * k / 4.5
                 line(f.seg(0, b, t * 0.7, b), lw=0.8, color="#a0522d")
-    elif ty in ("beam_splitter", "dichroic"):
-        poly([f.p(0, -h), f.p(h, 0), f.p(0, h), f.p(-h, 0)], face="#fff4d6" if ty == "dichroic" else "#e8f4e8")
-        line(f.seg(0, -h, 0, h), lw=1.6, color="#b8860b" if ty == "dichroic" else "#2e7d32")
+    elif ty in ("beam_splitter", "dichroic", "pbs"):
+        face = {"dichroic": "#fff4d6", "pbs": "#e3ecfa"}.get(ty, "#e8f4e8")
+        poly([f.p(0, -h), f.p(h, 0), f.p(0, h), f.p(-h, 0)], face=face)
+        line(f.seg(0, -h, 0, h), lw=1.6, color={"dichroic": "#b8860b", "pbs": "#1f4e9c"}.get(ty, "#2e7d32"))
+        if ty == "pbs":                                              # the polarizing cube says so
+            mark = f.p(h * 0.45, 0)
+            ax.text(mark[0], mark[1], "P", fontproperties=fp, fontsize=6, color="#1f4e9c", ha="center", va="center",
+                    zorder=6, parse_math=False)
     elif ty == "lens":
         top = [f.p(t * (1 - (s / 10) ** 2) * 1.6, h * s / 10) for s in range(-10, 11)]
         bottom = [f.p(-t * (1 - (s / 10) ** 2) * 1.6, h * s / 10) for s in range(10, -11, -1)]
@@ -179,7 +242,7 @@ def _draw_component(ax: Any, c: Component, fp: Any, label: bool) -> None:
         poly([f.p(-t, -s), f.p(t, -s), f.p(t, s), f.p(-t, s)], face="#d7f0d7")
         line(f.seg(-t, -s, t, s), lw=0.8, color="#2e7d32")
     if label:
-        text = _text(c.label or c.id)
+        text = _text(c.label or c.id) + suffix
         off = f.p(-(max(h, 8.0) + 6.0), 0)
         ax.text(off[0], off[1], text, fontproperties=fp, fontsize=7, color="#111111", ha="center", va="center", zorder=8,
                 parse_math=False,
@@ -269,17 +332,23 @@ def _render(lay: Layout, trace: list[dict], width_px: int, labels: bool, fit: st
         if len(xs) * len(ys) <= _MAX_HOLES:
             ax.scatter([x for y in ys for x in xs], [y for y in ys for _ in xs], s=1.2, c="#c8c8c0", linewidths=0, zorder=1)
 
-    # The beams go into two collections (solid and dashed), the marks into one line per kind: a
-    # matplotlib artist costs about a millisecond, so one per branch or per mark would make a
-    # trace of thousands of events take seconds.
-    beams: dict[str, tuple[list, list, list]] = {"-": ([], [], []), "--": ([], [], [])}
+    # The beams go into three collections (solid, dashed, and dotted for no light), the marks into one
+    # line per kind: a matplotlib artist costs about a millisecond, so one per branch or per mark would
+    # make a trace of thousands of events take seconds. The weight of a segment follows its power
+    # (contract v2 §6), so it is set per segment.
+    beams: dict[str, tuple[list, list, list]] = {"-": ([], [], []), "--": ([], [], []), ":": ([], [], [])}
     for tree in trace:
         color, style = wavelength_color(tree["wavelength_nm"])
-        segs, colors, widths = beams[style]
         for br in tree["branches"]:
-            rgba = (*color, 0.55 + 0.4 * br["fraction"])
-            width = 0.8 + 1.6 * br["fraction"]
             for s in br["segments"]:
+                p = (s.get("beam") or {}).get("p")
+                if p is not None and p < DARK_SHARE:
+                    segs, colors, widths = beams[":"]
+                    rgba, width = _DARK_COLOR, BEAM_WIDTH_PT[0]
+                else:
+                    segs, colors, widths = beams[style]
+                    weight = beam_weight(br["fraction"] if p is None else p)
+                    rgba, width = (*color, 0.55 + 0.4 * weight), beam_width(br["fraction"] if p is None else p)
                 segs.append([(s["x0"], s["y0"]), (s["x1"], s["y1"])])
                 colors.append(rgba)
                 widths.append(width)
@@ -287,9 +356,11 @@ def _render(lay: Layout, trace: list[dict], width_px: int, labels: bool, fit: st
         if segs:
             ax.add_collection(LineCollection(segs, colors=colors, linestyles=style, linewidths=widths, zorder=3))
 
+    # heights (contract 3D §8): only a layout that uses them gets them in its labels
+    h = beam_height(lay.table) if uses_heights(lay) else None
     for c in lay.components:
         if x0 <= c.x_mm <= x1 and y0 <= c.y_mm <= y1:
-            _draw_component(ax, c, fp, labels)
+            _draw_component(ax, c, fp, labels, "" if h is None else _height_suffix(c, h))
 
     by_id = {c.id: c for c in lay.components}
     back_hits: list[tuple[float, float]] = []
@@ -316,6 +387,23 @@ def _render(lay: Layout, trace: list[dict], width_px: int, labels: bool, fit: st
                 markersize=9, markeredgewidth=1.6, zorder=7)
     if misses:
         ax.plot(*zip(*misses), linestyle="none", marker="x", color="#d32f2f", markersize=7, markeredgewidth=1.6, zorder=7)
+
+    # the power that arrives at every terminal component (a beam that stops on its front), next to it
+    arrivals: dict[str, list[str]] = {}
+    for tree in trace:
+        for br in tree["branches"]:
+            for ev in br["events"]:
+                if ev["action"] == "stop" and ev.get("beam") and ev["component"] in by_id:
+                    arrivals.setdefault(ev["component"], []).append(_arrived(ev["beam"]))
+    for cid, texts in list(arrivals.items())[:_MAX_POWER_LABELS]:
+        c = by_id[cid]
+        if not (x0 <= c.x_mm <= x1 and y0 <= c.y_mm <= y1):
+            continue
+        f = _Frame(c)
+        at = f.p(0.0, max(f.half, 4.0) + 8.0)                    # beside the working surface, off the beam
+        ax.text(at[0], at[1], ", ".join(texts[:3]) + (" ..." if len(texts) > 3 else ""), fontproperties=fp,
+                fontsize=6.5, color="#0d47a1", ha="center", va="center", zorder=8, parse_math=False,
+                bbox=dict(boxstyle="round,pad=0.12", facecolor="white", edgecolor="#90caf9", linewidth=0.6, alpha=0.85))
 
     if cut:
         # Where the trace stopped, and a note on the picture. English only: the machine may have no

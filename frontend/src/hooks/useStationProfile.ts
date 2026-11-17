@@ -5,13 +5,16 @@ import { settingsWriteProblem, type SettingsPatch } from "@/lib/settingsWrite";
 import {
   normalizeProfile,
   normalizeSource,
+  profileNeverChosen,
   restartNeeded,
   type ProfileSource,
   type StationProfile,
 } from "@/lib/stationProfile";
 
-// Which kind of station this MAST service is: "stm" (a Nanonis STM) or "optical"
-// (an optical/Raman station, no STM). Two values are involved and they are not the
+// Which kind of station this MAST service is: "stm" (a Nanonis STM), "optical" (an
+// optical/Raman station, no STM) or "generic" (neither: another lab's machine). This hook
+// is about choosing and saving the profile; what the UI shows is gated on the station's
+// capabilities (useStationCapabilities). Two values are involved and they are not the
 // same thing:
 //   * the profile in force  - GET /api/health `station_profile` (what the UI should
 //     look like), plus `station_restart_pending`: the stored value was changed
@@ -85,6 +88,11 @@ export function useStationProfile() {
   const flag = health.data?.station_restart_pending;
   const restartPending =
     typeof flag === "boolean" ? flag : loaded && restartNeeded(configured, profile);
+  // Nobody has chosen a profile here yet (nothing stored, no environment variable): the
+  // first-use prompt. Only the service's explicit "default" counts (profileNeverChosen).
+  const firstRun = profileNeverChosen(
+    (health.data as { station_profile_source?: unknown } | undefined)?.station_profile_source,
+  );
 
   const setProfile = useMutation({
     mutationFn: async ({ profile: next, pin }: SwitchRequest) => {
@@ -127,11 +135,12 @@ export function useStationProfile() {
   return {
     /** The profile in force (GET /api/health); "stm" until health answers. */
     profile,
-    isOptical: profile === "optical",
     /** The stored choice (GET /api/settings); "stm" when never set. */
     configured,
     /** Where the configured profile comes from; "env" = pinned by MAST_STATION_PROFILE. */
     source,
+    /** No profile was ever chosen on this machine (no stored value, no environment variable). */
+    firstRun,
     /** Saved, but the running service has not restarted into it yet. */
     restartPending,
     /** Health and settings have both answered at least once. */

@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from pydantic import BaseModel, Field
 
-from mast._runtime_paths import project_root
+from mast._runtime_paths import data_root, project_root
 
 logger = logging.getLogger(__name__)
 
@@ -719,8 +719,9 @@ class Paths(BaseModel):
         default_factory=lambda: _project_root() / "artifacts" / "legacy")
     overrides_dir: Path = Field(
         default_factory=lambda: _project_root() / "config" / "overrides")
+    # 记录库是运行时写的用户数据，跟着 data_root()（MAST_DATA_DIR > project_root）。
     experiments_db: Path = Field(
-        default_factory=lambda: _project_root() / "experiments" / "mast_experiments.db")
+        default_factory=lambda: data_root() / "experiments" / "mast_experiments.db")
 
 
 class MASTConfig(BaseModel):
@@ -742,4 +743,4 @@ class MASTConfig(BaseModel):
     experiments_dir: Path = Field(default_factory=lambda: _project_root() / "experiments")
     session_dir: Path = Path("")
     db_path: Path = Field(
-        default_factory=lambda: _project_root() / "experiments" / "mast_experiments.db")
+        default_factory=lambda: data_root() / "experiments" / "mast_experiments.db")

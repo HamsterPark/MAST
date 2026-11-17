@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════════════════
-// Pure-logic tests for src/lib/monitoring.ts — the 电流监控 helpers.
+// Pure-logic tests for src/lib/monitoring.ts — the 信号监控 (signal monitor) helpers.
 //
 // NO TEST FRAMEWORK IS INSTALLED in this frontend (no vitest, no jest), and
 // adding one is a dependency decision that is not ours to make. These run on
@@ -145,7 +145,7 @@ describe("stateView", () => {
   // Every state monitoring/service.py can publish. "unknown" is a real state
   // with its own entry, so it is checked separately from the fall-through.
   const STATES = [
-    "disabled", "no_pool", "comms_down", "probing",
+    "disabled", "no_pool", "comms_down", "comms_recovering", "probing",
     "running", "unavailable", "paused",
   ];
 
@@ -167,6 +167,8 @@ describe("stateView", () => {
     assert.equal(stateView("running").tone, "AUTO");
     assert.equal(stateView("comms_down").tone, "DANGEROUS");
     assert.notEqual(stateView("no_pool").tone, "AUTO");
+    // A breaker that has not been verified yet is not a healthy link either.
+    assert.notEqual(stateView("comms_recovering").tone, "AUTO");
   });
 });
 

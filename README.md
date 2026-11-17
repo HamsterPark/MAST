@@ -24,7 +24,7 @@
 
 You can view progress, operate the instrument manually, or stop a task in the MAST interface.
 
-This repository contains the **MAST 7.1.6 public source snapshot**; the matching Windows installer is on the [Releases](https://github.com/HamsterPark/MAST/releases) page. See [release scope and validation](#validation-and-public-release-scope) for what the snapshot omits and for its validation records.
+This repository contains the **MAST 7.3.1 public source snapshot**; the matching Windows installer is on the [Releases](https://github.com/HamsterPark/MAST/releases) page. See [release scope and validation](#validation-and-public-release-scope) for what the snapshot omits and for its validation records.
 
 **Connecting general-purpose AI agents to atomic-scale experiments.**
 
@@ -175,6 +175,7 @@ The table below lists usage entry points alongside source references in this sna
 | Support TERS experiments | Control supported optical components through the TERS interface | TERS section in the MAST application; [TERS workflows](MASTv2/mast/skills/composite/ters_common.py), [optical drivers](MASTv2/mast/instruments/), [spectroscopy-PC satellite](satellite/README.md) |
 | Connect an external agent | Skill discovery, asynchronous jobs, request deduplication, conflict checks, and restart-state handling | [External jobs](MASTv2/mast/api/ext/jobs.py), [Claude Code integration](integrations/claude-code/README.md) |
 | Execute bounded physical operations | Parameter and SI-magnitude validation, execution-mode checks, instrument ownership, and abort handling | [Execution context](MASTv2/mast/core/execution_context.py), [safety checks](MASTv2/mast/core/safety.py) |
+| Change the magnetic field and the sample temperature | Gates that refuse rather than clamp, the user's own words to authorise raising the field, no heating during a field change, and a ledger of every write and refusal | [Magnet supply](MASTv2/mast/instruments/magnet_625.py), [temperature controller](MASTv2/mast/instruments/heater_335.py) |
 | Relate reasoning to recent observations | Buffering and monitoring expose observation age and scan progress | [Buffer service](MASTv2/mast/buffer/service.py), [snapshot observation tools](MASTv2/mast/agents/_shared/buffer_tools.py) |
 | Inspect and measure visual evidence | Persistent images, calibrated coordinates, regional inspection, profiles, registration, and quantitative readout | [VISTA service](MASTv2/mast/vista/service.py), [VISTA-SPM](https://github.com/HamsterPark/VISTA-SPM) |
 | Detect and handle communication failures | Controller-protocol reads, timeouts, reconnection and polling fallback, and explicit stream-completion states | [Controller protocol](MASTv2/mast/core/nanonis_patch.py), [interface communication](frontend/src/lib/) |
@@ -199,10 +200,11 @@ The records below describe specific versions and execution paths. They include h
 | Component or record | Version and evidence | Scope |
 |---|---|---|
 | Long STM campaign | MAST **6.4.0**; timestamped record spanning approximately 99 hours | Maintainer-reported real-instrument operation through the earlier external control path; selected figures are public. |
-| Public source snapshot | MAST **7.1.6**; exported and tested **2026-11-07** | Backend, frontend, and release checks using test doubles and synthetic data. |
+| Public source snapshot | MAST **7.3.1**; exported and tested **2026-11-17** | Backend, frontend, and release checks using test doubles and synthetic data. |
 | External API and MCP integration | `/api/ext/v1` in this snapshot | Maintainer-reported real-instrument use; the snapshot records software tests. |
 | VISTA-SPM layer | Added in MAST 7.0–7.1 | Maintainer-reported real-instrument use; the snapshot records software tests with instrument doubles. |
 | TERS and optical-station control | Added in MAST 7.0–7.1 | The snapshot records software tests with instrument doubles; it does not include hardware validation for these paths. |
+| Cryogenic-instrument control, the generic station, the 3-D optical layout and its exports, and the live scan on the scan map | Added in MAST 7.1.8–7.3.1 | The snapshot records software tests with instrument doubles. Read-only use of the magnet supply and the temperature controller on a real instrument is maintainer-reported; field ramps, temperature control and the live scan await hardware validation. |
 | Built-in orchestration and DINOv3-based vision | Earlier research and development retained in the source snapshot | Historical implementations; further development of these approaches has stopped. Current work uses external agents and VISTA-SPM. |
 | Other snapshot extensions | The skill workshop and marketplace, and qPlus paths | Hardware validation was pending in the recorded snapshot. |
 
@@ -211,21 +213,21 @@ The maintainer also reports functional instrument use of core execution, skills,
 <details>
 <summary>Recorded software validation: environment, counts, and scope</summary>
 
-The recorded platform was **Windows / Python 3.13**, on the exported tree of MAST 7.1.6.
+The recorded platform was **Windows / Python 3.13**, on the exported tree of MAST 7.3.1.
 
 | Check | Recorded result |
 |---|---|
-| Backend tests | **19,755 passed**; 1 timing-dependent failure that passed on rerun, 68 skipped and 2 expected failures |
-| Frontend unit tests | **1,931 / 1,931 passed** |
+| Backend tests | **21,458 passed**; 68 skipped and 2 expected failures |
+| Frontend unit tests | **2,946 / 2,946 passed** |
 | Frontend build and type checking | Passed |
-| API contract | 329 OpenAPI paths and 654 schema definitions; frontend types synchronized |
+| API contract | 337 OpenAPI paths and 681 schema definitions; frontend types synchronized |
 | Release checks | Python syntax, import closure, and public-content cleanup passed |
 
 These results apply to this exported tree. Documentation edits do not rerun or extend this validation. The [validation record](docs/OPEN_SOURCE_NOTES.md#四import-闭包与测试) documents commands, optional dependencies, skips, and reproduction requirements. Tests use instrument doubles; a complete instrument simulator is not bundled.
 
 </details>
 
-The public source follows MAST 7.1.6: instrument skills, execution checks, external-agent integration with the VISTA-SPM layer, TERS and optical-station control, data processing, the React interface, contribution examples, and tests, alongside historical built-in orchestration and vision code. Gallery and literature-management implementations are included with empty initial data. The presence of the earlier code records the project history; it does not make those approaches the current recommendation.
+The public source follows MAST 7.3.1: instrument skills, execution checks, external-agent integration with the VISTA-SPM layer, TERS and optical-station control, cryogenic-instrument control, the generic station profile, data processing, the React interface, contribution examples, and tests, alongside historical built-in orchestration and vision code. Gallery and literature-management implementations are included with empty initial data. The presence of the earlier code records the project history; it does not make those approaches the current recommendation.
 
 Selected specialized modules, literature-derived skills, knowledge assets, vision weights, instrument calibration, site configuration, full experimental datasets, and private development history are excluded for licensing, intellectual-property, commercialization, and research-data reasons. Deployment requires the corresponding configuration and assets; the built-in preprocessing profile is an uncalibrated example. The [public release notes](docs/OPEN_SOURCE_NOTES.md) describe these omissions and their effects.
 
@@ -234,13 +236,13 @@ Selected specialized modules, literature-derived skills, knowledge assets, visio
 
 | Metric | Count |
 |---|---|
-| Python files / physical lines in `MASTv2/mast/` | 985 / 401,432 |
-| Handwritten TypeScript lines in `frontend/src/` | 93,773; generated `schema.d.ts` excluded |
-| Skill classes defining `execute()` | 521; built-in and composite skills |
-| HTTP / WebSocket route declarations | 428 |
-| Test function definitions in `tests/` | 15,344; parameterized cases not expanded |
+| Python files / physical lines in `MASTv2/mast/` | 1,021 / 422,964 |
+| Handwritten TypeScript lines in `frontend/src/` | 111,275; generated `schema.d.ts` excluded |
+| Skill classes defining `execute()` | 537; built-in and composite skills |
+| HTTP / WebSocket route declarations | 437 |
+| Test function definitions in `tests/` | 16,448; parameterized cases not expanded |
 
-These are static counts of the exported tree. Runtime registrations, OpenAPI paths, and expanded test cases use different counting methods. Development began on 2026-03-17; the development repository had 1334 commits at export.
+These are static counts of the exported tree. Runtime registrations, OpenAPI paths, and expanded test cases use different counting methods. Development began on 2026-03-17; the development repository had 1655 commits at export.
 
 The historical agent topology comprises one orchestrator; seven domain agents for research coordination, literature, experimental design, instrument control, data processing, paper writing, and paper review; and two auxiliary nodes for brainstorming and buffer summaries. The snapshot also retains `conduct/`, `agentruntime/`, and `goals/`. Its custom runtime coexists with LangGraph, with `engine_v2_*` switches off by default; these details describe the archived design.
 

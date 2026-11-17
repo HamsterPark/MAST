@@ -284,6 +284,7 @@ def test_the_unbounded_hazards_are_dangerous(registry):
         "RunRfFrequencySweep":  "同上，且整个扫描期间都在出功率",
         "MoveProbeXY":          "探针互撞——Nanonis 不知道别的探针在哪",
         "SetPiControllerOnOff": "把环闭到任意输出上，可驱动压电且无接触停止",
+        "RampMagnetField":      "超导磁体扫场：Nanonis 管不到；SETI 一发就扫，电源没有看门狗",
     }
     for name, why in sorted(unbounded.items()):
         meta = next((m for m in registry.list_skills() if m.name == name), None)

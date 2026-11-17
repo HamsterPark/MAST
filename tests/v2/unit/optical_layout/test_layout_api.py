@@ -176,6 +176,20 @@ def test_the_documented_limits_are_enforced_through_the_api(client):
     assert put(client, body={"layout": doc(comps=ok), "base_revision": 0, "by": "ana"}).status_code == 200
 
 
+def test_a_wavelength_that_would_round_to_zero_is_a_422_not_a_stored_zero(client, layout_root):
+    """0.0001 nm rounds to 0.0 at the 0.001 the model keeps: refused, so nothing is stored that the next read
+    would refuse (contract v2 §12.1: normalising twice changes nothing again) and no beam has a zero wavelength."""
+    tiny = doc(comps=[laser("las1", 50, 62.5, wl=0.0001), det("d", 300, 62.5, 180)])
+    r = put(client, body={"layout": tiny, "base_revision": 0, "by": "ana"})
+    assert r.status_code == 422 and "wavelength_nm" in r.text
+    assert client.get("/api/optical-layouts/main").status_code == 404                  # nothing was written
+    assert not list((layout_root / "config" / "optical_layouts").glob("*.json"))
+    ok = doc(comps=[laser("las1", 50, 62.5, wl=0.0006), det("d", 300, 62.5, 180)])     # rounds to 0.001: kept
+    saved = seed(client, body={"layout": ok, "base_revision": 0, "by": "ana"})
+    assert saved["layout"]["components"][0]["props"]["wavelength_nm"] == 0.001
+    assert client.get("/api/optical-layouts/main").status_code == 200                  # and it reads back
+
+
 def test_a_huge_request_body_is_refused_before_it_is_read(client):
     big = b'{"layout": {"id": "main", "notes": "' + b"x" * 3_000_000 + b'"}, "base_revision": 0, "by": "ana"}'
     r = client.put("/api/optical-layouts/main", content=big, headers=JSON)
@@ -533,7 +547,9 @@ def test_the_routes_are_part_of_the_main_app_and_not_of_the_ext_surface():
                     ("POST", "/api/optical-layouts/{layout_id}/delete"), ("GET", "/api/optical-layouts/{layout_id}/history"),
                     ("GET", "/api/optical-layouts/{layout_id}/revisions/{revision}"), ("GET", "/api/optical-layouts/{layout_id}/render.png"),
                     ("GET", "/api/optical-layouts/{layout_id}/comments"), ("POST", "/api/optical-layouts/{layout_id}/comments"),
-                    ("POST", "/api/optical-layouts/{layout_id}/comments/{comment_id}/resolve")}
+                    ("POST", "/api/optical-layouts/{layout_id}/comments/{comment_id}/resolve"),
+                    # the figure as a PDF (routes/optical_layout_figure.py): converts what it is sent, stores nothing
+                    ("POST", "/api/optical-layouts/figure.pdf")}
     assert not [p for p in spec["paths"] if p.startswith("/api/ext")]
     assert {"Layout", "LayoutWriteBody", "LayoutViewResponse", "CommentOut"} <= set(spec["components"]["schemas"])
 

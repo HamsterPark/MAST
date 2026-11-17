@@ -1,5 +1,7 @@
 /**
- * 站点画像（stm / optical）的纯函数 + 它在页面里的接线（src/lib/stationProfile.ts）。
+ * 站点画像（stm / optical / generic）的纯函数 + 它在页面里的接线（src/lib/stationProfile.ts）。
+ * 门按能力判断（src/lib/stationCapabilities.ts），三种画像 × 有 / 无能力字段在
+ * test/stationCapabilities.test.ts；这里只管画像本身和首页的接线。
  *
  *     cd frontend && npm run test:unit
  *
@@ -38,9 +40,10 @@ import {
 } from "../src/lib/stationProfile.ts";
 
 describe("normalizeProfile", () => {
-  it("认 stm / optical 两个值", () => {
+  it("认 stm / optical / generic 三个值", () => {
     assert.equal(normalizeProfile("stm"), "stm");
     assert.equal(normalizeProfile("optical"), "optical");
+    assert.equal(normalizeProfile("generic"), "generic");
   });
 
   it("忽略大小写与首尾空白（后端存的是规范形式，但手改过的文件不一定）", () => {
@@ -68,6 +71,11 @@ describe("normalizeProfile", () => {
       "null",
       "undefined",
       "true",
+      "generic2",
+      "genric", // 拼错
+      "general",
+      "通用站",
+      "generic optical",
     ]) {
       assert.equal(normalizeProfile(v), "stm", JSON.stringify(v));
     }
@@ -79,11 +87,11 @@ describe("normalizeProfile", () => {
     }
   });
 
-  it("返回值只有两种，而且是幂等的", () => {
-    const samples: unknown[] = ["optical", "stm", " Optical ", "x", "", null, undefined, 3, {}, "STM", "oPtIcAl"];
+  it("返回值只有三种，而且是幂等的", () => {
+    const samples: unknown[] = ["optical", "stm", "generic", " Optical ", " GENERIC", "x", "", null, undefined, 3, {}, "STM", "oPtIcAl"];
     for (const v of samples) {
       const p = normalizeProfile(v);
-      assert.ok(p === "stm" || p === "optical", String(v));
+      assert.ok(p === "stm" || p === "optical" || p === "generic", String(v));
       assert.equal(normalizeProfile(p), p);
     }
   });
@@ -118,16 +126,19 @@ describe("restartNeeded", () => {
 });
 
 describe("profileLabel / profileBlurb", () => {
-  it("两种画像各有自己的名字", () => {
+  it("三种画像各有自己的名字", () => {
     assert.equal(profileLabel("stm"), "STM 站");
     assert.equal(profileLabel("optical"), "光学站");
+    assert.equal(profileLabel("generic"), "通用站");
   });
 
   it("说明各自提到各自的仪器", () => {
     assert.match(profileBlurb("stm"), /Nanonis/);
     assert.match(profileBlurb("optical"), /WITec/);
     assert.match(profileBlurb("optical"), /没有 STM/);
-    assert.notEqual(profileBlurb("stm"), profileBlurb("optical"));
+    assert.match(profileBlurb("generic"), /没有 STM/);
+    assert.match(profileBlurb("generic"), /也没有 WITec/);
+    assert.equal(new Set(["stm", "optical", "generic"].map((p) => profileBlurb(p as "stm"))).size, 3);
   });
 });
 
@@ -315,17 +326,20 @@ function code(rel: string): string {
 }
 
 describe("接线", () => {
-  it("SetupBanner：hook 先调，光学站再早退（hook 个数不能随画像变）", () => {
+  it("SetupBanner：hook 先调，没有 STM 安全参数的站再早退（hook 个数不能随站变）；清单本身也不去要", () => {
     const src = code("components/shell/SetupBanner.tsx");
-    const hook = src.indexOf("useStationProfile()");
-    const bail = src.search(/if \(station\.isOptical\) return null/);
+    const hook = src.indexOf("useStationCapabilities()");
+    const init = src.indexOf("useInstrumentInit({ enabled: stmSafety })");
+    const bail = src.search(/if \(!stmSafety\) return null/);
     const firstReturn = src.indexOf("return null");
-    assert.ok(hook >= 0, "SetupBanner 没有调用 useStationProfile()");
-    assert.ok(bail > hook, "光学站的早退必须在 hook 调用之后");
-    assert.ok(hook < firstReturn, "useStationProfile() 必须在第一个 return null 之前");
+    assert.ok(hook >= 0, "SetupBanner 没有调用 useStationCapabilities()");
+    assert.match(src, /const stmSafety = station\.ready && station\.has\("stm_safety"\);/);
+    assert.ok(init > hook, "初始化清单的请求要等能力：useInstrumentInit({ enabled: stmSafety })");
+    assert.ok(bail > init, "早退必须在所有 hook 调用之后");
+    assert.ok(hook < firstReturn && init < firstReturn, "hook 必须在第一个 return null 之前");
   });
 
-  it("Dashboard：两个 STM 读取带 enabled，光学站不发；两节只在 STM 画像下渲染", () => {
+  it("Dashboard：两个 STM 读取带 enabled，没有 Nanonis 的站不发；两节只在有 Nanonis 时渲染", () => {
     const src = code("pages/DashboardPage.tsx");
     for (const name of ["useConnection", "useLiveReadings"]) {
       const m = new RegExp(`function ${name}\\(enabled: boolean\\) \\{[\\s\\S]*?\\n\\}`).exec(src);
@@ -333,15 +347,53 @@ describe("接线", () => {
       assert.match(m[0], /^\s*enabled,\s*$/m, `${name} 没把 enabled 交给 useQuery`);
       assert.match(src, new RegExp(`${name}\\(stmReads\\)`), `${name} 的调用没有走 stmReads`);
     }
-    assert.match(src, /const stmReads = !optical &&/, "stmReads 必须排除光学画像");
-    assert.match(src, /useOpticsDevices\(optical\)/, "光学设备清单只在光学画像下读");
+    assert.match(src, /const kind = overviewKind\(station\.has\);/);
+    assert.match(src, /const nanonis = kind === "stm";/);
+    assert.match(src, /const stmReads = station\.ready && nanonis;/, "stmReads 要等能力，并且只在有 Nanonis 时为真");
     for (const title of ["硬件实时读数", "TCP 端口"]) {
       assert.match(
         src,
-        new RegExp(`\\{!optical && \\(\\s*<Section title=\\{tr\\("${title}"`),
-        `「${title}」那一节没有被 !optical 包住`,
+        new RegExp(`\\{nanonis && \\(\\s*<Section title=\\{tr\\("${title}"`),
+        `「${title}」那一节没有被 nanonis 包住`,
       );
     }
+  });
+
+  it("Dashboard：设备卡和设备表挂 optical_bench（不是「没有 nanonis」），叫法看 witec", () => {
+    const src = code("pages/DashboardPage.tsx");
+    assert.match(src, /const bench = station\.has\("optical_bench"\);/);
+    assert.match(src, /const benchReads = station\.ready && bench;/);
+    assert.match(src, /useOpticsDevices\(benchReads\)/);
+    assert.match(src, /\{bench && \(\s*<StatCard label=\{devicesTitle\}/);
+    assert.match(src, /\{bench && \(\s*<Section\s+title=\{devicesTitle\}/);
+    assert.match(src, /const devicesTitle = station\.has\("witec"\) \? tr\("光学设备"/);
+    assert.doesNotMatch(src, /\{!nanonis && \(/, "不能再拿「没有 nanonis」去推别的东西");
+  });
+
+  it("Dashboard：环境传感器挂 sensor_echo；图库概况只在通用版里、只读轻量的两样（数据根、建索引状态）", () => {
+    const src = code("pages/DashboardPage.tsx");
+    assert.match(src, /const sensors = station\.has\("sensor_echo"\);/);
+    assert.match(src, /const sensorReads = station\.ready && sensors;/);
+    assert.match(src, /useEnvironmentReadings\(sensorReads\)/);
+    assert.match(src, /\{sensors && \(\s*<Section\s+title=\{tr\("环境传感器"/);
+    assert.match(src, /const galleryReads = station\.ready && kind === "generic";/);
+    assert.match(src, /useGalleryOverview\(galleryReads\)/);
+    assert.match(src, /\{kind === "generic" && \(\s*<Section\s+title=\{tr\("数据图库概况"/);
+    const env = /function useEnvironmentReadings\(enabled: boolean\) \{[\s\S]*?\n\}/.exec(src);
+    assert.ok(env && /^\s*enabled,\s*$/m.test(env[0]) && /refetchInterval: 5000,/.test(env[0]), "和右栏同一个间隔，不更短");
+  });
+
+  it("Dashboard：图库概况绝不去拉 /api/gallery/index，也不轮询（数据根大时 index 很大）", () => {
+    const src = code("pages/DashboardPage.tsx");
+    const gallery = /function useGalleryOverview\(enabled: boolean\) \{[\s\S]*?\n\}/.exec(src);
+    assert.ok(gallery, "找不到 useGalleryOverview");
+    const g = gallery[0];
+    // config 与 status 带调用方的 enabled；index 一律 enabled: false（只读缓存，永不发请求）
+    assert.match(g, /queryKey: GALLERY_KEYS\.config,\s*enabled,/);
+    assert.match(g, /queryKey: GALLERY_KEYS\.status,\s*enabled,/);
+    assert.match(g, /queryKey: GALLERY_KEYS\.index,\s*enabled: false,/);
+    assert.doesNotMatch(g, /refetchInterval/, "首页不新增图库的轮询");
+    assert.equal([...src.matchAll(/GALLERY_KEYS\.index/g)].length, 1, "首页只在那一个永不发请求的观察者里碰 index");
   });
 
   it("health 的缓存键与 Dashboard / TopBar / RightPanel 共用 [\"health\"]", () => {

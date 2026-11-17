@@ -181,6 +181,48 @@ def test_open_circuit_breaker_parks_with_zero_tcp(store, bus_events):
     assert pool.calls == 0
 
 
+def test_a_recovering_breaker_parks_as_recovering_not_as_down(store, bus_events, monkeypatch):
+    """Real ConnectionPool + breaker (fake clock). OPEN parks as comms_down. Once the
+    cooldown is over (HALF_OPEN) the monitor still sends nothing — its calls are
+    count_health=False and may not carry the probe — and says "recovering", which the
+    page shows apart from both "running" and "down"."""
+    from mast.config import NanonisConfig
+    from mast.core.comms_health import CommsCircuitBreaker
+    from mast.core.connection import ConnectionPool
+
+    monkeypatch.setattr(S, "_PAUSED_POLL_S", 0.05)
+    now = [1000.0]
+    pool = ConnectionPool(NanonisConfig(port_main=0, port_monitor=0, port_data=0,
+                                        port_emergency=0))
+    pool._breaker = CommsCircuitBreaker(clock=lambda: now[0])
+    for _ in range(3):
+        pool._breaker.record_failure("timed out")
+    sent: list = []
+
+    def _no_tcp(*a, **k):
+        sent.append(a)
+        raise AssertionError("the monitor sent TCP while the breaker was not CLOSED")
+
+    pool.safe_call = _no_tcp                                   # type: ignore[method-assign]
+
+    def _wait_for(state: str) -> str:
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline and svc.status()["state"] != state:
+            time.sleep(0.02)
+        return svc.status()["state"]
+
+    svc = _service(store, pool=pool)
+    svc.start()
+    try:
+        assert _wait_for(S.STATE_COMMS_DOWN) == S.STATE_COMMS_DOWN
+        now[0] += 21.0                                         # cooldown over: HALF_OPEN
+        assert _wait_for(S.STATE_COMMS_RECOVERING) == S.STATE_COMMS_RECOVERING
+        assert svc.status()["connected"] is False
+    finally:
+        svc.stop(join_timeout=3.0)
+    assert sent == []
+
+
 def test_no_pool_parks(store, bus_events):
     svc = _service(store, pool=None)
     svc.start()

@@ -90,6 +90,16 @@ describe("the other keys", () => {
     assert.equal(interpretKey({ key: "z", ctrlKey: true, altKey: true }), null, "Ctrl+Alt is AltGr on some layouts");
     assert.equal(interpretKey({ key: "r", ctrlKey: true }), null, "Ctrl+R reloads the page");
   });
+
+  it("F toggles focus mode; with a modifier it is somebody else's key", () => {
+    assert.deepEqual(arrow("f"), { kind: "focus" });
+    assert.deepEqual(interpretKey({ key: "F" }), { kind: "focus" }, "Caps Lock on");
+    assert.equal(interpretKey({ key: "F", shiftKey: true }), null, "Shift+F is a capital letter somebody may mean");
+    assert.equal(interpretKey({ key: "f", altKey: true }), null, "Alt+F opens the browser's menu");
+    assert.equal(interpretKey({ key: "f", ctrlKey: true }), null, "Ctrl+F is the browser's find");
+    assert.equal(interpretKey({ key: "f", metaKey: true }), null);
+    assert.ok(shortcutHelp().some((h) => h.keys === "F" && h.en.includes("Focus") && h.en.includes("Esc")));
+  });
 });
 
 describe("typing in a box never moves a component", () => {

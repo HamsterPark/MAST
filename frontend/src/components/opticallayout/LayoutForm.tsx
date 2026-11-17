@@ -6,7 +6,8 @@ import { isSourceType } from "@/lib/opticalLayout/types";
 import type { AlignLevel } from "@/lib/opticalLayout/indicators";
 import { typeLabel } from "@/lib/opticalLayout/catalog";
 import { GRID_KINDS, LIMITS } from "@/lib/opticalLayout/types";
-import { removeText, setNotes, setTable, setTitle, updateText } from "@/lib/opticalLayout/edit";
+import { removeText, setBeamHeight, setNotes, setTable, setTitle, updateText } from "@/lib/opticalLayout/edit";
+import { DEFAULT_BEAM_HEIGHT_MM } from "@/lib/opticalLayout/heights";
 import { holeCounts } from "@/lib/opticalLayout/geometry";
 import { shortcutHelp } from "@/lib/opticalLayout/keys";
 import { CommitNumber, CommitText, CommitTextarea, Group, NumberRow, Row } from "./fields";
@@ -104,6 +105,18 @@ export function LayoutForm({
           rules={{ min: 0, max: LIMITS.holeOffsetMax, step: 1 }}
           hint={tr(`第一个孔离台面左下角的距离。共 ${counts.cols} 列 × ${counts.rows} 行`, `Distance of the first hole from the lower-left corner. ${counts.cols} columns × ${counts.rows} rows`)}
           onCommit={(v) => v !== null && edit((l) => setTable(l, { hole_offset_mm: v }))}
+        />
+        <NumberRow
+          label={tr("光束高度", "Beam height")}
+          unit="mm"
+          value={t.beam_height_mm ?? null}
+          disabled={readOnly}
+          rules={{ min: 0, minExclusive: true, max: LIMITS.beamHeightMax, step: 5, optional: true }}
+          hint={tr(
+            `光束离台面的高度：没填高度的器件和光源都在这个高度。不填按 ${DEFAULT_BEAM_HEIGHT_MM} mm`,
+            `Height of the beam above the table top: every component and source without a height of its own sits at it. Empty: ${DEFAULT_BEAM_HEIGHT_MM} mm`,
+          )}
+          onCommit={(v) => edit((l) => setBeamHeight(l, v))}
         />
         <Row label={tr("孔位样式", "Hole style")} help={tr("metric 和 imperial 只是标注；none 表示台面上不画孔和网格。", "metric and imperial are labels only; none draws no holes and no grid on the table.")}>
           <select

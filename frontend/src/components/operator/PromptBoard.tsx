@@ -4,7 +4,7 @@ import { Section, Badge, EmptyNote, ErrorNote } from "@/components/ui";
 import {
   useAnswerPrompt,
   useDismissPrompt,
-  useIsOpticalStation,
+  useHasOperatorPrompts,
   useOpenPromptFeed,
   useOpticalState,
   usePromptHistory,
@@ -37,9 +37,10 @@ import { OperatorNameField } from "./OperatorNameField";
 // safe...) with the right control for each kind, plus what was handled recently. The
 // same prompts appear in the launcher's desktop popup; whoever answers first counts.
 //
-// Only an optical station has these: on an STM station (or before the service has said
-// what it is) the board is not rendered and nothing is requested for it, so that page
-// stays exactly as it was.
+// Only a station with the operator prompt service has these (capability
+// `operator_prompts`, the optical station by default): anywhere else (or before the service
+// has said what it has) the board is not rendered and nothing is requested for it, so that
+// page stays exactly as it was.
 
 const INPUT =
   "rounded border border-mast-border bg-mast-bg px-3 py-1.5 text-sm text-mast-text placeholder:text-mast-muted focus:border-mast-accent focus:outline-none";
@@ -275,10 +276,10 @@ function HistoryRow({ p }: { p: OperatorPrompt }) {
 }
 
 /** The board: open prompts as cards (safety first), then what was handled recently.
- *  Optical stations only; anywhere else this renders nothing, and the hooks below (history,
- *  slot definitions, clocks) are never even mounted. */
+ *  Only on a station with operator prompts; anywhere else this renders nothing, and the
+ *  hooks below (history, slot definitions, clocks) are never even mounted. */
 export function OperatorPromptBoard() {
-  if (!useIsOpticalStation()) return null;
+  if (!useHasOperatorPrompts()) return null;
   return <PromptBoardBody />;
 }
 

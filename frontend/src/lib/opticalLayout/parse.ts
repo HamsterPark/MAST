@@ -12,6 +12,7 @@ import { tr } from "../i18n.ts";
 import type {
   Annotations,
   CommentAuthorKind,
+  EventBeam,
   LayoutComment,
   LayoutComponent,
   LayoutDocument,
@@ -20,11 +21,17 @@ import type {
   LinkState,
   LinksState,
   OpticalLayout,
+  QParam,
   RevisionInfo,
+  Segment,
+  SegmentBeam,
+  StokesNorm,
   TableSpec,
   Trace,
   TraceBranch,
   TraceEvent,
+  TracePass,
+  TreeBeam,
   SourceTrace,
   BranchEnd,
 } from "./types.ts";
@@ -100,13 +107,18 @@ function parseComponent(raw: unknown, index: number): LayoutComponent {
 
 function parseTable(raw: unknown): TableSpec {
   const t = isObj(raw) ? raw : {};
-  return {
+  const table: TableSpec = {
     width_mm: num(t["width_mm"], DEFAULT_TABLE.width_mm),
     height_mm: num(t["height_mm"], DEFAULT_TABLE.height_mm),
     hole_pitch_mm: num(t["hole_pitch_mm"], DEFAULT_TABLE.hole_pitch_mm),
     hole_offset_mm: num(t["hole_offset_mm"], DEFAULT_TABLE.hole_offset_mm),
     grid: str(t["grid"], DEFAULT_TABLE.grid) || DEFAULT_TABLE.grid,
   };
+  // the 3D contract, section 2: only a server that knows heights sends it, and only when it is set; absent (or
+  // null) stays absent, so the body of the next PUT is what an older editor would send
+  const bh = t["beam_height_mm"];
+  if (typeof bh === "number" && Number.isFinite(bh)) table.beam_height_mm = bh;
+  return table;
 }
 
 function parseText(raw: unknown): LayoutText | null {
@@ -259,6 +271,64 @@ export function parseLinksState(raw: unknown): LinksState {
 
 const BRANCH_ENDS: readonly string[] = ["stop", "left_table", "max_events", "blocked", "back_hit", "split", "budget"];
 
+// The `beam` keys of v2 section 4.7. A server older than v2 sends none: the key stays absent. A value of
+// the wrong shape reads as "not known" (null), never as a made-up number: a power of 0 would draw a beam
+// as extinguished, a polarisation of (0, 0, 0) as unpolarised.
+
+const finiteOrNull = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+function tupleOf(v: unknown, n: number): number[] | null {
+  if (!Array.isArray(v) || v.length !== n) return null;
+  const out = v.map(finiteOrNull);
+  return out.every((x): x is number => x !== null) ? out : null;
+}
+
+const stokesOf = (v: unknown): StokesNorm | null => tupleOf(v, 3) as StokesNorm | null;
+const qOf = (v: unknown): QParam | null => {
+  const t = tupleOf(v, 2);
+  return t && t[1]! > 0 ? (t as QParam) : null;
+};
+
+/** The relative power: a number at or above 0, else the beam is not read at all. */
+const powerOf = (v: unknown): number | null => {
+  const p = finiteOrNull(v);
+  return p !== null && p >= 0 ? p : null;
+};
+
+export function parseTreeBeam(raw: unknown): TreeBeam | undefined {
+  if (!isObj(raw)) return undefined;
+  return { source_mw: finiteOrNull(raw["source_mw"]), m2: finiteOrNull(raw["m2"]) };
+}
+
+export function parseSegmentBeam(raw: unknown): SegmentBeam | undefined {
+  if (!isObj(raw)) return undefined;
+  const p = powerOf(raw["p"]);
+  if (p === null) return undefined;
+  return { p, s: stokesOf(raw["s"]), q: qOf(raw["q"]) };
+}
+
+export function parseEventBeam(raw: unknown): EventBeam | undefined {
+  if (!isObj(raw)) return undefined;
+  const p = powerOf(raw["p"]);
+  if (p === null) return undefined;
+  return { p, mw: finiteOrNull(raw["mw"]), d_mm: finiteOrNull(raw["d_mm"]), s: stokesOf(raw["s"]) };
+}
+
+/** The passes of a segment (the 3D contract, section 4); an entry that is not one is left out, a list that is not one is absent. */
+export function parsePasses(raw: unknown): TracePass[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: TracePass[] = [];
+  for (const p of raw) {
+    if (!isObj(p) || typeof p["component"] !== "string") continue;
+    const x = finiteOrNull(p["x"]);
+    const y = finiteOrNull(p["y"]);
+    const dz = finiteOrNull(p["dz_mm"]);
+    if (x === null || y === null || dz === null) continue;
+    out.push({ component: p["component"], x, y, dz_mm: dz });
+  }
+  return out;
+}
+
 /** The server's trace, read loosely: the editor draws its own, this is for comparing. Null if absent. */
 export function parseTrace(raw: unknown): Trace | null {
   if (!Array.isArray(raw)) return null;
@@ -278,14 +348,31 @@ export function parseTrace(raw: unknown): Trace | null {
           incidence_deg: num(e["incidence_deg"], 0),
           path_mm: num(e["path_mm"], 0),
         };
+        const beam = parseEventBeam(e["beam"]);
+        if (beam) ev.beam = beam;
+        // the 3D contract, section 4: a server without heights sends neither; a value of the wrong shape is "not
+        // known" (absent), never a made-up height
+        const z = finiteOrNull(e["z_mm"]);
+        if (z !== null) ev.z_mm = z;
+        const dz = finiteOrNull(e["dz_mm"]);
+        if (dz !== null) ev.dz_mm = dz;
         return ev;
       });
-      const segments = (Array.isArray(b["segments"]) ? b["segments"] : []).filter(isObj).map((g) => ({
-        x0: num(g["x0"], 0),
-        y0: num(g["y0"], 0),
-        x1: num(g["x1"], 0),
-        y1: num(g["y1"], 0),
-      }));
+      const segments = (Array.isArray(b["segments"]) ? b["segments"] : []).filter(isObj).map((g) => {
+        const seg: Segment = {
+          x0: num(g["x0"], 0),
+          y0: num(g["y0"], 0),
+          x1: num(g["x1"], 0),
+          y1: num(g["y1"], 0),
+        };
+        const z = finiteOrNull(g["z_mm"]);
+        if (z !== null) seg.z_mm = z;
+        const beam = parseSegmentBeam(g["beam"]);
+        if (beam) seg.beam = beam;
+        const passes = parsePasses(g["passes"]);
+        if (passes) seg.passes = passes;
+        return seg;
+      });
       const end = str(b["end"]);
       branches.push({
         branch: str(b["branch"]),
@@ -295,7 +382,10 @@ export function parseTrace(raw: unknown): Trace | null {
         end: (BRANCH_ENDS.includes(end) ? end : "stop") as BranchEnd,
       });
     }
-    out.push({ source: str(s["source"]), wavelength_nm: nullableNum(s["wavelength_nm"]), branches });
+    const tree: SourceTrace = { source: str(s["source"]), wavelength_nm: nullableNum(s["wavelength_nm"]), branches };
+    const beam = parseTreeBeam(s["beam"]);
+    if (beam) tree.beam = beam;
+    out.push(tree);
   }
   return out;
 }

@@ -132,6 +132,27 @@ class ScanImage(BaseModel):
             "scan has no coord_epoch of its own; the file's mtime against the "
             "last coarse_move timestamp is the only link there is."),
     )
+    mtime: str = Field(
+        default="",
+        description=(
+            "When the file was last written, ISO 8601 in UTC "
+            "(e.g. 2026-11-12T03:04:05Z); \"\" when it could not be read. For a "
+            "saved .sxm that is when Nanonis finished the scan; for the scan in "
+            "progress, when its newest milestone image was written. Clients use "
+            "it to show the image's age and to filter the map by time — an "
+            "image with no mtime must be treated as undated, not as old."),
+    )
+    live: bool = Field(
+        default=False,
+        description=(
+            "True for the scan IN PROGRESS (the vision monitor's newest 1/8 "
+            "milestone image), False for a saved .sxm. A time window filters "
+            "saved scans by mtime; the scan in progress is always drawn, like "
+            "the live scan frame it sits in. A client drawing the row-by-row "
+            "live stream (LiveHub local/scan/live/<n>) hides this image while "
+            "that stream covers the frame, and uses it as the fallback when "
+            "the stream is unavailable."),
+    )
 
 
 class MapMarkerView(BaseModel):
@@ -148,7 +169,15 @@ class MapMarkerView(BaseModel):
     skill_name: str = ""
     status: str = "done"
     source: str = "skill"
-    timestamp: str = ""
+    timestamp: str = Field(
+        default="",
+        description=(
+            "When it was recorded: ISO 8601 with the UTC offset in force on "
+            "that date on the instrument PC (2026-07-01T12:00:00.123456+02:00, "
+            "2026-01-15T09:30:00+01:00 in a zone with daylight saving). \"\" "
+            "for a planned step; a stamp that could not be read is passed on "
+            "as recorded."),
+    )
     coord_epoch: Optional[int] = Field(
         default=None,
         description=("coordinate-system generation this marker's xy belongs to; "

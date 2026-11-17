@@ -34,6 +34,9 @@ _JOIN_S = 5.0
 #: 一秒的段,剩下几个真样本 —— 那不是一次测量。
 _MAX_GAP_FRAC = 0.2
 
+#: 开机后第一次清扫等多久（秒）。
+FIRST_SWEEP_DELAY_S = 720.0
+
 
 class _AnyEvent:
     """把两个 Event 当成一个用：任一被 set 就算 set，wait 取较早醒的那个。
@@ -75,7 +78,8 @@ class EnvHistoryRecorder:
                  storage_getter: Callable | None = None,
                  pool_getter: Callable | None = None,
                  state_getter: Callable | None = None,
-                 scope_provider: Callable | None = None) -> None:
+                 scope_provider: Callable | None = None,
+                 first_sweep_delay_s: float = FIRST_SWEEP_DELAY_S) -> None:
         self._store_getter = store_getter
         self._th_getter = thresholds_getter
         self._storage_getter = storage_getter
@@ -108,12 +112,15 @@ class EnvHistoryRecorder:
 
         #: 「上一次真的跑过」的墙钟时刻；**0.0 = 从没跑过**。
         #:
-        #: 初值 0.0 让周期闸门（``now - _last_*_at < interval``）在第一次必然放行
-        #: ——「**第一次 tick 就跑，之后才按间隔**」是刻意的设计，不是漏算：
-        #: ``test_tick_runs_the_sweep_once_per_interval`` 用 1e9 秒的间隔断言第一次
-        #: 仍然会跑。别把它改成 ``max(上次, 启动时刻)`` —— 2026-08-02 试过，四个
-        #: 测试当场变红，而那四个测试才是对的。
+        #: 初值 0.0 让周期闸门（``now - _last_*_at < interval``）在放行条件
+        #: 满足后第一次必然放行。第一次清扫不再「第一次 tick 就跑」，而是开机后
+        #: 再等 ``first_sweep_delay_s``（默认 12 分钟）：开机头几分钟磁盘正被
+        #: 启动时的遍历/恢复占满，清扫的读放大会叠上去。
+        #: 延迟从「第一次 on_tick 的 now」起算，用的是调用方的时钟。别改成
+        #: ``max(上次, 启动时刻)``——那会让注入的假时钟测试失灵。
         self._last_sweep_at: float = 0.0
+        self._first_sweep_delay_s = max(0.0, float(first_sweep_delay_s))
+        self._first_tick_at: float | None = None
         self._last_sweep_result: dict = {}
         self._last_z_at: float = 0.0
         self._last_z_result: dict = {}
@@ -194,6 +201,11 @@ class EnvHistoryRecorder:
     # ── 原始行清扫 ────────────────────────────────────────────────────
 
     def _maybe_sweep(self, now: float, th) -> None:
+        if self._first_tick_at is None:
+            self._first_tick_at = now
+        if (self._last_sweep_at == 0.0
+                and (now - self._first_tick_at) < self._first_sweep_delay_s):
+            return
         if (now - self._last_sweep_at) < float(th.eh_sweep_interval_s):
             return
         with self._lock:
@@ -305,10 +317,14 @@ class EnvHistoryRecorder:
     # ── 生命周期 ──────────────────────────────────────────────────────
 
     def stop(self) -> None:
-        """落定未满的桶，有界等待两个后台线程。永不抛。"""
+        """落定未满的桶并关掉 sink，有界等待两个后台线程。永不抛。
+
+        关掉而不只是 flush：环境监控的归档线程若在关停时还没写完，之后再喂进来的
+        读数会把刚落定的那一分钟用一个只含后半分钟的桶覆盖掉（upsert 是整行替换）。
+        """
         self._stopping.set()
         try:
-            self.sink.flush()
+            self.sink.close()
         except Exception:  # noqa: BLE001
             pass
         for attr in ("_sweep_thread", "_burst_thread"):

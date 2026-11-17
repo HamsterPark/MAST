@@ -40,9 +40,9 @@ DOGLEG_ZH = """\
 
 光路（沿光束的顺序）：
 1) L1 激光器（532 nm，在 (50, 62.5) mm，电动：否）
-   → M1 反射镜（在 (112.5, 62.5) mm，命中偏离中心 0.0 mm，入射 45.0°，累计 62.5 mm）
-   → M2 反射镜（在 (112.5, 187.5) mm，命中偏离中心 0.0 mm，入射 45.0°，累计 187.5 mm）
-   → 终止于 D1 探测器（在 (300, 187.5) mm，命中偏离中心 0.0 mm，入射 0.0°，累计 375.0 mm）
+   → M1 反射镜（在 (112.5, 62.5) mm，命中偏离中心 0.0 mm，入射 45.0°，累计 62.5 mm） · 相对 100 % · 非偏振
+   → M2 反射镜（在 (112.5, 187.5) mm，命中偏离中心 0.0 mm，入射 45.0°，累计 187.5 mm） · 相对 100 % · 非偏振
+   → 终止于 D1 探测器（在 (300, 187.5) mm，命中偏离中心 0.0 mm，入射 0.0°，累计 375.0 mm） · 相对 100 % · 非偏振
 
 需要注意：没有发现问题。
 """
@@ -54,9 +54,9 @@ Coordinates: origin at the table's lower left, x to the right, y up, in mm; angl
 
 Beam paths (in the order along the beam):
 1) L1 laser (532 nm, at (50, 62.5) mm, motorized: no)
-   → M1 mirror (at (112.5, 62.5) mm, hit 0.0 mm off center, incidence 45.0 deg, path 62.5 mm)
-   → M2 mirror (at (112.5, 187.5) mm, hit 0.0 mm off center, incidence 45.0 deg, path 187.5 mm)
-   → ends at D1 detector (at (300, 187.5) mm, hit 0.0 mm off center, incidence 0.0 deg, path 375.0 mm)
+   → M1 mirror (at (112.5, 62.5) mm, hit 0.0 mm off center, incidence 45.0 deg, path 62.5 mm) · relative 100 % · unpolarised
+   → M2 mirror (at (112.5, 187.5) mm, hit 0.0 mm off center, incidence 45.0 deg, path 187.5 mm) · relative 100 % · unpolarised
+   → ends at D1 detector (at (300, 187.5) mm, hit 0.0 mm off center, incidence 0.0 deg, path 375.0 mm) · relative 100 % · unpolarised
 
 Things to look at: none found.
 """
@@ -139,10 +139,10 @@ def test_a_split_is_written_branch_by_branch_with_the_reflected_one_first():
     body = lines(text)
     first, second = body.index(next(ln for ln in body if "reflected branch 0.r" in ln)), body.index(next(ln for ln in body if "transmitted branch 0.t" in ln))
     assert first < second
-    assert "(intensity 50%)" in body[first] and any("reflected branch 0.t.r (intensity 25%)" in ln for ln in body)
+    assert "(split share 50%)" in body[first] and any("reflected branch 0.t.r (split share 25%)" in ln for ln in body)
     assert any("splits" in ln and "BS2" in ln for ln in body)
     zh = summarize(fixture("beam_splitter_cascade"), lang="zh")
-    assert "↳ 反射支 0.r（强度 50%）" in zh and "↳ 透射支 0.t.t（强度 25%）" in zh
+    assert "↳ 反射支 0.r（分光 50%）" in zh and "↳ 透射支 0.t.t（分光 25%）" in zh
     indent = lambda ln: len(ln) - len(ln.lstrip())  # noqa: E731
     sub = next(ln for ln in body if "reflected branch 0.t.r" in ln)
     assert indent(sub) > indent(next(ln for ln in body if "transmitted branch 0.t " in ln))
@@ -159,7 +159,7 @@ def test_the_end_of_each_kind_of_beam_is_in_words():
     assert "blocked by F1 filter" in en and "the wavelength is outside the passband" in en
     assert "the shutter is closed" in summarize(fixture("shutter_closed_and_open"), lang="en")
     assert "beyond the open radius" in summarize(fixture("iris_open_diameter"), lang="en")
-    assert "event limit (64) reached" in summarize(fixture("max_events_ping_pong"), lang="en")
+    assert "event limit (64) reached" in summarize(fixture("max_events_ping_pong"), lang="en", limit=20000)
     assert "light comes in at FI1" in summarize(fixture("fiber_coupling_continues"), lang="en")
 
 
@@ -230,13 +230,16 @@ def test_a_loop_and_a_broken_fiber_link_are_problems():
     assert any("fiber output FO gets no light" in p for p in problems(lay))
 
 
-def test_a_long_problem_list_is_cut_and_says_how_many_more():
+def test_a_long_problem_list_shows_three_of_a_kind_and_says_how_many_more():
+    """Contract v2 §12.3: at most three lines of each kind, then one counting the rest (it was twelve lines
+    of everything, which pushed whole kinds out of sight)."""
     lay = layout([laser(f"l{i}", 10 + 10 * i, 100) for i in range(20)])         # twenty beams, all leaving the table
     en = lines(summarize(lay, lang="en"))
     head = next(i for i, ln in enumerate(en) if ln.startswith("Things to look at"))
     assert en[head] == "Things to look at (20):"
     shown = [ln for ln in en[head + 1:] if ln.startswith("- ")]
-    assert len(shown) == 13 and shown[-1] == "- ... 8 more" and all("leaves the table" in ln for ln in shown[:12])
+    assert len(shown) == 4 and shown[-1] == "- (17 more of this kind)" and all("leaves the table" in ln for ln in shown[:3])
+    assert "- （同类另有 17 条）" in summarize(lay, lang="zh")
 
 
 # ── a layout without a light source ──────────────────────────────────────────────────────────
@@ -248,7 +251,7 @@ def test_without_a_source_the_components_and_their_annotations_are_listed():
     en = summarize(lay, lang="en")
     assert "has no light source yet" in en and "the layout has no light source (laser, fiber output, lamp, LED)" in en
     assert "- M1 mirror (Thorlabs BB1-E02, function: steering, at (112.5, 62.5) mm, facing 135 deg)" in en
-    assert "- HWP waveplate (half-wave, at (150, 62.5) mm, facing 0 deg, motorized: yes, K10CR1)" in en
+    assert "- HWP waveplate (half-wave, fast axis not given: taken as 0 deg, at (150, 62.5) mm, facing 0 deg, motorized: yes, K10CR1)" in en
     zh = summarize(lay, lang="zh")
     assert "图里还没有光源" in zh and "- M1 反射镜（Thorlabs BB1-E02，作用：steering，在 (112.5, 62.5) mm，朝向 135°）" in zh
     assert "（没有器件）" in summarize(layout([]), lang="zh")
@@ -287,14 +290,20 @@ def _big() -> dict:
     return layout(comps)
 
 
-def test_a_long_description_is_cut_at_8000_characters_and_says_so():
+def test_a_long_description_cuts_the_beam_paths_and_keeps_the_things_to_look_at_whole():
+    """Contract v2 §5: past 8000 characters the beam paths are cut (and say so), never the things to look at;
+    only when even those do not fit is the text cut from its end (as in v1)."""
     en = summarize(_big(), lang="en")
-    assert len(en) == MAX_CHARS and en.endswith("... (summary cut at 8000 characters)")
+    assert len(en) <= MAX_CHARS and "... (the beam paths are cut here; every kind of thing to look at is below)" in en
+    assert en.rstrip().endswith("goes out at (2200, 100) mm") and "Things to look at (1):" in en
+    assert "WINDOW-0 window" in en and "WINDOW-59 window" not in en
     zh = summarize(_big(), lang="zh")
-    assert len(zh) <= MAX_CHARS and zh.endswith("…（摘要在 8000 字符处截断）")
-    short = summarize(_big(), lang="en", limit=500)
-    assert len(short) == 500 and short.endswith("(summary cut at 500 characters)")
-    assert len(summarize(fixture("two_mirror_dogleg"), lang="en")) < 1000 and "cut at" not in summarize(fixture("two_mirror_dogleg"), lang="en")
+    assert len(zh) <= MAX_CHARS and "…（光路叙述在这里截断，下面的“需要注意”每一类都在）" in zh and "需要注意（1 条）：" in zh
+    short = summarize(_big(), lang="en", limit=500)                          # the paths go, the problem stays
+    assert len(short) <= 500 and "the beam paths are cut here" in short and short.rstrip().endswith("(2200, 100) mm")
+    tiny = summarize(_big(), lang="en", limit=300)                           # not even that fits: cut from the end
+    assert len(tiny) == 300 and tiny.endswith("(summary cut at 300 characters)")
+    assert len(summarize(fixture("two_mirror_dogleg"), lang="en")) < 1000 and "cut" not in summarize(fixture("two_mirror_dogleg"), lang="en")
 
 
 def test_the_text_is_deterministic_and_leaves_its_input_alone():
@@ -355,9 +364,16 @@ def test_a_complete_trace_has_no_cut_line_even_when_it_used_the_whole_budget():
 
 
 def test_the_notice_is_still_there_when_the_text_is_cut_at_8000_characters():
-    """The notice is up in the header, because the list of problems is at the end and the text is
-    cut from the end."""
+    """The notice is up in the header as well as the first thing to look at: the beam paths of a long text
+    are cut, and a text that does not fit even then is cut from the end."""
     lay = dense_field()
-    text = summarize(lay, trace_layout(lay, max_trace_events=400), lang="en")
-    assert len(text) == MAX_CHARS and text.endswith("... (summary cut at 8000 characters)")
+    trace = trace_layout(lay, max_trace_events=400)
+    text = summarize(lay, trace, lang="en")
+    assert len(text) <= MAX_CHARS and "the beam paths are cut here" in text
     assert "trace cut: the layout reached its limit of 400 events" in text[:1200]
+    assert problems(lay, trace=trace)[0].startswith("trace cut")
+    shrunk = summarize(lay, trace, lang="en", limit=1500)                      # one line of each kind, paths cut
+    assert len(shrunk) <= 1500 and "the beam paths are cut here" in shrunk and "- (" in shrunk
+    tight = summarize(lay, trace, lang="en", limit=1200)                       # even that does not fit: from the end
+    assert len(tight) == 1200 and tight.endswith("(summary cut at 1200 characters)")
+    assert "trace cut: the layout reached its limit of 400 events" in tight

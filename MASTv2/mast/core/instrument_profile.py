@@ -327,7 +327,55 @@ _CONFIG_SPEC: dict[str, tuple[str, str, type, tuple[float, float], Any]] = {
         tr(
             "Z 噪声底(留空 = 每次从数据估计)",
             "Z noise floor (leave empty = estimate from the data each time)"), "m", float, (0.0, 1.0e-9), None),
+    # 超导磁体调场（7.2.0，``instruments/magnet_625.py``）。四个都没有出厂默认：
+    # 不填，MAST 就不改变磁场（升场还要后两个）。上限是磁体本身的额定，不是电源
+    # 的 LIMIT——两个都核，取更严的那个，超了就拒绝，从不夹到上限。场常数每次调场
+    # 前都与仪器自己的 FLDS? 交叉核对（差 0.5% 以上拒绝）：DFLT 会把 FLDS 复位成
+    # 0.1 T/A，只信它就会在场常数不是 0.1 T/A 的磁体上把设定的场整体算错。
+    "magnet_max_field_t": (
+        tr("磁体允许的最大磁场 |B|", "Maximum field |B| MAST may set on the magnet"),
+        "T", float, (0.0, 30.0), None),
+    "magnet_field_constant_t_per_a": (
+        tr("磁体场常数", "Magnet field constant"), "T/A", float, (0.0, 10.0), None),
+    # 温度计不准、读数随磁场漂，所以上限是操作员的数，不是
+    # 常数；只用作升场前提，扫场中不据此停。
+    "magnet_max_temperature_k": (
+        tr("升场前磁体温度上限", "Magnet temperature limit for raising the field"),
+        "K", float, (0.0, 400.0), None),
+    # 样品台控温（Lake Shore 335，``instruments/heater_335.py``）。都没有出厂默认：
+    # 前四项缺一项，MAST 就不开加热器（关加热器永远可用）。输出号和量程用整数而不是
+    # 枚举：枚举必须带出厂默认，而这里「没填」本身就是答案。
+    "heater_output": (
+        tr("加热输出（335 的输出 1 或 2）", "Heater output (335 output 1 or 2)"),
+        "", int, (1, 2), None),
+    "heater_max_setpoint_k": (
+        tr("控温最高设定温度", "Maximum temperature setpoint"),
+        "K", float, (1.0, 500.0), None),
+    "heater_max_range": (
+        tr("最大加热量程（1 低 / 2 中 / 3 高）", "Maximum heater range (1 low / 2 medium / 3 high)"),
+        "", int, (1, 3), None),
+    # 加热器额定电流：335 的 HTRSET? 算出的最大量程满量程电流超过它就不加热（MAST 从不写 HTRSET）。
+    "heater_max_current_a": (
+        tr("加热器额定电流（A）", "Heater rated current (A)"), "A", float, (0.001, 2.0), None),
+    # 分区里每区手动输出（前馈）的上限；0 = 关（默认），MAST 不写 MOUT 本身。
+    "heater_max_mout_pct": (
+        tr("最大手动输出（%）", "Max manual output (%)"), "%", float, (0.0, 100.0), 0.0),
+    "heater_max_rate_k_per_min": (
+        tr("最大扫温速率", "Maximum ramp rate"), "K/min", float, (0.1, 100.0), None),
+    # 可选：加热时守着另一支温度计（例如磁体那一路），超过就不加热 / 关加热器。磁体上的
+    # 二极管在高场下读数可能偏低，上限按高场下的读数定。
+    "heater_guard_max_k": (
+        tr("加热时守护温度计的上限", "Guard thermometer limit while heating"),
+        "K", float, (0.1, 500.0), None),
 }
+
+#: Numbers that are dropped, not clamped, when out of range (see sanitize): limits
+#: that guard hardware, where a clamped typo would silently become a different limit.
+_REJECT_OUT_OF_RANGE: frozenset[str] = frozenset({
+    "magnet_max_field_t", "magnet_field_constant_t_per_a", "magnet_max_temperature_k",
+    "heater_output", "heater_max_setpoint_k", "heater_max_range", "heater_max_current_a",
+    "heater_max_mout_pct", "heater_max_rate_k_per_min", "heater_guard_max_k",
+})
 
 # Enumerated config — stored value MUST be one of the choices; else dropped.
 # key -> (中文标签, choices, {value: 显示文本}, 默认值).
@@ -489,6 +537,19 @@ _CHOICE_SPEC: dict[str, tuple[str, tuple[str, ...], dict[str, str], str]] = {
              "Not declared - the injected block tells the model explicitly that "
              "it does not know")},
         "unknown"),
+    # 超导磁体反向场（``instruments/magnet_625.py``）。625 手册没有写明
+    # 负向输出是否按 |I| 查分段表（RSEGS 只列 0 到 +60.1 A），所以出厂是「未验证」：
+    # 负向目标的 |I| 超过第一段上限就拒绝。操作员在负向第一次越过那个边界时看到 RATE?
+    # 随之变化，才改成 yes。存成 yes/no 枚举（与本表其余开关同形），读出来是布尔；
+    # 只有精确的 "yes" 为真，其余一律当未验证。
+    "magnet_negative_segments_verified": (
+        tr("负向扫场分段已验证", "Negative-side ramp segments verified"), ("no", "yes"),
+        {"no": tr("否 — 负向目标不得超过第一段上限（默认）",
+                  "No - a negative target may not exceed the first segment's upper current (default)"),
+         "yes": tr("是 — 已在负向第一段边界处看到 RATE? 变化，分段按 |I| 生效",
+                   "Yes - RATE? was seen to change at the first segment boundary on the negative "
+                   "side; segments act on |I|")},
+        "no"),
 }
 
 # ── Free-text fields ─────────────────────────────────────────────────────────
@@ -500,6 +561,16 @@ _CHOICE_SPEC: dict[str, tuple[str, tuple[str, ...], dict[str, str], str]] = {
 # 抹掉。自由文本需要独立的类型处理和前端回显。
 _TEXT_SPEC: dict[str, tuple[str, int]] = {
     "preamp_model": (tr("前置放大器型号", "Preamplifier model"), 120),
+    # 环境监控里磁体温度计那个通道的名字（如 335 的「Magnet」输入）。按
+    # core/temperature 的规则匹配：精确 → 忽略大小写 → 唯一子串；对不上就不升场。
+    "magnet_temperature_channel": (
+        tr("磁体温度计（环境通道名）", "Magnet thermometer (environment channel name)"), 80),
+    # 样品台控温：335 上哪个输入做控制（A 或 B，必须与面板上该输出的控制输入一致，
+    # MAST 只核对、不改）；以及可选的守护温度计（环境通道名，匹配规则同上）。
+    "heater_control_input": (
+        tr("控温的控制输入（A 或 B）", "Control input for temperature control (A or B)"), 1),
+    "heater_guard_channel": (
+        tr("加热时守护温度计（环境通道名）", "Guard thermometer while heating (environment channel name)"), 80),
 }
 
 # Learned calibration — WRITTEN BY THE RUNTIME (set_calibration), not the UI.
@@ -658,6 +729,10 @@ def sanitize(raw: Any) -> dict[str, Any]:
             continue
         val = _coerce_num(kind, raw[key])
         if val is None:
+            continue
+        if key in _REJECT_OUT_OF_RANGE and not (lo <= val <= hi):
+            # A limit that guards hardware is dropped, not clamped: 51 typed for 5.1
+            # must not become a stored 30 T. Dropped = not set = MAST does not act.
             continue
         val = max(lo, min(hi, val))
         out[key] = int(val) if kind is int else float(val)

@@ -125,6 +125,10 @@ describe("glyphs", () => {
         return [s.bx, s.by, s.bw, s.bh].every(Number.isFinite) && s.d.length > 0 && !s.d.includes("NaN");
       case "circle":
         return [s.cx, s.cy, s.r].every(Number.isFinite) && s.r > 0;
+      case "text":
+        return [s.x, s.y, s.size].every(Number.isFinite) && s.size > 0 && s.text.length > 0;
+      case "dial":
+        return [s.cx, s.cy, s.r, s.deg].every(Number.isFinite) && s.r > 0;
     }
   };
 
@@ -161,10 +165,14 @@ describe("glyphs", () => {
   });
 
   it("a mirror's hatching is on its back (-x), a grating's teeth are on its front (+x)", () => {
-    const m = shapeBounds(glyphShapes(newComponent("mirror", "m", { x: 0, y: 0 })));
+    const mirror = glyphShapes(newComponent("mirror", "m", { x: 0, y: 0 }));
+    const m = shapeBounds(mirror);
     assert.ok(m.minX < -1 && m.maxX <= 1e-9, JSON.stringify(m));
-    const g = shapeBounds(glyphShapes(newComponent("grating", "g", { x: 0, y: 0 })));
-    assert.ok(g.maxX > 1 && g.minX >= -1e-9, JSON.stringify(g));
+    const hatch = shapeBounds(mirror.filter((s) => s.role === "hatch"));
+    assert.ok(mirror.some((s) => s.role === "hatch") && hatch.maxX <= 1e-9, JSON.stringify(hatch));
+    const grating = glyphShapes(newComponent("grating", "g", { x: 0, y: 0 }));
+    const teeth = shapeBounds(grating.filter((s) => s.role === "teeth"));
+    assert.ok(grating.some((s) => s.role === "teeth") && teeth.maxX > 0.5 && teeth.minX >= -1e-9, JSON.stringify(teeth));
   });
 
   it("receivers and sources have their body behind the face (-x)", () => {

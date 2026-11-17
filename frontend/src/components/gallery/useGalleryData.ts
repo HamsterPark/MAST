@@ -10,9 +10,11 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import type { components } from "@/api/schema";
 import type { GalleryItem, GalleryRoot } from "@/lib/gallery/types";
 import { num } from "@/lib/gallery/format";
 import { framesTimeline } from "@/lib/gallery/context";
+import { envDetailUrl } from "@/lib/gallery/env";
 
 export const GALLERY_KEYS = {
   index: ["gallery", "index"] as const,
@@ -54,6 +56,27 @@ export function useGalleryConfig() {
       if (error) throw error;
       return data;
     },
+  });
+}
+
+export type GalleryEnvDetail = components["schemas"]["GalleryEnvDetail"];
+
+/**
+ * Full environment record of one item (lightbox side panel). Fetched on demand, not part of the
+ * index. Plain fetch with a per-segment encoded URL: item ids contain slashes and the backend
+ * route is `{path:path}`.
+ */
+export function useGalleryEnv(id: string | undefined) {
+  return useQuery({
+    queryKey: ["gallery", "env", id ?? ""] as const,
+    queryFn: async (): Promise<GalleryEnvDetail> => {
+      const r = await fetch(envDetailUrl(id!), { credentials: "same-origin" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return (await r.json()) as GalleryEnvDetail;
+    },
+    enabled: !!id,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 }
 

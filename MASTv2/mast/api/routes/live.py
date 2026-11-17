@@ -32,7 +32,7 @@ WS 协议
     {"kind":"error","op":…,"message":…}                             客户端消息格式不对（连接照常）
 
 顺序保证：同一个流内 dropped → axis → 帧，seq 升序、不重复。spectrum / scalar 每拍只推最新一帧
-（中间被覆盖的不算丢，不发 dropped）；xy / map2d / status 不丢，只合批。``hub`` 变了说明 MAST
+（中间被覆盖的不算丢，不发 dropped）；xy / map2d / map2d_rows / status 不丢，只合批。``hub`` 变了说明 MAST
 重启过：丢掉手里的 since，从头订。未知的 ``kind`` 一律忽略（以后会加新的）。
 """
 

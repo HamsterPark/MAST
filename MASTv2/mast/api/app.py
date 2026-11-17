@@ -56,6 +56,7 @@ from mast.api.routes import (
     monitoring,
     prompts,
     optical_layout,
+    optical_layout_figure,
     optics,
     orchestrator,
     qa,
@@ -282,6 +283,9 @@ def create_app(
         # ── 光路图（docs/v2/design/optical_layout.md）：/optical-layouts*。网页编辑器用；
         #    外部 agent 只经 /api/ext/v1/optical-layouts 读 + 评论，不能改几何 / 注释 / 解决评论 ──
         optical_layout,
+        # ── 光路图论文图转 PDF（docs/v2/design/optical_layout_exports.md）：POST /optical-layouts/figure.pdf。
+        #    单独一个路由器：请求体上限（16 MB）与上面的 2 MB 不同，都在读体之前判 ──
+        optical_layout_figure,
     ):
         app.include_router(module.router, prefix="/api")
 

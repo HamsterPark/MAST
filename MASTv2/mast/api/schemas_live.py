@@ -3,7 +3,9 @@
 帧的形状由流的 ``kind`` 决定（帧里不重复带 kind）：
 
 * spectrum ``{t, y, axis_ver, meta?}`` —— 横轴另发（``axis``），帧里只带版本号；
-* scalar ``{t, values}`` / xy ``{t, x, values}`` / map2d ``{t, ix, iy, values}`` / status ``{t, text, level}``。
+* scalar ``{t, values}`` / xy ``{t, x, values}`` / map2d ``{t, ix, iy, values}`` / status ``{t, text, level}``；
+* map2d_rows ``{t, iy, ix0, values: {name: [float|null, …]}}`` —— 一帧一行（或一行里从 ix0 起的一段），
+  按 iy 保留与覆盖。
 
 ``t`` 是 unix 秒（枢纽时钟）。非有限的数（NaN / Inf）一律是 ``null``。
 
@@ -16,7 +18,7 @@ from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
-LiveKind = Literal["spectrum", "scalar", "xy", "map2d", "status"]
+LiveKind = Literal["spectrum", "scalar", "xy", "map2d", "map2d_rows", "status"]
 
 
 class LiveStreamMeta(BaseModel):
@@ -32,9 +34,9 @@ class LiveStreamMeta(BaseModel):
     y_unit: Optional[str] = None
     meta: dict[str, Any] = Field(
         default_factory=dict,
-        description="声明时给的描述。map2d 必有 nx, ny, x0, y0, dx, dy, x_unit, y_unit；"
+        description="声明时给的描述。map2d / map2d_rows 必有 nx, ny, x0, y0, dx, dy, x_unit, y_unit；"
                     "spectrum 可带 laser_line_nm（前端切 cm⁻¹ 用）")
-    retain: int = Field(description="保留的帧数上限（map2d 是像素数）")
+    retain: int = Field(description="保留的帧数上限（map2d 是像素数，map2d_rows 是行数）")
     uid: str
     created_t: float
     last_t: Optional[float] = None
@@ -84,6 +86,15 @@ class LiveMap2DFrame(BaseModel):
     values: dict[str, Optional[float]]
 
 
+class LiveMap2DRowsFrame(BaseModel):
+    """map2d_rows：一行（或一行里从 ix0 起的一段）；各通道数组等长，ix0 + 长度 ≤ nx。"""
+
+    t: float
+    iy: int
+    ix0: int = 0
+    values: dict[str, list[Optional[float]]]
+
+
 class LiveStatusFrame(BaseModel):
     t: float
     text: str
@@ -93,7 +104,7 @@ class LiveStatusFrame(BaseModel):
 class LiveFrameItem(BaseModel):
     seq: int
     frame: Union[LiveSpectrumFrame, LiveScalarFrame, LiveXYFrame, LiveMap2DFrame,
-                 LiveStatusFrame]
+                 LiveMap2DRowsFrame, LiveStatusFrame]
 
 
 class LiveGap(BaseModel):
@@ -120,7 +131,8 @@ class LiveStreamDetail(BaseModel):
 
 
 __all__ = [
-    "LiveAxis", "LiveFrameItem", "LiveGap", "LiveKind", "LiveMap2DFrame", "LiveScalarFrame",
+    "LiveAxis", "LiveFrameItem", "LiveGap", "LiveKind", "LiveMap2DFrame", "LiveMap2DRowsFrame",
+    "LiveScalarFrame",
     "LiveSpectrumFrame", "LiveStatusFrame", "LiveStreamDetail", "LiveStreamList",
     "LiveStreamMeta", "LiveXYFrame",
 ]

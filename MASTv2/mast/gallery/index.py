@@ -54,11 +54,15 @@ def _put(item: dict, key: str, value, *, always: bool = False) -> None:
 
 
 def build_items(inv: dict, render: dict, analysis: dict, dup: dict, seg: dict,
-                enabled_roots: set[str], thumbs: Path) -> list[dict]:
+                enabled_roots: set[str], thumbs: Path, env: dict | None = None) -> list[dict]:
     """从三层缓存拼出索引条目。
 
     只收「渲染记录与当前文件是同一份字节、渲染成功、缩略图文件还在」的条目：一个内容
-    变了但还没重出图的文件，**不能**拿旧缩略图配新元数据出现在索引里（T1）。"""
+    变了但还没重出图的文件，**不能**拿旧缩略图配新元数据出现在索引里。
+
+    ``env``：环境标签缓存（:mod:`mast.gallery.envtags`）。摘要原样放进 ``it["env"]``，**不经**
+    ``_clean`` —— 那里按小数位取整，3e-8 Pa 会变成 0；摘要自己已按有效数字取整。同样只收
+    与当前文件是同一份字节的那一条。"""
     from mast.gallery.analysis import VER_ANALYSIS
     from mast.gallery.render import VER_LI
 
@@ -85,6 +89,9 @@ def build_items(inv: dict, render: dict, analysis: dict, dup: dict, seg: dict,
         if len(copies) > 1:
             it["cp"] = len(copies)
             it["cpl"] = list(copies)
+        ev = (env or {}).get(iid)
+        if ev and ev.get("src") == src and ev.get("sum"):
+            it["env"] = ev["sum"]
 
         if k == "f":
             for key, val in (("w", e.get("w_nm")), ("hn", e.get("h_nm")), ("b", e.get("bias_V")),

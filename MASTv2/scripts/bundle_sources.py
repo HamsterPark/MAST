@@ -29,6 +29,13 @@ PyInstaller 把全部 ``.py`` 编译进 ``MAST.exe`` 内嵌的 PYZ 归档，冻�
    ``_defaults.py`` 的内容不同）。
 
 第 1 道就足以挡住 ``_defaults.py``；第 2 道是「有人 ``git add -f`` 了它」时的保险。
+
+不随包发出的模块
+================
+:data:`PRIVATE_MODULES` 是另一件事：模块本身在 git 里、开发树要用，但**安装包不带**。
+它们两条通道都不进：``mast/_src/`` 这里跳过，PYZ 由 ``mast2.spec`` 加进 ``excludes``、
+并从 hiddenimports 里滤掉；产物侧 ``verify_frozen_artifact.py`` 查它们确实不在。
+引用它们的代码必须容忍它们缺席。
 """
 
 from __future__ import annotations
@@ -47,6 +54,23 @@ DEST_ROOT = os.path.join("mast", "_src")
 MIN_FILES = 700
 
 _SKIP_DIRS = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
+
+#: 不随安装包发出的模块（模块名 → 理由）。名字覆盖它的子模块。每一条都要写理由，
+#: 形状照抄 :data:`CREDENTIAL_ALLOWLIST`。
+PRIVATE_MODULES: dict[str, str] = {}   # 公开树里为空：列在这里的模块本来就不随公开源码发布
+
+
+def is_private(module: str) -> bool:
+    """``module`` 是 :data:`PRIVATE_MODULES` 里的某一项，或者是它的子模块。"""
+    return any(module == p or module.startswith(p + ".") for p in PRIVATE_MODULES)
+
+
+def module_name(src: Path, mast_pkg: Path) -> str:
+    """``<MASTv2>/mast/a/b.py`` → ``mast.a.b``；``__init__.py`` 取包名。"""
+    parts = list(src.relative_to(mast_pkg.parent).with_suffix("").parts)
+    if parts[-1] == "__init__":
+        parts.pop()
+    return ".".join(parts)
 
 #: 敏感常量：**大写常量名** = **足够长的字符串字面量**。
 #: 只认字面量赋值 —— ``token = get_token()`` 不是凭据，是代码。
@@ -174,6 +198,7 @@ class BundleReport:
     def __init__(self):
         self.files: list[tuple[str, str]] = []      # (src, dest_dir)
         self.skipped_gitignored: list[Path] = []
+        self.skipped_private: list[Path] = []       # PRIVATE_MODULES 里的
         self.violations: list[tuple[Path, str, str]] = []
         self.degraded: str = ""
 
@@ -202,6 +227,9 @@ def collect(mastv2_root: str | Path, repo_root: str | Path) -> BundleReport:
         if src in ignored:
             rep.skipped_gitignored.append(src)
             continue
+        if is_private(module_name(src, mast_pkg)):
+            rep.skipped_private.append(src)
+            continue
         for name, preview in scan_credentials(src):
             rep.violations.append((src, name, preview))
         rel_dir = src.parent.relative_to(mast_pkg)
@@ -221,6 +249,10 @@ def main(argv: list[str] | None = None) -> int:
     if rep.skipped_gitignored:
         print(f"跳过 {len(rep.skipped_gitignored)} 个 git 忽略的文件：")
         for p in rep.skipped_gitignored:
+            print(f"    {p}")
+    if rep.skipped_private:
+        print(f"跳过 {len(rep.skipped_private)} 个不随包发出的模块（PRIVATE_MODULES）：")
+        for p in rep.skipped_private:
             print(f"    {p}")
     if rep.violations:
         print("!! 疑似凭据：")

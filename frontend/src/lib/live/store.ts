@@ -18,12 +18,14 @@
 import { SeqRanges } from "./seqRanges.ts";
 import {
   decodeMap2dFrame,
+  decodeMap2dRowsFrame,
   decodeScalarFrame,
   decodeSpectrumFrame,
   decodeStatusFrame,
   decodeXyFrame,
   epochSeconds,
   isIncrementalKind,
+  isMapKind,
   map2dGeometry,
   type Map2dGeometry,
   type StreamMeta,
@@ -80,13 +82,18 @@ export interface Map2dBuf {
   channels: string[];
   /** 每个通道一幅 nx*ny 的图，行优先（idx = iy*nx + ix），没采到的像素是 NaN。 */
   values: Map<string, Float64Array>;
-  /** 每个像素最后一次写入的 seq（0 = 没写过）。同一像素写两次时新的赢。 */
+  /**
+   * 每个像素最后一次写入的 seq（0 = 没写过）。同一像素写两次时新的赢。
+   * 第一帧到来时才分配（目录里出现的流不占内存：连续扫描每帧一个新流，
+   * 一幅 512² 光这一项就是 2 MiB）。几何不对的流一直是 null。
+   */
   pixelSeq: Float64Array | null;
   filled: number;
   /**
    * 像素写入日志（环形，存像素下标）。同一个流可能同时挂在好几个视图上（TERS 页
    * 主图 + 数据流列表），每个视图各自记读到了第几条 —— 一个「取走即清空」的脏列表
-   * 会让先画的那个视图把后画的那个的增量吃掉。
+   * 会让先画的那个视图把后画的那个的增量吃掉。和 pixelSeq 一样，第一帧到来时才分配；
+   * 之前是长度 0。
    */
   log: Int32Array;
   /** 累计写入次数（单调增）。视图落后超过日志容量时整幅重画。 */
@@ -184,6 +191,29 @@ type Listener = (id: string) => void;
 /** map2d 写入日志容量。一个视图在两次重画之间落后超过这么多条，就整幅重画。 */
 export const MAP2D_LOG_CAPACITY = 65_536;
 
+/** 还没收到帧的 map2d 缓冲的日志：长度 0，不占内存。 */
+const EMPTY_LOG = new Int32Array(0);
+
+/** 写一个像素的一个通道；这个通道第一次出现时给它一幅 NaN 的图。 */
+function writePixel(b: Map2dBuf, g: Map2dGeometry, name: string, idx: number, v: number | null): void {
+  let img = b.values.get(name);
+  if (!img) {
+    img = new Float64Array(g.nx * g.ny).fill(Number.NaN);
+    b.values.set(name, img);
+    b.channels.push(name);
+  }
+  img[idx] = v === null ? Number.NaN : v;
+}
+
+/** 第一帧到来时分配 map2d 缓冲的大块内存。几何不对的流返回 false（帧照旧不收）。 */
+function ensureMap2dAlloc(b: Map2dBuf): b is Map2dBuf & { pixelSeq: Float64Array } {
+  if (b.pixelSeq) return true;
+  if (!b.geom) return false;
+  b.pixelSeq = new Float64Array(b.geom.nx * b.geom.ny);
+  b.log = new Int32Array(MAP2D_LOG_CAPACITY);
+  return true;
+}
+
 /**
  * 视图读 map2d 增量：从日志第 `from` 条读到最新。返回新的读取位置。
  * `full` = 落后太多（或第一次画），调用方整幅重画、忽略 `idx`。
@@ -209,16 +239,18 @@ function emptyBuf(meta: StreamMeta): StreamBuf {
       return { kind: "scalar", seqs: [], t: [], channels: [], values: new Map() };
     case "xy":
       return { kind: "xy", points: [], channels: [] };
-    case "map2d": {
-      const geom = map2dGeometry(meta);
+    case "map2d":
+    case "map2d_rows": {
+      // map2d（一帧一像素）和 map2d_rows（一帧一行）落进同一种缓冲，画法完全相同。
+      // 大块内存在第一帧到来时才分配（ensureMap2dAlloc）。
       return {
         kind: "map2d",
-        geom,
+        geom: map2dGeometry(meta),
         channels: [],
         values: new Map(),
-        pixelSeq: geom ? new Float64Array(geom.nx * geom.ny) : null,
+        pixelSeq: null,
         filled: 0,
-        log: new Int32Array(MAP2D_LOG_CAPACITY),
+        log: EMPTY_LOG,
         logCount: 0,
         last: null,
         outOfRange: 0,
@@ -401,7 +433,7 @@ export class LiveStore {
   private restarted(st: StreamState, item: StreamMeta, trustLastSeq: boolean): boolean {
     if (item.kind !== st.meta.kind) return true;
     if (item.epoch !== null && st.meta.epoch !== null && item.epoch !== st.meta.epoch) return true;
-    if (item.kind === "map2d" && !sameGeometry(map2dGeometry(item), map2dGeometry(st.meta))) {
+    if (isMapKind(item.kind) && !sameGeometry(map2dGeometry(item), map2dGeometry(st.meta))) {
       return true;
     }
     // last_seq 倒退只在流**没有 uid** 时才拿来判重启：有 uid 的服务端在同一进程里 seq
@@ -605,10 +637,11 @@ export class LiveStore {
         return true;
       }
       case "map2d": {
+        if (st.meta.kind === "map2d_rows") return this.writeRow(st, b, seq, frame);
         const f = decodeMap2dFrame(frame);
         if (!f) return false;
         const g = b.geom;
-        if (!g || !b.pixelSeq) return false;
+        if (!g || !ensureMap2dAlloc(b)) return false;
         if (f.ix < 0 || f.iy < 0 || f.ix >= g.nx || f.iy >= g.ny) {
           b.outOfRange += 1;
           return false;
@@ -617,13 +650,7 @@ export class LiveStore {
         if (b.pixelSeq[idx]! > seq) return true; // 这个像素已经有更新的值：旧帧到晚了
         const first = b.pixelSeq[idx] === 0;
         for (const [name, v] of Object.entries(f.values)) {
-          let img = b.values.get(name);
-          if (!img) {
-            img = new Float64Array(g.nx * g.ny).fill(Number.NaN);
-            b.values.set(name, img);
-            b.channels.push(name);
-          }
-          img[idx] = v === null ? Number.NaN : v;
+          writePixel(b, g, name, idx, v);
         }
         b.pixelSeq[idx] = seq;
         if (first) b.filled += 1;
@@ -652,6 +679,37 @@ export class LiveStore {
     }
   }
 
+  /**
+   * map2d_rows：一帧写一行（或一行里从 ix0 起的一段）。逐像素记 seq、进写入日志 ——
+   * 视图、补齐、整幅重画的逻辑和逐像素的 map2d 完全一样。
+   */
+  private writeRow(st: StreamState, b: Map2dBuf, seq: number, frame: unknown): boolean {
+    const f = decodeMap2dRowsFrame(frame);
+    if (!f) return false;
+    const g = b.geom;
+    if (!g || !ensureMap2dAlloc(b)) return false;
+    const rows = Object.entries(f.values);
+    const n = rows[0]![1].length;
+    if (f.iy < 0 || f.iy >= g.ny || f.ix0 < 0 || f.ix0 + n > g.nx) {
+      b.outOfRange += 1;
+      return false;
+    }
+    const base = f.iy * g.nx + f.ix0;
+    for (let k = 0; k < n; k++) {
+      const idx = base + k;
+      if (b.pixelSeq[idx]! > seq) continue; // 这个像素已经有更新的值：旧帧到晚了
+      const first = b.pixelSeq[idx] === 0;
+      for (const [name, arr] of rows) writePixel(b, g, name, idx, arr[k] ?? null);
+      b.pixelSeq[idx] = seq;
+      if (first) b.filled += 1;
+      b.log[b.logCount % b.log.length] = idx;
+      b.logCount += 1;
+    }
+    if (seq >= st.cursor) b.last = { ix: f.ix0 + n - 1, iy: f.iy };
+    this.noteT(st, epochSeconds(f.t), seq);
+    return true;
+  }
+
   private noteT(st: StreamState, t: number | null, seq: number): void {
     if (t !== null && seq >= st.cursor) st.lastT = t;
   }
@@ -665,5 +723,25 @@ export class LiveStore {
     next.resets = st.resets;
     this.streams.set(id, next);
     this.emit(id);
+  }
+
+  /**
+   * 忘掉服务端已经不列（gone）、也没有视图在看的流。返回删掉的 id。
+   *
+   * 不删的话每个见过的流都永远留在内存里：扫描地图的实时扫描每帧一个新流，连续扫描
+   * 一晚上就是几百个。还有视图在看的 gone 流留着 —— 刚结束的那一帧
+   * 还要显示一会儿；没人看了再删。
+   */
+  dropGone(isWatched: (id: string) => boolean): string[] {
+    const out: string[] = [];
+    for (const [id, st] of this.streams) {
+      if (!st.gone || isWatched(id)) continue;
+      this.streams.delete(id);
+      this.pending.delete(id);
+      this.metaSeenMs.delete(id);
+      out.push(id);
+    }
+    if (out.length) this.emitList();
+    return out;
   }
 }

@@ -105,6 +105,14 @@ class QueuedIngestSink:
             target=self._run, name="mast-data-ingest", daemon=True)
         self._worker.start()
 
+    def set_on_result(self, fn) -> None:
+        """构造之后再接（或换掉）落地回调 ``fn(job, result)``。
+
+        回调跑在归档线程上，异常被吞掉并记账（见 :meth:`_handle`）—— 回调里只该排队，不该干活。
+        给环境标签用（docs/v2/design/data_env_tags.md）：副本落地后要补一份 sidecar，而 runtime
+        构造这个 sink 的那一行不改。"""
+        self._on_result = fn
+
     # ── 提交 ──────────────────────────────────────────────────────────
 
     def submit(

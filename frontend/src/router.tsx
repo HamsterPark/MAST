@@ -2,7 +2,7 @@ import type { ReactElement } from "react";
 import { createBrowserRouter } from "react-router-dom";
 import AppLayout from "@/layout/AppLayout";
 import { GroupIndex, LegacyRedirect, TabGroup } from "@/layout/TabGroup";
-import { LEGACY_REDIRECTS, TABS, sectionPath } from "@/lib/nav";
+import { LEGACY_REDIRECTS, TABS, findTab, sectionPath } from "@/lib/nav";
 import ChatPage from "@/pages/ChatPage";
 import AgentsPage from "@/pages/AgentsPage";
 import QaPage from "@/pages/QaPage";
@@ -27,7 +27,9 @@ import MonitoringPage from "@/pages/MonitoringPage";
 import EnvHistoryPage from "@/pages/EnvHistoryPage";
 import TersPage from "@/pages/TersPage";
 import { LegacyOnly } from "@/components/shell/LegacyOnly";
+import { CapabilityOnly } from "@/components/shell/CapabilityOnly";
 import { useLegacyFeatures } from "@/hooks/useLegacyFeatures";
+import type { Capability } from "@/lib/stationCapabilities";
 
 /** "/": the built-in agent chat with legacy features on, the overview otherwise. */
 function HomeRoute() {
@@ -88,6 +90,16 @@ const FLAT_ELEMENTS: Record<string, ReactElement> = {
 
 const strip = (p: string) => p.replace(/^\//, "");
 
+/**
+ * A page that needs a station capability (`requires` in nav.ts) renders through
+ * <CapabilityOnly>: on a station without it the page is not mounted and a notice says
+ * which station it belongs to. A legacy page still renders through <LegacyOnly> outside it.
+ */
+function gated(entry: { legacy?: boolean; requires?: Capability }, el: ReactElement | undefined) {
+  const forStation = entry.requires && el ? <CapabilityOnly cap={entry.requires}>{el}</CapabilityOnly> : el;
+  return entry.legacy ? <LegacyOnly>{forStation}</LegacyOnly> : forStation;
+}
+
 /** Tabs with sections → a group route with children, derived from TABS. */
 const groupRoutes = TABS.filter((t) => t.sections?.length).map((t) => ({
   path: strip(t.to),
@@ -96,7 +108,7 @@ const groupRoutes = TABS.filter((t) => t.sections?.length).map((t) => ({
     { index: true, element: <GroupIndex to={t.to} /> },
     ...(t.sections ?? []).map((sec) => {
       const el = SECTION_ELEMENTS[sectionPath(t, sec.seg)];
-      return { path: sec.seg, element: sec.legacy ? <LegacyOnly>{el}</LegacyOnly> : el };
+      return { path: sec.seg, element: gated(sec, el) };
     }),
   ],
 }));
@@ -112,7 +124,7 @@ const LEGACY_FLAT = new Set(["/agents", "/qa", "/vision", "/chat"]);
 
 const flatRoutes = Object.entries(FLAT_ELEMENTS).map(([p, element]) => ({
   path: strip(p),
-  element: LEGACY_FLAT.has(p) ? <LegacyOnly>{element}</LegacyOnly> : element,
+  element: gated({ legacy: LEGACY_FLAT.has(p), requires: findTab(p)?.requires }, element),
 }));
 
 export const router = createBrowserRouter([

@@ -842,6 +842,22 @@ def test_the_station_profile_is_what_the_service_says_and_stm_when_it_does_not_s
     assert [r["path"] for r in plain_service.seen] == ["/api/health"]
 
 
+@pytest.mark.parametrize("health,expect", [
+    # the capability list decides, whatever the profile is called (a generic station has prompts)
+    ({"station_profile": "generic", "station_capabilities": ["optical_bench", "operator_prompts"]}, "optical"),
+    ({"station_profile": "optical", "station_capabilities": ["witec", "operator_prompts"]}, "optical"),
+    # a list without it wins over the profile
+    ({"station_profile": "optical", "station_capabilities": ["nanonis"]}, "stm"),
+    ({"station_profile": "stm", "station_capabilities": []}, "stm"),
+    # not a list (or absent): the profile, as an older service
+    ({"station_profile": "optical", "station_capabilities": "operator_prompts"}, "optical"),
+    ({"station_profile": "optical", "station_capabilities": None}, "optical"),
+    ({"station_profile": "generic"}, "stm")])
+def test_the_operator_prompts_capability_decides_when_the_service_lists_capabilities(launcher, plain_service, health, expect):
+    plain_service.route = lambda m, p: (200, health)
+    assert launcher.OperatorApi(plain_service.server_address[1]).station_profile() == expect
+
+
 def test_a_body_that_is_not_json_reads_as_stm(launcher):
     api = launcher.OperatorApi(1)
 

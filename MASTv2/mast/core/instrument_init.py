@@ -207,7 +207,44 @@ GROUPS: tuple[InitGroup, ...] = (
             "Which optional modules are actually installed on this machine; **all "
             "are off by default**."),
     ),
+    # 超导磁体调场（7.2.0，instruments/magnet_625.py）。只在运行时识别到 Model 625
+    # 的机器上出现（依赖 RUNTIME_MAGNET_SUPPLY），所以没有磁体的站不会因为这一组
+    # 弹出「需要初始化」。不填 = MAST 不改变磁场（fail-closed），不是「按某个默认值改」。
+    InitGroup(
+        id="magnet",
+        title=tr("超导磁体（Lake Shore 625）", "Superconducting magnet (Lake Shore 625)"),
+        intro=tr(
+            "识别到磁体电源才出现；不填，MAST 就不改变磁场。",
+            "Shown only when a magnet supply is detected; until it is filled in, MAST "
+            "does not change the field."),
+    ),
+    # 样品台控温（instruments/heater_335.py）。只在识别到 Model 335 的机器上出现
+    # （依赖 RUNTIME_TEMPERATURE_CONTROLLER）。不填 = MAST 不开加热器；关加热器不依赖它。
+    # 可选的守护温度计两项不在这一页（设置 → 仪器参数里有）：页面字数预算留给必填项。
+    InitGroup(
+        id="heater",
+        title=tr("样品台控温（Lake Shore 335）", "Sample-stage heating (Lake Shore 335)"),
+        intro=tr(
+            "识别到 335 才出现；不填，MAST 就不开加热器。",
+            "Shown only when a 335 is detected; until it is filled in, MAST does not "
+            "turn a heater on."),
+    ),
 )
+
+#: 不来自任何存储、由 API 层从**正在运行的仪器**现取的事实（``depends_on`` 可以指向它们）。
+#: 值不在场时按「不适用」处理：没有识别到磁体电源的机器上，磁体那一组整组不出现。
+RUNTIME_MAGNET_SUPPLY = "runtime.magnet_supply"
+RUNTIME_TEMPERATURE_CONTROLLER = "runtime.temperature_controller"
+RUNTIME_FACTS: dict[str, str] = {
+    RUNTIME_MAGNET_SUPPLY: tr(
+        "这台机器上没有识别到 Lake Shore 625 磁体电源，所以这一项不适用。",
+        "No Lake Shore 625 magnet supply is detected on this machine, so this item "
+        "does not apply."),
+    RUNTIME_TEMPERATURE_CONTROLLER: tr(
+        "这台机器上没有识别到 Lake Shore 335 温控仪，所以这一项不适用。",
+        "No Lake Shore 335 temperature controller is detected on this machine, so this "
+        "item does not apply."),
+}
 
 _GROUP_IDS = frozenset(g.id for g in GROUPS)
 
@@ -972,6 +1009,165 @@ CATALOG: tuple[InitItem, ...] = (
                 "railing is one of the most direct pieces of evidence that \"the tip "
                 "has punched in\". It raises no error; it quietly does nothing.")),
     ),
+
+    # ── ⑩ 超导磁体 ──────────────────────────────────────────────────────────
+    # 这四项都没有出厂默认：不填，MAST 不改变磁场（前两项），或不升场（后两项）。
+    # 调场时目标用磁场（T），线上发的是电流；场常数把两者连起来，所以它和上限
+    # 一样是安全关键。读数怎么核对、为什么拒绝而不夹取，见 instruments/magnet_625.py。
+    InitItem(
+        key="magnet_max_field_t", store="instrument_profile", group="magnet",
+        severity=REQUIRED, safety_critical=True, unit="T", has_factory=False,
+        depends_on=(RUNTIME_MAGNET_SUPPLY,), depends_values=("lakeshore_625",),
+        label=tr("磁体允许的最大磁场 |B|", "Maximum field |B| on the magnet"),
+        hint=tr("按磁体额定填；超过它的目标一律拒绝，不会夹到上限。",
+                "From the magnet's rating; a target above it is refused, never clipped."),
+        consequence=tr(
+            "填大了，MAST 会接受超过磁体额定的目标，扫场到那里可能失超、损坏磁体。"
+            "电源自己的 LIMIT 是第二道线，但它限的是电流，不知道磁体额定。",
+            "Too high, and MAST accepts targets above the magnet's rating; ramping there "
+            "can quench or damage the magnet. The supply's own LIMIT is a second line, but "
+            "it limits current and knows nothing of the magnet's rating."),
+    ),
+    # 后果展开：场常数是「电流 → 磁场」的唯一换算。MAST 在每次调场前读仪器的
+    # FLDS? 交叉核对，差 0.5% 以上拒绝 —— 所以填错通常表现为「拒绝调场」；但若
+    # 有人把 FLDS 也改成了同一个错值，两边一致，换算就整体错了。
+    InitItem(
+        key="magnet_field_constant_t_per_a", store="instrument_profile", group="magnet",
+        severity=REQUIRED, safety_critical=True, unit="T/A", has_factory=False,
+        depends_on=(RUNTIME_MAGNET_SUPPLY,), depends_values=("lakeshore_625",),
+        label=tr("磁体场常数", "Magnet field constant"),
+        hint=tr("看磁体铭牌；每次调场前与仪器的 FLDS 交叉核对。",
+                "From the magnet's nameplate; cross-checked against FLDS before each change."),
+        consequence=tr(
+            "填小了，同一个目标磁场会算出更大的电流，实际磁场高于目标、可能超过磁体额定；"
+            "填大了则场偏低。与仪器 FLDS 差 0.5% 以上时 MAST 拒绝调场。",
+            "Too small, and the same target field becomes a larger current: the real field "
+            "ends above the target and possibly above the magnet's rating. Too large, and "
+            "the field ends low. MAST refuses to change the field when this and the "
+            "instrument's FLDS differ by more than 0.5 %."),
+    ),
+    # 只作升场前提（温度计不准、读数随磁场漂，所以不写死、
+    # 扫场中也不据此停）。匹配规则同 core/temperature：精确 → 忽略大小写 → 唯一子串。
+    InitItem(
+        key="magnet_temperature_channel", store="instrument_profile", group="magnet",
+        severity=REQUIRED, has_factory=False,
+        depends_on=(RUNTIME_MAGNET_SUPPLY,), depends_values=("lakeshore_625",),
+        label=tr("磁体温度计", "Magnet thermometer"),
+        hint=tr("环境监控里那一路的名字，如 335 的「Magnet」。",
+                "The environment channel's name, e.g. the 335's \"Magnet\"."),
+    ),
+    InitItem(
+        key="magnet_max_temperature_k", store="instrument_profile", group="magnet",
+        severity=REQUIRED, unit="K", has_factory=False,
+        depends_on=(RUNTIME_MAGNET_SUPPLY,), depends_values=("lakeshore_625",),
+        label=tr("升场前磁体温度上限", "Magnet temperature limit for raising the field"),
+        hint=tr("按你的温度计定，它的读数随磁场漂。",
+                "Set for your thermometer; its reading drifts with field."),
+    ),
+    # 反向场。625 手册没写负向输出按 |I| 查分段表，所以出厂「否」：
+    # 负向目标的 |I| 超过第一段上限就拒绝。有出厂默认（「否」是保守的那一边），
+    # 所以不挡初始化；只有操作员亲眼看到 RATE? 在负向第一段边界变了，才改成「是」。
+    InitItem(
+        key="magnet_negative_segments_verified", store="instrument_profile", group="magnet",
+        severity=OPTIONAL,
+        depends_on=(RUNTIME_MAGNET_SUPPLY,), depends_values=("lakeshore_625",),
+        label=tr("负向扫场分段已验证", "Negative-side ramp segments verified"),
+        hint=tr("负向过第一段边界时见 RATE? 变了才选「是」。",
+                "Choose Yes only after seeing RATE? change at the first segment boundary on the "
+                "negative side."),
+    ),
+
+    # ── ⑪ 样品台控温 ────────────────────────────────────────────────────────
+    # 都没有出厂默认：缺一项，MAST 就不开加热器。335 面板上的控制模式、控制输入、
+    # 断电自启、手动输出、温度上限（TLIMIT）不在这里填 —— MAST 每次加热前现读核对，
+    # 不对就拒绝，从不替操作员改（闭环 PID 与分区之间的切换、分区表除外：调试时由
+    # SetHeaterControlMode / SetHeaterZoneTable 在加热器关着时写，见 instruments/heater_335）。
+    InitItem(
+        key="heater_output", store="instrument_profile", group="heater",
+        severity=REQUIRED, safety_critical=True, has_factory=False,
+        depends_on=(RUNTIME_TEMPERATURE_CONTROLLER,), depends_values=("lakeshore_335",),
+        label=tr("加热输出（335 的输出 1 或 2）", "Heater output (335 output 1 or 2)"),
+        hint=tr("接样品台加热器的那一路；面板上须是 PID 或分区。",
+                "The one wired to the sample-stage heater; closed-loop PID or zone at the panel."),
+        consequence=tr(
+            "填错了，MAST 会去开另一路输出：那一路接着什么、控着哪支温度计，MAST 都不知道。"
+            "MAST 会核对那一路是否闭环 PID、控制输入是否一致，不对就拒绝，但核对不出它接的是哪个加热器。",
+            "Wrong, and MAST turns on the other output: what it heats, and which thermometer "
+            "controls it, MAST does not know. MAST checks that the output is closed-loop PID on "
+            "the configured input and refuses otherwise, but cannot tell which heater is wired "
+            "to it."),
+    ),
+    InitItem(
+        key="heater_control_input", store="instrument_profile", group="heater",
+        severity=REQUIRED, has_factory=False,
+        depends_on=(RUNTIME_TEMPERATURE_CONTROLLER,), depends_values=("lakeshore_335",),
+        label=tr("控温的控制输入（A 或 B）", "Control input for temperature control (A or B)"),
+        hint=tr("须与面板上该输出的控制输入一致，MAST 只核对。",
+                "Must match that output's control input at the panel; MAST only checks it."),
+    ),
+    InitItem(
+        key="heater_max_setpoint_k", store="instrument_profile", group="heater",
+        severity=REQUIRED, safety_critical=True, unit="K", has_factory=False,
+        depends_on=(RUNTIME_TEMPERATURE_CONTROLLER,), depends_values=("lakeshore_335",),
+        label=tr("控温最高设定温度", "Maximum temperature setpoint"),
+        hint=tr("加热台额定最高温度；超过即拒绝，不夹到上限。",
+                "The heater stage's rated maximum temperature; a target above it is "
+                "refused, never clipped."),
+        consequence=tr(
+            "填高了，MAST 会接受把样品台加热到那个温度：样品、针尖、磁体和液氦都可能吃不消。"
+            "加热中超过它 MAST 就关加热器；335 面板上的温度上限（Temperature Limit）是第二道线，"
+            "MAST 加热前要求它开着，且不高于这个值。",
+            "Too high, and MAST accepts heating the stage that far: the sample, the tip, the "
+            "magnet and the helium may not take it. Above it while heating, MAST turns the "
+            "heater off; the 335's own Temperature Limit is the second line, and MAST requires "
+            "it to be on, and not above this value, before heating."),
+    ),
+    InitItem(
+        key="heater_max_range", store="instrument_profile", group="heater",
+        severity=REQUIRED, safety_critical=True, has_factory=False,
+        depends_on=(RUNTIME_TEMPERATURE_CONTROLLER,), depends_values=("lakeshore_335",),
+        label=tr("最大加热量程（1 低 / 2 中 / 3 高）", "Maximum heater range (1 low / 2 medium / 3 high)"),
+        hint=tr("低是最大功率的 1%，中 10%，高 100%。",
+                "Low is 1 % of the maximum power, medium 10 %, high 100 %."),
+        consequence=tr(
+            "填高了，出错时加热器能给出的功率高十倍到一百倍：液氦温区一瓦就很多，"
+            "样品台在 MAST 或面板反应过来之前就可能热过头。",
+            "Too high, and when something goes wrong the heater can deliver ten to a hundred "
+            "times the power: near liquid-helium temperature one watt is a lot, and the stage "
+            "can overheat before MAST or anyone at the panel reacts."),
+    ),
+    InitItem(
+        key="heater_max_current_a", store="instrument_profile", group="heater",
+        severity=REQUIRED, safety_critical=True, unit="A", has_factory=False,
+        depends_on=(RUNTIME_TEMPERATURE_CONTROLLER,), depends_values=("lakeshore_335",),
+        label=tr("加热器额定电流（A）", "Heater rated current (A)"),
+        hint=tr("超过它就不加热。",
+                "Heating is refused above it."),
+        consequence=tr(
+            "填大了，MAST 会放行一个实际上能把加热器过驱的量程：电流超过额定，加热器或引线可能烧坏。"
+            "MAST 每次加热前读 335 的 HTRSET?（最大电流设置）算出最大量程的满量程电流，超过这个值就拒绝，"
+            "加热中也会定期复核；MAST 从不写 HTRSET，要改请在面板上改。",
+            "Too large, and MAST lets through a range that can overdrive the heater: above its "
+            "rating, the heater or its leads can burn out. Before each heating MAST reads the "
+            "335's HTRSET? (maximum current setting), works out the full-scale current of the "
+            "maximum range, and refuses above this value; while heating it checks again at "
+            "intervals. MAST never writes HTRSET: change it at the panel."),
+    ),
+    InitItem(
+        key="heater_max_mout_pct", store="instrument_profile", group="heater",
+        severity=OPTIONAL, unit="%",
+        depends_on=(RUNTIME_TEMPERATURE_CONTROLLER,), depends_values=("lakeshore_335",),
+        label=tr("最大手动输出（%）", "Max manual output (%)"),
+        hint=tr("分区前馈的上限，0 = 关。",
+                "Cap on the per-zone manual output; 0 = off."),
+    ),
+    InitItem(
+        key="heater_max_rate_k_per_min", store="instrument_profile", group="heater",
+        severity=REQUIRED, unit="K/min", has_factory=False,
+        depends_on=(RUNTIME_TEMPERATURE_CONTROLLER,), depends_values=("lakeshore_335",),
+        label=tr("最大扫温速率", "Maximum ramp rate"),
+        hint=tr("调用时没给速率就用它。", "Used when a change gives no rate."),
+    ),
 )
 
 _BY_ID: dict[str, InitItem] = {it.id: it for it in CATALOG}
@@ -1113,6 +1309,9 @@ def na_reason(it: InitItem, values: dict[str, Any]) -> str:
         raw = values.get(dep_id)
         if dep is not None and _is_blank(raw, dep):
             continue
+        if (dep is None and dep_id in RUNTIME_FACTS and it.depends_values
+                and str(raw).strip() not in it.depends_values):
+            return RUNTIME_FACTS[dep_id]
         if it.depends_values and str(raw).strip() not in it.depends_values:
             answer = str(raw).strip()
             shown = _CHOICE_LABEL.get(answer, answer or tr("（空）", "(empty)"))

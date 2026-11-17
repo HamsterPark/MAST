@@ -39,6 +39,12 @@ from mast.api.schemas_admin import (
     DiscoverResponse,
     InstrumentState,
     InstrumentStateResponse,
+    HeaterControlStatus,
+    HeaterOffRequest,
+    HeaterOffResponse,
+    MagnetControlStatus,
+    MagnetStopRequest,
+    MagnetStopResponse,
     NanonisConnectAccepted,
     NanonisConnectionResponse,
     NanonisConnectRequest,
@@ -415,8 +421,17 @@ def get_sensors(request: Request) -> SensorsResponse:
 
         cfg = load_config()
         sensors = [_sensor_to_entry(s) for s in (cfg.get("sensors") or []) if isinstance(s, dict)]
+        try:
+            from mast.environment.config import autodetect_policy
+
+            effective, why = autodetect_policy(cfg)
+        except Exception as exc:  # noqa: BLE001 - the config itself was read: report it anyway
+            logger.debug("autodetect policy unreadable: %s", exc)
+            effective, why = None, ""
         return SensorsResponse(
             autodetect=bool(cfg.get("autodetect", True)),
+            autodetect_effective=effective,
+            autodetect_reason=why,
             sensors=sensors,
             count=len(sensors),
             degraded=False,
@@ -496,6 +511,47 @@ def _rebuild_sensor_set(request, build_environment_sensors) -> list:
     return sensors
 
 
+def _refuse_while_magnet_busy() -> None:
+    """409 while MAST prepares, sends or supervises a magnet ramp.
+
+    A ramp is supervised over the magnet supply's open handle. Discovery, adoption
+    and rescan all close every handle (:func:`_release_bus`), and discovery then
+    probes the supply's port for seconds. The supervisor would lose contact, its
+    STOP would find the port held, and the ramp would go on unsupervised. Called
+    at the top of each of those endpoints (before anything is persisted) and again
+    in ``_release_bus``.
+    """
+    try:
+        from mast.core import magnet_control as _mc
+
+        ctl = _mc.controller()
+        busy = ctl is not None and bool(ctl.busy)
+    except Exception:  # noqa: BLE001 - asking never blocks a scan by accident
+        busy = False
+    if busy:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=tr(
+            "MAST 正在扫磁场：等它到位或停住之后再扫描设备接口（扫描会关掉磁体电源的串口）。",
+            "MAST is ramping the magnet: scan after it arrives or is stopped (a scan "
+            "closes the magnet supply's serial port)."))
+    # The same holds for a temperature change MAST is supervising on the 335's port.
+    try:
+        from mast.core import heater_control as _hc
+
+        hctl = _hc.controller()
+        heating = hctl is not None and bool(hctl.busy)
+    except Exception:  # noqa: BLE001
+        heating = False
+    if heating:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=tr(
+            "MAST 正在改变样品台温度：等它稳定或停住之后再扫描设备接口（扫描会关掉温控仪的串口）。",
+            "MAST is changing the stage temperature: scan after it settles or is held (a "
+            "scan closes the temperature controller's serial port)."))
+
+
 def _release_bus(monitor) -> bool:
     """Stop the monitor loop and close every serial handle; report prior state.
 
@@ -503,8 +559,10 @@ def _release_bus(monitor) -> bool:
     re-opens a port must first take the bus away from the live monitor —
     otherwise the probe fails on a port MAST itself is holding and the caller
     wrongly concludes "no device there". Returns whether the archive loop had
-    been running, for :func:`_restore_bus`.
+    been running, for :func:`_restore_bus`. Refuses (409) while a magnet ramp is
+    in flight.
     """
+    _refuse_while_magnet_busy()
     was_running = bool(getattr(monitor, "is_running", False))
     stop = getattr(monitor, "stop", None)
     if callable(stop):
@@ -564,6 +622,7 @@ def discover_environment_devices(request: Request) -> DiscoverResponse:
     dismissed dialog, not a bad config.
     """
     ctx = request.app.state.ctx
+    _refuse_while_magnet_busy()
     monitor = getattr(ctx, "environment_monitor", None)
     if monitor is None:
         # Standalone API process: never open serial ports the live app owns.
@@ -602,6 +661,7 @@ def adopt_sensors(request: Request, body: SensorAdoptRequest) -> SensorAdoptResp
     """
     from mast.environment.config import SENSOR_TYPES, update_sensor
 
+    _refuse_while_magnet_busy()          # before anything is persisted
     accepted: list[dict] = []
     rejected: list[str] = []
     for raw in body.sensors or []:
@@ -670,22 +730,53 @@ def instrument_state(request: Request) -> InstrumentStateResponse:
     though its inputs are separate sensors sharing that port.
 
     Everything here is a query — the panel can show that a heater is on, and has
-    no path to turn one on.
+    no path to turn one on. The same holds for the Lake Shore 625 magnet supply
+    (field, current, setpoints, persistent switch, quench/error bits) and the
+    Cryomagnetics LM-510 (level, status, sample mode): read, never commanded.
     """
     ctx = request.app.state.ctx
     monitor = getattr(ctx, "environment_monitor", None)
     if monitor is None:
         return InstrumentStateResponse(degraded=True)
     try:
+        from mast.environment.cryomag_lm510 import LM510LevelSensor
+        from mast.environment.lakeshore_625 import Model625Sensor
         from mast.environment.lakeshore_temp import LakeshoreTemperatureSensor
     except Exception:  # pragma: no cover - import guard
         return InstrumentStateResponse(degraded=True)
 
     sensors = getattr(monitor, "_sensors", {}) or {}
     seen_ports: set[str] = set()
+    seen_links: set[int] = set()
     out: list[InstrumentState] = []
     for sensor in list(sensors.values()):
         inner = getattr(sensor, "_inner", sensor)   # unwrap _RenamedSensor
+        if isinstance(inner, (Model625Sensor, LM510LevelSensor)):
+            # One instrument per link (the field and current readings of a 625
+            # share it). Queries only, over the monitor's own identity-checked link.
+            link = inner.link
+            if id(link) in seen_links:
+                continue
+            seen_links.add(id(link))
+            try:
+                snap = inner.instrument_state()
+            except Exception as exc:  # noqa: BLE001 — panel must never 500
+                logger.debug("instrument_state failed on %s: %s", inner.name(), exc)
+                snap = None
+            if snap is None:
+                continue
+            data = snap.as_dict()
+            common = {k: data.get(k, "") or "" for k in
+                      ("port", "model", "idn", "firmware", "serial_number")}
+            try:
+                if isinstance(inner, Model625Sensor):
+                    out.append(InstrumentState(kind="lakeshore_625", magnet=data, **common))
+                else:
+                    out.append(InstrumentState(kind="cryomag_lm510", level_meter=data,
+                                               **common))
+            except Exception as exc:  # noqa: BLE001 — one bad payload, not a 500
+                logger.debug("instrument_state payload rejected: %s", exc)
+            continue
         if not isinstance(inner, LakeshoreTemperatureSensor):
             continue
         settings = getattr(inner, "_settings", None)
@@ -708,6 +799,89 @@ def instrument_state(request: Request) -> InstrumentStateResponse:
     return InstrumentStateResponse(instruments=out, degraded=False)
 
 
+@router.get("/environment/magnet-control", response_model=MagnetControlStatus)
+def magnet_control_status() -> MagnetControlStatus:
+    """Field control status: configured at initialization or not, and the ramp MAST runs. No I/O."""
+    from mast.core import magnet_control as _mc
+
+    ctl = _mc.controller()
+    if ctl is None:
+        return MagnetControlStatus(present=False)
+    try:
+        st = ctl.status()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("magnet control status failed: %s", exc)
+        return MagnetControlStatus(present=True)
+    return MagnetControlStatus(present=True, port=str(st.get("port") or ""),
+                               can_set_field=bool(st.get("can_set_field")),
+                               busy=bool(st.get("busy")),
+                               settings=dict(st.get("settings") or {}),
+                               active=st.get("active"), last=st.get("last"),
+                               last_stop=st.get("last_stop"))
+
+
+@router.post("/environment/magnet-control/stop", response_model=MagnetStopResponse)
+def magnet_control_stop(body: MagnetStopRequest) -> MagnetStopResponse:
+    """Operator STOP: freeze the magnet output at its present value. Always allowed, no PIN.
+
+    STOP does not bring the field to zero; it holds it where it is.
+    """
+    from mast.core import magnet_control as _mc
+
+    ctl = _mc.controller()
+    if ctl is None:
+        return MagnetStopResponse(present=False, sent=False,
+                                  error=tr("没有识别到磁体电源", "no magnet supply recognised"))
+    why = (body.reason or "").strip() or tr("操作员在 MAST 界面上按了停止",
+                                           "the operator pressed STOP in the MAST UI")
+    res = ctl.stop(reason=why, origin="MAST UI")
+    return MagnetStopResponse(present=True, sent=bool(res.get("sent")),
+                              error=str(res.get("error") or ""))
+
+
+@router.get("/environment/heater-control", response_model=HeaterControlStatus)
+def heater_control_status() -> HeaterControlStatus:
+    """Sample-stage heating status: set up at initialization or not, and the change MAST
+    runs. No I/O."""
+    from mast.core import heater_control as _hc
+
+    ctl = _hc.controller()
+    if ctl is None:
+        return HeaterControlStatus(present=False)
+    try:
+        st = ctl.status()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("heater control status failed: %s", exc)
+        return HeaterControlStatus(present=True)
+    return HeaterControlStatus(present=True, port=str(st.get("port") or ""),
+                               can_heat=bool(st.get("can_heat")), busy=bool(st.get("busy")),
+                               settings=dict(st.get("settings") or {}),
+                               identity=dict(st.get("identity") or {}),
+                               active=st.get("active"), last=st.get("last"),
+                               last_off=st.get("last_off"), last_hold=st.get("last_hold"))
+
+
+@router.post("/environment/heater-control/off", response_model=HeaterOffResponse)
+def heater_control_off(body: HeaterOffRequest) -> HeaterOffResponse:
+    """Operator heater-off: RANGE 0 on the configured output and on the one MAST is heating,
+    read back until it reads 0 (retried in the background). No PIN; the stage then cools
+    by itself. Refused where temperature control is not set up and MAST is not heating:
+    there MAST writes nothing to the 335 (``error`` says to use ALL OFF)."""
+    from mast.core import heater_control as _hc
+
+    ctl = _hc.controller(learn=True)
+    if ctl is None:
+        return HeaterOffResponse(present=False, sent=False,
+                                 error=tr("没有识别到 Lake Shore 335 温控仪",
+                                          "no Lake Shore 335 recognised"))
+    why = (body.reason or "").strip() or tr("操作员在 MAST 界面上关了加热器",
+                                           "the operator turned the heater off in the MAST UI")
+    res = ctl.heater_off(reason=why, origin="MAST UI")
+    return HeaterOffResponse(present=True, sent=bool(res.get("sent")),
+                             confirmed=bool(res.get("confirmed")),
+                             error=str(res.get("error") or ""))
+
+
 @router.get("/environment/sensors/rescan", response_model=SensorRescanResponse)
 def rescan_sensors(request: Request) -> SensorRescanResponse:
     """Re-enumerate serial ports + rebuild the live monitor (degrade-safe).
@@ -716,6 +890,9 @@ def rescan_sensors(request: Request) -> SensorRescanResponse:
     (its EnvironmentMonitor). With no monitor wired we degrade to the persisted
     config — never opening serial ports from this standalone process."""
     ctx = request.app.state.ctx
+    # Here explicitly as well as in _release_bus: below, _release_bus runs inside a
+    # try whose except would turn the 409 into a "degraded" answer.
+    _refuse_while_magnet_busy()
     monitor = getattr(ctx, "environment_monitor", None)
     if monitor is None:
         # No live monitor → report the persisted config without touching serial.
@@ -901,6 +1078,13 @@ def _arm_exit_backstop() -> None:
                   tr("graceful shutdown 后进程未退出,已强制结束",
                      "Process did not exit after graceful shutdown; forced exit"),
                   threads=[t.name for t in alive])
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            # os._exit skips atexit: write out what the log queue still holds (bounded).
+            from mast.core.log_hygiene import flush_log_queue
+
+            flush_log_queue(2.0)
         except Exception:  # noqa: BLE001
             pass
         _os._exit(0)

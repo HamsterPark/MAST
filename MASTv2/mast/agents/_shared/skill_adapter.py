@@ -117,8 +117,8 @@ def _offload_long_summary(skill_name: str, full: str, cap: int = _TOOL_RETURN_CA
     try:
         import uuid as _uuid
 
-        from mast._runtime_paths import project_root
-        d = project_root() / "artifacts" / "tool_returns"
+        from mast._runtime_paths import data_root
+        d = data_root() / "artifacts" / "tool_returns"
         d.mkdir(parents=True, exist_ok=True)
         safe = "".join(ch if ch.isalnum() else "_" for ch in (skill_name or "tool"))[:40]
         fp = d / (safe + "_" + _uuid.uuid4().hex[:8] + ".txt")
@@ -965,7 +965,7 @@ def wrap_skill(
                 from mast.core.state import patch_state_from_result
 
                 patch_state_from_result(getattr(ctx, "state", None), data,
-                                        what=meta.name)
+                                        what=meta.name, tags=getattr(meta, "tags", None))
             summary = getattr(result, "summary", None)
             # ``data`` 是否已经原样进了摘要 —— 只有「没设 summary、且不是带错误
             # 信息的失败」那一支会这样。记下来,免得下面再附一遍。

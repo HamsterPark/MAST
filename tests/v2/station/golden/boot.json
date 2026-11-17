@@ -1,0 +1,99 @@
+{
+ "note": "answers of the probe on the source commit, normalised by _invariants.normalize",
+ "optical": {
+  "async_calls": [],
+  "autodetect_policy": {
+   "absent": [
+    false,
+    "forced off by the optical station profile"
+   ],
+   "false": [
+    false,
+    "forced off by the optical station profile"
+   ],
+   "true": [
+    false,
+    "forced off by the optical station profile"
+   ]
+  },
+  "calls": [
+   "install_operator_hitl",
+   "install_revocation_listener"
+  ],
+  "describe": {
+   "boot_profile": "optical",
+   "configured": "optical",
+   "profile": "optical",
+   "restart_pending": false,
+   "source": "env"
+  },
+  "executor": "SkillExecutor",
+  "hardware_modules_on": [
+   "ters_optics"
+  ],
+  "pool": "ConnectionPool",
+  "ports": [
+   0,
+   0,
+   0,
+   0
+  ],
+  "reconnect": 0,
+  "state": "InstrumentState",
+  "threads": []
+ },
+ "probe": "tests/v2/station/_invariants_probe.py",
+ "source": "pre-capability-table",
+ "stm": {
+  "async_calls": [
+   "vision_warmup.preload"
+  ],
+  "autodetect_policy": {
+   "absent": [
+    true,
+    "enabled in environment_sensors.json (default)"
+   ],
+   "false": [
+    false,
+    "autodetect is false in environment_sensors.json"
+   ],
+   "true": [
+    true,
+    "enabled in environment_sensors.json (default)"
+   ]
+  },
+  "calls": [
+   "connect_all",
+   "start_background_refresh",
+   "watchdog.start",
+   "current_monitor.start_service",
+   "map_activity_watcher",
+   "nanonis_env_sensors",
+   "autodetect_sensors"
+  ],
+  "describe": {
+   "boot_profile": "stm",
+   "configured": "stm",
+   "profile": "stm",
+   "restart_pending": false,
+   "source": "env"
+  },
+  "executor": "SkillExecutor",
+  "hardware_modules_on": [],
+  "pool": "ConnectionPool",
+  "ports": [
+   6501,
+   6502,
+   6503,
+   6504
+  ],
+  "reconnect": "not called on stm",
+  "state": "InstrumentState",
+  "threads": [
+   "CurrentMonitorService",
+   "InstrumentStateRefresh",
+   "MapActivityWatcher",
+   "SafetyWatchdog"
+  ]
+ }
+}

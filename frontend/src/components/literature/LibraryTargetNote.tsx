@@ -3,6 +3,7 @@ import { api } from "../../api/client";
 import { useCurrentScope } from "../../api/scope";
 import { libraryLabel } from "../../lib/libraryLabel";
 import { tr } from "../../lib/i18n";
+import { apiError } from "@/lib/apiError";
 
 /** Banner stating which library a paper will be filed into.
  *
@@ -29,8 +30,8 @@ export function LibraryTargetNote({
   const q = useQuery({
     queryKey: ["literature", "libraries"],
     queryFn: async () => {
-      const { data, error } = await api.GET("/api/literature/libraries");
-      if (error) throw error;
+      const { data, error, response } = await api.GET("/api/literature/libraries");
+      if (error) throw apiError(error, response);
       return data;
     },
   });
@@ -109,8 +110,8 @@ export function LibraryRef({
   const q = useQuery({
     queryKey: ["literature", "libraries"],
     queryFn: async () => {
-      const { data, error } = await api.GET("/api/literature/libraries");
-      if (error) throw error;
+      const { data, error, response } = await api.GET("/api/literature/libraries");
+      if (error) throw apiError(error, response);
       return data;
     },
   });

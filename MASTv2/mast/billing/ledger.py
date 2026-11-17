@@ -219,8 +219,8 @@ _LEDGER_LOCK = threading.Lock()
 
 
 def _default_path() -> Path:
-    from mast._runtime_paths import project_root
-    return Path(project_root()) / "experiments" / "usage_ledger.sqlite"
+    from mast._runtime_paths import data_root
+    return Path(data_root()) / "experiments" / "usage_ledger.sqlite"
 
 
 def get_ledger() -> UsageLedger:

@@ -13,6 +13,14 @@
 // the figure-job notification, clearing the selection on view change, the bottom action bar
 // and the toast.
 //
+// Automatic incremental builds (design D8) are started by the server on a timer and when this
+// page is opened / becomes visible (POST /api/gallery/auto; the server decides whether one
+// really starts). They must not disturb someone who is looking at pictures: when one ends with
+// nothing changed, nothing happens; with changes, only a light toast and a header chip appear and
+// the new index is fetched when the chip is clicked or the view changes (re-fetching it in place
+// would reset the card grid, the scroll position, the open lightbox and the selection). Marks
+// are never re-read after an automatic build. lib/gallery/autoBuild.ts holds the rules.
+//
 // NOTE: the view body is memoised on "view + index". This layer subscribes to save state and
 // build state, so it re-renders on every rating and on every 1.5 s build poll. If the body were
 // rebuilt each time, list views would receive a new `base` array: the card grid would drop back
@@ -20,11 +28,13 @@
 // marks mid-rating. So the body is rebuilt only when the view or the index really changes.
 // ════════════════════════════════════════════════════════════════════════════
 
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { EmptyNote, ErrorNote, Spinner } from "@/components/ui";
+import { api } from "@/api/client";
+import { buildKey, isPristine, planAfterBuild } from "@/lib/gallery/autoBuild";
 import { newBatch } from "@/lib/gallery/dirs";
 import { parseView, navId, viewKey, viewSearch, type GalleryView } from "@/lib/gallery/route";
 import { GALLERY_KEYS, useGalleryModel, useGalleryStatus } from "./useGalleryData";
@@ -43,6 +53,30 @@ import { FigureJobChip } from "./figures/figureJob";
 import { tr } from "@/lib/i18n";
 
 const LAST_VIEW_KEY = "mast.gallery.view";
+
+/** Nearest ancestor that scrolls (AppLayout's <main>), else the page. */
+function scrollParent(el: HTMLElement | null): HTMLElement {
+  for (let n = el?.parentElement ?? null; n; n = n.parentElement) {
+    const oy = getComputedStyle(n).overflowY;
+    if (oy === "auto" || oy === "scroll") return n;
+  }
+  return (document.scrollingElement as HTMLElement | null) ?? document.documentElement;
+}
+
+/** Has the user done nothing yet: no lightbox, first screen, nothing selected, nothing being edited? */
+function viewIsPristine(root: HTMLElement | null): boolean {
+  const sc = scrollParent(root);
+  const ae = document.activeElement;
+  const typing = !!ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName);
+  const save = useMarksStore.getState().saveState;
+  return isPristine({
+    lightboxOpen: !!document.querySelector("[data-gallery-lightbox]"),
+    scrollTop: sc.scrollTop,
+    viewportHeight: sc.clientHeight,
+    selected: useSelectionStore.getState().ids.size,
+    editing: typing || save === "pending" || save === "bad",
+  });
+}
 
 function readLastView(): string | null {
   try {
@@ -107,35 +141,112 @@ export function GalleryApp() {
     };
   }, []);
 
-  // The moment a build goes from running to not running: re-fetch the index and marks.
-  const wasRunning = useRef<boolean | null>(null);
-  const running = status.data?.running;
-  useEffect(() => {
-    if (running === undefined) return;
-    if (wasRunning.current && !running) {
-      void qc.invalidateQueries({ queryKey: GALLERY_KEYS.index });
-      void useMarksStore.getState().reload();
-      const d = status.data;
-      toast(
-        d?.phase === "error"
-          ? tr(`图库构建出错：${d.message || d.detail || ""}`, `Gallery build failed: ${d.message || d.detail || ""}`)
-          : d?.phase === "cancelled"
-            ? tr("图库构建已取消", "Gallery build cancelled")
-            : tr(
-                `图库已更新：新 ${d?.n_new ?? 0} · 变动 ${d?.n_changed ?? 0} · 失败 ${d?.n_failed ?? 0}`,
-                `Gallery updated: ${d?.n_new ?? 0} new · ${d?.n_changed ?? 0} changed · ${d?.n_failed ?? 0} failed`,
-              ),
-        d?.phase === "error" ? "err" : "ok",
-      );
-    }
-    wasRunning.current = running;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running]);
+  // Fresh index waiting to be fetched (an automatic build changed something).
+  const [staleIndex, setStaleIndex] = useState(false);
+  const staleRef = useRef(false);
+  const applyIndex = useCallback(() => {
+    staleRef.current = false;
+    setStaleIndex(false);
+    void qc.invalidateQueries({ queryKey: GALLERY_KEYS.index });
+  }, [qc]);
 
-  // Clear the selection when the view changes.
+  // A build has just ended (its identity changed). Identity, not the running -> not running edge:
+  // polling pauses while the page is in the background, so a whole automatic build can run and end
+  // without anyone seeing running=true. The first status seen is a past build, not news.
+  const lastKey = useRef<string | undefined>(undefined);
+  const lastAutoFailed = useRef(0);
+  useEffect(() => {
+    const d = status.data;
+    if (!d) return;
+    const key = buildKey(d);
+    if (key === null) {
+      // Still running. If this is the first status we see, its end is news (not a past build).
+      if (lastKey.current === undefined) lastKey.current = "";
+      return;
+    }
+    if (lastKey.current === undefined) {
+      lastKey.current = key;
+      return;
+    }
+    if (key === lastKey.current) return;
+    lastKey.current = key;
+    const plan = planAfterBuild(d, viewIsPristine(rootRef.current));
+    if (plan.index === "now") applyIndex();
+    else if (plan.index === "later") {
+      staleRef.current = true;
+      setStaleIndex(true);
+    }
+    if (plan.marks) void useMarksStore.getState().reload();
+    switch (plan.toast) {
+      case "updated":
+        toast(
+          tr(
+            `图库已更新：新 ${d.n_new ?? 0} · 变动 ${d.n_changed ?? 0} · 失败 ${d.n_failed ?? 0}`,
+            `Gallery updated: ${d.n_new ?? 0} new · ${d.n_changed ?? 0} changed · ${d.n_failed ?? 0} failed`,
+          ),
+        );
+        break;
+      case "light":
+        toast(
+          tr(
+            `图库自动更新：新 ${d.n_new ?? 0} · 变动 ${d.n_changed ?? 0}`,
+            `Gallery auto-updated: ${d.n_new ?? 0} new · ${d.n_changed ?? 0} changed`,
+          ),
+        );
+        break;
+      case "failed":
+        // The same files fail again every round: say so once per distinct count, not every ten minutes.
+        if ((d.n_failed ?? 0) !== lastAutoFailed.current) {
+          lastAutoFailed.current = d.n_failed ?? 0;
+          toast(
+            tr(
+              `图库自动更新：${d.n_failed} 个文件处理失败（详情在「数据根与构建」）`,
+              `Gallery auto-update: ${d.n_failed} files failed (see Data roots & build)`,
+            ),
+            "err",
+          );
+        }
+        break;
+      case "error":
+        toast(tr(`图库构建出错：${d.message || d.detail || ""}`, `Gallery build failed: ${d.message || d.detail || ""}`), "err");
+        break;
+      case "cancelled":
+        toast(tr("图库构建已取消", "Gallery build cancelled"));
+        break;
+    }
+    if (plan.toast !== "failed") lastAutoFailed.current = 0;
+  }, [status.data, applyIndex]);
+
+  // Opening the page (or coming back to it): ask the server for an automatic incremental build.
+  // The server applies the rules (switch, roots, already running, >= 1 min since the last build,
+  // start-up hold), so any number of tabs can ask. Throttled here only to spare the request.
+  const lastAsk = useRef(0);
+  useEffect(() => {
+    const ask = () => {
+      if (document.visibilityState !== "visible") return;
+      const t = Date.now();
+      if (t - lastAsk.current < 30_000) return;
+      lastAsk.current = t;
+      void api
+        .POST("/api/gallery/auto", { body: { reason: "open" } })
+        .then(({ data }) => {
+          if (data && !data.degraded) qc.setQueryData(GALLERY_KEYS.status, data);
+        })
+        .catch(() => {
+          /* The next poll shows the real state */
+        });
+    };
+    ask();
+    document.addEventListener("visibilitychange", ask);
+    return () => document.removeEventListener("visibilitychange", ask);
+  }, [qc]);
+
+  // Clear the selection when the view changes. Changing view is also the natural moment to take
+  // the index an automatic build produced: nothing on screen is kept across it.
   useEffect(() => {
     useSelectionStore.getState().clear();
-  }, [vk]);
+    if (staleRef.current) applyIndex();
+  }, [vk, applyIndex]);
 
   // Header height -> CSS variable, so the filter bar sticks below it.
   const rootRef = useRef<HTMLDivElement>(null);
@@ -259,10 +370,28 @@ export function GalleryApp() {
           <Link
             to={{ search: `?${viewSearch({ v: "setup" })}` }}
             className="rounded-mast-badge bg-mast-info-bg px-1.5 text-xs text-mast-info hover:no-underline"
-            title={tr("图库正在构建", "Gallery build in progress")}
+            title={
+              status.data.trigger === "auto"
+                ? tr("图库正在自动增量更新", "Gallery automatic incremental update in progress")
+                : tr("图库正在构建", "Gallery build in progress")
+            }
           >
-            {tr("构建中", "Building")} {status.data.done}/{status.data.total}
+            {status.data.trigger === "auto" ? tr("自动更新中", "Auto-updating") : tr("构建中", "Building")} {status.data.done}/
+            {status.data.total}
           </Link>
+        )}
+        {staleIndex && (
+          <button
+            type="button"
+            onClick={applyIndex}
+            className="rounded-mast-badge bg-mast-accent px-1.5 text-xs text-mast-accent-ink"
+            title={tr(
+              "自动更新带来了新数据；点一下载入（会回到列表顶部）",
+              "The automatic update brought new data; click to load it (the list returns to the top)",
+            )}
+          >
+            {tr("有新数据 · 点此载入", "New data · click to load")}
+          </button>
         )}
         <FigureJobChip />
         <div

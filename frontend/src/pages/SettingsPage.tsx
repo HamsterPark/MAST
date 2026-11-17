@@ -7,7 +7,8 @@ import { getLang, tr } from "@/lib/i18n";
 import { RECOMMENDED_MODEL_LABEL } from "@/lib/project";
 import { useLegacyFeatures } from "@/hooks/useLegacyFeatures";
 import { useStationProfile } from "@/hooks/useStationProfile";
-import { profileBlurb, profileLabel, type StationProfile } from "@/lib/stationProfile";
+import { useStationCapabilities } from "@/hooks/useStationCapabilities";
+import { PROFILES, profileBlurb, profileLabel, type StationProfile } from "@/lib/stationProfile";
 import { openOnboardingGuide } from "@/components/shell/OnboardingGuide";
 import { VacuumInterlockStrip } from "@/components/vision/VacuumInterlockStrip";
 import { INSTRUMENT_INIT_KEY, useInstrumentInit } from "@/hooks/useInstrumentInit";
@@ -33,6 +34,8 @@ import {
 } from "../components/controls";
 import { ModelCapabilityTable } from "../components/settings/ModelCapabilityTable";
 import { StationProfileDialog } from "../components/settings/StationProfileDialog";
+import { SerialAutodetectSetting } from "@/components/settings/SerialAutodetectSetting";
+import { StationSetupSteps } from "@/components/shell/StationSetupBanner";
 import { AgentOverridesEditor } from "../components/settings/AgentOverridesEditor";
 // Hardware connection in Settings is read-only: a small port table shows the
 // resolved host and the 4 Nanonis TCP ports. Editing, reconnecting and sensors live
@@ -60,9 +63,10 @@ import { settingsWriteProblem, type SettingsPatch } from "@/lib/settingsWrite";
 // Sections that only concern the built-in agents are hidden unless legacy features
 // are enabled; hardware and safety sections are always shown. Hardware editing lives
 // behind the PIN-gated Advanced tab.
-// On an optical station (station profile "optical", no STM) the new-instrument setup
-// row and the Nanonis hardware-connection section are hidden; the station-profile
-// card next to the legacy-features switch is where the profile is chosen.
+// On a station without the STM capabilities (an optical or a generic station) the
+// new-instrument setup row (`stm_safety`) and the Nanonis hardware-connection section
+// (`nanonis`) are not mounted, so they send nothing; the station-profile card next to the
+// legacy-features switch is where the profile is chosen.
 
 // ── shared queries ────────────────────────────────────────────────────────────
 function useModels() {
@@ -209,7 +213,16 @@ export default function SettingsPage() {
   const queryClient = useQueryClient();
   const { toast, node: toastNode } = useToast();
   const { enabled: legacy } = useLegacyFeatures();
-  const { isOptical } = useStationProfile();
+  // Both STM-only parts below send a request as soon as they mount (the setup checklist,
+  // the Nanonis connection), so they wait until the station has said what it has.
+  const station = useStationCapabilities();
+  const stmSetup = station.ready && station.has("stm_safety");
+  const nanonisPorts = station.ready && station.has("nanonis");
+  // The STM-only sections further down are closed accordions: nothing inside mounts (or asks
+  // for anything) until someone opens one, so they follow `has()` and an STM station draws
+  // them from the first frame, exactly as before. Not drawing them changes no stored value.
+  const stmControls = station.has("nanonis");
+  const tipSafety = station.has("stm_safety");
   const location = useLocation();
 
   // Scroll to the section named by the URL hash (e.g. /settings/general#legacy-features).
@@ -275,9 +288,9 @@ export default function SettingsPage() {
         {/* Manual entry to the new-instrument setup checklist. The automatic prompt is
             the top banner (shown when required values are missing, the hardware
             fingerprint changed, or setup was never run); this row is for going through
-            it again on demand. Hidden on an optical station: the checklist is made of
-            STM quantities. */}
-        {!isOptical && <SetupEntryRow toast={toast} />}
+            it again on demand. Only on a station with the STM safety parameters: the
+            checklist is made of STM quantities. */}
+        {stmSetup && <SetupEntryRow toast={toast} />}
 
         {legacy && (
           <Accordion title={tr("模型 Model", "Model")} defaultOpen>
@@ -310,8 +323,8 @@ export default function SettingsPage() {
           />
         </Accordion>
 
-        {/* Nanonis ports: not shown on an optical station (it has no Nanonis). */}
-        {!isOptical && (
+        {/* Nanonis ports: only on a station with Nanonis. */}
+        {nanonisPorts && (
           <Accordion title={tr("硬件连接 Hardware", "Hardware connection")} defaultOpen>
             {/* Ports are read-only here; editing lives in Advanced -> Hardware (PIN-gated).
                 The table shows host, the 4 ports (defaults 6501-6504 via
@@ -336,6 +349,10 @@ export default function SettingsPage() {
                 )}
               </span>
             </div>
+            {/* Automatic probing of the serial ports at start-up: shown only where it is
+                forced off (optical) or off by default (generic, with its PIN switch);
+                nothing at all on an STM station. */}
+            <SerialAutodetectSetting />
             <InstrumentStateCard />
           </div>
         </Accordion>
@@ -358,35 +375,46 @@ export default function SettingsPage() {
           <ExperimentDefaultsSection settings={settings} saving={saveSettings.isPending} save={save} />
         </Accordion>
 
-        <Accordion
-          title={tr(
-            "Z 参数组 Z-control presets（AI 按名应用，数值由代码写）",
-            "Z-control presets (applied by name; values are written by code)",
-          )}
-          defaultOpen={false}
-        >
-          <ZCtrlPresetsSection saving={saveSettings.isPending} save={save} />
-        </Accordion>
+        {/* Z-controller presets and the scan policy drive the Nanonis Z controller and
+            scanner: only on a station with Nanonis. */}
+        {stmControls && (
+          <Accordion
+            title={tr(
+              "Z 参数组 Z-control presets（AI 按名应用，数值由代码写）",
+              "Z-control presets (applied by name; values are written by code)",
+            )}
+            defaultOpen={false}
+          >
+            <ZCtrlPresetsSection saving={saveSettings.isPending} save={save} />
+          </Accordion>
+        )}
 
-        <Accordion
-          title={tr(
-            "扫描参数档位 Scan policy（按尺度：速度 / 像素 / 反馈）",
-            "Scan policy (by scale: speed / pixels / feedback)",
-          )}
-          defaultOpen={false}
-        >
-          <ScanPolicySection saving={saveSettings.isPending} save={save} />
-        </Accordion>
+        {stmControls && (
+          <Accordion
+            title={tr(
+              "扫描参数档位 Scan policy（按尺度：速度 / 像素 / 反馈）",
+              "Scan policy (by scale: speed / pixels / feedback)",
+            )}
+            defaultOpen={false}
+          >
+            <ScanPolicySection saving={saveSettings.isPending} save={save} />
+          </Accordion>
+        )}
 
-        <Accordion
-          title={tr(
-            "仪器进退针 Instrument (退针方向 / dI/dV)",
-            "Instrument approach / retract (retract direction / dI/dV)",
-          )}
-          defaultOpen={false}
-        >
-          <InstrumentProfileSection settings={settings} saving={saveSettings.isPending} save={save} />
-        </Accordion>
+        {/* Approach / retract, dI/dV and the preamp, and the field / heater control limits
+            (the 625 / 335 control skills stay on the STM side, generic_station.md §3.2):
+            the tip's safety parameters, only on a station with `stm_safety`. */}
+        {tipSafety && (
+          <Accordion
+            title={tr(
+              "仪器进退针 Instrument (退针方向 / dI/dV)",
+              "Instrument approach / retract (retract direction / dI/dV)",
+            )}
+            defaultOpen={false}
+          >
+            <InstrumentProfileSection settings={settings} saving={saveSettings.isPending} save={save} />
+          </Accordion>
+        )}
 
         {legacy && (
           <Accordion title={tr("语音 Voice", "Voice")} defaultOpen={false}>
@@ -424,31 +452,37 @@ export default function SettingsPage() {
           </Accordion>
         )}
 
-        <Accordion
-          title={tr(
-            "经典针尖阈值 Classical（免模型 · 按仪器重标定）",
-            "Classical tip thresholds (model-free · recalibrate per instrument)",
-          )}
-          defaultOpen={false}
-        >
-          <ClassicalThresholdsSection settings={settings} saving={saveSettings.isPending} save={save} />
-        </Accordion>
-
-        <Accordion
-          title={tr(
-            "电流监控 Current Monitor（常开 / 保留策略 / 告警阈值）",
-            "Current monitor (always-on / retention / alert thresholds)",
-          )}
-          defaultOpen={false}
-        >
-          <div className="mb-3 max-w-2xl rounded-mast-card border border-mast-warn-border bg-mast-warn-bg p-3 text-xs text-mast-warn">
-            {tr(
-              "自动告警现在默认关闭，属于计划中的后续功能（默认阈值尚未针对通用场景标定）。电流的采集与记录仍然开启。硬件安全看门狗是独立的：电流饱和时它会自动退针，不受此处任何设置影响，始终有效。",
-              "Automatic alerts are now off by default and are a planned future feature (the default thresholds are not yet calibrated for general use). Current acquisition and logging stay on. The hardware safety watchdog, which withdraws the tip when the current saturates, is independent of these settings and always stays active.",
+        {/* Tip-quality thresholds and the tunnelling-current monitor's settings: the tip's
+            safety side (`stm_safety`; the backend starts the current monitor only with it). */}
+        {tipSafety && (
+          <Accordion
+            title={tr(
+              "经典针尖阈值 Classical（免模型 · 按仪器重标定）",
+              "Classical tip thresholds (model-free · recalibrate per instrument)",
             )}
-          </div>
-          <MonitoringSettingsSection settings={settings} saving={saveSettings.isPending} save={save} />
-        </Accordion>
+            defaultOpen={false}
+          >
+            <ClassicalThresholdsSection settings={settings} saving={saveSettings.isPending} save={save} />
+          </Accordion>
+        )}
+
+        {tipSafety && (
+          <Accordion
+            title={tr(
+              "信号监控 Signal Monitor（常开 / 保留策略 / 告警阈值）",
+              "Signal monitor (always-on / retention / alert thresholds)",
+            )}
+            defaultOpen={false}
+          >
+            <div className="mb-3 max-w-2xl rounded-mast-card border border-mast-warn-border bg-mast-warn-bg p-3 text-xs text-mast-warn">
+              {tr(
+                "自动告警现在默认关闭，属于计划中的后续功能（默认阈值尚未针对通用场景标定）。电流的采集与记录仍然开启。硬件安全看门狗是独立的：电流饱和时它会自动退针，不受此处任何设置影响，始终有效。",
+                "Automatic alerts are now off by default and are a planned future feature (the default thresholds are not yet calibrated for general use). Current acquisition and logging stay on. The hardware safety watchdog, which withdraws the tip when the current saturates, is independent of these settings and always stays active.",
+              )}
+            </div>
+            <MonitoringSettingsSection settings={settings} saving={saveSettings.isPending} save={save} />
+          </Accordion>
+        )}
 
         <Accordion
           title={tr(
@@ -501,8 +535,8 @@ function AdminPinGuideCard() {
       </p>
       <p className="mt-1 text-xs">
         {tr(
-          "部分设置受管理员 PIN 保护：高级能力开关、硬件模块、粗动驱动声明、修针方案覆写、站点画像（STM 站 / 光学站），以及整个“设置 → 高级”标签页。",
-          "Some settings are protected by an admin PIN: advanced capabilities, hardware modules, the coarse-drive declaration, tip-conditioning overrides, the station profile (STM station / optical station), and the whole Settings → Advanced tab.",
+          "部分设置受管理员 PIN 保护：高级能力开关、硬件模块、粗动驱动声明、修针方案覆写、站点画像（STM 站 / 光学站 / 通用站），以及整个“设置 → 高级”标签页。",
+          "Some settings are protected by an admin PIN: advanced capabilities, hardware modules, the coarse-drive declaration, tip-conditioning overrides, the station profile (STM station / optical station / generic station), and the whole Settings → Advanced tab.",
         )}
       </p>
       <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
@@ -611,23 +645,29 @@ function LegacyFeaturesCard() {
 }
 
 // ── Station profile ────────────────────────────────────────────────────────────
-// Whether this MAST service runs as an STM station or as an optical station (the
-// WITec Raman computer, no STM). Unlike the legacy-features switch, a click here does
-// NOT save: the profile is an admin-PIN setting (backend admin_pin.GUARDED_KEYS) that
-// decides at the next start whether Nanonis is dialled and which watchdogs run, so the
-// click opens a confirmation (StationProfileDialog) that says what each profile means
-// and takes the PIN, and only that dialog's confirm button writes. Part of the profile
-// is read live and part is decided once at start-up (the Nanonis connection and its
-// threads), so a change is only complete after the service restarts: the card always
-// says so, and turns amber while a saved change is still waiting for that restart. The
-// values are identity strings; only the labels are translated.
-const STATION_CHOICES: { value: StationProfile; label: string }[] = [
-  { value: "stm", label: profileLabel("stm") },
-  { value: "optical", label: profileLabel("optical") },
-];
+// Which kind of station this MAST service runs as: an STM station, an optical station
+// (the WITec Raman computer, no STM) or a generic station (neither: another lab's
+// machine). Unlike the legacy-features switch, a click here does NOT save: the profile
+// is an admin-PIN setting (backend admin_pin.GUARDED_KEYS) that decides at the next
+// start whether Nanonis is dialled and which watchdogs run, so the click opens a
+// confirmation (StationProfileDialog) that says what each profile means and takes the
+// PIN, and only that dialog's confirm button writes. Part of the profile is read live
+// and part is decided once at start-up (the Nanonis connection and its threads), so a
+// change is only complete after the service restarts: the card always says so, and
+// turns amber while a saved change is still waiting for that restart. The values are
+// identity strings; only the labels are translated.
+//
+// First use (nothing stored, no environment variable): the card lists the two steps
+// (an admin PIN, then the choice), and choosing the profile that is already shown, the
+// default, opens the confirmation as well. Otherwise there would be no way to record
+// that the default is right, and the first-use prompt would never go away.
+const STATION_CHOICES: { value: StationProfile; label: string }[] = PROFILES.map((p) => ({
+  value: p,
+  label: profileLabel(p),
+}));
 
 function StationProfileCard() {
-  const { profile, configured, source, restartPending, loaded, setProfile } = useStationProfile();
+  const { profile, configured, source, firstRun, restartPending, loaded, setProfile } = useStationProfile();
   // The choice waiting for the operator's confirmation. Nothing is saved while it is set;
   // the radio shows it, the text of the card still says what is saved and what is in effect.
   const [pending, setPending] = useState<StationProfile | null>(null);
@@ -635,10 +675,11 @@ function StationProfileCard() {
   const busy = setProfile.isPending;
   const shown: StationProfile = pending ?? configured;
 
-  // A click only asks. Choosing the saved profile again withdraws the question.
+  // A click only asks. Choosing the saved profile again withdraws the question, except on
+  // first use: nothing is saved yet, and confirming the default is the point of the visit.
   const choose = (v: StationProfile) => {
     setProfile.reset();
-    setPending(v === configured ? null : v);
+    setPending(v === configured && !firstRun ? null : v);
   };
   // The one place that writes: the dialog's confirm button, with the PIN typed into it.
   const confirm = (pin: string) => {
@@ -671,6 +712,7 @@ function StationProfileCard() {
         {tr("当前生效：", "In effect: ")}
         <span className="font-semibold text-mast-text">{loaded ? profileLabel(profile) : "—"}</span>
       </p>
+      {firstRun && <StationSetupSteps where="card" profile={profile} />}
       {source === "env" && (
         <p className="mt-2 text-xs text-mast-warn" role="status">
           {tr(
@@ -701,6 +743,8 @@ function StationProfileCard() {
         from={configured}
         to={pending ?? configured}
         source={source}
+        active={loaded ? profile : undefined}
+        firstRun={firstRun}
         busy={busy}
         error={setProfile.isError ? String(err?.message ?? err) : null}
         onConfirm={confirm}
@@ -1929,6 +1973,60 @@ const INSTRUMENT_NUM_FIELDS: {
       "单位米。留空则每帧从数据现估（RANSAC 内点阈、圆拟合台阶否决、PI 整定验证都要用它）；填了就当本机基准值，省掉每次估计。",
       "In metres. Blank = estimated from the data for every frame (used by the RANSAC inlier threshold, the circle-fit step veto and PI-tuning verification); if filled in, it is used as this machine's baseline and the per-frame estimate is skipped.",
     ) },
+  // Superconducting magnet field control (7.2.0, instruments/magnet_625.py). None of
+  // these has a default: left blank, MAST does not change the field.
+  { key: "magnet_max_field_t", label: tr("磁体允许的最大磁场 |B|", "Maximum field |B| on the magnet"), placeholder: tr("如 5", "e.g. 5"), min: 0, max: 30, step: "0.01",
+    hint: tr(
+      "单位 T。按磁体额定填；调场目标超过它一律拒绝，不会夹到上限。留空 = MAST 不改变磁场。",
+      "In T. From the magnet's rating; a target above it is refused, never clipped. Blank = MAST does not change the field.",
+    ) },
+  { key: "magnet_field_constant_t_per_a", label: tr("磁体场常数", "Magnet field constant"), placeholder: tr("如 0.34", "e.g. 0.34"), min: 0, max: 10, step: "0.0001",
+    hint: tr(
+      "单位 T/A。看磁体铭牌；每次调场前与 625 自己的 FLDS 交叉核对，差 0.5% 以上拒绝。留空 = MAST 不改变磁场。",
+      "In T/A. From the magnet's nameplate; cross-checked against the 625's own FLDS before each change, and refused if they differ by more than 0.5 %. Blank = MAST does not change the field.",
+    ) },
+  { key: "magnet_max_temperature_k", label: tr("升场前磁体温度上限", "Magnet temperature limit for raising the field"), placeholder: tr("如 4.5", "e.g. 4.5"), min: 0, max: 400, step: "0.01",
+    hint: tr(
+      "单位 K。只作升场前提：磁体温度高于它、读不到、或 60 s 没更新，就不升场。按你的温度计定（读数会随磁场漂）。",
+      "In K. Only a precondition for raising: above it, unreadable, or not updated for 60 s, and the field is not raised. Set it for your thermometer (its reading drifts with field).",
+    ) },
+  // Sample-stage heating (Lake Shore 335, instruments/heater_335.py). None of these has a
+  // default: without any of the first four, MAST does not turn a heater on.
+  { key: "heater_output", label: tr("加热输出（335 的输出 1 或 2）", "Heater output (335 output 1 or 2)"), placeholder: tr("如 2", "e.g. 2"), min: 1, max: 2, step: "1",
+    hint: tr(
+      "接样品台加热器的那一路输出。该输出在面板上必须是闭环 PID 或分区（zone）、控制输入与下面一致、断电后不自启、手动输出为 0；MAST 只核对，不改（闭环 PID 与分区之间的切换除外，用 SetHeaterControlMode）。留空 = MAST 不开加热器。",
+      "The output wired to the sample-stage heater. At the panel it must be closed-loop PID or zone, controlled by the input below, off after a power cut, with manual output 0; MAST checks these and changes none (except switching between closed-loop PID and zone, with SetHeaterControlMode). Blank = MAST does not turn a heater on.",
+    ) },
+  { key: "heater_max_setpoint_k", label: tr("控温最高设定温度", "Maximum temperature setpoint"), placeholder: tr("如 40", "e.g. 40"), min: 1, max: 500, step: "0.1",
+    hint: tr(
+      "单位 K，样品台的绝对上限（例如厂家给的最高加热温度）。超过它的目标一律拒绝，不会夹到上限；加热中超过它就关加热器。另外 335 自己的温度上限（面板 Temperature Limit，控制输入那一路）必须开着，不低于目标加允许过冲（最多到这个值），也不高于这个值；它是 MAST 不在场时唯一的保护。",
+      "In K: the stage's absolute maximum (for example the manufacturer's maximum heating temperature). A target above it is refused, never clipped, and the heater is turned off when the stage goes above it. The 335's own Temperature Limit (set at the panel, on the control input) must also be on, at least the target plus the overshoot allowance (up to this value), and not above this value: it is the only protection when MAST is not running.",
+    ) },
+  { key: "heater_max_range", label: tr("最大加热量程（1 低 / 2 中 / 3 高）", "Maximum heater range (1 low / 2 medium / 3 high)"), placeholder: tr("如 1", "e.g. 1"), min: 1, max: 3, step: "1",
+    hint: tr(
+      "低 = 输出最大功率的 1%，中 = 10%，高 = 100%。液氦温区通常低量程就够；量程越高，出错时热得越快。",
+      "Low = 1 % of the output's maximum power, medium = 10 %, high = 100 %. Near liquid-helium temperature low is usually enough; the higher the range, the faster things heat when something goes wrong.",
+    ) },
+  { key: "heater_max_current_a", label: tr("加热器额定电流（A）", "Heater rated current (A)"), placeholder: tr("如 0.2", "e.g. 0.2"), min: 0.001, max: 2, step: "0.001",
+    hint: tr(
+      "单位 A，加热器能承受的最大电流。MAST 读 335 的 HTRSET?（最大电流设置），算出最大加热量程的满量程电流（量程每降一档，电流除以 √10），超过这个值就不加热；加热中也会定期复核。MAST 从不写 HTRSET：超了请降低最大量程，或在面板上把该输出的最大用户电流设成这个值。留空 = MAST 不开加热器。",
+      "In A: the largest current the heater can take. MAST reads the 335's HTRSET? (maximum current setting), works out the full-scale current of the maximum range (each range step down divides the current by √10) and refuses to heat above this value; it checks again at intervals while heating. MAST never writes HTRSET: when it is exceeded, lower the maximum range, or set the output's maximum user current to this value at the panel. Blank = MAST does not turn a heater on.",
+    ) },
+  { key: "heater_max_mout_pct", label: tr("最大手动输出（%）", "Max manual output (%)"), placeholder: tr("如 0", "e.g. 0"), min: 0, max: 100, step: "0.1",
+    hint: tr(
+      "单位 %，分区表里每区手动输出（前馈）的上限，默认 0 = 不用。手动输出直接叠加在 PID 输出上，所以 MAST 也核对面板上的 MOUT 不超过它；加热中超过就关加热器。MAST 只在分区行里写手动输出，从不单独写 MOUT。",
+      "In %: the upper limit for the per-zone feed-forward manual output; default 0 = not used. The manual output is added straight to the PID output, so MAST also checks that the panel's MOUT is not above it and turns the heater off if it goes above while heating. MAST writes a manual output only as a zone row's field, never MOUT on its own.",
+    ) },
+  { key: "heater_max_rate_k_per_min", label: tr("最大扫温速率", "Maximum ramp rate"), placeholder: tr("如 1", "e.g. 1"), min: 0.1, max: 100, step: "0.1",
+    hint: tr(
+      "单位 K/min。335 按这个速率把设定值从当前温度扫到目标；不指定速率时用它。",
+      "In K/min. The 335 ramps the setpoint from the present temperature to the target at this rate; used when no rate is given.",
+    ) },
+  { key: "heater_guard_max_k", label: tr("加热时守护温度计的上限", "Guard thermometer limit while heating"), placeholder: tr("可留空", "optional"), min: 0.1, max: 500, step: "0.01",
+    hint: tr(
+      "单位 K，可选。与下面的守护温度计一起填：它高于这个值、读不到或 60 s 没更新，就不加热；加热中超过就关加热器。磁体上的二极管温度计在高场下读数偏低（磁体比读数热），上限要按高场下的读数定、留出余量。",
+      "In K, optional. Fill in together with the guard thermometer below: above it, unreadable, or not updated for 60 s, and there is no heating; exceeded while heating, and the heater is turned off. A diode thermometer on the magnet reads LOW at high field (the magnet is warmer than it reads): set the limit for the reading at high field, with margin.",
+    ) },
   // Lateral coarse relocation (RelocateCoarseXY). The defaults are starting points;
   // true values can only be calibrated on the real instrument: move once, scan an
   // image, and check whether the terrain has changed completely.
@@ -2010,7 +2108,26 @@ const INSTRUMENT_TEXT_FIELDS: { key: string; label: string; hint: string; placeh
       "记下来是为了让 AI 解释噪声与带宽时知道自己在跟什么打交道（不同前放的噪声底、带宽、最大输入差别很大）。",
       "Recorded so the AI knows what it is dealing with when explaining noise and bandwidth (noise floor, bandwidth and maximum input differ a lot between preamps).",
     ) },
+  { key: "magnet_temperature_channel", label: tr("磁体温度计（环境通道名）", "Magnet thermometer (environment channel name)"), placeholder: tr("如 Magnet", "e.g. Magnet"),
+    hint: tr(
+      "环境监控里磁体温度计那一路的名字（如 Lake Shore 335 的「Magnet」输入）。按精确、忽略大小写、唯一子串的顺序匹配；对不上就不升场。",
+      "The name of the magnet thermometer's channel in the environment monitor (e.g. the Lake Shore 335's \"Magnet\" input). Matched exactly, then ignoring case, then as a unique substring; no match, no raise.",
+    ) },
+  { key: "heater_control_input", label: tr("控温的控制输入（A 或 B）", "Control input for temperature control (A or B)"), placeholder: tr("如 A", "e.g. A"),
+    hint: tr(
+      "335 上控制加热的那一路输入，必须与面板上该输出设定的控制输入一致；不一致就不加热（MAST 不改它）。留空 = MAST 不开加热器。",
+      "The 335 input that controls the heater; it must match the control input set for that output at the panel, or there is no heating (MAST does not change it). Blank = MAST does not turn a heater on.",
+    ) },
+  { key: "heater_guard_channel", label: tr("加热时守护温度计（环境通道名）", "Guard thermometer while heating (environment channel name)"), placeholder: tr("可留空，如 Magnet", "optional, e.g. Magnet"),
+    hint: tr(
+      "可选。加热时盯着的另一支温度计（例如磁体那一路），与上面的守护上限一起填。匹配规则同磁体温度计。注意磁体上的二极管在高场下读低。",
+      "Optional. Another thermometer watched while heating (for example the magnet's), filled in together with the guard limit above. Matched like the magnet thermometer. Note that a diode on the magnet reads low at high field.",
+    ) },
 ];
+// Text fields shown in the superconducting-magnet block rather than with the preamp.
+const MAGNET_TEXT_KEYS = new Set(["magnet_temperature_channel"]);
+// Text fields shown in the sample-stage heating block.
+const HEATER_TEXT_KEYS = new Set(["heater_control_input", "heater_guard_channel"]);
 const RETRACT_DIR_KEY = "retract_motor_dir";
 const RETRACT_DIR_CHOICES = [
   { value: "z+", label: tr("Z+ (Nanonis 标准: 远离样品)", "Z+ (Nanonis standard: away from the sample)") },
@@ -2055,6 +2172,14 @@ const APPROACH_QPLUS_WATCH_CHOICES = [
   { value: "on", label: tr("开 — 途中振幅归零就停进针并退针（默认）", "On — stop and withdraw if the amplitude drops to zero on the way (default)") },
   { value: "off", label: tr("关 — 进针只靠电流判停", "Off — the approach relies on the current stop only") },
 ];
+// Reverse field on the magnet: the 625 manual never says the ramp segments act on |I| for
+// negative output, so a negative target beyond the first segment's upper current is refused
+// until the operator has seen RATE? change at that boundary on the negative side.
+const MAGNET_NEG_SEGMENTS_KEY = "magnet_negative_segments_verified";
+const MAGNET_NEG_SEGMENTS_CHOICES = [
+  { value: "no", label: tr("否 — 负向目标不得超过第一段上限（默认）", "No — a negative target may not exceed the first segment's upper current (default)") },
+  { value: "yes", label: tr("是 — 已在负向第一段边界处看到 RATE? 变化", "Yes — RATE? was seen to change at the first segment boundary on the negative side") },
+];
 const SCAN_PATH_KEY = "scan_path_strategy";
 const SCAN_PATH_CHOICES = [
   { value: "auto", label: tr("自动 — 按有无 XY 粗动推导", "Auto — derived from whether XY coarse motion exists") },
@@ -2096,7 +2221,7 @@ const BIAS_APPLIED_CHOICES = [
 const INSTRUMENT_CHOICE_KEYS = [
   RETRACT_DIR_KEY, Z_EXTEND_SIGN_KEY, XY_COARSE_KEY, APPROACH_DMG_KEY, SCAN_PATH_KEY,
   VACUUM_MODE_KEY, BIAS_APPLIED_KEY, APPROACH_SUPERVISION_KEY, LOCKIN_FORM_KEY,
-  APPROACH_QPLUS_WATCH_KEY,
+  APPROACH_QPLUS_WATCH_KEY, MAGNET_NEG_SEGMENTS_KEY,
 ];
 // Learned calibration keys, written by the runtime (set_calibration) and shown
 // read-only here. They must be echoed back on every save (whole-replace store).
@@ -2594,6 +2719,82 @@ function InstrumentProfileSection({
       </p>
       {["z_range_m", "tilt_limit_deg", "v_tip_max_m_s", "z_noise_floor_m"].map(numRow)}
 
+      <p className={subHeading}>{tr("超导磁体（Lake Shore 625 调场）", "Superconducting magnet (Lake Shore 625 field control)")}</p>
+      <p className="text-xs text-mast-muted">
+        {trn(
+          <>
+            MAST 调场（RampMagnetField）只在这几项都填好之后才会动磁体：前两项缺一项，MAST 就不改变磁场；
+            后两项缺一项，MAST 就不升场。<b>停止扫场永远可用</b>，它只冻结在当前值，<b>不是回零</b>。
+          </>,
+          <>
+            MAST's field control (RampMagnetField) moves the magnet only once these are filled in: without either of the
+            first two, MAST does not change the field; without either of the last two, it does not raise it.{" "}
+            <b>Stopping a ramp always works</b>; it freezes the present value and <b>does not go to zero</b>.
+          </>,
+        )}
+      </p>
+      {["magnet_max_field_t", "magnet_field_constant_t_per_a", "magnet_max_temperature_k"].map(numRow)}
+      {INSTRUMENT_TEXT_FIELDS.filter((f) => MAGNET_TEXT_KEYS.has(f.key)).map((f) => (
+        <Field key={f.key} label={f.label} hint={f.hint}>
+          <TextRow
+            value={strAt(f.key)}
+            placeholder={f.placeholder}
+            disabled={saving}
+            onCommit={(v) => commitText(f.key, v)}
+          />
+        </Field>
+      ))}
+      <Field
+        label={tr("负向扫场分段已验证", "Negative-side ramp segments verified")}
+        hint={tr(
+          "625 手册没有写明负向输出是否也按 |I| 查分段表。选「否」时，负向目标的 |I| 超过第一段上限就被拒绝；在负向第一次越过那个边界时看到面板上 RATE? 随之变化，才改成「是」。负向目标另需用户的话里明确写出负向 / 反向的磁场，且扫场不跨零。",
+          "The 625 manual does not say that negative output also looks up the ramp segments by |I|. On \"No\", a negative target whose |I| exceeds the first segment's upper current is refused; switch to \"Yes\" only after you have seen RATE? change at that boundary on the negative side. A negative target also needs the user's words to name a negative / reverse field, and a ramp never crosses zero.",
+        )}
+      >
+        <SelectField
+          value={strAt(MAGNET_NEG_SEGMENTS_KEY) || "no"}
+          onChange={(v) => commitChoice(MAGNET_NEG_SEGMENTS_KEY, v)}
+          options={MAGNET_NEG_SEGMENTS_CHOICES}
+        />
+      </Field>
+
+      <p className={subHeading}>{tr("样品台控温（Lake Shore 335）", "Sample-stage temperature control (Lake Shore 335)")}</p>
+      <p className="text-xs text-mast-muted">
+        {trn(
+          <>
+            MAST 控温（SetSampleTemperature）只在加热输出、控制输入、最高设定温度、最大量程、加热器额定电流、最大速率都填好之后才会开加热器；
+            另外还要 335 自己的温度上限开着、且不高于最高设定温度。<b>关加热器（HeaterOff）永远可用</b>，不依赖这里的任何一项。
+          </>,
+          <>
+            MAST's temperature control (SetSampleTemperature) turns a heater on only once the heater output, control
+            input, maximum setpoint, maximum range, heater rated current and maximum rate are filled in, and the 335's own temperature limit is
+            on and not above the maximum setpoint. <b>Turning the heater off (HeaterOff) always works</b> and needs none of these.
+          </>,
+        )}
+      </p>
+      {["heater_output", "heater_max_setpoint_k", "heater_max_range", "heater_max_current_a", "heater_max_mout_pct", "heater_max_rate_k_per_min"].map(numRow)}
+      {INSTRUMENT_TEXT_FIELDS.filter((f) => f.key === "heater_control_input").map((f) => (
+        <Field key={f.key} label={f.label} hint={f.hint}>
+          <TextRow
+            value={strAt(f.key)}
+            placeholder={f.placeholder}
+            disabled={saving}
+            onCommit={(v) => commitText(f.key, v)}
+          />
+        </Field>
+      ))}
+      {["heater_guard_max_k"].map(numRow)}
+      {INSTRUMENT_TEXT_FIELDS.filter((f) => f.key === "heater_guard_channel").map((f) => (
+        <Field key={f.key} label={f.label} hint={f.hint}>
+          <TextRow
+            value={strAt(f.key)}
+            placeholder={f.placeholder}
+            disabled={saving}
+            onCommit={(v) => commitText(f.key, v)}
+          />
+        </Field>
+      ))}
+
       <p className={subHeading}>{tr("信号链（前放 / 偏压极性）", "Signal chain (preamp / bias polarity)")}</p>
       <p className="text-xs text-mast-muted">
         {trn(
@@ -2625,7 +2826,7 @@ function InstrumentProfileSection({
           options={BIAS_APPLIED_CHOICES}
         />
       </Field>
-      {INSTRUMENT_TEXT_FIELDS.map((f) => (
+      {INSTRUMENT_TEXT_FIELDS.filter((f) => !MAGNET_TEXT_KEYS.has(f.key) && !HEATER_TEXT_KEYS.has(f.key)).map((f) => (
         <Field key={f.key} label={f.label} hint={f.hint}>
           <TextRow
             value={strAt(f.key)}

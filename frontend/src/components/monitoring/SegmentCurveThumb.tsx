@@ -95,7 +95,7 @@ export function SegmentCurveThumb({
     return (
       <Frame title={hint} wide={wide}>
         <div className="px-1 text-center text-[10px] leading-snug text-mast-muted">
-          {tr(`电流监控 · 第 ${segId} 段`, `Current monitor · segment ${segId}`)}
+          {tr(`信号监控 · 第 ${segId} 段`, `Signal monitor · segment ${segId}`)}
           <div className="mt-0.5 text-mast-faint">
             {q.isError
               ? tr("波形读取失败", "Failed to read the waveform")

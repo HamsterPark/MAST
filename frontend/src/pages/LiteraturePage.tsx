@@ -18,6 +18,7 @@ import { PdfUploadPanel, ManualEntryPanel } from "@/components/literature/Upload
 import { useStickyTab } from "@/hooks/useStickyTab";
 import { IncompleteBadge } from "@/components/shell/LegacyOnly";
 import { tr } from "@/lib/i18n";
+import { apiError } from "@/lib/apiError";
 
 // Literature page, over the typed FastAPI routes. Flat SubTabs (no nested tab
 // groups, so the UI cannot freeze):
@@ -67,10 +68,10 @@ export default function LiteraturePage() {
   const boardQ = useQuery({
     queryKey: ["literature", "fetch-board", ""],
     queryFn: async () => {
-      const { data, error } = await api.GET("/api/literature/fetch-board", {
+      const { data, error, response } = await api.GET("/api/literature/fetch-board", {
         params: { query: { status: null } },
       });
-      if (error) throw error;
+      if (error) throw apiError(error, response);
       return data;
     },
     refetchInterval: 5000,
@@ -82,8 +83,8 @@ export default function LiteraturePage() {
   const libsQ = useQuery({
     queryKey: ["literature", "libraries", "effective"],
     queryFn: async () => {
-      const { data, error } = await api.GET("/api/literature/libraries");
-      if (error) throw error;
+      const { data, error, response } = await api.GET("/api/literature/libraries");
+      if (error) throw apiError(error, response);
       return data;
     },
     refetchInterval: 30_000,

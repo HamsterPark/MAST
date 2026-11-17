@@ -92,6 +92,10 @@ def test_the_damage_kinds_the_analysis_relies_on_are_all_styled():
 def test_legend_covers_the_new_decision_relevant_kinds():
     """A kind with a colour but no legend row is a colour nobody can read."""
     src = _canvas_source()
-    legend = src.split("export function ScanMapLegend()", 1)[1]
+    # The opening "(" only: the legend takes optional props (per-kind counts)
+    # since 2026-11-12, so its parameter list is no longer empty.
+    head = "export function ScanMapLegend("
+    assert head in src, "ScanMapLegend is gone or renamed — this check would read nothing"
+    legend = src.split(head, 1)[1]
     for label in ("进针", "撞针", "粗动换区"):
         assert label in legend, f"legend missing an entry for {label}"

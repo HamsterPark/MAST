@@ -18,6 +18,9 @@ import {
   minorGridVisible,
   niceStep,
   panBy,
+  rescaleView,
+  viewAfterResize,
+  EMPTY_RESIZE_MEMORY,
   tickValues,
   toScreen,
   toWorld,
@@ -134,6 +137,74 @@ describe("centring on a point", () => {
 
   it("stays within the zoom limits", () => {
     assert.equal(centerOn(v, { x: 0, y: 0 }, 800, 600, 1000).k, MAX_K);
+  });
+});
+
+describe("a viewport that changes size (focus mode, the window)", () => {
+  it("keeps the middle in the middle and grows the zoom with the smaller factor", () => {
+    const v: View = { k: 2, ox: 10, oy: 500 };
+    const mid = toWorld(v, 400, 300);
+    const r = rescaleView(v, { w: 800, h: 600 }, { w: 1600, h: 900 });
+    // x2 wide but x1.5 tall: everything that was in view still is
+    near(r.k, 3);
+    const s = toScreen(r, mid);
+    near(s.x, 800);
+    near(s.y, 450);
+  });
+
+  it("shrinking keeps what was in view in view too, within the zoom limits", () => {
+    // (it is not the inverse of growing: the canvas puts back the view it had before, see LayoutCanvas)
+    const v: View = { k: 3, ox: -100, oy: 700 };
+    const small = rescaleView(v, { w: 1600, h: 900 }, { w: 800, h: 600 });
+    near(small.k, 1.5);
+    const before = visibleBounds(v, 1600, 900);
+    const after = visibleBounds(small, 800, 600);
+    assert.ok(after.minX <= before.minX + 1e-9 && after.maxX >= before.maxX - 1e-9 && after.minY <= before.minY + 1e-9 && after.maxY >= before.maxY - 1e-9);
+    assert.equal(rescaleView({ k: MAX_K, ox: 0, oy: 0 }, { w: 100, h: 100 }, { w: 1000, h: 1000 }).k, MAX_K);
+  });
+
+  it("going back to a size it had puts back the view it had, exactly (entering and leaving focus mode)", () => {
+    const A = { w: 722, h: 598 };
+    const B = { w: 1274, h: 806 };
+    const v0: View = { k: 0.5094, ox: 55.3, oy: 528.2 };
+    const enter = viewAfterResize(EMPTY_RESIZE_MEMORY, v0, A, B);
+    assert.notDeepEqual(enter.view, v0);
+    const leave = viewAfterResize(enter.mem, enter.view, B, A);
+    assert.deepEqual(leave.view, v0);
+    // and again
+    const again = viewAfterResize(leave.mem, leave.view, A, B);
+    assert.deepEqual(again.view, enter.view);
+  });
+
+  it("through several steps, back to any size of the chain", () => {
+    const sizes = [{ w: 800, h: 600 }, { w: 900, h: 650 }, { w: 1600, h: 900 }];
+    let mem = EMPTY_RESIZE_MEMORY;
+    let v: View = { k: 1, ox: 0, oy: 600 };
+    const views = [v];
+    for (let i = 1; i < sizes.length; i++) {
+      const r = viewAfterResize(mem, v, sizes[i - 1]!, sizes[i]!);
+      mem = r.mem;
+      v = r.view;
+      views.push(v);
+    }
+    const back = viewAfterResize(mem, v, sizes[2]!, sizes[1]!);
+    assert.deepEqual(back.view, views[1]);
+    const first = viewAfterResize(back.mem, back.view, sizes[1]!, sizes[0]!);
+    assert.deepEqual(first.view, views[0]);
+  });
+
+  it("a pan or a zoom in between forgets: the view is rescaled, not put back", () => {
+    const A = { w: 800, h: 600 };
+    const B = { w: 1600, h: 900 };
+    const enter = viewAfterResize(EMPTY_RESIZE_MEMORY, { k: 2, ox: 0, oy: 0 }, A, B);
+    const panned = panBy(enter.view, 30, 0);
+    const leave = viewAfterResize(enter.mem, panned, B, A);
+    assert.deepEqual(leave.view, rescaleView(panned, B, A));
+  });
+
+  it("an empty size leaves the view as it is", () => {
+    const v: View = { k: 2, ox: 1, oy: 2 };
+    assert.equal(rescaleView(v, { w: 0, h: 600 }, { w: 800, h: 600 }), v);
   });
 });
 

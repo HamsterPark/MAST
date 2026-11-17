@@ -4,6 +4,8 @@
 避免把尚未采集的数据误当作有效图像并产生质量判决。"""
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -116,47 +118,58 @@ def test_degenerate_inputs_return_an_empty_mask_without_raising():
 # 变异验证:先证明自己动了手,再看测试红不红
 # ══════════════════════════════════════════════════════════════════════
 
-def test_mutating_all_to_any_turns_the_load_bearing_test_red():
+def test_mutating_all_to_any_turns_the_load_bearing_test_red(tmp_path):
     """把 ``.all(axis=1)`` 改成 ``.any(axis=1)`` ⇒ 上面第一条**必须红**。
 
     没有这条,「第一条测试真的挡得住那次改写」只是我们的信念。
     [[mutation_must_prove_it_landed]]:合格的输出要有「变异已应用」+「测试红了」
     两半 —— 今晚已经因为只看后半而误判过一次,所以这里**先断言替换真的落到了
     文件里**(计数 == 1),再跑。
+
+    变异只落在 ``tmp_path`` 里的副本上:整个 ``mast`` 包和本文件按仓库布局拷过去,子进程
+    从副本 import。原先是直接改写检出里的 ``frame_validity.py``、跑完再写回 —— 进程在
+    中间被杀(2026-11-09 全量两次被内存回收停掉)源码就停在变异后的样子,而同一时刻另一个
+    xdist worker import 到的也是变异版。
     """
-    src = Path(_MASTV2_ROOT) / "mast" / "vision" / "frame_validity.py"
-    original = src.read_text(encoding="utf-8")
+    real = Path(_MASTV2_ROOT) / "mast"
+    original = (real / "vision" / "frame_validity.py").read_text(encoding="utf-8")
     needle = "np.isfinite(a).all(axis=1)"
     assert original.count(needle) == 1, (
         f"变异目标不在文件里(找到 {original.count(needle)} 处)—— "
         "实现改过了,这条变异测试已经失效,请更新 needle。")
 
-    mutated = original.replace(needle, "np.isfinite(a).any(axis=1)")
-    assert mutated != original, "变异没有落到文件里"
-    try:
-        src.write_text(mutated, encoding="utf-8")
-        # 子进程跑,避免污染本进程已导入的模块
-        proc = subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-             f"{Path(__file__)}::test_the_row_being_scanned_is_excluded_all_not_any"],
-            capture_output=True, text=True,
-            env={**__import__("os").environ, "PYTHONPATH": _MASTV2_ROOT},
-            cwd=str(Path(_MASTV2_ROOT).parent))
-        assert proc.returncode != 0, (
-            "把 .all 换成 .any 之后那条测试仍然是绿的 —— 它没有钉住这个区分。\n"
-            f"stdout:\n{proc.stdout[-2000:]}")
-    finally:
-        src.write_text(original, encoding="utf-8")
+    repo = tmp_path / "repo"
+    shutil.copytree(real, repo / "MASTv2" / "mast",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    here = repo / Path(__file__).resolve().relative_to(Path(_MASTV2_ROOT).parent)
+    here.parent.mkdir(parents=True)
+    shutil.copy2(__file__, here)
+    target = repo / "MASTv2" / "mast" / "vision" / "frame_validity.py"
 
-    # 改回来之后必须绿(否则上面那次红说明不了是变异造成的)
-    proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-         f"{Path(__file__)}::test_the_row_being_scanned_is_excluded_all_not_any"],
-        capture_output=True, text=True,
-        env={**__import__("os").environ, "PYTHONPATH": _MASTV2_ROOT},
-        cwd=str(Path(_MASTV2_ROOT).parent))
+    def _run():
+        # 子进程跑,避免污染本进程已导入的模块;不写 .pyc,免得改了源码还读到旧字节码
+        return subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+             f"{here}::test_the_row_being_scanned_is_excluded_all_not_any"],
+            capture_output=True, text=True,
+            env={**os.environ, "PYTHONPATH": str(repo / "MASTv2"),
+                 "PYTHONDONTWRITEBYTECODE": "1"},
+            cwd=str(repo))
+
+    # 没动过的副本必须绿 —— 否则下面那次红说明不了是变异造成的
+    proc = _run()
     assert proc.returncode == 0, (
-        f"恢复之后测试没有变绿,文件可能没恢复干净:\n{proc.stdout[-2000:]}")
+        f"副本还没变异就不绿,拷贝不完整:\n{proc.stdout[-2000:]}")
+
+    target.write_text(original.replace(needle, "np.isfinite(a).any(axis=1)"),
+                      encoding="utf-8")
+    assert target.read_text(encoding="utf-8").count("np.isfinite(a).any(axis=1)") == 1, (
+        "变异没有落到副本里")
+    proc = _run()
+    assert proc.returncode == 1 and "1 failed" in proc.stdout, (
+        "把 .all 换成 .any 之后那条测试没有以「1 failed」变红 —— 它没有钉住这个区分"
+        "(rc 不是 1 就是跑挂了,不算杀死)。\n"
+        f"rc={proc.returncode}\nstdout:\n{proc.stdout[-2000:]}")
 
 # 另一种未采集形态：原始扫描缓冲中的全零行。
 def test_all_zero_rows_from_the_live_buffer_are_not_acquired():

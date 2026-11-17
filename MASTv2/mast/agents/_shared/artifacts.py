@@ -830,9 +830,11 @@ def _count_memories() -> tuple[int | None, str]:
 
 
 def _count_buffer_events() -> tuple[int | None, str]:
-    from mast._runtime_paths import project_root
+    # data_root(), like the runtime that writes it and like _count_campaigns above:
+    # a probe on project_root() read the developer's real buffer inside tests.
+    from mast._runtime_paths import data_root
 
-    db = project_root() / "experiments" / "vision_buffer.wal.sqlite"
+    db = data_root() / "experiments" / "vision_buffer.wal.sqlite"
     ev = _sqlite_count(db, "SELECT COUNT(*) FROM event_journal")
     tips = _sqlite_count(db, "SELECT COUNT(*) FROM tip_status_journal")
     if ev is None and tips is None:

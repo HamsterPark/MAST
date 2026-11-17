@@ -570,6 +570,17 @@ if (Test-Path $rtExe) {
     }
     if (Test-Path $rtDst) { Remove-Item -Recurse -Force $rtDst }
     Copy-Item $rtSrc $rtDst -Recurse -Force
+    # 源运行时里已有的 .pyc 是在构建机上编的，co_filename 带构建机绝对路径（7.1.7/7.1.8 的安装包
+    # 里 5151 个 .pyc 都含用户名）。随包的 Program Files 目录普通用户写不了 .pyc（运行时以 -B 起），
+    # 所以不能一删了之 —— 删掉 __pycache__，用拷过去的运行时自己的 python.exe 以中性 -d 前缀重编。
+    # 只动 dist 副本，不动源 MASTv2\pyruntime。
+    Get-ChildItem -Path $rtDst -Recurse -Directory -Filter "__pycache__" -Force | Remove-Item -Recurse -Force
+    # -B: starting this interpreter imports sitecustomize.py, which would otherwise write its .pyc
+    # with the absolute dist path before compileall runs; -f: recompile every file anyway.
+    & (Join-Path $rtDst "python.exe") -B -m compileall -f -q -j 0 -d "pyruntime/Lib/site-packages" (Join-Path $rtDst "Lib\site-packages")
+    # compileall 对少数 py2 残留文件返回 1 是正常的（同 build_pyruntime.compile_all）；>1 才是没跑起来
+    if ($LASTEXITCODE -gt 1) { throw "dist 里的分析运行时重编 .pyc 失败（rc=$LASTEXITCODE）" }
+    $global:LASTEXITCODE = 0
     $rtMB = [math]::Round(((Get-ChildItem -Recurse -File $rtDst | Measure-Object -Property Length -Sum).Sum) / 1MB, 0)
     $rtN = (Get-ChildItem -Recurse -File $rtDst | Measure-Object).Count
     # 拷贝本身也会静默少东西（长路径、占用中的文件）—— 数一遍

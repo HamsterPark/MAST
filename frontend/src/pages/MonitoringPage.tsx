@@ -30,7 +30,8 @@ import {
 
 type MonitoringStatus = components["schemas"]["MonitoringStatus"];
 
-// Current monitor — the tunnelling current, recorded natively and continuously.
+// Signal monitor (the page used to be called "Current monitor") — the tunnelling current, recorded
+// natively and continuously, plus the auxiliary channels (Z, qPlus amplitude, frequency shift, dI/dV).
 //
 // ── where each number comes from ───────────────────────────────────────────
 // The daemon holds the ONE oscilloscope subscription and writes a segment per
@@ -291,7 +292,7 @@ export default function MonitoringPage() {
   return (
     <div>
       <Section
-        title={tr("电流监控", "Current monitor")}
+        title={tr("信号监控", "Signal monitor")}
         subtitle={tr(
           "常开采集隧道电流：逐段落库、判级告警，并留作针尖状态的训练语料",
           "Always-on tunnelling-current acquisition: stored per segment, graded, and kept as a training corpus of tip states",
@@ -312,7 +313,7 @@ export default function MonitoringPage() {
           <ErrorNote error={status.error} />
         ) : (
           <div className="space-y-4">
-            {degraded && <DegradedNote what={tr("电流监控", "Current monitor")} />}
+            {degraded && <DegradedNote what={tr("信号监控", "Signal monitor")} />}
 
             <VerdictBanner status={status.data} stale={stale} ageS={ageS} />
 

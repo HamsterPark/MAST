@@ -165,6 +165,26 @@ def _stored_values(ctx: Any) -> dict[str, Any]:
         if it.store == "scan_policy":
             out[it.id] = tiers or None
 
+    # 不来自存储、从运行中的仪器现取的事实（``ii.RUNTIME_FACTS``）：识别到 Model 625
+    # 时磁体那一组才适用。问不到就不给 —— 那一组按「不适用」处理，不会凭空弹提醒。
+    try:
+        from mast.core import magnet_control as _mc
+
+        present = _mc.present()
+        if present is not None:
+            out[ii.RUNTIME_MAGNET_SUPPLY] = "lakeshore_625" if present else "none"
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("magnet supply presence unavailable: %s", exc)
+    # Same for the Model 335 and the sample-stage heating group.
+    try:
+        from mast.core import heater_control as _hc
+
+        present = _hc.present()
+        if present is not None:
+            out[ii.RUNTIME_TEMPERATURE_CONTROLLER] = "lakeshore_335" if present else "none"
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("temperature controller presence unavailable: %s", exc)
+
     return out
 
 
@@ -340,10 +360,20 @@ def get_instrument_init(request: Request) -> InstrumentInitResponse:
         ))
 
     safety_source, restart_pending = "", None
+    envelope_narrower: list[str] = []
     try:
         from mast.api.safety_view import in_force_safety_limits, pending_restart
         _limits, safety_source = in_force_safety_limits(ctx)
         restart_pending = pending_restart(ctx)
+        # 配置的包络比实测行程窄 ⇒ 当作一条未完成的 REQUIRED 项浮出来。
+        # 只读最近一次对账的缓存，不在这里读硬件；只上报，不改任何值。
+        from mast.core.envelope_reconcile import active_narrower_findings
+        for f in active_narrower_findings(_limits):
+            envelope_narrower.append(f.describe())
+            item_id = f"safety_limits.{f.field_name}"
+            if item_id in by_id and item_id not in summary["outstanding_required"]:
+                summary["outstanding_required"].append(item_id)
+                summary["needs_setup"] = True
     except Exception as exc:  # noqa: BLE001
         logger.debug("safety provenance unavailable: %s", exc)
 
@@ -366,6 +396,7 @@ def get_instrument_init(request: Request) -> InstrumentInitResponse:
         derived=derived,
         safety_source=safety_source,
         safety_restart_pending=restart_pending,
+        envelope_narrower=envelope_narrower,
         degraded=degraded,
     )
 
@@ -837,6 +868,9 @@ def _envelope_fields(ctx: Any, warnings: list[str]) -> list[ProbeField]:
 
         limits, _source = in_force_safety_limits(ctx)
         result = reconcile_envelope(safe_call, limits)
+        # 按需对账是最新的一次读数：记下来，拒绝信息与 /api/safety/limits 用它。
+        from mast.core.envelope_reconcile import remember_reconciliation
+        remember_reconciliation(result)
     except Exception as exc:  # noqa: BLE001 — 对账失败不该把这一页打挂
         logger.warning("envelope reconcile (probe) failed: %s", exc)
         return []

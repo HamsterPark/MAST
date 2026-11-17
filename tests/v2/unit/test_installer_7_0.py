@@ -498,6 +498,29 @@ class TestInnoScript:
             assert m, head
             assert "MB_YESNO, IDNO)" in m.group(0), f"{head}: the silent default must be no"
 
+    def test_get_date_time_string_gets_char_separators_not_empty_strings(self):
+        """GetDateTimeString(Format, DateSeparator: Char, TimeSeparator: Char): a '' (zero-length
+        string) passed for a Char raises "Type Mismatch" at run time. Compiled and run with
+        Inno Setup 6.7.1 (SetupLogging): '-', '' and '', '' both raised; '-', ':' and #0, #0 did
+        not. In PrepareToInstall it made a "Runtime error" box before the install began and
+        skipped the literature-index snapshot (KNOWN_ISSUES §3.1) on every upgrade."""
+        text = ISS.read_text(encoding="utf-8")
+        code = text.split("[Code]", 1)[1]
+        code = re.sub(r"//[^\n]*", "", code)  # a call named in a comment does not count
+        calls = re.findall(r"GetDateTimeString\s*\(([^;]*?)\)\s*;", code)
+        assert calls, "反向自检：一个 GetDateTimeString 调用都没找到"
+        char = r"(?:'(?:[^']|'')'|#\d+)"  # one character: 'x' or #n — not '' and not 'ab'
+        for args in calls:
+            assert re.fullmatch(rf"\s*'[^']*'\s*,\s*{char}\s*,\s*{char}\s*", args), (
+                f"GetDateTimeString({args}): the two separators must each be a single Char"
+            )
+
+    def test_setup_logging_is_on_so_a_runtime_error_can_be_traced(self):
+        """The "Runtime error" box gives no call name. SetupLogging=yes leaves the log in %TEMP%."""
+        text = ISS.read_text(encoding="utf-8")
+        setup = re.search(r"^\[Setup\]\s*$(.*?)(?=^\[\w+\]\s*$)", text, re.M | re.S).group(1)
+        assert re.search(r"^SetupLogging=yes\s*$", setup, re.M)
+
     def test_the_data_dir_can_be_given_on_the_command_line(self):
         code = ISS.read_text(encoding="utf-8").split("[Code]", 1)[1]
         assert "ExpandConstant('{param:DATADIR|{sd}\\MAST-data}')" in code

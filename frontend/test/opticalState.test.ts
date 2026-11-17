@@ -24,7 +24,6 @@ import { describe, it } from "node:test";
 
 import {
   LASER_AREA_SAFE,
-  isOpticalProfile,
   buildSlotClearBody,
   buildSlotPutBody,
   displayValue,
@@ -56,16 +55,6 @@ function slot(over: Partial<OpticalSlot> = {}): OpticalSlot {
 function value(over: Partial<SlotValue> = {}): SlotValue {
   return { value: "x", set_by: "Ana", set_at: iso(T0), source: "web", valid_until: null, valid: true, note: "", ...over };
 }
-
-describe("which kind of station this is", () => {
-  it("only the optical profile is optical; anything unreadable is an STM station", () => {
-    assert.equal(isOpticalProfile("optical"), true);
-    assert.equal(isOpticalProfile(" Optical "), true, "case and padding do not matter");
-    for (const v of ["stm", "", "optic", "opticals", "witec", null, undefined, 1, true, {}, []]) {
-      assert.equal(isOpticalProfile(v), false, `${JSON.stringify(v)} must not turn an STM station optical`);
-    }
-  });
-});
 
 describe("parsing the optical state", () => {
   const snapshot = {

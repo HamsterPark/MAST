@@ -4,6 +4,7 @@ import { api } from "../../api/client";
 import { Card, Spinner, ErrorNote, DegradedNote, EmptyNote } from "../ui";
 import { tr } from "../../lib/i18n";
 import type { components } from "../../api/schema";
+import { apiError } from "@/lib/apiError";
 
 type SearchHit = components["schemas"]["SearchHit"];
 type SearchResponse = components["schemas"]["SearchResponse"];
@@ -42,7 +43,7 @@ export function SearchPanel({ libraryId }: { libraryId: string | null }) {
 
   const searchM = useMutation({
     mutationFn: async (): Promise<SearchResponse> => {
-      const { data, error } = await api.POST("/api/literature/search", {
+      const { data, error, response } = await api.POST("/api/literature/search", {
         body: {
           query: query.trim(),
           k,
@@ -50,7 +51,7 @@ export function SearchPanel({ libraryId }: { libraryId: string | null }) {
           library_id: libraryId,
         },
       });
-      if (error) throw error;
+      if (error) throw apiError(error, response);
       return data;
     },
   });
@@ -187,11 +188,11 @@ export function AbstractView({ workId }: { workId: string }) {
   const q = useQuery({
     queryKey: ["literature", "abstract", workId],
     queryFn: async () => {
-      const { data, error } = await api.GET(
+      const { data, error, response } = await api.GET(
         "/api/literature/abstract/{work_id}",
         { params: { path: { work_id: workId } } },
       );
-      if (error) throw error;
+      if (error) throw apiError(error, response);
       return data;
     },
     enabled: !!workId,

@@ -146,8 +146,8 @@ def _is_terminal(progress) -> bool:
 
 
 def _sidecar_dir():
-    from mast._runtime_paths import project_root
-    d = project_root() / "experiments" / "composite_progress"
+    from mast._runtime_paths import data_root
+    d = data_root() / "experiments" / "composite_progress"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

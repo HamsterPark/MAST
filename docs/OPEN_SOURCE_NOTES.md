@@ -1,6 +1,6 @@
 # 公开版本说明：保留能力、发布范围与验证记录
 
-本仓是 **MAST 7.1.6** 在 2026-11-07 导出的工作树审查快照。
+本仓是 **MAST 7.3.1** 在 2026-11-17 导出的工作树审查快照。
 它是经过清理与本地软件验证的**公开精简源码版**，保留通用仪器技能与执行约束、VISTA 视觉层、TERS 与光学站控制、
 感知和数据处理框架、React 操作界面、外部 agent 接口及相应测试，也保留历史的多智能体编排代码。
 这些内容支持从高层任务协作一直读到控制器协议和界面通信的实现；下文记录已有成果、公开取舍及验证方法。
@@ -10,9 +10,9 @@
 **在 MAST 6.4.0 一轮已结束的实机实验中，外部 AI agent 控制真实 STM，带时间戳的记录从 2026-09-17 23:10:37 至 2026-09-22 02:08:10（北京时间），跨越约 99 小时。**
 这是项目已有的长时间仪器控制经历，涉及当时的外部控制路径。该经历由维护者提供；README 仅展示少量去除样品标识的选图，完整实验数据集和运行日志不随本快照发布。
 
-MAST 6.5.0 在已有实践基础上新增 `/api/ext/v1` 及配套 MCP 集成；7.0–7.1 又加入 VISTA 视觉层、TERS 光学控制与卫星程序、光学站驱动。这些新路径已有软件测试；其中外部接口、MCP 集成与 VISTA 视觉层已在实机上使用（维护者报告），TERS、卫星程序与光学站路径尚待真机验证。
+MAST 6.5.0 在已有实践基础上新增 `/api/ext/v1` 及配套 MCP 集成；7.0–7.1 又加入 VISTA 视觉层、TERS 光学控制与卫星程序、光学站驱动；7.1.8–7.3.1 加入低温仪器（超导磁体电源、温控仪、液面计）的接入与控制、通用站、光路图 3D 与导出、扫描地图实时扫描。这些新路径已有软件测试；其中外部接口、MCP 集成与 VISTA 视觉层已在实机上使用，磁体电源与温控仪的只读接入也已在实机上使用（均为维护者报告）；TERS、卫星程序、光学站、调场、控温与实时扫描路径尚待真机验证。
 项目的真机实践与公开版的软件验证构成两类记录：约 99 小时记录对应 MAST 6.4.0 的实际部署，
-下文的测试数字对应本次公开源码；TERS 与光学站路径的真机验证是后续工作。
+下文的测试数字对应本次公开源码；TERS、光学站、调场、控温与实时扫描路径的真机验证是后续工作。
 
 ## 公开范围与取舍
 
@@ -69,6 +69,7 @@ README 中少量去除样品标识的实测选图是这一范围说明的例外�
 | `MASTv2/mast/skills/composite/prescan_check.py` | line_check 技能不随仓发布，常量就地保留 |
 | `MASTv2/mast/vision/corrugation_gate.py` | line_check 技能不随仓发布，常量就地保留 |
 | `MASTv2/mast/conduct/templates/__init__.py` | 样品 campaign 模板不随仓发布 |
+| `MASTv2/scripts/bundle_sources.py` | 不随安装包发出的模块表里只有不随仓发布的模块 |
 | `MASTv2/mast/api/tool_narration.py` | 解说表去掉随 skills/paper 移除的 compose_montage |
 | `tests/v2/unit/conduct/test_api_conducts.py` | 两条依赖 campaign 模板 coord_epoch 槽位的测试 |
 | `tests/v2/unit/conduct/test_compiler.py` | 一条依赖 campaign 模板 coord_epoch 槽位的测试 |
@@ -86,7 +87,7 @@ README 中少量去除样品标识的实测选图是这一范围说明的例外�
 | `MASTv2/mast/gallery/figures/series.py` | 相关窗与搜索域限制在实际视野内，小视野也可默认叠加 |
 | `tests/v2/unit/gallery/figures/test_figures_stitch.py` | 默认拼接不携带任何实测 κ；显式参数测试仍保留 |
 | `mast2.spec` | 打包预导入及隐藏导入列表不再点名已移除的论文技能包 |
-| `MASTv2/mast/__init__.py` | 构建元信息不随仓时，公开快照的版本回退为 7.1.6 |
+| `MASTv2/mast/__init__.py` | 构建元信息不随仓时，公开快照的版本回退为 7.1.7 |
 | `MASTv2/mast/agents/_shared/artifacts.py` | 工具产物流图去掉不随仓的论文移植工具映射，保留真实性断言 |
 | `tests/v2/unit/agents/test_prompt_provenance_gate.py` | 溯源闸门使用运行时拼出的合成禁止标记，清洗不会消掉变异输入 |
 | `tests/v2/unit/agents/test_instrument_control_handoff.py` | 公开交接测试验证确定性派发与维护说明的位置，不依赖私有提交 |
@@ -159,22 +160,24 @@ README 中少量去除样品标识的实测选图是这一范围说明的例外�
 
 以下结果针对本次公开快照；测试环境与范围随结果一并记录。
 
-2026-11-07，在 Windows / Python 3.13 环境中验证本次 MAST 7.1.6 公开快照，未连接仪器。
+2026-11-17，在 Windows / Python 3.13 环境中验证本次 MAST 7.3.1 公开快照，未连接仪器。
 
-- 后端整树：**19,755 通过、1 失败、68 跳过、2 个预期失败**。那 1 条失败是 `tests/v2/live/test_ws_live.py::test_spectra_are_rate_limited_to_the_latest_frame`，测试在后台线程写入结果之前就读了它，高负载下才会撞上；单独连跑 5 次与 `tests/v2/live` 整组（117 条）都通过。命令为 `python -m pytest tests -q -n 3 --dist loadfile -m "not hardware and not live_llm"`，`PYTHONPATH` 指向本快照的 `MASTv2`。
-- 前端：类型检查与构建通过，`npm run test:unit` **1,931 / 1,931 通过**。
-- 卫星端 C#（`satellite/MastSatellite`）用 .NET 8 SDK 编译通过（0 警告、0 错误），离线自检 21 通过、1 跳过（跳过项需要不随仓的 LightField 文件尾样例）。
-- OpenAPI 与公开后端一致：329 条路径、654 个 schema；前端生成类型已同步。
+- 后端整树：**21,458 通过、68 跳过、2 个预期失败**，没有失败。按测试文件分 49 块依次运行（合计覆盖全部 1,058 个测试文件），每块一个进程，命令为 `python -m pytest <该块的测试文件> -q -p no:cacheprovider -rf -m "not hardware and not live_llm"`，`PYTHONPATH` 指向本快照的 `MASTv2`。
+- 第一轮有 1 个失败：`tests/v2/unit/gallery/test_envtags.py::test_the_window_start_is_the_gallery_start`。毛病在测试本身：它拿图库测试共用的合成时钟 `T0_NS` 当 .sxm 的 mtime，而公开导出改写过这个时钟，改写后它早于合成文件头里的开始时刻，采集窗口按规则不成立。测试改为从合成文件头推出自己的 mtime（只改测试，被测代码不变）；所在的那一块（338 项）在同一棵树上重跑，全部通过。上面的计数用的是重跑结果。
+- 运行期间测试不写检出：运行时数据（计费账本、记录库、监控库、帧存档等）一律落进 pytest 的临时目录；跑完后测试树相对导出只多出 `config/overrides/` 下的两个空目录（Python 的 `__pycache__` 不算）。
+- 前端：类型检查与构建通过，`npm run test:unit` **2,946 / 2,946 通过**。
+- 卫星端 C#（`satellite/MastSatellite`）的源码自 7.1.7 起没有变化，这次没有重新编译。7.1.7 时用 .NET 8 SDK 编译通过（0 警告、0 错误），离线自检 21 通过、1 跳过（跳过项需要不随仓的 LightField 文件尾样例）。
+- OpenAPI 与公开后端一致：337 条路径、681 个 schema；前端生成类型已同步。
 - 全树 Python 语法检查、import 闭包及公开卫生扫描通过。三份 Nanonis 格式夹具可从随仓生成器复现。
-- GitHub 投稿 CI 的两步（`skill_check --all-contrib` 与所选测试）在屏蔽了 `MASTv2/requirements-ci.txt` 之外依赖的环境中通过。
+- GitHub 投稿 CI 的两个 Python 任务在屏蔽了 `MASTv2/requirements-ci.txt` 之外依赖的环境中通过：compliance（`skill_check --all-contrib`，以及合规、变异和文档守卫测试 75 项）与 backend（`.github/ci_backend_subset.txt` 所列 147 个测试文件，2,804 项）。
+- 后端整树与前端检查跑在导出树上；最终快照与它只差几份记录文档，文档守卫在最终快照上重跑。
 
 跳过与预期失败按测试自身标记统计，不计为通过。本结果覆盖无需硬件和真实 LLM 的测试范围，不代表真机验证。
 
 ### 复现验证时的前提
 
-上述并行命令中的 `-n 3 --dist loadfile` 由 `pytest-xdist` 提供，它不在主依赖清单中。
-如需同样的并行方式，先用所选虚拟环境的 Python 执行 `-m pip install pytest-xdist`。
-无需并行时，省略这两个参数即可；默认串行命令见根目录 AGENTS。
+上面的整树运行逐块单进程，没有用 `pytest-xdist`（它不在主依赖清单中）。想并行时，先用所选虚拟环境的
+Python 执行 `-m pip install pytest-xdist`，再加 `-n <进程数> --dist loadfile`；默认串行命令见根目录 AGENTS。
 
 运行前保持 `MAST_LIT_LIVE`、`MAST_VOICE_RT_SMOKE`、`MAST_VOICE_LIVE_TESTS`、
 `MAST_TEST_M12_REAL` 和 `MAST_TEST_QUALITY_MODEL` 未设置。部分真实服务测试由环境变量控制，

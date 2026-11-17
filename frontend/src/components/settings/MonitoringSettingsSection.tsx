@@ -2,7 +2,7 @@ import type { SettingsPatch } from "@/lib/settingsWrite";
 import { KnobCatalogSection } from "./KnobCatalogSection";
 import { getLang, tr } from "@/lib/i18n";
 
-// Settings -> current monitoring: the always-on tunnelling-current monitor's
+// Settings -> signal monitor (formerly "current monitoring"): the always-on tunnelling-current monitor's
 // knobs. Rows come from `GET /api/monitoring/config`'s catalogue; the rendering,
 // the whole-replace guard and the reset button live in KnobCatalogSection,
 // shared with the environment-history section.

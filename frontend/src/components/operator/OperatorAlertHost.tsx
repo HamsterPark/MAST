@@ -27,8 +27,9 @@ import {
 // The page-wide alert for a new operator prompt: a toast at the top right, a short
 // beep, a desktop notification when the operator has allowed them and is not looking at
 // this tab, and a "(N)" in the tab title. Mounted once in the app shell, which owns the
-// polling and hands the open prompts in (`feed`). The shell mounts it on an optical station
-// only (`feed.enabled`): an STM station gets no alert, no listener, no title change.
+// polling and hands the open prompts in (`feed`). The shell mounts it only on a station with
+// operator prompts (`feed.enabled`, capability `operator_prompts`): an STM or a generic
+// station gets no alert, no listener, no title change.
 //
 // What is open when the page loads is the starting point, not news: someone who has just
 // opened the page is looking at it, and the nav badge already counts those. Only an id

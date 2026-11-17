@@ -606,7 +606,7 @@ class ExecutionContext:
                 from mast.core.state import patch_state_from_result
 
                 patch_state_from_result(self.state, getattr(result, "data", None),
-                                        what=skill_name)
+                                        what=skill_name, tags=getattr(meta, "tags", None))
             # composite 子步骤不经过 agent 工具边界，必须接入相同的扫描地图记录器。
             # 成功和失败均需记录：失败的脉冲也可能改变表面，不能继续把落点当成干净区域。
             _sink = getattr(self, "marker_sink", None)

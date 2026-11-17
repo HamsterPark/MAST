@@ -66,6 +66,7 @@ def _rec(store, **kw):
     th = kw.pop("th", EnvHistoryThresholds(eh_spectrum_interval_s=300.0,
                                            eh_spectrum_min_segments=2,
                                            eh_spectrum_accum_every_s=0.0))
+    kw.setdefault("first_sweep_delay_s", 0.0)   # the start-up delay has its own test
     r = EnvHistoryRecorder(store_getter=lambda: store,
                            thresholds_getter=lambda: th, **kw)
     set_recorder(r)

@@ -1,0 +1,47 @@
+{
+  "capabilities": [
+    "nanonis",
+    "stm_safety",
+    "stm_actions",
+    "scan_map",
+    "witec",
+    "optical_bench",
+    "operator_prompts",
+    "laser_safety",
+    "sensor_echo"
+  ],
+  "profiles": {
+    "stm": [
+      "nanonis",
+      "stm_safety",
+      "stm_actions",
+      "scan_map"
+    ],
+    "optical": [
+      "witec",
+      "optical_bench",
+      "operator_prompts",
+      "laser_safety"
+    ],
+    "generic": [
+      "optical_bench",
+      "operator_prompts",
+      "laser_safety",
+      "sensor_echo"
+    ]
+  },
+  "requires": {
+    "stm_safety": [
+      "nanonis"
+    ],
+    "stm_actions": [
+      "nanonis"
+    ],
+    "scan_map": [
+      "nanonis"
+    ],
+    "laser_safety": [
+      "operator_prompts"
+    ]
+  }
+}

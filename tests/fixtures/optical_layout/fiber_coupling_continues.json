@@ -216,6 +216,10 @@
     {
       "source": "las1",
       "wavelength_nm": 532.0,
+      "beam": {
+        "source_mw": null,
+        "m2": null
+      },
       "branches": [
         {
           "branch": "0",
@@ -225,7 +229,18 @@
               "x0": 50.0,
               "y0": 62.5,
               "x1": 150.0,
-              "y1": 62.5
+              "y1": 62.5,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             }
           ],
           "events": [
@@ -234,9 +249,21 @@
               "action": "stop",
               "x": 150.0,
               "y": 62.5,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 100.0
+              "path_mm": 100.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             }
           ],
           "end": "stop"
@@ -246,6 +273,10 @@
     {
       "source": "las3",
       "wavelength_nm": 532.0,
+      "beam": {
+        "source_mw": null,
+        "m2": null
+      },
       "branches": [
         {
           "branch": "0",
@@ -255,7 +286,18 @@
               "x0": 50.0,
               "y0": 64.0,
               "x1": 150.0,
-              "y1": 64.0
+              "y1": 64.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             }
           ],
           "events": [
@@ -264,9 +306,21 @@
               "action": "stop",
               "x": 150.0,
               "y": 64.0,
+              "z_mm": 75.0,
               "offset_mm": -1.5,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 100.0
+              "path_mm": 100.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             }
           ],
           "end": "stop"
@@ -276,6 +330,10 @@
     {
       "source": "las4",
       "wavelength_nm": 633.0,
+      "beam": {
+        "source_mw": null,
+        "m2": null
+      },
       "branches": [
         {
           "branch": "0",
@@ -285,7 +343,18 @@
               "x0": 50.0,
               "y0": 61.0,
               "x1": 150.0,
-              "y1": 61.0
+              "y1": 61.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             }
           ],
           "events": [
@@ -294,9 +363,21 @@
               "action": "stop",
               "x": 150.0,
               "y": 61.0,
+              "z_mm": 75.0,
               "offset_mm": 1.5,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 100.0
+              "path_mm": 100.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             }
           ],
           "end": "stop"
@@ -306,6 +387,10 @@
     {
       "source": "fo1",
       "wavelength_nm": 532.0,
+      "beam": {
+        "source_mw": null,
+        "m2": null
+      },
       "branches": [
         {
           "branch": "0",
@@ -315,13 +400,35 @@
               "x0": 150.0,
               "y0": 300.0,
               "x1": 250.0,
-              "y1": 300.0
+              "y1": 300.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             },
             {
               "x0": 250.0,
               "y0": 300.0,
               "x1": 250.0,
-              "y1": 450.0
+              "y1": 450.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             }
           ],
           "events": [
@@ -330,18 +437,42 @@
               "action": "reflect",
               "x": 250.0,
               "y": 300.0,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 45.0,
-              "path_mm": 100.0
+              "path_mm": 100.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             },
             {
               "component": "det1",
               "action": "stop",
               "x": 250.0,
               "y": 450.0,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 250.0
+              "path_mm": 250.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             }
           ],
           "end": "stop"
@@ -351,6 +482,10 @@
     {
       "source": "fo1",
       "wavelength_nm": 633.0,
+      "beam": {
+        "source_mw": null,
+        "m2": null
+      },
       "branches": [
         {
           "branch": "0",
@@ -360,13 +495,35 @@
               "x0": 150.0,
               "y0": 300.0,
               "x1": 250.0,
-              "y1": 300.0
+              "y1": 300.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             },
             {
               "x0": 250.0,
               "y0": 300.0,
               "x1": 250.0,
-              "y1": 450.0
+              "y1": 450.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             }
           ],
           "events": [
@@ -375,18 +532,42 @@
               "action": "reflect",
               "x": 250.0,
               "y": 300.0,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 45.0,
-              "path_mm": 100.0
+              "path_mm": 100.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             },
             {
               "component": "det1",
               "action": "stop",
               "x": 250.0,
               "y": 450.0,
+              "z_mm": 75.0,
               "offset_mm": 0.0,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 250.0
+              "path_mm": 250.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             }
           ],
           "end": "stop"

@@ -409,16 +409,34 @@ def test_contrast_range_all_zero_is_safe():
     assert vmax > vmin           # degenerate but never a zero-width range
 
 
-def test_persist_frame_png_skips_blank_frame(tmp_path):
+def test_persist_frame_png_skips_blank_frame(tmp_path, monkeypatch):
     """An all-zero (nothing-acquired) frame is not a real image → no PNG written;
-    a frame with real data does persist."""
+    a frame with real data does persist — into the redirected directory."""
+    frames = tmp_path / "frames"   # tmp_path itself already holds the autouse _sidecars/
+    monkeypatch.setenv("MAST_VISION_FRAMES_DIR", str(frames))
     pool, buf, vision = StubPool(), StubBuffer(), StubVision()
     mon = _monitor(pool, buf, vision)
     assert mon._persist_frame_png(np.zeros((8, 8), dtype=np.float32), 1) is None
+    assert not frames.exists() or list(frames.iterdir()) == []
     a = np.zeros((8, 8), dtype=np.float32)
     a[:4] = 5.0
     out = mon._persist_frame_png(a, 2)
     assert out is not None and Path(out).is_file()
+    assert Path(out).parent == frames
+
+
+def test_vision_frames_dir_defaults_under_the_project_root(tmp_path, monkeypatch):
+    """Without either override the frames stay where the app has always put them."""
+    from mast.vision.scan_monitor import vision_frames_dir
+
+    monkeypatch.delenv("MAST_VISION_FRAMES_DIR", raising=False)
+    monkeypatch.delenv("MAST_DATA_DIR", raising=False)
+    monkeypatch.setenv("MAST2_PROJECT_ROOT", str(tmp_path))
+    assert vision_frames_dir() == tmp_path.resolve() / "artifacts" / "vision_frames"
+    monkeypatch.setenv("MAST_DATA_DIR", str(tmp_path / "data"))
+    assert vision_frames_dir() == tmp_path / "data" / "artifacts" / "vision_frames"
+    monkeypatch.setenv("MAST_VISION_FRAMES_DIR", str(tmp_path / "elsewhere"))
+    assert vision_frames_dir() == tmp_path / "elsewhere"
 
 
 # ── Fix #144: is_monitor_running signals a live system scan ────────────

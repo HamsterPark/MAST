@@ -70,6 +70,30 @@ _ESTIMATE_GROWTH = 1.5
 # early-abort (which leaves a large NaN region).
 _COMPLETE_FRAC = 0.98
 
+#: Overrides where the milestone PNGs go. The test suite points it at tmp
+#: (``tests/v2/conftest.py``), the same way ``MAST_DIAGNOSTICS_DIR`` and
+#: ``MAST_TRACES_DIR`` are redirected: without it every scan-monitor test wrote
+#: its frames into the checkout's ``artifacts/vision_frames``, next to the real
+#: ones, and git ignores that directory, so nothing showed it.
+VISION_FRAMES_DIR_ENV = "MAST_VISION_FRAMES_DIR"
+
+
+def vision_frames_dir():
+    """``$MAST_VISION_FRAMES_DIR`` when set, else ``<data root>/artifacts/vision_frames``.
+
+    Resolved on every call: a path fixed at import time would turn a test's
+    redirect into a no-op for any module imported before the test set it.
+    """
+    import os
+    from pathlib import Path
+
+    env = os.environ.get(VISION_FRAMES_DIR_ENV, "").strip()
+    if env:
+        return Path(env).expanduser()
+    from mast._runtime_paths import data_root
+
+    return data_root() / "artifacts" / "vision_frames"
+
 
 def _parsed_values(rec: Any) -> list | None:
     """Pull the parsed value list out of a NanonisCallRecord.
@@ -1095,13 +1119,12 @@ class ScanVisionMonitor:
         what you see is what the model actually saw at that instant."""
         try:
             import re
-            from mast._runtime_paths import project_root
             a = np.asarray(frame)
             if a.ndim == 3:
                 a = a[0]  # forward/topography channel
             if a.ndim != 2 or a.size == 0:
                 return None
-            d = project_root() / "artifacts" / "vision_frames"
+            d = vision_frames_dir()
             d.mkdir(parents=True, exist_ok=True)
             safe = re.sub(r"[^\w一-鿿-]", "_", str(self._scan_id))[:60] or "scan"
             # Per-run uniqueness: same scan_id re-scanned later must not

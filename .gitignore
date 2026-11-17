@@ -37,6 +37,9 @@ working-sessions/
 config/vision.json
 config/scan_prep_profiles.json
 config/overrides/
+# 本地自定义技能（agent 把验证过的做法存成本地技能；要上游走 contrib PR，
+# 见 docs/external/*/06-contributing-skills.md）。enabled.json 是本机启用清单。
+config/custom_skills/
 **/_gallery/
 push_distribution/
 test-results/

@@ -373,7 +373,7 @@ def write_settings(request: Request, body: SettingsWriteRequest) -> SettingsWrit
         bad_values["ingest_copy_mode"] = (
             tr(f"归档方式只能是 copy 或 hardlink（收到 {body.ingest_copy_mode!r}）。"
             f"hardlink 省盘，但源和实验文件夹必须在同一个卷上。", f"Archive mode must be copy or hardlink (got {body.ingest_copy_mode!r}). hardlink saves disk, but the source and the experiment folder must be on the same volume."))
-    # 站点画像：只认 stm / optical。一个拼错的值不能被存下来 —— 读的一侧会把它当
+    # 站点画像：只认 stm / optical / generic。一个拼错的值不能被存下来 —— 读的一侧会把它当
     # stm 处理（mast.station），于是界面绿字「已保存」而光学站其实没切过去。
     if body.station_profile is not None:
         from mast import station as _station
@@ -609,6 +609,11 @@ def write_settings(request: Request, body: SettingsWriteRequest) -> SettingsWrit
     read_once = [v for k, v in _READ_ONCE_AT_STARTUP.items() if k in payload]
     if read_once:
         rebuild_note += tr(f"（{'、'.join(read_once)}下次启动生效）", f"({', '.join(read_once)} take effect on next start)")
+    # 串口自动探测：环境传感器是在启动时或硬件页「重新扫描」时建的，那一刻才看这个开关。
+    if "serial_autodetect" in payload:
+        rebuild_note += tr("（串口自动探测在下次启动或硬件页「重新扫描」时生效）",
+                           "(serial auto-detection takes effect at the next start or rescan on the "
+                           "hardware page)")
 
     return SettingsWriteResponse(ok=True, persisted=persisted, applied=applied,
                                  degraded=False, rebuild_note=rebuild_note)

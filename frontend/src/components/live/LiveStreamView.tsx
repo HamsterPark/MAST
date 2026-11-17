@@ -40,6 +40,7 @@ export function LiveStreamBody({ st, compact = false }: { st: StreamState; compa
     case "xy":
       return <LiveSeriesChart streamId={id} mode="xy" compact={compact} />;
     case "map2d":
+    case "map2d_rows": // one frame per row; the same buffer, the same view
       return <LiveMap2d streamId={id} compact={compact} />;
     case "status":
       return <LiveStatusLog streamId={id} compact={compact} />;

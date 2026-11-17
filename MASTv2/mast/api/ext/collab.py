@@ -190,12 +190,13 @@ _STRUCTURED_FIELDS = STRUCTURED_FIELDS
 
 
 def _structured_prompts_here() -> bool:
-    """Structured operator prompts exist on the optical station only (``mast.station``). An STM station keeps what it always had: every request is a text request.
-    Unreadable profile = STM."""
+    """Structured operator prompts exist on a station with the capability ``operator_prompts``
+    (``mast.station``: the optical and the generic station). An STM station keeps what it always
+    had: every request is a text request. Unreadable profile = STM."""
     try:
         from mast import station
 
-        return bool(station.is_optical())
+        return bool(station.has("operator_prompts"))
     except Exception:  # noqa: BLE001
         return False
 

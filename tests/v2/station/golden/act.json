@@ -1,0 +1,238 @@
+{
+ "note": "answers of the probe on the source commit, normalised by _invariants.normalize",
+ "optical": {
+  "actions": {
+   "approach": {
+    "detail": "Action 'approach' belongs to the STM's vocabulary; this is an optical station (no STM / Nanonis). Run optical skills with mast_run (find them with mast_find_skills, read mast_skill_card first); an instrument-driving skill still needs the `after` token of your latest observation.",
+    "extra": {
+     "station": "optical"
+    },
+    "outcome": "refused",
+    "status": 422,
+    "token_still_live": true
+   },
+   "df_curve": {
+    "detail": "Action 'df_curve' belongs to the STM's vocabulary; this is an optical station (no STM / Nanonis). Run optical skills with mast_run (find them with mast_find_skills, read mast_skill_card first); an instrument-driving skill still needs the `after` token of your latest observation.",
+    "extra": {
+     "station": "optical"
+    },
+    "outcome": "refused",
+    "status": 422,
+    "token_still_live": true
+   },
+   "drift_compensation": {
+    "detail": "Action 'drift_compensation' belongs to the STM's vocabulary; this is an optical station (no STM / Nanonis). Run optical skills with mast_run (find them with mast_find_skills, read mast_skill_card first); an instrument-driving skill still needs the `after` token of your latest observation.",
+    "extra": {
+     "station": "optical"
+    },
+    "outcome": "refused",
+    "status": 422,
+    "token_still_live": true
+   },
+   "feedback": {
+    "detail": "Action 'feedback' belongs to the STM's vocabulary; this is an optical station (no STM / Nanonis). Run optical skills with mast_run (find them with mast_find_skills, read mast_skill_card first); an instrument-driving skill still needs the `after` token of your latest observation.",
+    "extra": {
+     "station": "optical"
+    },
+    "outcome": "refused",
+    "status": 422,
+    "token_still_live": true
+   },
+   "move_atom": {
+    "detail": "Action 'move_atom' belongs to the STM's vocabulary; this is an optical station (no STM / Nanonis). Run optical skills with mast_run (find them with mast_find_skills, read mast_skill_card first); an instrument-driving skill still needs the `after` token of your latest observation.",
+    "extra": {
+     "station": "optical"
+    },
+    "outcome": "refused",
+    "status": 422,
+    "token_still_live": true
+   },
+   "move_tip": {
+    "detail": "Action 'move_tip' belongs to the STM's vocabulary; this is an optical station (no STM / Nanonis). Run optical skills with mast_run (find them with mast_find_skills, read mast_skill_card first); an instrument-driving skill still needs the `after` token of your latest observation.",
+    "extra": {
+     "station": "optical"
+    },
+    "outcome": "refused",
+    "status": 422,
+    "token_still_live": true
+   },
+   "pll": {
+    "detail": "Action 'pll' belongs to the STM's vocabulary; this is an optical station (no STM / Nanonis). Run optical skills with mast_run (find them with mast_find_skills, read mast_skill_card first); an instrument-driving skill still needs the `after` token of your latest observation.",
+    "extra": {
+     "station": "optical"
+    },
+    "outcome": "refused",
+    "status": 422,
+    "token_still_live": true
+   },
+   "poke": {
+    "detail": "Action 'poke' belongs to the STM's vocabulary; this is an optical station (no STM / Nanonis). Run optical skills with mast_run (find them with mast_find_skills, read mast_skill_card first); an instrument-driving skill still needs the `after` token of your latest observation.",
+    "extra": {
+     "station": "optical"
+    },
+    "outcome": "refused",
+    "status": 422,
+    "token_still_live": true
+   },
+   "pulse": {
+    "detail": "Action 'pulse' belongs to the STM's vocabulary; this is an optical station (no STM / Nanonis). Run optical skills with mast_run (find them with mast_find_skills, read mast_skill_card first); an instrument-driving skill still needs the `after` token of your latest observation.",
+    "extra": {
+     "station": "optical"
+    },
+    "outcome": "refused",
+    "status": 422,
+    "token_still_live": true
+   },
+   "scan": {
+    "detail": "Action 'scan' belongs to the STM's vocabulary; this is an optical station (no STM / Nanonis). Run optical skills with mast_run (find them with mast_find_skills, read mast_skill_card first); an instrument-driving skill still needs the `after` token of your latest observation.",
+    "extra": {
+     "station": "optical"
+    },
+    "outcome": "refused",
+    "status": 422,
+    "token_still_live": true
+   },
+   "set_bias": {
+    "detail": "Action 'set_bias' belongs to the STM's vocabulary; this is an optical station (no STM / Nanonis). Run optical skills with mast_run (find them with mast_find_skills, read mast_skill_card first); an instrument-driving skill still needs the `after` token of your latest observation.",
+    "extra": {
+     "station": "optical"
+    },
+    "outcome": "refused",
+    "status": 422,
+    "token_still_live": true
+   },
+   "set_current": {
+    "detail": "Action 'set_current' belongs to the STM's vocabulary; this is an optical station (no STM / Nanonis). Run optical skills with mast_run (find them with mast_find_skills, read mast_skill_card first); an instrument-driving skill still needs the `after` token of your latest observation.",
+    "extra": {
+     "station": "optical"
+    },
+    "outcome": "refused",
+    "status": 422,
+    "token_still_live": true
+   },
+   "sts": {
+    "detail": "Action 'sts' belongs to the STM's vocabulary; this is an optical station (no STM / Nanonis). Run optical skills with mast_run (find them with mast_find_skills, read mast_skill_card first); an instrument-driving skill still needs the `after` token of your latest observation.",
+    "extra": {
+     "station": "optical"
+    },
+    "outcome": "refused",
+    "status": 422,
+    "token_still_live": true
+   },
+   "wait": {
+    "detail": "Action 'wait' belongs to the STM's vocabulary; this is an optical station (no STM / Nanonis). Run optical skills with mast_run (find them with mast_find_skills, read mast_skill_card first); an instrument-driving skill still needs the `after` token of your latest observation.",
+    "extra": {
+     "station": "optical"
+    },
+    "outcome": "refused",
+    "status": 422,
+    "token_still_live": true
+   },
+   "withdraw": {
+    "detail": "Action 'withdraw' belongs to the STM's vocabulary; this is an optical station (no STM / Nanonis). Run optical skills with mast_run (find them with mast_find_skills, read mast_skill_card first); an instrument-driving skill still needs the `after` token of your latest observation.",
+    "extra": {
+     "station": "optical"
+    },
+    "outcome": "refused",
+    "status": 422,
+    "token_still_live": true
+   }
+  },
+  "observe_instrument_keys": [
+   "operator_prompts_open",
+   "optical_state"
+  ],
+  "observe_keys": [
+   "instrument",
+   "last_act",
+   "latest_frame",
+   "next_token",
+   "observe",
+   "station",
+   "turn",
+   "workspace"
+  ],
+  "observe_station": "optical",
+  "watch_once": 0
+ },
+ "probe": "tests/v2/station/_invariants_probe.py",
+ "source": "pre-capability-table",
+ "stm": {
+  "actions": {
+   "approach": {
+    "error": "AttributeError",
+    "outcome": "passed_the_station_check"
+   },
+   "df_curve": {
+    "code": "invalid_params",
+    "outcome": "passed_the_station_check"
+   },
+   "drift_compensation": {
+    "code": "invalid_params",
+    "outcome": "passed_the_station_check"
+   },
+   "feedback": {
+    "error": "AttributeError",
+    "outcome": "passed_the_station_check"
+   },
+   "move_atom": {
+    "code": "invalid_params",
+    "outcome": "passed_the_station_check"
+   },
+   "move_tip": {
+    "code": "invalid_params",
+    "outcome": "passed_the_station_check"
+   },
+   "pll": {
+    "error": "AttributeError",
+    "outcome": "passed_the_station_check"
+   },
+   "poke": {
+    "code": "invalid_params",
+    "outcome": "passed_the_station_check"
+   },
+   "pulse": {
+    "code": "invalid_params",
+    "outcome": "passed_the_station_check"
+   },
+   "scan": {
+    "code": "invalid_params",
+    "outcome": "passed_the_station_check"
+   },
+   "set_bias": {
+    "code": "invalid_params",
+    "outcome": "passed_the_station_check"
+   },
+   "set_current": {
+    "code": "invalid_params",
+    "outcome": "passed_the_station_check"
+   },
+   "sts": {
+    "code": "invalid_params",
+    "outcome": "passed_the_station_check"
+   },
+   "wait": {
+    "code": "invalid_params",
+    "outcome": "passed_the_station_check"
+   },
+   "withdraw": {
+    "error": "AttributeError",
+    "outcome": "passed_the_station_check"
+   }
+  },
+  "observe_instrument_keys": [
+   "unavailable"
+  ],
+  "observe_keys": [
+   "instrument",
+   "last_act",
+   "latest_frame",
+   "next_token",
+   "observe",
+   "turn",
+   "workspace"
+  ],
+  "observe_station": null,
+  "watch_once": 0
+ }
+}

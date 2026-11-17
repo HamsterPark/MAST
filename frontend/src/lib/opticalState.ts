@@ -14,7 +14,6 @@
 // Slot ids and kinds are identity strings and are never translated.
 
 import { tr } from "./i18n.ts";
-import { normalizeProfile } from "./stationProfile.ts";
 import {
   NOTE_MAX,
   OPERATOR_NAME_MAX,
@@ -33,17 +32,9 @@ import {
 export const SLOT_KINDS = ["choice", "number", "text", "flag"] as const;
 export type SlotKind = (typeof SLOT_KINDS)[number];
 
-/**
- * Whether the service runs as an optical station. The value is `GET /api/health`
- * `station_profile`, the profile the running process IS (not the stored setting, which
- * can differ until the next restart). Same reading as the station profile helper:
- * only "optical" (case and surrounding space ignored) counts; anything unreadable is an
- * STM station, so a machine that predates profiles behaves as it always did.
- */
-export function isOpticalProfile(profile: unknown): boolean {
-  // one reading of the profile for the whole UI: the station profile helper's
-  return normalizeProfile(profile) === "optical";
-}
+// Whether a station has the optical state at all is not decided here: it is the
+// `operator_prompts` capability (lib/stationCapabilities.ts, api/operator.ts
+// useHasOperatorPrompts), the same gate as the prompts.
 
 /** The attestation software needs before it may switch laser emission on. */
 export const LASER_AREA_SAFE = "laser_area_safe";

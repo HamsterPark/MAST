@@ -59,6 +59,26 @@ export function isStub(s: EnvSensor): boolean {
   return s.placeholder === true;
 }
 
+/**
+ * Display label for a sensor row.
+ *
+ * Sensors from the read-only cryostat drivers carry stable machine names
+ * (`magnet_field`, `magnet_current`, `helium_level`) so their history survives a COM
+ * port renumbering; the panel shows a readable label instead of the key. Any other name
+ * (an instrument's own input label such as "SPM", or one the operator chose) is shown
+ * as is.
+ */
+const SENSOR_LABELS: Record<string, string> = {
+  magnet_field: "Magnet field",
+  magnet_current: "Magnet current",
+  helium_level: "Helium Level",
+};
+
+export function sensorLabel(name: string | null | undefined): string {
+  const n = name ?? "";
+  return SENSOR_LABELS[n] ?? n;
+}
+
 /** Sensors the panel actually draws as a reading row. */
 export function readingRows(sensors: readonly EnvSensor[]): EnvSensor[] {
   return sensors.filter((s) => !mirrorsInstrumentPanel(s) && !isStub(s));

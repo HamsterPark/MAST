@@ -329,6 +329,145 @@ def _isolate_readback_traces(monkeypatch, tmp_path_factory):
         )
 
 
+_REAL_VISION_FRAMES = _REPO_ROOT / "artifacts" / "vision_frames"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_vision_frames(monkeypatch, tmp_path_factory):
+    """扫描里程碑的帧 PNG(``ScanVisionMonitor._persist_frame_png``)落进 tmp,不落进
+    检出里的 ``artifacts/vision_frames``。
+
+    它默认从 ``data_root()`` 走(没设 ``MAST_DATA_DIR`` 时就是 project_root),而大多数
+    测试不改这两样。那个目录被 git 忽略,
+    ``git status`` 看不出来:2026-11-09 在开发机上数过,3,573 张里约 3,200 张是十五个
+    测试 scan_id(``switch`` / ``emit`` / ``t1`` / ``testscan`` …)写的,和真实扫描帧
+    混在一处;公开树的使用者每跑一遍全量,检出里也会多出一批。
+
+    夹具同时是闸门:退出时核对真实目录没被动过。只比目录本身的 mtime(一次 stat)——
+    开发机上这个目录有几千个条目,每条测试前后各列一遍要多花三四毫秒。新建、删除、
+    目录凭空建出来都会改它;**覆写一个同名的已有文件不会**(假时钟的测试每次写同一个
+    名字),所以单条测试的归因不保证,但重定向一旦失效,用真实时钟命名的那十几条测试
+    每条都会新建文件,闸门照样会响。
+    """
+    d = tmp_path_factory.getbasetemp() / "vision_frames"
+    d.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("MAST_VISION_FRAMES_DIR", str(d))
+
+    def _fp():
+        try:
+            return _REAL_VISION_FRAMES.stat().st_mtime_ns
+        except OSError:
+            return None      # 目录还不存在 —— 「凭空建出来」本身就要报
+
+    before = _fp()
+    yield
+    after = _fp()
+    if before != after:
+        pytest.fail(
+            "this test changed the checkout's REAL vision-frame directory "
+            f"({_REAL_VISION_FRAMES}).\n"
+            "MAST_VISION_FRAMES_DIR is set for every test by this fixture, so if "
+            "you are seeing this, some code path is NOT going through "
+            "mast.vision.scan_monitor.vision_frames_dir()."
+        )
+
+
+# ``mast._runtime_paths.data_root()`` 下面的运行时用户数据。不设 MAST_DATA_DIR 时 data_root()
+# 就是 project_root(),也就是检出本身 —— 开发机上真实的计费账本、park board、电流监控库都在这里。
+# 目录只比自身的 mtime(新建、删除、凭空建出来都会改它;SQLite 以 WAL 打开时建删 -wal/-shm
+# 也会改它,而「打开」本身就是写);已有文件比 size 与 mtime(原地改写)。
+_REAL_DATA_DIRS = (
+    "experiments", "experiments/current_monitor", "experiments/env_history",
+    "experiments/frames", "experiments/best_frames", "experiments/composite_progress",
+    "artifacts", "artifacts/activation", "artifacts/tool_returns", "artifacts/cluster_panels",
+    "data", "data/drafts", "data/reviews", "data/reports", "data/figures",
+)
+_REAL_DATA_FILES = (
+    "experiments/usage_ledger.sqlite", "experiments/mast_experiments.db",
+    "experiments/mast_experiments_v2.db", "experiments/current_monitor/monitor.sqlite",
+    "experiments/env_history/env_history.sqlite", "artifacts/activation/park_board.json",
+    "experiments/mast_conversations.db", "experiments/orchestrator_checkpoints.sqlite",
+    "experiments/vision_buffer.wal.sqlite",
+)
+
+
+# 库的 -wal / -shm 也要盯:它们已经在的时候(上次异常退出留下的,或者有进程正开着库),
+# 再打开这个库只改它们,不改目录 —— 2026-11-09 环境勘察就这样读了开发机真实的 vision
+# buffer 而闸门没响。
+_REAL_DATA_SIDECARS = tuple(f"{rel}{side}" for rel in _REAL_DATA_FILES
+                            if rel.endswith((".db", ".sqlite")) for side in ("-wal", "-shm"))
+
+
+def _real_data_fingerprint() -> tuple:
+    out = []
+    for rel in _REAL_DATA_DIRS + _REAL_DATA_FILES + _REAL_DATA_SIDECARS:
+        try:
+            st = (_REPO_ROOT / rel).stat()
+        except OSError:
+            out.append((rel, None))      # 不存在 —— 「凭空建出来」本身就要报
+            continue
+        out.append((rel, (0 if rel in _REAL_DATA_DIRS else st.st_size, st.st_mtime_ns)))
+    return tuple(out)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _session_data_root(tmp_path_factory):
+    """``MAST_DATA_DIR`` 在整个会话里都指向 tmp,不只在每条测试的窗口里。
+
+    下面的逐条夹具只管「测试正在跑」的那一段:module / session 级夹具在它之前建立,
+    两条测试之间的空档里环境变量是复原了的,测试结束后还在跑的线程也可能在空档里落笔
+    —— 这些时候 ``data_root()`` 会退回检出本身,而闸门又看不见(不在前后两次指纹之间)。
+    会话级先垫一层,逐条夹具再按测试覆盖。
+    """
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("MAST_DATA_DIR", str(tmp_path_factory.mktemp("session_data_root")))
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _isolate_data_root(monkeypatch, tmp_path):
+    """运行时写的用户数据(``mast._runtime_paths.data_root()``)落进 tmp,不落进检出 —— 阻断型。
+
+    计费账本、记录库、电流监控库、帧存档、composite 进度、park board、溢出的工具返回、
+    团簇面板、旧的 data/ 目录,原先都直接取 ``project_root()``,而大多数测试不改
+    project_root。2026-11-09 在开发机上数过:真实计费账本 5,549 条里 2,792 条是测试写的
+    (model 都是 ``'m'``,每跑一遍全量多 9 条),park board 上 54 个停靠全是测试的,
+    ``tool_returns`` 里有一千五百多个测试文件;公开树的使用者每跑一遍全量,检出里也会多出
+    ``experiments/`` 和 ``artifacts/`` 两棵树。账本和监控库是单例,复位(``set_*_for_test(None)``)
+    之后下一次取用会重新解析路径 —— 所以必须在路径函数这一层拦,光替换单例不够。
+
+    现在这些写入点都走 ``data_root()``:``MAST_DATA_DIR`` > ``project_root()``。这里给每条
+    测试设 ``MAST_DATA_DIR``;自己设了的测试照样赢(显式请求的夹具在 autouse 之后跑)。
+
+    夹具同时是闸门(指认型):退出时核对检出里这些落点没被动过。第一次全量就由它指出
+    普查漏掉的五处 —— 删除闸门脚本以 WAL 打开真实会话账本、numpy 沙箱测试往 ``data/``
+    写 .npy、全量导出把整个真实 ``experiments/`` 打进 zip、环境勘察读真实 vision buffer、
+    以及 runtime 的 checkpoint / vision buffer 路径 —— 普查只看「多出来的文件」,只读打开、
+    建了又删的临时文件它都看不见。
+
+    两种误报:同一个检出上有 MAST 服务在写(跑全量前先停服务);pytest-xdist 下各 worker
+    共用这个检出,一条测试写了,另一个 worker 上同时在跑的测试也会被点名 —— 单独重跑
+    那个文件(``-p no:xdist``)就能分清。
+    """
+    monkeypatch.setenv("MAST_DATA_DIR", str(tmp_path / "_data_root"))
+    before = _real_data_fingerprint()
+    yield
+    after = _real_data_fingerprint()
+    if before != after:
+        changed = [b[0] for b, a in zip(before, after) if b != a]
+        pytest.fail(
+            "this test changed runtime data in the checkout itself "
+            f"({_REPO_ROOT}): {changed}\n"
+            "MAST_DATA_DIR is set for every test by this fixture, so if you are "
+            "seeing this, some code path is NOT going through "
+            "mast._runtime_paths.data_root() (or the test unset MAST_DATA_DIR).\n"
+            "Under pytest-xdist the workers share this checkout: a test running on "
+            "another worker at the same moment may be the writer. Rerun this file "
+            "alone with -p no:xdist to tell. A MAST service writing from this same "
+            "checkout also trips it."
+        )
+
+
 def _real_unfiled_docs_fingerprint() -> tuple:
     """What the suite must not change inside the operator's REAL experiment root.
 
@@ -541,7 +680,7 @@ def seeded_composite_store(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def _isolate_composite_sidecar(tmp_path, monkeypatch):
     """P2-G: GraphExecutor writes step-progress sidecars under
-    project_root()/experiments/composite_progress/ — running ANY composite in
+    data_root()/experiments/composite_progress/ — running ANY composite in
     a test would pollute the real repo AND leak resume state across tests
     (a stale sidecar makes the next test silently resume-skip its steps).
     Redirect every test's sidecars into its own tmp dir."""
@@ -716,6 +855,30 @@ def _env_history_thresholds_are_default():
 
 
 @pytest.fixture(autouse=True)
+def _env_tagger_is_reset():
+    """数据文件的环境标签记录器（``mast.envhistory.filetags.tagger``）是进程单例，带一个按需起的
+    工作线程。上一条测试留下的实例会接着往下一条测试的 tmp 目录、或下一条测试换上的环境历史库
+    里写 —— 每条测试前后都停掉并清空。它的设置缓存按配置文件路径分开，但同样清掉。"""
+    try:
+        from mast.envhistory.filetags import settings as _ft_settings
+        from mast.envhistory.filetags.tagger import get_tagger, set_tagger
+    except Exception:  # pragma: no cover
+        yield
+        return
+
+    def _clear():
+        t = get_tagger()
+        if t is not None:
+            t.stop(timeout=2.0)
+        set_tagger(None)
+        _ft_settings.reset_cache()
+
+    _clear()
+    yield
+    _clear()
+
+
+@pytest.fixture(autouse=True)
 def _runtime_settings_are_isolated(tmp_path_factory):
     """THE SUITE MUST NOT READ THE OPERATOR'S REAL ``ui_settings.json``.
 
@@ -828,3 +991,52 @@ def _tool_face_registry_is_not_bound_across_tests():
         station_face.bind_registry(None)
     except Exception:  # noqa: BLE001 - a partial import must never fail an unrelated test
         pass
+
+
+class _NoRealSerialPorts:
+    """pyserial stand-in for the suite: opening a port raises, enumeration is empty."""
+
+    class SerialException(OSError):
+        pass
+
+    def __getattr__(self, name):            # PARITY_ODD, SEVENBITS, ... -> placeholders
+        return name
+
+    def Serial(self, *a, **k):  # noqa: N802 - mirrors pyserial
+        port = k.get("port") or (a[0] if a else "?")
+        raise _NoRealSerialPorts.SerialException(
+            f"tests must not open real serial port {port!r}: patch open_transport / "
+            "the probe, or set MAST_TEST_REAL_SERIAL=1 for a deliberate hardware test")
+
+
+@pytest.fixture(autouse=True)
+def _real_serial_ports_are_off_limits(monkeypatch):
+    """No test opens a real COM port — a lab PC's ports carry instruments.
+
+    The environment layer writes identity queries to every free port during
+    auto-detection, and one of the ports it may find can be a
+    superconducting-magnet supply. A test that forgets to patch one probe would
+    otherwise send ``*IDN?`` (and the binary DL-7 frame) to whatever the machine
+    running the suite has plugged in. Tests that fake transports by patching
+    ``open_transport`` / the probes never reach pyserial, so they are unaffected;
+    ``list_serial_ports`` returns ``[]`` unless a test patches it. Opt out only for
+    a deliberate hardware test with ``MAST_TEST_REAL_SERIAL=1``.
+    """
+    if os.environ.get("MAST_TEST_REAL_SERIAL") == "1":
+        yield
+        return
+    try:
+        from mast.environment import serial_transport as _st
+    except Exception:  # noqa: BLE001 - a partial import must never fail an unrelated test
+        yield
+        return
+    monkeypatch.setattr(_st, "_pyserial", _NoRealSerialPorts())
+    monkeypatch.setattr(_st, "HAS_PYSERIAL", True)
+
+    class _NoPorts:
+        @staticmethod
+        def comports():
+            return []
+
+    monkeypatch.setattr(_st, "_list_ports", _NoPorts())
+    yield

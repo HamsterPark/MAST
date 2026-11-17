@@ -2807,6 +2807,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/environment/heater-control": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Heater Control Status
+         * @description Sample-stage heating status: set up at initialization or not, and the change MAST
+         *     runs. No I/O.
+         */
+        get: operations["heater_control_status_api_environment_heater_control_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/environment/heater-control/off": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Heater Control Off
+         * @description Operator heater-off: RANGE 0 on the configured output and on the one MAST is heating,
+         *     read back until it reads 0 (retried in the background). No PIN; the stage then cools
+         *     by itself. Refused where temperature control is not set up and MAST is not heating:
+         *     there MAST writes nothing to the 335 (``error`` says to use ALL OFF).
+         */
+        post: operations["heater_control_off_api_environment_heater_control_off_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/environment/instrument-state": {
         parameters: {
             query?: never;
@@ -2824,11 +2868,55 @@ export interface paths {
          *     though its inputs are separate sensors sharing that port.
          *
          *     Everything here is a query — the panel can show that a heater is on, and has
-         *     no path to turn one on.
+         *     no path to turn one on. The same holds for the Lake Shore 625 magnet supply
+         *     (field, current, setpoints, persistent switch, quench/error bits) and the
+         *     Cryomagnetics LM-510 (level, status, sample mode): read, never commanded.
          */
         get: operations["instrument_state_api_environment_instrument_state_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/environment/magnet-control": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Magnet Control Status
+         * @description Field control status: configured at initialization or not, and the ramp MAST runs. No I/O.
+         */
+        get: operations["magnet_control_status_api_environment_magnet_control_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/environment/magnet-control/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Magnet Control Stop
+         * @description Operator STOP: freeze the magnet output at its present value. Always allowed, no PIN.
+         *
+         *     STOP does not bring the field to zero; it holds it where it is.
+         */
+        post: operations["magnet_control_stop_api_environment_magnet_control_stop_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3449,6 +3537,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/gallery/auto": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Gallery Auto
+         * @description The gallery page was opened: start an automatic incremental build if the server's rules
+         *     allow it (switch on, a root enabled, nothing running, >= 1 min since the last build, past
+         *     the start-up hold). Always answers with the current status; never waits.
+         */
+        post: operations["gallery_auto_api_gallery_auto_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/gallery/build": {
         parameters: {
             query?: never;
@@ -3498,9 +3608,58 @@ export interface paths {
         put?: never;
         /**
          * Gallery Config Update
-         * @description Replace the root list. Invalid input writes nothing and says why.
+         * @description Replace the root list. Invalid input writes nothing and says why. Nested or repeated roots
+         *     are merged into the outer / first one instead of refused; ``detail`` then says what was merged
+         *     (with ``ok`` true).
          */
         post: operations["gallery_config_update_api_gallery_config_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/gallery/env-tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Gallery Env Tags
+         * @description 环境标签的两个设置，加上本进程记录器的计数。只读，不创建任何东西。
+         */
+        get: operations["gallery_env_tags_api_gallery_env_tags_get"];
+        put?: never;
+        /**
+         * Gallery Env Tags Update
+         * @description 改环境标签的设置，省略的键不变。只写状态目录的 ``env_tags.json``，不碰数据根。
+         */
+        post: operations["gallery_env_tags_update_api_gallery_env_tags_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/gallery/env/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Gallery Env
+         * @description 一个条目（``path`` = 条目 id）的完整环境记录：保存时写下的 sidecar、中央记录，或现推断。
+         *
+         *     只读：读 sidecar、查环境历史库、必要时读数据文件头 64 KiB 核对身份；不写任何东西，也不
+         *     新建环境历史库（docs/v2/design/data_env_tags.md）。条目不在索引里 ⇒ ``how="none"``。永不 500。
+         */
+        get: operations["gallery_env_api_gallery_env__path__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5297,6 +5456,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/optical-layouts/figure.pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Figure Pdf Route
+         * @description The figure SVG as a one-page vector PDF: text kept as text (Chinese in an embedded subset of MuPDF's CJK
+         *     font), the page 0.75 pt per pixel of the SVG (its size on paper at 96 px to the inch). 422 when ``svg`` is not
+         *     a figure SVG (the detail says why), 501 without PyMuPDF, 500 when MuPDF fails.
+         */
+        post: operations["figure_pdf_route_api_optical_layouts_figure_pdf_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/optical-layouts/{layout_id}": {
         parameters: {
             query?: never;
@@ -6024,6 +6205,9 @@ export interface paths {
          *
          *       * ``x-safety-limits-source``   — live_guard | merged | defaults
          *       * ``x-safety-restart-pending`` — true | false | unknown
+         *       * ``x-safety-envelope-narrower`` — fields (comma-separated) the last
+         *         reconciliation found NARROWER than the measured instrument travel;
+         *         ``none`` | ``unknown`` (never reconciled)
          *
          *     Never raises: "what are the limits" degrades to the code defaults rather
          *     than 500-ing, because a caller who gets no answer here will assume the
@@ -6081,6 +6265,10 @@ export interface paths {
          *     为自动重连未能识别或恢复的连接故障提供显式入口。它只更换连接，
          *     不进针、不开反馈、不改变扫描。沿连接池的 FIN、排空迟到字节、关闭和新建
          *     流程执行，避免强制关闭影响单客户端端口的恢复。
+         *
+         *     通信熔断器没闭合时，同时结束冷却、重新放一个探针：下一次计数调用就验证
+         *     链路（见 ``ConnectionPool.reconnect_role``）。之后的状态看
+         *     ``GET /api/safety/latches`` 的 ``comms_breaker``。
          */
         post: operations["reconnect_role_api_safety_reconnect_role_post"];
         delete?: never;
@@ -11273,7 +11461,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "laser" | "fiber_out" | "lamp" | "led" | "mirror" | "beam_splitter" | "dichroic" | "grating" | "lens" | "objective" | "waveplate" | "polarizer" | "filter" | "window" | "nd" | "aotf" | "prism" | "periscope" | "iris" | "shutter" | "sample" | "detector" | "camera" | "spectrometer" | "power_meter" | "beam_dump" | "blocker" | "fiber_in" | "custom";
+            type: "laser" | "fiber_out" | "lamp" | "led" | "mirror" | "beam_splitter" | "pbs" | "dichroic" | "grating" | "lens" | "objective" | "waveplate" | "polarizer" | "filter" | "window" | "nd" | "aotf" | "prism" | "periscope" | "iris" | "shutter" | "sample" | "detector" | "camera" | "spectrometer" | "power_meter" | "beam_dump" | "blocker" | "fiber_in" | "custom";
             /**
              * X Mm
              * @description position, mm, 0.01 resolution
@@ -12660,6 +12848,8 @@ export interface components {
              * @default
              */
             kind: string;
+            level_meter?: components["schemas"]["LevelMeterState"] | null;
+            magnet?: components["schemas"]["MagnetState"] | null;
             /**
              * Model
              * @default
@@ -14214,6 +14404,32 @@ export interface components {
             vacuum?: components["schemas"]["SensorValue"];
         };
         /**
+         * EventBeam
+         * @description The beam as it arrives at a component, before the component acts (contract v2 §4.7).
+         */
+        EventBeam: {
+            /**
+             * D Mm
+             * @description 1/e^2 diameter of the Gaussian beam here, mm; null without one
+             */
+            d_mm: number | null;
+            /**
+             * Mw
+             * @description absolute power in mW (the tree's source_mw times p); null when the source's power is not known
+             */
+            mw: number | null;
+            /**
+             * P
+             * @description power relative to the tree's source
+             */
+            p: number;
+            /**
+             * S
+             * @description [S1/S0, S2/S0, S3/S0], the normalised Stokes vector in the beam's own frame (e_h = z x d in the table plane, left of the beam; e_v = z, up; S1 = I_h - I_v, S2 = I_+45 - I_-45, angles from e_h towards e_v); null when no light (S0 = 0)
+             */
+            s: number[] | null;
+        };
+        /**
          * ExperimentDetail
          * @description Full experiment detail: header metadata + samples + actions +
          *     spatial map markers + operator feedback. ``degraded`` / ``found`` let the
@@ -14969,6 +15185,23 @@ export interface components {
             url: string;
         };
         /**
+         * FigurePdfBody
+         * @description The figure to convert: the SVG file the editor's "Figure SVG" export saves, and a title for the PDF.
+         */
+        FigurePdfBody: {
+            /**
+             * Svg
+             * @description the figure as a standalone SVG file (root svg in the SVG namespace, sized in px)
+             */
+            svg: string;
+            /**
+             * Title
+             * @description written into the PDF's properties
+             * @default
+             */
+            title: string;
+        };
+        /**
          * FileAttributionEntry
          * @description One row of ``file_locations`` — which experiment/sample a file belongs to.
          *
@@ -15134,6 +15367,20 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /**
+         * GalleryAutoRequest
+         * @description Ask for an automatic incremental build. The body is required (a bodyless POST must not be
+         *     accepted: trap on optional request bodies as a CSRF door). The server decides whether one
+         *     actually starts (switch on, a root enabled, nothing running, >= 1 min since the last build).
+         */
+        GalleryAutoRequest: {
+            /**
+             * Reason
+             * @description the gallery page was opened / became visible
+             * @constant
+             */
+            reason: "open";
+        };
         /** GalleryBuildError */
         GalleryBuildError: {
             /** Id */
@@ -15193,6 +15440,18 @@ export interface components {
              */
             n_changed: number;
             /**
+             * N Deferred
+             * @description files written in the last minute, left for the next round (not read, not cached)
+             * @default 0
+             */
+            n_deferred: number;
+            /**
+             * N Env
+             * @description entries whose environment tags changed in this build (a sidecar appeared after the file was first indexed counts) — the index changed even if no file did
+             * @default 0
+             */
+            n_env: number;
+            /**
              * N Failed
              * @default 0
              */
@@ -15208,6 +15467,12 @@ export interface components {
              * @default 0
              */
             n_new: number;
+            /**
+             * N Removed
+             * @description entries dropped because their files are gone
+             * @default 0
+             */
+            n_removed: number;
             /**
              * N Render
              * @default 0
@@ -15232,9 +15497,28 @@ export interface components {
              * @default 0
              */
             total: number;
+            /**
+             * Trigger
+             * @description who started this build: the operator's click, or the automatic updater
+             * @default manual
+             * @enum {string}
+             */
+            trigger: "manual" | "auto";
         };
         /** GalleryConfigResponse */
         GalleryConfigResponse: {
+            /**
+             * Auto Build
+             * @description incremental build in the background every auto_interval_min minutes and when the gallery page is opened
+             * @default true
+             */
+            auto_build: boolean;
+            /**
+             * Auto Interval Min
+             * @description minutes between automatic incremental builds (2-720)
+             * @default 10
+             */
+            auto_interval_min: number;
             /**
              * Degraded
              * @default false
@@ -15269,6 +15553,16 @@ export interface components {
          *     come back as ``ok=false`` + ``detail`` and nothing is written.
          */
         GalleryConfigUpdate: {
+            /**
+             * Auto Build
+             * @description omitted ⇒ unchanged
+             */
+            auto_build?: boolean | null;
+            /**
+             * Auto Interval Min
+             * @description omitted ⇒ unchanged
+             */
+            auto_interval_min?: number | null;
             /** Roots */
             roots?: components["schemas"]["GalleryRootIn"][];
             /** Workers */
@@ -15295,6 +15589,505 @@ export interface components {
              * @default 0
              */
             ts: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /** GalleryEnvAcquisition */
+        GalleryEnvAcquisition: {
+            /** Duration S */
+            duration_s?: number | null;
+            /** End */
+            end?: number | null;
+            /**
+             * End From
+             * @default
+             */
+            end_from: string;
+            /**
+             * End Iso
+             * @default
+             */
+            end_iso: string;
+            /** Start */
+            start?: number | null;
+            /**
+             * Start From
+             * @default
+             */
+            start_from: string;
+            /**
+             * Start Iso
+             * @default
+             */
+            start_iso: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /** GalleryEnvDetail */
+        GalleryEnvDetail: {
+            /**
+             * Degraded
+             * @default false
+             */
+            degraded: boolean;
+            /** Detail */
+            detail?: string | null;
+            /**
+             * How
+             * @description sidecar / central record (both made when the file was saved) / inferred from the environment history / nothing known
+             * @default none
+             * @enum {string}
+             */
+            how: "sidecar" | "central" | "inferred" | "none";
+            /** Id */
+            id: string;
+            record?: components["schemas"]["GalleryEnvRecord"] | null;
+            /**
+             * Sidecar Path
+             * @default
+             */
+            sidecar_path: string;
+        };
+        /** GalleryEnvMissing */
+        GalleryEnvMissing: {
+            /** Kind */
+            kind?: string | null;
+            /**
+             * Sensor
+             * @default
+             */
+            sensor: string;
+            /** Status */
+            status?: string | null;
+            /**
+             * Why
+             * @description no_reading / invalid
+             * @default
+             */
+            why: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /** GalleryEnvRecord */
+        GalleryEnvRecord: {
+            acquisition?: components["schemas"]["GalleryEnvAcquisition"] | null;
+            /** File */
+            file?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Inferred
+             * @default false
+             */
+            inferred: boolean;
+            /** Missing */
+            missing?: components["schemas"]["GalleryEnvMissing"][];
+            /** Saved At */
+            saved_at?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema
+             * @default
+             */
+            schema: string;
+            /** Tagged */
+            tagged?: {
+                [key: string]: unknown;
+            };
+            /** Values */
+            values?: components["schemas"]["GalleryEnvValueDetail"][];
+            /** Window */
+            window?: components["schemas"]["GalleryEnvWindowDetail"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * GalleryEnvSummary
+         * @description ``env`` on an index item. Present only when something is known.
+         */
+        GalleryEnvSummary: {
+            /** @description magnetic field */
+            B?: components["schemas"]["GalleryEnvValue"] | null;
+            /** @description cryogen level */
+            L?: components["schemas"]["GalleryEnvValue"] | null;
+            /** @description pressure */
+            P?: components["schemas"]["GalleryEnvValue"] | null;
+            /** @description temperature */
+            T?: components["schemas"]["GalleryEnvValue"] | null;
+            /**
+             * S
+             * @description r = recorded when the file was saved (sidecar or central record); i = inferred by the gallery from the environment history
+             * @default r
+             * @enum {string}
+             */
+            s: "r" | "i";
+            /**
+             * Wb
+             * @description [min, max] during the acquisition, same unit as B.u
+             */
+            wB?: number[] | null;
+            /**
+             * Wl
+             * @description [min, max] during the acquisition, same unit as L.u
+             */
+            wL?: number[] | null;
+            /**
+             * Wp
+             * @description [min, max] during the acquisition, same unit as P.u
+             */
+            wP?: number[] | null;
+            /**
+             * Wt
+             * @description [min, max] during the acquisition, same unit as T.u
+             */
+            wT?: number[] | null;
+            /**
+             * Wr
+             * @description keys (T/B/P/L) whose window came from individual readings, so it covers exactly the acquisition; the other windows come from 1-minute buckets and are wider. Only these mark a card as changed during the acquisition
+             */
+            wr?: string[] | null;
+        };
+        /**
+         * GalleryEnvTagStatus
+         * @description The env-tag recorder in THIS process (``mast.envhistory.filetags.tagger``). Counters are
+         *     since the service started. ``active=false``: no recorder here (standalone API process).
+         */
+        GalleryEnvTagStatus: {
+            /**
+             * Active
+             * @default false
+             */
+            active: boolean;
+            /**
+             * Central Failed
+             * @description central records that could not be written
+             * @default 0
+             */
+            central_failed: number;
+            /**
+             * Central Written
+             * @default 0
+             */
+            central_written: number;
+            /**
+             * Computed
+             * @description records made from the cached readings
+             * @default 0
+             */
+            computed: number;
+            /**
+             * Cooldown Skipped
+             * @description files in a directory cooling down after a failure
+             * @default 0
+             */
+            cooldown_skipped: number;
+            /**
+             * Cooling Dirs
+             * @default 0
+             */
+            cooling_dirs: number;
+            /**
+             * Dropped Disabled
+             * @description files dropped because recording was switched off
+             * @default 0
+             */
+            dropped_disabled: number;
+            /**
+             * Dropped Full
+             * @description files dropped because the queue was full
+             * @default 0
+             */
+            dropped_full: number;
+            /**
+             * Empty
+             * @description files saved while nothing was known (no record written)
+             * @default 0
+             */
+            empty: number;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Errors
+             * @description unexpected errors inside the recorder (see last_error)
+             * @default 0
+             */
+            errors: number;
+            /**
+             * Failed Write
+             * @description sidecar writes that failed (central record kept)
+             * @default 0
+             */
+            failed_write: number;
+            /** Last Error */
+            last_error?: string | null;
+            /**
+             * Max Age S
+             * @default 30
+             */
+            max_age_s: number;
+            /**
+             * Pending
+             * @default 0
+             */
+            pending: number;
+            /**
+             * Reused
+             * @description copies given the original's record
+             * @default 0
+             */
+            reused: number;
+            /**
+             * Same
+             * @description files whose sidecar already described them
+             * @default 0
+             */
+            same: number;
+            /**
+             * Superseded
+             * @description sidecars written after moving a stale one aside
+             * @default 0
+             */
+            superseded: number;
+            /**
+             * Worker Alive
+             * @default false
+             */
+            worker_alive: boolean;
+            /**
+             * Written
+             * @description sidecars written
+             * @default 0
+             */
+            written: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * GalleryEnvTagsConfig
+         * @description Environment tags on saved data files (docs/v2/design/data_env_tags.md): the two
+         *     settings and the recorder in this process. Stored in the gallery state directory
+         *     (``env_tags.json``), not in the gallery ``config.json``: saving the data roots rewrites that
+         *     file and must not reset these.
+         */
+        GalleryEnvTagsConfig: {
+            /**
+             * Degraded
+             * @default false
+             */
+            degraded: boolean;
+            /** Detail */
+            detail?: string | null;
+            /**
+             * Enabled
+             * @description record the known environment beside every newly saved data file (.mast/envtags/<file>.json)
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Max Age S
+             * @description a cached reading counts as current when it is at most this many seconds from the save (5-600); older ones are recorded with their age
+             * @default 30
+             */
+            max_age_s: number;
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** @description the recorder in this process; null in a process without one */
+            status?: components["schemas"]["GalleryEnvTagStatus"] | null;
+        };
+        /**
+         * GalleryEnvTagsUpdate
+         * @description Change the env-tag settings. An omitted key is unchanged; the data roots are never touched.
+         */
+        GalleryEnvTagsUpdate: {
+            /**
+             * Enabled
+             * @description omitted ⇒ unchanged
+             */
+            enabled?: boolean | null;
+            /**
+             * Max Age S
+             * @description omitted ⇒ unchanged
+             */
+            max_age_s?: number | null;
+        };
+        /**
+         * GalleryEnvValue
+         * @description One primary value in an item's environment summary (card + filters).
+         */
+        GalleryEnvValue: {
+            /**
+             * A
+             * @description stale only: how many seconds before the save it was read
+             */
+            a?: number | null;
+            /**
+             * C
+             * @description canonical value for filters: K / T / Pa / % / cm
+             */
+            c?: number | null;
+            /**
+             * S
+             * @description l = a cached reading near the save; h = the env-history bucket holding the save; o = stale (the last reading before the save, see a); i = inferred later
+             * @default l
+             * @enum {string}
+             */
+            s: "l" | "h" | "o" | "i";
+            /**
+             * U
+             * @description the sensor's own unit, shown on the card as is
+             * @default
+             */
+            u: string;
+            /**
+             * V
+             * @description value in the sensor's own unit (4 significant digits)
+             */
+            v?: number | null;
+        };
+        /** GalleryEnvValueDetail */
+        GalleryEnvValueDetail: {
+            /** Bucket */
+            bucket?: {
+                [key: string]: unknown;
+            } | null;
+            /** Canonical */
+            canonical?: number | null;
+            /**
+             * Canonical Unit
+             * @default
+             */
+            canonical_unit: string;
+            /**
+             * Driver
+             * @default
+             */
+            driver: string;
+            /**
+             * Dt S
+             * @description reading time minus save time, s (negative = before)
+             */
+            dt_s?: number | null;
+            /**
+             * Fresh
+             * @default true
+             */
+            fresh: boolean;
+            /**
+             * Iso
+             * @default
+             */
+            iso: string;
+            /**
+             * Kind
+             * @description temperature / field / pressure / level / magnet_current / other
+             * @default
+             */
+            kind: string;
+            /**
+             * Primary
+             * @default false
+             */
+            primary: boolean;
+            /**
+             * Sensor
+             * @description sensor name at the time (provenance only)
+             * @default
+             */
+            sensor: string;
+            /**
+             * Source
+             * @description live / history / inferred
+             * @default
+             */
+            source: string;
+            /**
+             * Span S
+             * @description 0 for a reading; the bucket width for history
+             */
+            span_s?: number | null;
+            /**
+             * Status
+             * @default
+             */
+            status: string;
+            /**
+             * T
+             * @description when MAST got the reading (bucket start for history), epoch s
+             */
+            t?: number | null;
+            /**
+             * Unit
+             * @default
+             */
+            unit: string;
+            /** Value */
+            value?: number | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /** GalleryEnvWindowDetail */
+        GalleryEnvWindowDetail: {
+            /** Canonical Max */
+            canonical_max?: number | null;
+            /** Canonical Min */
+            canonical_min?: number | null;
+            /**
+             * Canonical Unit
+             * @default
+             */
+            canonical_unit: string;
+            /**
+             * Complete
+             * @default false
+             */
+            complete: boolean;
+            /**
+             * From
+             * @description start of the interval actually covered
+             */
+            from?: number | null;
+            /**
+             * Kind
+             * @default
+             */
+            kind: string;
+            /** Max */
+            max?: number | null;
+            /**
+             * Method
+             * @description readings / buckets / buckets+readings
+             * @default
+             */
+            method: string;
+            /** Min */
+            min?: number | null;
+            /**
+             * N
+             * @default 0
+             */
+            n: number;
+            /**
+             * Sensor
+             * @default
+             */
+            sensor: string;
+            /**
+             * To
+             * @description end of the interval actually covered
+             */
+            to?: number | null;
+            /**
+             * Unit
+             * @default
+             */
+            unit: string;
         } & {
             [key: string]: unknown;
         };
@@ -15620,6 +16413,8 @@ export interface components {
              * @description id of the frame this one is a repeat save of
              */
             dup?: string | null;
+            /** @description known environment when the file was saved (or inferred); absent = nothing known */
+            env?: components["schemas"]["GalleryEnvSummary"] | null;
             /**
              * Ex
              * @description Experiment name when this is not a bias spectrum
@@ -16672,12 +17467,14 @@ export interface components {
              * @default false
              */
             skill_registry_wired: boolean;
+            /** Station Capabilities */
+            station_capabilities?: ("nanonis" | "stm_safety" | "stm_actions" | "scan_map" | "witec" | "optical_bench" | "operator_prompts" | "laser_safety" | "sensor_echo")[];
             /**
              * Station Profile
              * @default stm
              * @enum {string}
              */
-            station_profile: "stm" | "optical";
+            station_profile: "stm" | "optical" | "generic";
             /**
              * Station Profile Source
              * @default default
@@ -16689,6 +17486,12 @@ export interface components {
              * @default false
              */
             station_restart_pending: boolean;
+            /**
+             * Station Serial Autodetect
+             * @default default_on
+             * @enum {string}
+             */
+            station_serial_autodetect: "default_on" | "default_off" | "forced_off";
             /**
              * Status
              * @default ok
@@ -16726,6 +17529,99 @@ export interface components {
              * @default 0
              */
             threshold_s: number;
+        };
+        /**
+         * HeaterControlStatus
+         * @description Sample-stage heating on the Model 335: set up or not, and the change MAST runs.
+         *
+         *     ``present`` False = no Model 335 recognised (or MAST's side not wired).
+         *     ``can_heat`` = output, control input and the limits are set at initialization.
+         *     ``active`` = the change MAST started and is supervising (``None`` = none); ``last`` =
+         *     how the previous one ended; ``last_off`` / ``last_hold`` = the latest heater-off / hold.
+         */
+        HeaterControlStatus: {
+            /** Active */
+            active?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Busy
+             * @default false
+             */
+            busy: boolean;
+            /**
+             * Can Heat
+             * @default false
+             */
+            can_heat: boolean;
+            /** Identity */
+            identity?: {
+                [key: string]: unknown;
+            };
+            /** Last */
+            last?: {
+                [key: string]: unknown;
+            } | null;
+            /** Last Hold */
+            last_hold?: {
+                [key: string]: unknown;
+            } | null;
+            /** Last Off */
+            last_off?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Port
+             * @default
+             */
+            port: string;
+            /**
+             * Present
+             * @default false
+             */
+            present: boolean;
+            /** Settings */
+            settings?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * HeaterOffRequest
+         * @description Operator heater-off from the MAST UI. The body is required (a write needs a JSON body).
+         */
+        HeaterOffRequest: {
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
+        /**
+         * HeaterOffResponse
+         * @description ``sent`` True = every RANGE 0 went out on the identity-checked handle;
+         *     ``confirmed`` True = every RANGE? read back 0.
+         */
+        HeaterOffResponse: {
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /**
+             * Error
+             * @default
+             */
+            error: string;
+            /**
+             * Present
+             * @default false
+             */
+            present: boolean;
+            /**
+             * Sent
+             * @default false
+             */
+            sent: boolean;
         };
         /** HistoryResponse */
         HistoryResponse: {
@@ -17610,6 +18506,8 @@ export interface components {
             degraded: boolean;
             /** Derived */
             derived?: components["schemas"]["DerivedSuggestion"][];
+            /** Envelope Narrower */
+            envelope_narrower?: string[];
             /**
              * Fingerprint Changed
              * @default false
@@ -17650,6 +18548,9 @@ export interface components {
         /**
          * InstrumentState
          * @description Everything MAST can read off an instrument without writing to it.
+         *
+         *     ``kind`` selects which part is filled: ``lakeshore_temp`` → ``channels`` /
+         *     ``outputs``; ``lakeshore_625`` → ``magnet``; ``cryomag_lm510`` → ``level_meter``.
          */
         InstrumentState: {
             /**
@@ -17674,6 +18575,8 @@ export interface components {
              * @default
              */
             kind: string;
+            level_meter?: components["schemas"]["LevelMeterState"] | null;
+            magnet?: components["schemas"]["MagnetState"] | null;
             /**
              * Model
              * @default
@@ -18442,6 +19345,109 @@ export interface components {
             layout: components["schemas"]["Layout"];
         };
         /**
+         * LevelMeterState
+         * @description Cryomagnetics LM-510 level monitor, one channel, read-only.
+         *
+         *     ``level`` is the instrument's LAST COMPLETED reading (MEAS?); MAST never starts
+         *     a measurement. ``updates_by_itself`` false = sample mode Off: the number will
+         *     not refresh until someone starts a reading at the instrument.
+         */
+        LevelMeterState: {
+            /**
+             * Boost
+             * @default
+             */
+            boost: string;
+            /**
+             * Channel
+             * @default 1
+             */
+            channel: number;
+            /**
+             * Channel Type
+             * @description LHe or LN2 (TYPE?)
+             */
+            channel_type?: string | null;
+            /** Channel Type Code */
+            channel_type_code?: number | null;
+            /**
+             * Control
+             * @description refill control status (CTRL?)
+             * @default
+             */
+            control: string;
+            /**
+             * Ctrl High
+             * @default
+             */
+            ctrl_high: string;
+            /**
+             * Ctrl Low
+             * @default
+             */
+            ctrl_low: string;
+            /**
+             * Default Channel
+             * @description channel the mode/interval/units fields describe (CHAN?)
+             */
+            default_channel?: number | null;
+            /**
+             * High Alarm
+             * @default
+             */
+            high_alarm: string;
+            /** Level */
+            level?: number | null;
+            /**
+             * Low Alarm
+             * @default
+             */
+            low_alarm: string;
+            /**
+             * Menu Open
+             * @description an operator has the front-panel menu open
+             */
+            menu_open?: boolean | null;
+            /**
+             * Read At
+             * @default 0
+             */
+            read_at: number;
+            /**
+             * Sample Interval
+             * @default
+             */
+            sample_interval: string;
+            /**
+             * Sample Mode
+             * @default
+             */
+            sample_mode: string;
+            /**
+             * Sensor Fault
+             * @description open sensor or burnout (STAT?)
+             */
+            sensor_fault?: boolean | null;
+            /**
+             * Sensor Length
+             * @default
+             */
+            sensor_length: string;
+            /** Status Code */
+            status_code?: number | null;
+            /** Status Flags */
+            status_flags?: string[] | null;
+            /** Unanswered */
+            unanswered?: string[];
+            /**
+             * Unit
+             * @default
+             */
+            unit: string;
+            /** Updates By Itself */
+            updates_by_itself?: boolean | null;
+        };
+        /**
          * LibrariesResponse
          * @description The library list for the 库管理 panel. ``degraded`` is True when the
          *     library backend is absent/unreachable (standalone dev) — empty, not broken.
@@ -18668,7 +19674,7 @@ export interface components {
         /** LiveFrameItem */
         LiveFrameItem: {
             /** Frame */
-            frame: components["schemas"]["LiveSpectrumFrame"] | components["schemas"]["LiveScalarFrame"] | components["schemas"]["LiveXYFrame"] | components["schemas"]["LiveMap2DFrame"] | components["schemas"]["LiveStatusFrame"];
+            frame: components["schemas"]["LiveSpectrumFrame"] | components["schemas"]["LiveScalarFrame"] | components["schemas"]["LiveXYFrame"] | components["schemas"]["LiveMap2DFrame"] | components["schemas"]["LiveMap2DRowsFrame"] | components["schemas"]["LiveStatusFrame"];
             /** Seq */
             seq: number;
         };
@@ -18693,6 +19699,25 @@ export interface components {
             /** Values */
             values: {
                 [key: string]: number | null;
+            };
+        };
+        /**
+         * LiveMap2DRowsFrame
+         * @description map2d_rows：一行（或一行里从 ix0 起的一段）；各通道数组等长，ix0 + 长度 ≤ nx。
+         */
+        LiveMap2DRowsFrame: {
+            /**
+             * Ix0
+             * @default 0
+             */
+            ix0: number;
+            /** Iy */
+            iy: number;
+            /** T */
+            t: number;
+            /** Values */
+            values: {
+                [key: string]: (number | null)[];
             };
         };
         /**
@@ -18871,7 +19896,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "spectrum" | "scalar" | "xy" | "map2d" | "status";
+            kind: "spectrum" | "scalar" | "xy" | "map2d" | "map2d_rows" | "status";
             /**
              * Last Seq
              * @description 最近一帧的 seq；还没有帧时是 0（或流被淘汰重建前的值）
@@ -18882,7 +19907,7 @@ export interface components {
             last_t?: number | null;
             /**
              * Meta
-             * @description 声明时给的描述。map2d 必有 nx, ny, x0, y0, dx, dy, x_unit, y_unit；spectrum 可带 laser_line_nm（前端切 cm⁻¹ 用）
+             * @description 声明时给的描述。map2d / map2d_rows 必有 nx, ny, x0, y0, dx, dy, x_unit, y_unit；spectrum 可带 laser_line_nm（前端切 cm⁻¹ 用）
              */
             meta?: {
                 [key: string]: unknown;
@@ -18894,7 +19919,7 @@ export interface components {
             n_frames: number;
             /**
              * Retain
-             * @description 保留的帧数上限（map2d 是像素数）
+             * @description 保留的帧数上限（map2d 是像素数，map2d_rows 是行数）
              */
             retain: number;
             /** Source */
@@ -18965,6 +19990,232 @@ export interface components {
             };
             /** X */
             x: number;
+        };
+        /**
+         * MagnetControlStatus
+         * @description Field control on the Model 625 (7.2.0): configured or not, and the ramp MAST runs.
+         *
+         *     ``present`` False = no magnet supply recognised (or MAST's side not wired).
+         *     ``can_set_field`` = max field and field constant are set at initialization.
+         *     ``active`` = the ramp MAST started and is supervising (``None`` = none);
+         *     ``last`` = how the previous one ended; ``last_stop`` = the latest STOP sent.
+         */
+        MagnetControlStatus: {
+            /** Active */
+            active?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Busy
+             * @default false
+             */
+            busy: boolean;
+            /**
+             * Can Set Field
+             * @default false
+             */
+            can_set_field: boolean;
+            /** Last */
+            last?: {
+                [key: string]: unknown;
+            } | null;
+            /** Last Stop */
+            last_stop?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Port
+             * @default
+             */
+            port: string;
+            /**
+             * Present
+             * @default false
+             */
+            present: boolean;
+            /** Settings */
+            settings?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * MagnetState
+         * @description Lake Shore Model 625 superconducting-magnet supply, read-only.
+         *
+         *     Every field comes from a query; ``null`` = the instrument did not answer that
+         *     query (unknown), never a default. MAST has no path to change any of these:
+         *     the driver cannot build a setter (``environment/lakeshore_625.py``).
+         */
+        MagnetState: {
+            /** Any Error */
+            any_error?: boolean | null;
+            /** Compliance V */
+            compliance_v?: number | null;
+            /** Crowbar Discharge */
+            crowbar_discharge?: boolean | null;
+            /**
+             * Current A
+             * @description measured output current (RDGI?), A
+             */
+            current_a?: number | null;
+            /**
+             * Energized
+             * @description |output current| > 10 mA
+             */
+            energized?: boolean | null;
+            /** External Program */
+            external_program?: string | null;
+            /** External Program Code */
+            external_program_code?: number | null;
+            /**
+             * Field
+             * @description computed field = measured current x field constant (RDGF?)
+             */
+            field?: number | null;
+            /**
+             * Field Constant
+             * @description field_unit per ampere (FLDS?)
+             */
+            field_constant?: number | null;
+            /**
+             * Field Unit
+             * @description T or kG (FLDS?)
+             * @default
+             */
+            field_unit: string;
+            /** Hardware Error Code */
+            hardware_error_code?: number | null;
+            /** Hardware Errors */
+            hardware_errors?: string[] | null;
+            /** In Compliance */
+            in_compliance?: boolean | null;
+            /** Interface Mode */
+            interface_mode?: string | null;
+            /**
+             * Interface Mode Code
+             * @description 0 local, 1 remote, 2 remote + lockout
+             */
+            interface_mode_code?: number | null;
+            /** Limit Current A */
+            limit_current_a?: number | null;
+            /** Limit Rate A S */
+            limit_rate_a_s?: number | null;
+            /** Limit Voltage V */
+            limit_voltage_v?: number | null;
+            /**
+             * Max Field
+             * @description LIMIT? current x field constant
+             */
+            max_field?: number | null;
+            /** Operational Error Code */
+            operational_error_code?: number | null;
+            /** Operational Errors */
+            operational_errors?: string[] | null;
+            /** Operational Status Code */
+            operational_status_code?: number | null;
+            /** Persistent Ramp Enabled */
+            persistent_ramp_enabled?: boolean | null;
+            /** Persistent Ramp Rate A S */
+            persistent_ramp_rate_a_s?: number | null;
+            /** Psh Current Ma */
+            psh_current_ma?: number | null;
+            /** Psh Delay S */
+            psh_delay_s?: number | null;
+            /**
+             * Psh Enabled
+             * @description a persistent switch is configured (PSHS?)
+             */
+            psh_enabled?: boolean | null;
+            /** Psh Error Code */
+            psh_error_code?: number | null;
+            /** Psh Errors */
+            psh_errors?: string[] | null;
+            /** Psh Last Current A */
+            psh_last_current_a?: number | null;
+            /** Psh State */
+            psh_state?: string | null;
+            /**
+             * Psh State Code
+             * @description 0 off, 1 on, 2 warming, 3 cooling
+             */
+            psh_state_code?: number | null;
+            /** Quench Detected */
+            quench_detected?: boolean | null;
+            /** Quench Detection Enabled */
+            quench_detection_enabled?: boolean | null;
+            /** Quench Step Limit A S */
+            quench_step_limit_a_s?: number | null;
+            /** Ramp Done */
+            ramp_done?: boolean | null;
+            /** Ramp Rate A S */
+            ramp_rate_a_s?: number | null;
+            /**
+             * Ramp Segments
+             * @description RSEGS? 1..5 when segments are enabled; null when not read
+             */
+            ramp_segments?: components["schemas"]["RampSegment"][] | null;
+            /** Ramp Segments Enabled */
+            ramp_segments_enabled?: boolean | null;
+            /** Ramping */
+            ramping?: boolean | null;
+            /**
+             * Read At
+             * @default 0
+             */
+            read_at: number;
+            /**
+             * Remote Voltage V
+             * @description voltage at the remote-sense leads (RDGRV?)
+             */
+            remote_voltage_v?: number | null;
+            /** Setpoint Current A */
+            setpoint_current_a?: number | null;
+            /** Setpoint Field */
+            setpoint_field?: number | null;
+            /**
+             * Trigger Current A
+             * @description current the output would ramp to on a trigger (TRIG?)
+             */
+            trigger_current_a?: number | null;
+            /** Unanswered */
+            unanswered?: string[];
+            /**
+             * Voltage V
+             * @description output voltage at the supply terminals (RDGV?)
+             */
+            voltage_v?: number | null;
+        };
+        /**
+         * MagnetStopRequest
+         * @description Operator STOP from the MAST UI. The body is required (a write needs a JSON body).
+         */
+        MagnetStopRequest: {
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
+        /**
+         * MagnetStopResponse
+         * @description ``sent`` True = STOP went out on the identity-checked handle.
+         */
+        MagnetStopResponse: {
+            /**
+             * Error
+             * @default
+             */
+            error: string;
+            /**
+             * Present
+             * @default false
+             */
+            present: boolean;
+            /**
+             * Sent
+             * @default false
+             */
+            sent: boolean;
         };
         /** MaintenanceBody */
         MaintenanceBody: {
@@ -19475,6 +20726,7 @@ export interface components {
             status: string;
             /**
              * Timestamp
+             * @description When it was recorded: ISO 8601 with the UTC offset in force on that date on the instrument PC (2026-07-01T12:00:00.123456+02:00, 2026-01-15T09:30:00+01:00 in a zone with daylight saving). "" for a planned step; a stamp that could not be read is passed on as recorded.
              * @default
              */
             timestamp: string;
@@ -22616,6 +23868,18 @@ export interface components {
              */
             reloaded: boolean;
         };
+        /**
+         * RampSegment
+         * @description One Model 625 ramp segment: ``rate_a_s`` applies while |I| < ``upper_current_a``.
+         */
+        RampSegment: {
+            /** Rate A S */
+            rate_a_s?: number | null;
+            /** Segment */
+            segment: number;
+            /** Upper Current A */
+            upper_current_a?: number | null;
+        };
         /** RearmWatchdogResponse */
         RearmWatchdogResponse: {
             /**
@@ -24197,6 +25461,18 @@ export interface components {
              */
             image_b64: string;
             /**
+             * Live
+             * @description True for the scan IN PROGRESS (the vision monitor's newest 1/8 milestone image), False for a saved .sxm. A time window filters saved scans by mtime; the scan in progress is always drawn, like the live scan frame it sits in. A client drawing the row-by-row live stream (LiveHub local/scan/live/<n>) hides this image while that stream covers the frame, and uses it as the fallback when the stream is unavailable.
+             * @default false
+             */
+            live: boolean;
+            /**
+             * Mtime
+             * @description When the file was last written, ISO 8601 in UTC (e.g. 2026-11-12T03:04:05Z); "" when it could not be read. For a saved .sxm that is when Nanonis finished the scan; for the scan in progress, when its newest milestone image was written. Clients use it to show the image's age and to filter the map by time — an image with no mtime must be treated as undated, not as old.
+             * @default
+             */
+            mtime: string;
+            /**
              * Name
              * @default
              */
@@ -24836,6 +26112,27 @@ export interface components {
             reloaded: boolean;
         };
         /**
+         * SegmentBeam
+         * @description The beam at the start of a segment (contract v2 §4.7).
+         */
+        SegmentBeam: {
+            /**
+             * P
+             * @description power relative to the tree's source (S0; 1 at the source)
+             */
+            p: number;
+            /**
+             * Q
+             * @description [z, zR] in mm: the complex beam parameter q = z + i zR of the Gaussian beam (z > 0 past the waist); null without one
+             */
+            q: number[] | null;
+            /**
+             * S
+             * @description [S1/S0, S2/S0, S3/S0], the normalised Stokes vector in the beam's own frame (e_h = z x d in the table plane, left of the beam; e_v = z, up; S1 = I_h - I_v, S2 = I_+45 - I_-45, angles from e_h towards e_v); null when no light (S0 = 0)
+             */
+            s: number[] | null;
+        };
+        /**
          * SegmentDataResponse
          * @description Decimated waveform for one segment.
          *
@@ -25146,6 +26443,11 @@ export interface components {
          * SensorsResponse
          * @description The persisted sensor config. ``autodetect`` mirrors the config flag.
          *     ``degraded`` True when the environment config module can't be read.
+         *
+         *     ``autodetect_effective`` / ``autodetect_reason``: whether the serial scan will really run
+         *     at the next start or rescan, and why - the station profile and the setting
+         *     ``serial_autodetect`` can say otherwise than the file (``environment.config.autodetect_policy``,
+         *     docs/v2/design/generic_station.md §1.4). ``None`` when it cannot be worked out.
          */
         SensorsResponse: {
             /**
@@ -25153,6 +26455,13 @@ export interface components {
              * @default true
              */
             autodetect: boolean;
+            /** Autodetect Effective */
+            autodetect_effective?: boolean | null;
+            /**
+             * Autodetect Reason
+             * @default
+             */
+            autodetect_reason: string;
             /**
              * Count
              * @default 0
@@ -25309,6 +26618,8 @@ export interface components {
             scan_policy?: {
                 [key: string]: unknown;
             } | null;
+            /** Serial Autodetect */
+            serial_autodetect?: boolean | null;
             /** Station Profile */
             station_profile?: string | null;
             /** Theme */
@@ -25462,6 +26773,8 @@ export interface components {
             scan_policy?: {
                 [key: string]: unknown;
             } | null;
+            /** Serial Autodetect */
+            serial_autodetect?: boolean | null;
             /** Station Profile */
             station_profile?: string | null;
             /** Theme */
@@ -26723,6 +28036,11 @@ export interface components {
         /** Table */
         Table: {
             /**
+             * Beam Height Mm
+             * @description height of the beam above the table top, mm (0-10000, 0.01 resolution): the height of every component and source without props.z_mm; not given = 75
+             */
+            beam_height_mm?: number | null;
+            /**
              * Grid
              * @default metric
              * @enum {string}
@@ -27353,21 +28671,62 @@ export interface components {
              * @enum {string}
              */
             action: "reflect" | "transmit" | "split" | "stop" | "blocked" | "back_hit";
+            beam: components["schemas"]["EventBeam"];
             /** Component */
             component: string;
+            /**
+             * Dz Mm
+             * @description height of the beam minus that of the component's axis (a periscope: of its entrance for this direction), mm; above 0 the beam is above the axis
+             */
+            dz_mm: number;
             /** Incidence Deg */
             incidence_deg: number;
             /** Offset Mm */
             offset_mm: number;
-            /** Path Mm */
+            /**
+             * Path Mm
+             * @description path from the source, mm, with the vertical runs inside periscopes
+             */
             path_mm: number;
             /** X */
+            x: number;
+            /** Y */
+            y: number;
+            /**
+             * Z Mm
+             * @description height of the beam arriving here, mm (contract 3D §4)
+             */
+            z_mm: number;
+        };
+        /**
+         * TracePass
+         * @description A component a segment passes over or under (contract 3D §3.5): the ray meets its working surface in the
+         *     plane, inside the aperture, but more than half the aperture above or below its axis, and goes on.
+         */
+        TracePass: {
+            /** Component */
+            component: string;
+            /**
+             * Dz Mm
+             * @description height of the beam minus that of the component's axis (a periscope: of its entrance for this direction), mm; above 0 the beam passes over it
+             */
+            dz_mm: number;
+            /**
+             * X
+             * @description where the ray passes it, in the plane, mm
+             */
             x: number;
             /** Y */
             y: number;
         };
         /** TraceSegment */
         TraceSegment: {
+            beam: components["schemas"]["SegmentBeam"];
+            /**
+             * Passes
+             * @description the components the segment passes over or under, in the order along it (contract 3D §3.5)
+             */
+            passes: components["schemas"]["TracePass"][];
             /** X0 */
             x0: number;
             /** X1 */
@@ -27376,9 +28735,15 @@ export interface components {
             y0: number;
             /** Y1 */
             y1: number;
+            /**
+             * Z Mm
+             * @description height of the beam along the segment above the table top, mm (contract 3D §4)
+             */
+            z_mm: number;
         };
         /** TraceTree */
         TraceTree: {
+            beam: components["schemas"]["TreeBeam"];
             /** Branches */
             branches: components["schemas"]["TraceBranch"][];
             /** Source */
@@ -27598,6 +28963,22 @@ export interface components {
             degraded: boolean;
             /** Entries */
             entries?: components["schemas"]["TranscriptEntry"][];
+        };
+        /**
+         * TreeBeam
+         * @description What the beam of a whole tree has in common (contract v2 §4.7).
+         */
+        TreeBeam: {
+            /**
+             * M2
+             * @description beam quality factor M^2 of the tree; null when it has no Gaussian beam
+             */
+            m2: number | null;
+            /**
+             * Source Mw
+             * @description the source's power in mW (every wavelength of a source has all of power_mw; a fibre continuation what reached its coupler times the coupling); null when not known
+             */
+            source_mw: number | null;
         };
         /** UpdateTipBody */
         UpdateTipBody: {
@@ -32660,6 +34041,59 @@ export interface operations {
             };
         };
     };
+    heater_control_status_api_environment_heater_control_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HeaterControlStatus"];
+                };
+            };
+        };
+    };
+    heater_control_off_api_environment_heater_control_off_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HeaterOffRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HeaterOffResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     instrument_state_api_environment_instrument_state_get: {
         parameters: {
             query?: never;
@@ -32676,6 +34110,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InstrumentStateResponse"];
+                };
+            };
+        };
+    };
+    magnet_control_status_api_environment_magnet_control_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MagnetControlStatus"];
+                };
+            };
+        };
+    };
+    magnet_control_stop_api_environment_magnet_control_stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MagnetStopRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MagnetStopResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -33568,6 +35055,39 @@ export interface operations {
             };
         };
     };
+    gallery_auto_api_gallery_auto_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GalleryAutoRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GalleryBuildStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     gallery_build_api_gallery_build_post: {
         parameters: {
             query?: never;
@@ -33661,6 +35181,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GalleryConfigResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gallery_env_tags_api_gallery_env_tags_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GalleryEnvTagsConfig"];
+                };
+            };
+        };
+    };
+    gallery_env_tags_update_api_gallery_env_tags_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GalleryEnvTagsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GalleryEnvTagsConfig"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gallery_env_api_gallery_env__path__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GalleryEnvDetail"];
                 };
             };
             /** @description Validation Error */
@@ -36230,6 +37834,51 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["LayoutListResponse"];
                 };
+            };
+        };
+    };
+    figure_pdf_route_api_optical_layouts_figure_pdf_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FigurePdfBody"];
+            };
+        };
+        responses: {
+            /** @description the figure as a vector PDF */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": unknown;
+                };
+            };
+            /** @description the request body is too large (refused before it is read) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description the body is not a figure SVG */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description PyMuPDF is not installed */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -15,10 +15,23 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 import { tr } from "./i18n.ts";
+import {
+  ALL_TIME,
+  browserOffsetMin,
+  fmtAgo,
+  fmtDateTime,
+  fmtUtcOffset,
+  inWindow,
+  parseStamp,
+  stampOffsetMin,
+  wallClockOf,
+  type TimeWindow,
+} from "./scanMapTime.ts";
 
 /** A drawable layer the operator can switch off. */
 export type MapLayerId =
   | "underlay" // saved .sxm thumbnails placed by real stage footprint
+  | "live" // the scan in progress, row by row (LiveHub), and its scan line
   | "grid" // nm grid + axis ticks
   | "avoid" // keep-out discs from the analysis
   | "history" // executed markers in the LIVE coordinate generation
@@ -36,12 +49,13 @@ export type MapViewMode =
   | "full"; // the whole reachable piezo area
 
 export const MAP_LAYER_IDS: MapLayerId[] = [
-  "underlay", "grid", "avoid", "history", "stale", "plan", "upcoming", "next",
+  "underlay", "live", "grid", "avoid", "history", "stale", "plan", "upcoming", "next",
 ];
 
 /** Human labels for the layer switches (kept next to the ids on purpose). */
 export const MAP_LAYER_LABELS: Record<MapLayerId, string> = {
   underlay: tr("扫描底图", "Scan underlay"),
+  live: tr("实时扫描", "Live scan"),
   grid: tr("网格刻度", "Grid and ticks"),
   avoid: tr("避让区", "Keep-out zones"),
   history: tr("历史操作", "History"),
@@ -54,17 +68,24 @@ export const MAP_LAYER_LABELS: Record<MapLayerId, string> = {
 /** One-line rationale shown under each switch. */
 export const MAP_LAYER_HINTS: Record<MapLayerId, string> = {
   underlay: tr("已保存 .sxm 按真实舞台坐标铺底", "Saved .sxm images laid out at their real stage coordinates"),
+  live: tr(
+    "正在扫的这一帧逐行画在扫描框上，带扫描线；不可用时退回 1/8 进度快照",
+    "The frame being scanned, drawn row by row in the scan frame with a scan line; falls back to the 1/8-progress snapshot",
+  ),
   grid: tr("nm 网格与坐标轴刻度", "nm grid and axis ticks"),
   avoid: tr("破坏/污染区域，规划会绕开", "Damaged / contaminated areas; planning routes around them"),
   history: tr("当前坐标系里已执行的操作", "Operations already executed in the current coordinate system"),
-  stale: tr("粗动前的旧坐标（淡显；关掉则完全隐藏）", "Old coordinates from before the coarse move (faded; hidden when switched off)"),
+  stale: tr(
+    "粗动前的旧坐标与旧扫描图（淡显；关掉则完全隐藏）",
+    "Markers and scan images from before the coarse move (faded; hidden when switched off)",
+  ),
   plan: tr("已发布的计划路线，按执行顺序编号", "Published planned route, numbered in execution order"),
   upcoming: tr("当前策略接下来会走的位置", "Positions the current strategy would visit next"),
   next: tr("分析给出的下一个推荐位置", "Next recommended position from the analysis"),
 };
 
 export const DEFAULT_LAYERS: MapLayers = {
-  underlay: true, grid: true, avoid: true, history: true,
+  underlay: true, live: true, grid: true, avoid: true, history: true,
   stale: true, plan: true, upcoming: true, next: true,
 };
 
@@ -96,7 +117,7 @@ export const MAP_PRESETS: MapPreset[] = [
     label: tr("精简", "Minimal"),
     hint: tr("只看表面与当前坐标系里做过什么", "Only the surface and what was done in the current coordinate system"),
     layers: {
-      underlay: true, grid: false, avoid: false, history: true,
+      underlay: true, live: true, grid: false, avoid: false, history: true,
       stale: false, plan: false, upcoming: false, next: false,
     },
   },
@@ -105,7 +126,7 @@ export const MAP_PRESETS: MapPreset[] = [
     label: tr("规划聚焦", "Planning focus"),
     hint: tr("去掉缩略图与旧坐标，突出去哪儿", "Hide thumbnails and old coordinates to highlight where to go"),
     layers: {
-      underlay: false, grid: true, avoid: true, history: true,
+      underlay: false, live: false, grid: true, avoid: true, history: true,
       stale: false, plan: true, upcoming: true, next: true,
     },
   },
@@ -259,10 +280,7 @@ interface BoundsMap {
   frame?: FrameLike | null;
   tip_xyz?: { x_m?: number | null; y_m?: number | null } | null;
   markers?: ({ status?: string | null; coord_epoch?: number | null } & XY)[] | null;
-  scan_images?: {
-    center_x_m?: number | null; center_y_m?: number | null;
-    width_m?: number | null; height_m?: number | null;
-  }[] | null;
+  scan_images?: ScanImageLike[] | null;
   current_epoch?: number | null;
 }
 
@@ -297,6 +315,58 @@ class Extent {
       minY: Math.min(...this.ys), maxY: Math.max(...this.ys),
     };
   }
+}
+
+// ── saved-scan thumbnails (the surface underlay) ───────────────────────────
+
+/** Opacity of a saved-scan thumbnail drawn at full strength. */
+export const SCAN_IMAGE_OPACITY = 0.92;
+
+/**
+ * Opacity multiplier for anything whose coordinate belongs to a superseded
+ * coordinate generation. A lateral coarse move slides the sample stage, so
+ * those numbers now address a different patch of surface — the thing is real
+ * history, but it is NOT where it is drawn any more. Faded rather than hidden:
+ * the operator should still be able to see that work happened.
+ */
+export const STALE_EPOCH_OPACITY = 0.22;
+
+/** The subset of `ScanImage` the view rules read. Structural, so tests need no API types. */
+export interface ScanImageLike {
+  center_x_m?: number | null;
+  center_y_m?: number | null;
+  width_m?: number | null;
+  height_m?: number | null;
+  angle_deg?: number | null;
+  stale_epoch?: boolean | null;
+  name?: string | null;
+  path?: string | null;
+  mtime?: string | null;
+  /** The scan in progress (the vision monitor's 1/8 milestone image), not a saved .sxm. */
+  live?: boolean | null;
+}
+
+/**
+ * How a saved-scan thumbnail is drawn: its opacity, or `null` when it is not
+ * drawn at all.
+ *
+ * A `.sxm` written before the last lateral coarse move carries header
+ * coordinates from a frame that no longer exists, so drawn at full strength it
+ * paints a picture over surface it never imaged — and looks exactly as
+ * trustworthy as a current one. That is the thing `stale_epoch` exists to
+ * prevent. Such an image follows the same
+ * rule as a stale marker: faded by the same factor, and hidden with the
+ * "old coordinates" layer.
+ */
+export function scanImageOpacity(
+  img: { stale_epoch?: boolean | null },
+  layers: Pick<MapLayers, "underlay" | "stale">,
+): number | null {
+  if (!layers.underlay) return null;
+  if (img?.stale_epoch === true) {
+    return layers.stale ? SCAN_IMAGE_OPACITY * STALE_EPOCH_OPACITY : null;
+  }
+  return SCAN_IMAGE_OPACITY;
 }
 
 /** True when this marker's coordinate predates a lateral coarse move. */
@@ -375,10 +445,11 @@ function fitBounds(
     ext.add(m.x_m, m.y_m, m.w_m, m.h_m);
   }
 
-  if (layers.underlay) {
-    for (const s of map?.scan_images ?? []) {
-      ext.add(s.center_x_m, s.center_y_m, s.width_m, s.height_m);
-    }
+  for (const s of map?.scan_images ?? []) {
+    // The same rule the canvas draws by: an old-coordinate image hidden with its
+    // layer must not keep holding the view open around empty canvas.
+    if (scanImageOpacity(s, layers) == null) continue;
+    ext.add(s.center_x_m, s.center_y_m, s.width_m, s.height_m);
   }
 
   if (analysis) {
@@ -526,9 +597,15 @@ export function stageToScreen(
 export function fmtNm(valueNm: number, stepNm: number): string {
   if (!Number.isFinite(valueNm)) return "";
   const step = Number.isFinite(stepNm) && stepNm > 0 ? stepNm : 1;
-  const decimals = Math.min(6, Math.max(0, Math.ceil(-Math.log10(step))));
-  // `+` normalises -0 to 0 and drops trailing zeros ("1.50" → "1.5").
-  return String(+(valueNm + 0).toFixed(decimals));
+  // The epsilon keeps a step that is a power of ten up to float noise (0.1 can
+  // come out of arithmetic as 0.09999999999999999) from asking for an extra
+  // decimal place.
+  const decimals = Math.min(6, Math.max(0, Math.ceil(-Math.log10(step) - 1e-9)));
+  // `+` normalises -0 to 0 and drops trailing zeros ("1.50" → "1.5"). Axis
+  // numbers take a real minus sign (U+2212): a hyphen is shorter than the digits
+  // and reads as a dash at 9 px.
+  const s = String(+(valueNm + 0).toFixed(decimals));
+  return s.startsWith("-") ? "−" + s.slice(1) : s;
 }
 
 // ── marker detail (clicking a marker opens a popup with details and time) ────
@@ -579,7 +656,21 @@ export function markerDetailRows(
   currentEpoch?: number | null,
 ): DetailRow[] {
   const rows: DetailRow[] = [];
-  if (m.timestamp) rows.push({ label: tr("时间", "Time"), value: m.timestamp.replace("T", " "), mono: true });
+  if (m.timestamp) {
+    // In the browser's time zone, through the same formatter as an image's
+    // "Modified" — two clocks in one popup must not disagree by a time zone.
+    const t = parseStamp(m.timestamp);
+    rows.push({ label: tr("时间", "Time"), value: t == null ? m.timestamp.replace("T", " ") : fmtDateTime(t), mono: true });
+    // A browser zones away from the instrument also gets the PC's own wall
+    // clock: that is what its file names and the lab notebook say. Both parts
+    // come from the stamp itself — the wall clock as written and the offset of
+    // ITS date — so a winter marker read in summer is not an hour off.
+    const own = stampOffsetMin(m.timestamp);
+    const wall = wallClockOf(m.timestamp);
+    if (t != null && own != null && wall && browserOffsetMin(t) !== own) {
+      rows.push({ label: tr("仪器时钟", "Instrument clock"), value: `${wall} (${fmtUtcOffset(own)})`, mono: true });
+    }
+  }
   if (m.skill_name) rows.push({ label: tr("技能", "Skill"), value: m.skill_name, mono: true });
   if (m.status) rows.push({ label: tr("状态", "Status"), value: statusLabelOf(m.status) });
   const x = nm(m.x_m);
@@ -610,4 +701,222 @@ function statusLabelOf(s: string): string {
   if (s === "failed") return tr("失败", "Failed");
   if (s === "done") return tr("已完成", "Done");
   return s;
+}
+
+// ── what is actually drawn (layers × time window) ──────────────────────────
+//
+// One decision, three readers: the canvas draws these, the legend counts them,
+// and the marker list lists them. Computing it once here is what keeps "STS 14"
+// in the legend true of the map next to it.
+
+/** The subset of `MapMarkerView` the history rules read. */
+export interface HistoryMarkerLike {
+  kind?: string | null;
+  status?: string | null;
+  coord_epoch?: number | null;
+  timestamp?: string | null;
+  x_m?: number | null;
+  y_m?: number | null;
+}
+
+const finite = (v: number | null | undefined): v is number => v != null && Number.isFinite(v);
+
+/**
+ * Executed markers that the canvas draws, with their index in `map.markers`.
+ *
+ * Planned steps are not history (the route draws them, unaffected by the time
+ * filter); a marker without a position cannot be drawn; the live/stale split
+ * follows the two layer switches; and the time window drops what is outside it
+ * — except an undated marker, which is always kept: hiding work because its
+ * clock reading is missing would make it vanish for a reason nobody can see.
+ */
+export function drawnHistory<T extends HistoryMarkerLike>(
+  markers: T[] | null | undefined,
+  currentEpoch: number | null | undefined,
+  layers: Pick<MapLayers, "history" | "stale">,
+  window: TimeWindow = ALL_TIME,
+): { m: T; index: number }[] {
+  const out: { m: T; index: number }[] = [];
+  (markers ?? []).forEach((m, index) => {
+    if (!m || (m.status ?? "") === "planned") return;
+    if (!finite(m.x_m) || !finite(m.y_m)) return;
+    if (!(isStaleEpoch(m, currentEpoch) ? layers.stale : layers.history)) return;
+    if (!inWindow(parseStamp(m.timestamp), window)) return;
+    out.push({ m, index });
+  });
+  return out;
+}
+
+/** Saved-scan thumbnails the canvas draws, with opacity and original index. */
+export function drawnScanImages<T extends ScanImageLike>(
+  images: T[] | null | undefined,
+  layers: Pick<MapLayers, "underlay" | "stale"> & Partial<Pick<MapLayers, "live">>,
+  window: TimeWindow = ALL_TIME,
+  /** The row-by-row live stream is drawing the scan in progress: its 1/8
+   *  milestone image would be a second, staler copy of the same frame. */
+  liveStreamShown = false,
+): { img: T; index: number; opacity: number }[] {
+  const out: { img: T; index: number; opacity: number }[] = [];
+  (images ?? []).forEach((img, index) => {
+    if (!img) return;
+    // The milestone image belongs to the "live scan" layer, and steps aside
+    // for the stream; it is the fallback when the stream is unavailable.
+    if (img.live === true && (layers.live === false || liveStreamShown)) return;
+    const opacity = scanImageOpacity(img, layers);
+    if (opacity == null) return;
+    // An image whose mtime could not be read is undated: kept, like a marker.
+    // The scan in progress is not filtered at all, like the live frame it sits
+    // in: its mtime is its newest milestone's, and a window closed before that
+    // hid the very scan the operator was watching.
+    if (img.live !== true && !inWindow(parseStamp(img.mtime), window)) return;
+    out.push({ img, index, opacity });
+  });
+  return out;
+}
+
+/** How many markers of each kind (lower-cased). */
+export function kindCounts(markers: { kind?: string | null }[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const m of markers) {
+    const k = (m?.kind ?? "").toLowerCase();
+    out[k] = (out[k] ?? 0) + 1;
+  }
+  return out;
+}
+
+/** "14", or "5/14" when the map shows fewer than were recorded. */
+export function fmtCount(shown: number, total: number): string {
+  return shown === total ? String(shown) : `${shown}/${total}`;
+}
+
+/**
+ * A stable identity for each marker, the same across 3 s polls.
+ *
+ * `MapMarkerView` carries no row id, and the array index is not stable: the
+ * backend returns the newest 2000 rows, so once a scope outgrows that window
+ * every index shifts by one on each new operation. Built from what the row
+ * says instead, with an occurrence suffix for exact duplicates.
+ */
+export function markerKeys(
+  markers: { kind?: string | null; timestamp?: string | null; skill_name?: string | null;
+    label?: string | null; x_m?: number | null; y_m?: number | null; status?: string | null }[],
+): string[] {
+  const seen = new Map<string, number>();
+  return markers.map((m) => {
+    const base = [m?.status ?? "", m?.timestamp ?? "", m?.kind ?? "", m?.skill_name ?? "",
+      m?.label ?? "", m?.x_m ?? "", m?.y_m ?? ""].join("|");
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    return `${base}#${n}`;
+  });
+}
+
+/**
+ * Rows for a saved-scan thumbnail's popup: which file it is, where and how big,
+ * when it was written, and whether its coordinates still mean anything.
+ */
+export function scanImageDetailRows(img: ScanImageLike, nowMs?: number | null): DetailRow[] {
+  const rows: DetailRow[] = [];
+  if (img.name) rows.push({ label: tr("文件", "File"), value: img.name, mono: true });
+  if (img.path) rows.push({ label: tr("路径", "Path"), value: img.path, mono: true });
+  const cx = nm(img.center_x_m);
+  const cy = nm(img.center_y_m);
+  if (cx && cy) rows.push({ label: tr("中心", "Centre"), value: `X ${cx} · Y ${cy}`, mono: true });
+  const w = nm(img.width_m);
+  const h = nm(img.height_m);
+  if (w && h) rows.push({ label: tr("尺寸", "Size"), value: `${w} × ${h}`, mono: true });
+  if (img.angle_deg != null && Number.isFinite(img.angle_deg) && img.angle_deg !== 0) {
+    rows.push({ label: tr("角度", "Angle"), value: `${img.angle_deg.toFixed(1)}°`, mono: true });
+  }
+  const t = parseStamp(img.mtime);
+  if (t != null) {
+    const ago = nowMs != null && Number.isFinite(nowMs) ? fmtAgo(t, nowMs) : null;
+    rows.push({
+      label: tr("修改时间", "Modified"),
+      value: `${fmtDateTime(t)}${ago ? tr(`（${ago}）`, ` (${ago})`) : ""}`,
+      mono: true,
+    });
+  } else {
+    rows.push({
+      label: tr("修改时间", "Modified"),
+      value: tr("读不到（按时间筛选时照常显示）", "Unknown (always shown when filtering by time)"),
+    });
+  }
+  rows.push(
+    img.stale_epoch
+      ? {
+          label: tr("坐标", "Coordinates"),
+          value: tr(
+            "粗动之前写的文件：头里的坐标属于已经作废的坐标系，这张图现在画在它从没扫过的表面上，所以淡显。",
+            "Written before the last coarse move: its header coordinates belong to a coordinate system that no longer applies, so it now sits over surface it never imaged. That is why it is faded.",
+          ),
+        }
+      : { label: tr("坐标", "Coordinates"), value: tr("当前坐标系", "Current coordinate system") },
+  );
+  return rows;
+}
+
+// ── the marker list under the map ──────────────────────────────────────────
+
+/**
+ * Rows for the marker list: the markers the map draws, newest first, narrowed
+ * by kind and by a free-text query over label, skill and kind name.
+ *
+ * "Newest" is record order (the index), not the timestamp — see
+ * latestActionIndex in scanMapTime.ts for why.
+ */
+export function filterMarkerRows<T extends { index: number; m: { kind?: string | null; label?: string | null; skill_name?: string | null } }>(
+  rows: T[],
+  opts: { kind?: string; query?: string },
+  kindName: (kind?: string | null) => string = () => "",
+): T[] {
+  const kind = (opts.kind ?? "").trim().toLowerCase();
+  const q = (opts.query ?? "").trim().toLowerCase();
+  return rows
+    .filter((r) => !kind || (r.m.kind ?? "").toLowerCase() === kind)
+    .filter((r) => {
+      if (!q) return true;
+      const hay = [r.m.label, r.m.skill_name, r.m.kind, kindName(r.m.kind)]
+        .map((v) => (v ?? "").toLowerCase())
+        .join("\n");
+      return hay.includes(q);
+    })
+    .sort((a, b) => b.index - a.index);
+}
+
+/**
+ * The kinds the list's filter offers: those its rows have, plus the one
+ * selected even when no row has it any more. Built from the
+ * rows alone, a kind that left them — the time window moved — vanished from
+ * the options while it still filtered: the select fell back to showing "All
+ * kinds" above a list narrowed to nothing. Kept, the select says what is
+ * filtering, and the choice is still there when the window widens again.
+ */
+export function markerKindOptions(rows: { m: { kind?: string | null } }[], selected: string): string[] {
+  const kinds = new Set(rows.map((r) => (r.m.kind ?? "").toLowerCase()).filter(Boolean));
+  const sel = selected.trim().toLowerCase();
+  if (sel) kinds.add(sel);
+  return [...kinds].sort();
+}
+
+// ── exporting the view ─────────────────────────────────────────────────────
+
+/**
+ * "scanmap_Au(111)_#3_20261112-154210.png": the sample and the moment, in a
+ * name every OS accepts. Characters Windows forbids in file names, control
+ * characters and whitespace become "_"; an empty or all-forbidden sample name
+ * falls back to "map".
+ */
+export function exportFileName(sample: string | null | undefined, at: Date): string {
+  const clean = (sample ?? "")
+    // eslint-disable-next-line no-control-regex
+    .replace(/[<>:"/\\|?*\u0000-\u001f\s]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^[_.]+|[_.]+$/g, "")
+    .slice(0, 60);
+  const p = (n: number) => String(n).padStart(2, "0");
+  const stamp =
+    `${at.getFullYear()}${p(at.getMonth() + 1)}${p(at.getDate())}-` +
+    `${p(at.getHours())}${p(at.getMinutes())}${p(at.getSeconds())}`;
+  return `scanmap_${clean || "map"}_${stamp}.png`;
 }

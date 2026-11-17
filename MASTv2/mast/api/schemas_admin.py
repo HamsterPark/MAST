@@ -170,9 +170,16 @@ class SensorEntry(BaseModel):
 
 class SensorsResponse(BaseModel):
     """The persisted sensor config. ``autodetect`` mirrors the config flag.
-    ``degraded`` True when the environment config module can't be read."""
+    ``degraded`` True when the environment config module can't be read.
+
+    ``autodetect_effective`` / ``autodetect_reason``: whether the serial scan will really run
+    at the next start or rescan, and why - the station profile and the setting
+    ``serial_autodetect`` can say otherwise than the file (``environment.config.autodetect_policy``,
+    docs/v2/design/generic_station.md §1.4). ``None`` when it cannot be worked out."""
 
     autodetect: bool = True
+    autodetect_effective: Optional[bool] = None
+    autodetect_reason: str = ""
     sensors: list[SensorEntry] = Field(default_factory=list)
     count: int = 0
     degraded: bool = False
@@ -270,8 +277,112 @@ class DiscoveredOutput(BaseModel):
     ramp_rate: Optional[float] = None
 
 
+class RampSegment(BaseModel):
+    """One Model 625 ramp segment: ``rate_a_s`` applies while |I| < ``upper_current_a``."""
+
+    segment: int
+    upper_current_a: Optional[float] = None
+    rate_a_s: Optional[float] = None
+
+
+class MagnetState(BaseModel):
+    """Lake Shore Model 625 superconducting-magnet supply, read-only.
+
+    Every field comes from a query; ``null`` = the instrument did not answer that
+    query (unknown), never a default. MAST has no path to change any of these:
+    the driver cannot build a setter (``environment/lakeshore_625.py``).
+    """
+
+    current_a: Optional[float] = Field(None, description="measured output current (RDGI?), A")
+    voltage_v: Optional[float] = Field(None, description="output voltage at the supply terminals (RDGV?)")
+    remote_voltage_v: Optional[float] = Field(None, description="voltage at the remote-sense leads (RDGRV?)")
+    field: Optional[float] = Field(None, description="computed field = measured current x field constant (RDGF?)")
+    field_unit: str = Field("", description="T or kG (FLDS?)")
+    field_constant: Optional[float] = Field(None, description="field_unit per ampere (FLDS?)")
+    max_field: Optional[float] = Field(None, description="LIMIT? current x field constant")
+    setpoint_current_a: Optional[float] = None
+    setpoint_field: Optional[float] = None
+    compliance_v: Optional[float] = None
+    ramp_rate_a_s: Optional[float] = None
+    persistent_ramp_enabled: Optional[bool] = None
+    persistent_ramp_rate_a_s: Optional[float] = None
+    limit_current_a: Optional[float] = None
+    limit_voltage_v: Optional[float] = None
+    limit_rate_a_s: Optional[float] = None
+    ramp_segments_enabled: Optional[bool] = None
+    ramp_segments: Optional[list[RampSegment]] = Field(
+        None, description="RSEGS? 1..5 when segments are enabled; null when not read")
+    trigger_current_a: Optional[float] = Field(
+        None, description="current the output would ramp to on a trigger (TRIG?)")
+    psh_enabled: Optional[bool] = Field(None, description="a persistent switch is configured (PSHS?)")
+    psh_current_ma: Optional[float] = None
+    psh_delay_s: Optional[float] = None
+    psh_state_code: Optional[int] = Field(None, description="0 off, 1 on, 2 warming, 3 cooling")
+    psh_state: Optional[str] = None
+    psh_last_current_a: Optional[float] = None
+    quench_detection_enabled: Optional[bool] = None
+    quench_step_limit_a_s: Optional[float] = None
+    external_program_code: Optional[int] = None
+    external_program: Optional[str] = None
+    interface_mode_code: Optional[int] = Field(None, description="0 local, 1 remote, 2 remote + lockout")
+    interface_mode: Optional[str] = None
+    operational_status_code: Optional[int] = None
+    ramp_done: Optional[bool] = None
+    in_compliance: Optional[bool] = None
+    ramping: Optional[bool] = None
+    energized: Optional[bool] = Field(None, description="|output current| > 10 mA")
+    hardware_error_code: Optional[int] = None
+    operational_error_code: Optional[int] = None
+    psh_error_code: Optional[int] = None
+    hardware_errors: Optional[list[str]] = None
+    operational_errors: Optional[list[str]] = None
+    psh_errors: Optional[list[str]] = None
+    any_error: Optional[bool] = None
+    quench_detected: Optional[bool] = None
+    crowbar_discharge: Optional[bool] = None
+    read_at: float = 0.0
+    unanswered: list[str] = Field(default_factory=list)
+
+
+class LevelMeterState(BaseModel):
+    """Cryomagnetics LM-510 level monitor, one channel, read-only.
+
+    ``level`` is the instrument's LAST COMPLETED reading (MEAS?); MAST never starts
+    a measurement. ``updates_by_itself`` false = sample mode Off: the number will
+    not refresh until someone starts a reading at the instrument.
+    """
+
+    channel: int = 1
+    level: Optional[float] = None
+    unit: str = ""
+    channel_type: Optional[str] = Field(None, description="LHe or LN2 (TYPE?)")
+    channel_type_code: Optional[int] = None
+    status_code: Optional[int] = None
+    status_flags: Optional[list[str]] = None
+    sensor_fault: Optional[bool] = Field(None, description="open sensor or burnout (STAT?)")
+    menu_open: Optional[bool] = Field(None, description="an operator has the front-panel menu open")
+    control: str = Field("", description="refill control status (CTRL?)")
+    default_channel: Optional[int] = Field(
+        None, description="channel the mode/interval/units fields describe (CHAN?)")
+    sample_mode: str = ""
+    sample_interval: str = ""
+    updates_by_itself: Optional[bool] = None
+    sensor_length: str = ""
+    boost: str = ""
+    low_alarm: str = ""
+    high_alarm: str = ""
+    ctrl_low: str = ""
+    ctrl_high: str = ""
+    read_at: float = 0.0
+    unanswered: list[str] = Field(default_factory=list)
+
+
 class InstrumentState(BaseModel):
-    """Everything MAST can read off an instrument without writing to it."""
+    """Everything MAST can read off an instrument without writing to it.
+
+    ``kind`` selects which part is filled: ``lakeshore_temp`` → ``channels`` /
+    ``outputs``; ``lakeshore_625`` → ``magnet``; ``cryomag_lm510`` → ``level_meter``.
+    """
 
     port: str = ""
     kind: str = ""
@@ -282,6 +393,8 @@ class InstrumentState(BaseModel):
     any_heater_on: bool = False
     channels: list[DiscoveredChannel] = Field(default_factory=list)
     outputs: list[DiscoveredOutput] = Field(default_factory=list)
+    magnet: Optional[MagnetState] = None
+    level_meter: Optional[LevelMeterState] = None
 
 
 class DiscoveredDevice(InstrumentState):
@@ -309,6 +422,78 @@ class InstrumentStateResponse(BaseModel):
 
     instruments: list[InstrumentState] = Field(default_factory=list)
     degraded: bool = False
+
+
+class MagnetControlStatus(BaseModel):
+    """Field control on the Model 625 (7.2.0): configured or not, and the ramp MAST runs.
+
+    ``present`` False = no magnet supply recognised (or MAST's side not wired).
+    ``can_set_field`` = max field and field constant are set at initialization.
+    ``active`` = the ramp MAST started and is supervising (``None`` = none);
+    ``last`` = how the previous one ended; ``last_stop`` = the latest STOP sent.
+    """
+
+    present: bool = False
+    port: str = ""
+    can_set_field: bool = False
+    #: A MAST ramp is being prepared, sent or supervised (scans are refused meanwhile).
+    busy: bool = False
+    settings: dict[str, Any] = Field(default_factory=dict)
+    active: Optional[dict[str, Any]] = None
+    last: Optional[dict[str, Any]] = None
+    last_stop: Optional[dict[str, Any]] = None
+
+
+class MagnetStopRequest(BaseModel):
+    """Operator STOP from the MAST UI. The body is required (a write needs a JSON body)."""
+
+    reason: str = Field(default="", max_length=200)
+
+
+class MagnetStopResponse(BaseModel):
+    """``sent`` True = STOP went out on the identity-checked handle."""
+
+    present: bool = False
+    sent: bool = False
+    error: str = ""
+
+
+class HeaterControlStatus(BaseModel):
+    """Sample-stage heating on the Model 335: set up or not, and the change MAST runs.
+
+    ``present`` False = no Model 335 recognised (or MAST's side not wired).
+    ``can_heat`` = output, control input and the limits are set at initialization.
+    ``active`` = the change MAST started and is supervising (``None`` = none); ``last`` =
+    how the previous one ended; ``last_off`` / ``last_hold`` = the latest heater-off / hold.
+    """
+
+    present: bool = False
+    port: str = ""
+    can_heat: bool = False
+    #: A MAST change is being prepared, sent or supervised (scans are refused meanwhile).
+    busy: bool = False
+    settings: dict[str, Any] = Field(default_factory=dict)
+    identity: dict[str, Any] = Field(default_factory=dict)
+    active: Optional[dict[str, Any]] = None
+    last: Optional[dict[str, Any]] = None
+    last_off: Optional[dict[str, Any]] = None
+    last_hold: Optional[dict[str, Any]] = None
+
+
+class HeaterOffRequest(BaseModel):
+    """Operator heater-off from the MAST UI. The body is required (a write needs a JSON body)."""
+
+    reason: str = Field(default="", max_length=200)
+
+
+class HeaterOffResponse(BaseModel):
+    """``sent`` True = every RANGE 0 went out on the identity-checked handle;
+    ``confirmed`` True = every RANGE? read back 0."""
+
+    present: bool = False
+    sent: bool = False
+    confirmed: bool = False
+    error: str = ""
 
 
 class SensorAdoptRequest(BaseModel):

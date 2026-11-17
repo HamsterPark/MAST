@@ -5,12 +5,21 @@ import { useCurrentScope } from "@/api/scope";
 import { ScopeControls } from "@/components/scope/ScopeControls";
 import { fmtBias, fmtCurrent, fmtSI } from "@/lib/units";
 import { LIVE_READINGS_POLL_MS, LIVE_READINGS_STALE_AFTER_MS } from "@/lib/pollRates";
-import { headlineSensors, readingRows, stubKinds, type EnvSensor } from "@/lib/envPanel";
+import { headlineSensors, readingRows, sensorLabel, stubKinds, type EnvSensor } from "@/lib/envPanel";
 import { tr } from "@/lib/i18n";
+import { useLegacyFeatures } from "@/hooks/useLegacyFeatures";
+import { useStationCapabilities } from "@/hooks/useStationCapabilities";
+import { pathVisible } from "@/lib/nav";
+import { profileLabel } from "@/lib/stationProfile";
 
 // Persistent right rail: INSTRUMENT / ENVIRONMENT / EXPERIMENT (active experiment +
 // sample) / SETTINGS (read-only summary) / SYSTEM / TCP. Visible on every tab.
 // Read-only summaries here; editing lives in the Settings and Records tabs.
+//
+// INSTRUMENT (bias, current, Z, ...) and TCP are the Nanonis link: they and their two
+// polls exist only on a station with the `nanonis` capability, and the polls wait until
+// the station has said so. Elsewhere a STATION section names the kind of station
+// instead, and no /api/nanonis* or live-readings request is ever sent from here.
 
 // One label/value pair rendered as two cells of the parent's auto/1fr grid.
 // The value is right-aligned, font-mono tabular-nums; an optional sparkline or
@@ -121,8 +130,13 @@ function PanelSection({
 }
 
 export function RightPanel() {
+  const station = useStationCapabilities();
+  const nanonis = station.has("nanonis");
+  const stmReads = station.ready && nanonis;
+  const { enabled: legacy } = useLegacyFeatures();
   const readings = useQuery({
     queryKey: ["hardware", "live-readings"],
+    enabled: stmReads,
     queryFn: async () => {
       const { data, error } = await api.GET("/api/hardware/live-readings");
       if (error) throw error;
@@ -144,6 +158,7 @@ export function RightPanel() {
   });
   const conn = useQuery({
     queryKey: ["nanonis", "connection"],
+    enabled: stmReads,
     queryFn: async () => {
       const { data, error } = await api.GET("/api/nanonis/connection");
       if (error) throw error;
@@ -276,46 +291,59 @@ export function RightPanel() {
     <aside className="relative w-72 shrink-0 overflow-auto bg-mast-panel">
       {/* accent bar down the left edge (canvas right-panel) */}
       <span className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-mast-accent" />
-      <PanelSection title="INSTRUMENT">
-        {readingsStale && (
-          <div className="col-span-2 mb-1 rounded bg-mast-warn-bg px-1.5 py-1 text-[10.5px] leading-snug text-mast-warn">
-            {tr("读数已停更 —— 下面是最后一次读到的值，不是当前值。", "Readings have stopped updating: the values below are the last ones read, not current.")}
+      {nanonis ? (
+        <PanelSection title="INSTRUMENT">
+          {readingsStale && (
+            <div className="col-span-2 mb-1 rounded bg-mast-warn-bg px-1.5 py-1 text-[10.5px] leading-snug text-mast-warn">
+              {tr("读数已停更 —— 下面是最后一次读到的值，不是当前值。", "Readings have stopped updating: the values below are the last ones read, not current.")}
+            </div>
+          )}
+          <Row label="Bias"
+            value={fmtBias(r?.bias_v)}
+            tone={r?.bias_v == null ? "text-mast-muted" : "text-mast-text"}
+            spark={biasHist.length ? biasHist : undefined} />
+          <Row label="Current"
+            value={fmtCurrent(r?.current_a)}
+            tone={r?.current_a == null ? "text-mast-muted" : "text-mast-text"}
+            spark={curHist.length ? curHist : undefined} sparkColor="var(--mast-accent)" />
+          <Row label="Z pos."
+            value={fmtSI(r?.z_m, "m", { digits: 5 })}
+            tone={r?.z_m == null ? "text-mast-muted" : "text-mast-text"}
+            spark={zHist.length ? zHist : undefined} />
+          <Row label="Z ctrl"
+            valueNode={
+              <StatusPill tone={zCtrl === "ON" ? "auto" : zCtrl === "OFF" ? "warn" : "muted"}>{zCtrl}</StatusPill>
+            } />
+          <Row label="Setpoint" value={fmtCurrent(r?.setpoint_a)} />
+          <Row label="Tip"
+            valueNode={
+              <StatusPill tone={r?.withdrawn ? "muted" : r?.withdrawn === false ? "auto" : "muted"}>
+                {r?.withdrawn == null ? "---" : r.withdrawn ? tr("撤回 · 安全", "Withdrawn · safe") : tr("接近", "Approached")}
+              </StatusPill>
+            } />
+          <Row label="Scan"
+            valueNode={
+              r?.scan_running ? (
+                <StatusPill tone="auto">RUNNING</StatusPill>
+              ) : (
+                <span className="font-mono text-[11.5px] tabular-nums text-mast-muted">
+                  {r?.scan_running == null ? "---" : "STOPPED"}
+                </span>
+              )
+            } />
+        </PanelSection>
+      ) : (
+        // No Nanonis on this station: no tip readouts to show. Say what the station is, and
+        // where its own overview (devices, environment, data) lives.
+        <PanelSection title="STATION">
+          <Row label={tr("类型", "Type")} value={profileLabel(station.profile)} />
+          <div className="col-span-2 mt-1 text-[11px] leading-snug text-mast-faint">
+            <Link to="/dashboard" className="text-mast-accent hover:underline">
+              {tr("站点总览 →", "Station overview →")}
+            </Link>
           </div>
-        )}
-        <Row label="Bias"
-          value={fmtBias(r?.bias_v)}
-          tone={r?.bias_v == null ? "text-mast-muted" : "text-mast-text"}
-          spark={biasHist.length ? biasHist : undefined} />
-        <Row label="Current"
-          value={fmtCurrent(r?.current_a)}
-          tone={r?.current_a == null ? "text-mast-muted" : "text-mast-text"}
-          spark={curHist.length ? curHist : undefined} sparkColor="var(--mast-accent)" />
-        <Row label="Z pos."
-          value={fmtSI(r?.z_m, "m", { digits: 5 })}
-          tone={r?.z_m == null ? "text-mast-muted" : "text-mast-text"}
-          spark={zHist.length ? zHist : undefined} />
-        <Row label="Z ctrl"
-          valueNode={
-            <StatusPill tone={zCtrl === "ON" ? "auto" : zCtrl === "OFF" ? "warn" : "muted"}>{zCtrl}</StatusPill>
-          } />
-        <Row label="Setpoint" value={fmtCurrent(r?.setpoint_a)} />
-        <Row label="Tip"
-          valueNode={
-            <StatusPill tone={r?.withdrawn ? "muted" : r?.withdrawn === false ? "auto" : "muted"}>
-              {r?.withdrawn == null ? "---" : r.withdrawn ? tr("撤回 · 安全", "Withdrawn · safe") : tr("接近", "Approached")}
-            </StatusPill>
-          } />
-        <Row label="Scan"
-          valueNode={
-            r?.scan_running ? (
-              <StatusPill tone="auto">RUNNING</StatusPill>
-            ) : (
-              <span className="font-mono text-[11.5px] tabular-nums text-mast-muted">
-                {r?.scan_running == null ? "---" : "STOPPED"}
-              </span>
-            )
-          } />
-      </PanelSection>
+        </PanelSection>
+      )}
 
       <PanelSection
         title="ENVIRONMENT"
@@ -361,7 +389,7 @@ export function RightPanel() {
           }
           return real.map((sn) => {
             const g = gauge({ value: sn.value, unit: sn.unit, connected: sn.connected, status: sn.status });
-            return <Row key={`${key}:${sn.name}`} label={sn.name || label} value={g.value} tone={g.tone} />;
+            return <Row key={`${key}:${sn.name}`} label={sensorLabel(sn.name) || label} value={g.value} tone={g.tone} />;
           });
         })}
         {/* Anything that is not one of the four known kinds (extra configured gauges)
@@ -372,7 +400,7 @@ export function RightPanel() {
           .filter((sn) => !ENV_KIND_KEYS.includes(sn.kind ?? ""))
           .map((sn) => {
             const g = gauge({ value: sn.value, unit: sn.unit, connected: sn.connected, status: sn.status });
-            return <Row key={sn.name} label={sn.name} value={g.value} tone={g.tone} />;
+            return <Row key={sn.name} label={sensorLabel(sn.name)} value={g.value} tone={g.tone} />;
           })}
         {envStubLabels.length > 0 && (
           <div className="col-span-2 mt-1 text-[11px] leading-snug text-mast-faint">
@@ -380,10 +408,11 @@ export function RightPanel() {
             {envStubLabels.map((k, i) => (
               <span key={k.key}>
                 {i > 0 && " · "}
-                {/* Noise has no dedicated hardware, but this machine's noise is measured:
-                    the current monitor computes a detrended RMS. Link there instead of
-                    inventing a number here. */}
-                {k.key === "noise_level" ? (
+                {/* Noise has no dedicated hardware, but on an STM station the noise is
+                    measured: the current monitor computes a detrended RMS. Link there
+                    instead of inventing a number here, as long as this station has that
+                    page at all. */}
+                {k.key === "noise_level" && pathVisible("/monitoring/current", legacy, station.has) ? (
                   <Link to="/monitoring/current" className="text-mast-accent hover:underline">
                     {k.label}
                   </Link>
@@ -465,19 +494,22 @@ export function RightPanel() {
         </div>
       </PanelSection>
 
-      {/* TCP footer — separate from System, like the old get_connection_compact_html */}
-      <PanelSection title="TCP">
-        <Row label={tr("连接", "Connection")}
-          valueNode={
-            <StatusPill tone={conn.data?.connected ? "auto" : "muted"}>
-              {conn.data?.connected ? tr("已连接", "Connected") : tr("未连接", "Disconnected")}
-            </StatusPill>
-          } />
-        {(conn.data?.ports ?? []).map((p) => (
-          <Row key={p.role} label={p.role} value={`${p.port ?? ""} ${p.connected ? "●" : "○"}`}
-            tone={p.connected ? "text-mast-auto" : "text-mast-muted"} />
-        ))}
-      </PanelSection>
+      {/* TCP footer — separate from System, like the old get_connection_compact_html.
+          The Nanonis ports: only on a station with Nanonis. */}
+      {nanonis && (
+        <PanelSection title="TCP">
+          <Row label={tr("连接", "Connection")}
+            valueNode={
+              <StatusPill tone={conn.data?.connected ? "auto" : "muted"}>
+                {conn.data?.connected ? tr("已连接", "Connected") : tr("未连接", "Disconnected")}
+              </StatusPill>
+            } />
+          {(conn.data?.ports ?? []).map((p) => (
+            <Row key={p.role} label={p.role} value={`${p.port ?? ""} ${p.connected ? "●" : "○"}`}
+              tone={p.connected ? "text-mast-auto" : "text-mast-muted"} />
+          ))}
+        </PanelSection>
+      )}
     </aside>
   );
 }

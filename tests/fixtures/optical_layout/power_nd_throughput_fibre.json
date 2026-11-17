@@ -1,0 +1,390 @@
+{
+  "name": "power_nd_throughput_fibre",
+  "description": "Absolute power. 100 mW, ND OD 1 (x 10^-1): 10 mW at M1; M1 reflects 90 % (throughput 0.9): 9 mW at the fibre coupler FC1. The fibre output FO1 continues it with source_mw = 9 x coupling 0.6 = 5.4 mW and its own beam: linear 90 deg (s = [-1, 0, 0]) and a 2 mm waist with M^2 = 1.1 (zR = pi 1^2 / (1.1 x 532e-6) mm); its relative power starts again at p = 1.",
+  "layout": {
+    "schema": 1,
+    "id": "power-fibre",
+    "title": "100 mW through OD 1, a 90 % mirror and a 60 % fibre coupling",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 50.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0,
+          "power_mw": 100.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "nd1",
+        "type": "nd",
+        "label": "ND1",
+        "x_mm": 150.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "od": 1.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "m1",
+        "type": "mirror",
+        "label": "M1",
+        "x_mm": 250.0,
+        "y_mm": 100.0,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "throughput": 0.9
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "fi1",
+        "type": "fiber_in",
+        "label": "FC1",
+        "x_mm": 250.0,
+        "y_mm": 300.0,
+        "angle_deg": 270.0,
+        "aperture_mm": 5.0,
+        "props": {
+          "continues_at": "fo1",
+          "coupling": 0.6
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "fo1",
+        "type": "fiber_out",
+        "label": "FO1",
+        "x_mm": 600.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0,
+          "polarization": "linear",
+          "pol_angle_deg": 90.0,
+          "beam_diameter_mm": 2.0,
+          "m2": 1.1
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "pm1",
+        "type": "power_meter",
+        "label": "PM1",
+        "x_mm": 900.0,
+        "y_mm": 100.0,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 532.0,
+      "beam": {
+        "source_mw": 100.0,
+        "m2": null
+      },
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 100.0,
+              "x1": 150.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            },
+            {
+              "x0": 150.0,
+              "y0": 100.0,
+              "x1": 250.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.1,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            },
+            {
+              "x0": 250.0,
+              "y0": 100.0,
+              "x1": 250.0,
+              "y1": 300.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.09,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "nd1",
+              "action": "transmit",
+              "x": 150.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 100.0,
+              "beam": {
+                "p": 1.0,
+                "mw": 100.0,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "m1",
+              "action": "reflect",
+              "x": 250.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 200.0,
+              "beam": {
+                "p": 0.1,
+                "mw": 10.0,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "fi1",
+              "action": "stop",
+              "x": 250.0,
+              "y": 300.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 400.0,
+              "beam": {
+                "p": 0.09,
+                "mw": 9.0,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "fo1",
+      "wavelength_nm": 532.0,
+      "beam": {
+        "source_mw": 5.4,
+        "m2": 1.1
+      },
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 600.0,
+              "y0": 100.0,
+              "x1": 900.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                "q": [
+                  0.0,
+                  5368.4085
+                ]
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "pm1",
+              "action": "stop",
+              "x": 900.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 300.0,
+              "beam": {
+                "p": 1.0,
+                "mw": 5.4,
+                "d_mm": 2.003120418,
+                "s": [
+                  -1.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ]
+}

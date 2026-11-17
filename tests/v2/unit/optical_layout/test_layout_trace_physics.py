@@ -191,7 +191,8 @@ def test_a_ray_that_starts_on_a_surface_does_not_hit_it():
 def test_a_ray_starting_on_the_boundary_moving_out_has_zero_length():
     lay = layout([laser("las1", 2200, 100, 0)])        # 1200 + 1000
     seg = trace_layout(lay)[0]["branches"][0]["segments"]
-    assert seg == [{"x0": 2200.0, "y0": 100.0, "x1": 2200.0, "y1": 100.0}]
+    assert seg == [{"x0": 2200.0, "y0": 100.0, "x1": 2200.0, "y1": 100.0, "z_mm": 75.0,     # 3D §4: added keys
+                    "beam": {"p": 1.0, "s": [0.0, 0.0, 0.0], "q": None}, "passes": []}]
     # moving in, from exactly the boundary, it travels the whole way across
     seg = trace_layout(layout([laser("las1", 2200, 100, 180)]))[0]["branches"][0]["segments"]
     assert seg[0]["x1"] == -1000.0

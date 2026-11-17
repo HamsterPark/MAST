@@ -76,15 +76,32 @@ CREATE TABLE IF NOT EXISTS env_spectra (
     created_at    REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_spectra_chan_ts ON env_spectra(channel, ts);
+
+-- 数据文件的环境标签的中央记录（docs/v2/design/data_env_tags.md）。每个打过标的数据文件
+-- 一行，按身份 (文件名小写, size, mtime_ns) 查：实验文件夹里的副本、只读目录、被挪走的文件，
+-- 图库都靠它认出来。payload 与 sidecar 是同一份 JSON。写一次（INSERT OR IGNORE），不改写。
+CREATE TABLE IF NOT EXISTS file_env_tags (
+    name_lc       TEXT NOT NULL,
+    size          INTEGER NOT NULL,
+    mtime_ns      INTEGER NOT NULL,
+    tagged_path   TEXT NOT NULL,
+    tagged_at     REAL NOT NULL,
+    sidecar_path  TEXT,               -- 写成了的 sidecar；写不进为 NULL
+    sidecar_error TEXT,               -- 写不进的原因
+    payload       TEXT NOT NULL,
+    PRIMARY KEY (name_lc, size, mtime_ns)
+) WITHOUT ROWID;
 """
 
+#: 3 = ``file_env_tags``（数据文件的环境标签）。新表由 ``CREATE TABLE IF NOT EXISTS``
+#:     在老库上直接补出来，不需要 ALTER。
 #: 2 = ``env_spectra.ctx_stable``（噪声谱需要记录当时的
 #:     状态）。**必须配 ALTER**：``CREATE TABLE IF NOT EXISTS`` 对已存在的表
 #:     一个字都不改，而这个类的写方法全部吞异常 —— 真机上老库会变成
 #:     「INSERT 报没有这一列 → 吞掉 → 谱记录悄悄停了」，而页面上看起来只是
 #:     「最近没攒到谱」。
 #: 1 = 初版。
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 #: 建表语句之后才加进来的列。``(表, 列, SQL 声明)``，开库时逐条补。
 #:
@@ -149,6 +166,9 @@ class EnvHistoryStore:
             self._add_missing_columns()
             try:
                 self._conn.execute("PRAGMA journal_mode=WAL")
+                # WAL + NORMAL: no WAL fsync per commit (a busy spinning disk pays
+                # 10-30 ms each); a power cut can lose only the newest buckets.
+                self._conn.execute("PRAGMA synchronous=NORMAL")
                 self._conn.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
             except sqlite3.Error:
                 pass
@@ -417,6 +437,67 @@ class EnvHistoryStore:
             logger.debug("spectrum read failed", exc_info=True)
             return None
 
+    # ── 数据文件的环境标签（docs/v2/design/data_env_tags.md）────────────
+
+    def buckets_between(self, sensors: Sequence[str], since: float,
+                        until: float) -> list[dict]:
+        """若干序列在 ``[since, until]`` 里的**原生**桶（不再分桶），带 ``dt_s``。
+
+        给环境标签用：要知道保存时刻落在哪个桶里、桶多宽，``series()`` 的点不带桶宽。
+        走主键 ``(sensor, bucket_ts, dt_s)``。失败返回空表。"""
+        names = [str(s) for s in (sensors or ()) if s]
+        if not names:
+            return []
+        try:
+            with self._lock:
+                rows = self._conn.execute(
+                    "SELECT sensor, bucket_ts, dt_s, n, mean, min, max, unit, worst_status"
+                    f" FROM env_buckets WHERE sensor IN ({','.join('?' * len(names))})"
+                    " AND bucket_ts >= ? AND bucket_ts <= ? ORDER BY sensor, bucket_ts",
+                    [*names, float(since), float(until)],
+                ).fetchall()
+            return [{"sensor": str(r["sensor"]), "bucket_ts": float(r["bucket_ts"]),
+                     "dt_s": float(r["dt_s"] or 0.0), "n": int(r["n"] or 0),
+                     "mean": _f_or_none(r["mean"]), "min": _f_or_none(r["min"]),
+                     "max": _f_or_none(r["max"]), "unit": str(r["unit"] or ""),
+                     "worst_status": str(r["worst_status"] or "ok")} for r in rows]
+        except Exception:  # noqa: BLE001
+            logger.debug("buckets_between failed", exc_info=True)
+            return []
+
+    def put_file_tag(self, *, name: str, size: int, mtime_ns: int, tagged_path: str,
+                     tagged_at: float, payload: str, sidecar_path: str | None = None,
+                     sidecar_error: str | None = None) -> bool:
+        """记一行中央记录。同一身份已有 ⇒ 不改（写一次）。成功（含已有）返回 True，失败 False，不抛。"""
+        try:
+            with self._lock:
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO file_env_tags (name_lc, size, mtime_ns, tagged_path,"
+                    " tagged_at, sidecar_path, sidecar_error, payload) VALUES (?,?,?,?,?,?,?,?)",
+                    (str(name).lower(), int(size), int(mtime_ns), str(tagged_path),
+                     float(tagged_at), sidecar_path or None, sidecar_error or None, str(payload)),
+                )
+                self._conn.commit()
+            return True
+        except Exception:  # noqa: BLE001
+            self._rollback()
+            logger.debug("file env tag write failed (swallowed)", exc_info=True)
+            return False
+
+    def find_file_tags(self, name: str, size: int) -> list[dict]:
+        """同名（不分大小写）同大小的记录，mtime 由调用方按容差挑。失败返回空表。"""
+        try:
+            with self._lock:
+                rows = self._conn.execute(
+                    "SELECT name_lc, size, mtime_ns, tagged_path, tagged_at, sidecar_path,"
+                    " sidecar_error, payload FROM file_env_tags WHERE name_lc = ? AND size = ?"
+                    " ORDER BY mtime_ns", [str(name).lower(), int(size)],
+                ).fetchall()
+            return [dict(r) for r in rows]
+        except Exception:  # noqa: BLE001
+            logger.debug("find_file_tags failed", exc_info=True)
+            return []
+
     def storage_stats(self) -> dict:
         """库有多大、装了多少、在哪 —— 给 ``/status`` 与运维。
 
@@ -470,8 +551,8 @@ _STORE_LOCK = threading.Lock()
 
 
 def _default_path() -> Path:
-    from mast._runtime_paths import project_root
-    return Path(project_root()) / "experiments" / "env_history" / "env_history.sqlite"
+    from mast._runtime_paths import data_root
+    return Path(data_root()) / "experiments" / "env_history" / "env_history.sqlite"
 
 
 def get_store() -> EnvHistoryStore:

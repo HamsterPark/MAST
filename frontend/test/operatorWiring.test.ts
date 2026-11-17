@@ -17,9 +17,10 @@
 //     post and wait for a prompt but must never be able to answer one;
 //   · the page keeps its free-text board and shows the new sections without depending
 //     on the wishlist query;
-//   · STM stations stay as they were: the optical panel and the prompt board are gated on the
-//     station profile, and so is every request under /api/operator, the nav badge's prompt
-//     count, the toast, the sound, the desktop notification and the tab title;
+//   · STM and generic stations stay as they were: the optical panel and the prompt board are
+//     gated on the station's `operator_prompts` capability (the optical station's by default,
+//     lib/stationCapabilities.ts), and so is every request under /api/operator, the nav
+//     badge's prompt count, the toast, the sound, the desktop notification and the tab title;
 //   · identity strings (kind, status, severity, slot ids) are never passed through tr().
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -71,7 +72,7 @@ describe("the nav badge and the alert host read the fast feed", () => {
     assert.match(APP_LAYOUT, /urgent=\{operatorPrompts\.hasSafety\}/, "a safety prompt turns the badge red");
   });
 
-  it("the alert host is mounted only while the feed is enabled, which only an optical station's is", () => {
+  it("the alert host is mounted only while the feed is enabled, which only a station with operator prompts has", () => {
     assert.match(APP_LAYOUT, /\{operatorPrompts\.enabled && <OperatorAlertHost feed=\{operatorPrompts\} \/>\}/);
   });
 
@@ -104,7 +105,7 @@ describe("polling", () => {
 
   it("the service's operator_prompt push event triggers an immediate refetch, owned by the one polling reader", () => {
     assert.match(API, /useWsEvent\(\s*"operator_prompt"/);
-    assert.match(API, /\},\s*poll && optical,\s*\);/, "only the polling reader, and only on an optical station, subscribes");
+    assert.match(API, /\},\s*poll && hasPrompts,\s*\);/, "only the polling reader, and only on a station with operator prompts, subscribes");
     assert.match(API, /what === "optical_state" \? OPTICAL_KEY : PROMPTS_KEY/);
   });
 
@@ -196,16 +197,23 @@ describe("the page", () => {
   });
 });
 
-describe("an STM station stays as it was", () => {
-  it("the optical panel exists only for the optical profile", () => {
-    assert.match(PANEL, /if \(!useIsOpticalStation\(\)\) return null;/);
-    // the profile in force (GET /api/health), not the stored setting; shares the ["health"] query
-    assert.match(API, /queryKey: \["health"\],\s*queryFn: async \(\) => \{\s*const \{ data, error \} = await api\.GET\("\/api\/health"\);/);
-    assert.match(API, /isOpticalProfile\(\(q\.data as \{ station_profile\?: unknown \} \| undefined\)\?\.station_profile\)/);
+describe("an STM or a generic station stays as it was", () => {
+  const CAPS_HOOK = read("hooks", "useStationCapabilities.ts");
+
+  it("the optical panel exists only on a station with operator prompts", () => {
+    assert.match(PANEL, /if \(!useHasOperatorPrompts\(\)\) return null;/);
+    // the capability, and nothing else: no profile name is asked here any more
+    assert.match(API, /export function useHasOperatorPrompts\(\{ keepAsking = false \}: \{ keepAsking\?: boolean \} = \{\}\): boolean \{\s*return useHasCapability\("operator_prompts", \{ keepAsking \}\);\s*\}/);
+    assert.doesNotMatch(API, /station_profile|isOpticalProfile|useIsOpticalStation/);
+    // what the running service IS (GET /api/health), not the stored setting; shares the ["health"] query
+    assert.match(CAPS_HOOK, /const HEALTH_KEY = \["health"\] as const;/);
+    assert.match(CAPS_HOOK, /queryKey: HEALTH_KEY,\s*queryFn: async \(\) => \{\s*const \{ data, error \} = await api\.GET\("\/api\/health"\);/);
+    // a capability counts only once the service has said so: nothing is asked for before
+    assert.match(CAPS_HOOK, /return s\.ready && s\.has\(cap\);/);
   });
 
-  it("the board exists only for the optical profile, and every hook that asks for something lives in its body", () => {
-    assert.match(BOARD, /export function OperatorPromptBoard\(\) \{\s*if \(!useIsOpticalStation\(\)\) return null;\s*return <PromptBoardBody \/>;\s*\}/);
+  it("the board exists only on a station with operator prompts, and every hook that asks for something lives in its body", () => {
+    assert.match(BOARD, /export function OperatorPromptBoard\(\) \{\s*if \(!useHasOperatorPrompts\(\)\) return null;\s*return <PromptBoardBody \/>;\s*\}/);
     const outer = BOARD.slice(BOARD.indexOf("export function OperatorPromptBoard"), BOARD.indexOf("function PromptBoardBody"));
     for (const hook of ["useOpenPromptFeed", "usePromptHistory", "useOpticalState", "useOperatorName", "useNow"]) {
       assert.ok(!outer.includes(`${hook}(`), `${hook} belongs in the body, which an STM station never mounts`);
@@ -218,7 +226,7 @@ describe("an STM station stays as it was", () => {
   });
 });
 
-describe("nothing under /api/operator is asked for, and nothing sounds, unless the station is an optical one", () => {
+describe("nothing under /api/operator is asked for, and nothing sounds, unless the station has operator prompts", () => {
   /** The source of every top-level function in a file, by name. */
   function functions(source: string): Map<string, string> {
     const heads = [...source.matchAll(/^(?:export )?function (\w+)/gm)];
@@ -229,15 +237,15 @@ describe("nothing under /api/operator is asked for, and nothing sounds, unless t
   const sources = files(SRC).map((f) => [f.slice(SRC.length + 1).replaceAll("\\", "/"), readFileSync(f, "utf8").replace(/\r\n/g, "\n")] as const);
   const importers = (pattern: RegExp) => sources.filter(([, text]) => pattern.test(text)).map(([name]) => name).sort();
 
-  it("there is one gate, and it is the station profile combined with the caller's own flag", () => {
+  it("there is one gate, and it is the station's operator-prompt capability combined with the caller's own flag", () => {
     assert.match(
       apiFns.get("useOperatorQueryEnabled")!,
-      /function useOperatorQueryEnabled\(enabled = true\): boolean \{\s*const optical = useIsOpticalStation\(\);\s*return optical && enabled;\s*\}/,
+      /function useOperatorQueryEnabled\(enabled = true\): boolean \{\s*const hasPrompts = useHasOperatorPrompts\(\);\s*return hasPrompts && enabled;\s*\}/,
     );
   });
 
   it("every query of the client takes its `enabled` from that gate (the prompts, the optical state, its history)", () => {
-    const queries = [...apiFns].filter(([name, body]) => /\buseQuery\(/.test(body) && name !== "useIsOpticalStation");
+    const queries = [...apiFns].filter(([, body]) => /\buseQuery\(/.test(body));
     assert.deepEqual(queries.map(([name]) => name).sort(), ["useOperatorPrompts", "useOpticalHistory", "useOpticalState"]);
     for (const [name, body] of queries) {
       assert.match(body, /const on = useOperatorQueryEnabled\(enabled\);/, `${name} must ask the gate`);
@@ -246,28 +254,32 @@ describe("nothing under /api/operator is asked for, and nothing sounds, unless t
     }
   });
 
-  it("the profile query is the only other query, and it is the shared health one", () => {
+  it("the client asks no other query of its own: what the station has comes from the shared health query", () => {
     const others = [...apiFns].filter(([, body]) => /\buseQuery\(/.test(body)).map(([name]) => name).sort();
-    assert.deepEqual(others, ["useIsOpticalStation", "useOperatorPrompts", "useOpticalHistory", "useOpticalState"]);
+    assert.deepEqual(others, ["useOperatorPrompts", "useOpticalHistory", "useOpticalState"]);
+    assert.match(API, /import \{ useHasCapability \} from "@\/hooks\/useStationCapabilities";/);
   });
 
-  it("the socket event that triggers an immediate refetch is listened to only on an optical station", () => {
-    assert.match(apiFns.get("useOpenPromptFeed")!, /\},\s*poll && optical,\s*\);/);
+  it("the socket event that triggers an immediate refetch is listened to only on a station with operator prompts", () => {
+    assert.match(apiFns.get("useOpenPromptFeed")!, /\},\s*poll && hasPrompts,\s*\);/);
   });
 
-  it("the feed is shaped by the pure function, which hands every non-optical station the empty feed", () => {
-    assert.match(apiFns.get("useOpenPromptFeed")!, /openPromptFeed\(\{ optical, list, loaded: q\.isSuccess, errorStatus, persistError \}\)/);
-    assert.match(read("lib", "operatorPrompts.ts"), /if \(!input\.optical\) return NO_PROMPT_FEED;/);
+  it("the feed is shaped by the pure function, which hands every station without operator prompts the empty feed", () => {
+    assert.match(apiFns.get("useOpenPromptFeed")!, /openPromptFeed\(\{ hasPrompts, list, loaded: q\.isSuccess, errorStatus, persistError \}\)/);
+    assert.match(read("lib", "operatorPrompts.ts"), /if \(!input\.hasPrompts\) return NO_PROMPT_FEED;/);
   });
 
-  it("the history ignores an earlier answer that is still cached once the station is not optical", () => {
-    assert.match(apiFns.get("usePromptHistory")!, /const list = optical \? q\.data\?\.prompts : undefined;/);
+  it("the history ignores an earlier answer that is still cached once the station has no operator prompts", () => {
+    assert.match(apiFns.get("usePromptHistory")!, /const list = hasPrompts \? q\.data\?\.prompts : undefined;/);
   });
 
-  it("only the owner of the polling keeps asking what the station is, and only until the service has answered", () => {
+  it("only the owner of the polling keeps asking what the station has, and only until the service has answered", () => {
     assert.deepEqual(importers(/keepAsking:\s*poll/), ["api/operator.ts"]);
-    assert.equal([...API.matchAll(/useIsOpticalStation\(\{ keepAsking: poll \}\)/g)].length, 1);
-    assert.match(apiFns.get("useIsOpticalStation")!, /refetchInterval: keepAsking \? \(query\) => \(query\.state\.data === undefined \? PROFILE_RETRY_MS : false\) : false,/);
+    assert.equal([...API.matchAll(/useHasOperatorPrompts\(\{ keepAsking: poll \}\)/g)].length, 1);
+    assert.match(
+      read("hooks", "useStationCapabilities.ts"),
+      /refetchInterval: keepAsking \? \(query\) => \(query\.state\.data === undefined \? PROFILE_RETRY_MS : false\) : false,/,
+    );
   });
 
   it("the nav badge reads the feed, so on an STM station it is the free-text requests alone", () => {

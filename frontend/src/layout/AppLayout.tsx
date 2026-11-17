@@ -11,10 +11,12 @@ import { wishlistBadge, wishlistBadgeLabel } from "@/lib/operatorPrompts";
 import { TopBar } from "@/components/shell/TopBar";
 import { NoSampleBanner } from "@/components/scope/ScopeControls";
 import { SetupBanner } from "@/components/shell/SetupBanner";
+import { StationSetupBanner } from "@/components/shell/StationSetupBanner";
 import { RightPanel } from "@/components/shell/RightPanel";
 import { FeedbackFloat } from "@/components/chat/FeedbackFloat";
 import { OnboardingGuide } from "@/components/shell/OnboardingGuide";
 import { useLegacyFeatures } from "@/hooks/useLegacyFeatures";
+import { useStationCapabilities } from "@/hooks/useStationCapabilities";
 import { tr } from "@/lib/i18n";
 import { homeLabel, statusMarker, visibleTabs } from "@/lib/nav";
 
@@ -39,13 +41,16 @@ function PendingBadge({ n, label, urgent = false }: { n: number; label: string; 
 }
 
 // App shell: header (TopBar) + [ top tabs and page content | right status panel ].
-// The tab list comes from lib/nav.ts, filtered by the legacy-features setting.
+// The tab list comes from lib/nav.ts, filtered by the legacy-features setting and by
+// the station's capabilities (the STM pages are not offered on an optical or a generic
+// station).
 
 export default function AppLayout() {
   const theme = useUiStore((s) => s.theme);
   const activeConversationId = useUiStore((s) => s.activeConversationId);
   const { enabled: legacy } = useLegacyFeatures();
-  const tabs = visibleTabs(legacy);
+  const station = useStationCapabilities();
+  const tabs = visibleTabs(legacy, station.has);
   // Global operating mode → a whole-app colored border: safe=green, semi=amber,
   // auto=none. Rendered as an INSET ring (box-shadow) so it never shifts layout
   // or clips at the viewport edge, and stays put across navigation (AppLayout
@@ -59,9 +64,11 @@ export default function AppLayout() {
   // Polled every few seconds, also while this tab is in the background, because a person
   // at the instrument is looking at the vendor software, not at a browser tab. This is
   // the one place that polls; the alert host below and the page read the same cache.
-  // Only an optical station has them: on an STM station (or before the service has said
-  // what it is) the feed is empty and `enabled` is false, nothing is requested, the tab
-  // badge stays what the free-text requests make it, and the alert host is not mounted.
+  // Only a station with the operator prompt service has them (capability
+  // `operator_prompts`, the optical station by default): anywhere else (or before the
+  // service has said what it has) the feed is empty and `enabled` is false, nothing is
+  // requested, the tab badge stays what the free-text requests make it, and the alert host
+  // is not mounted.
   const operatorPrompts = useOpenPromptFeed();
   const wishlistCount = wishlistBadge(operatorPrompts.openCount, openAgentRequests);
   useEffect(() => {
@@ -94,6 +101,9 @@ export default function AppLayout() {
       {/* Shown while no sample is selected: data-producing actions are refused,
           everything else keeps working. Informational, never blocking. */}
       <NoSampleBanner />
+      {/* First use: no station type chosen yet (set a PIN, then choose). Same rule as
+          the setup banner: persistent, foldable, never a modal. */}
+      <StationSetupBanner />
       {/* Instrument setup incomplete or hardware changed: a persistent banner,
           deliberately not a modal, so E-STOP stays reachable. */}
       <SetupBanner />

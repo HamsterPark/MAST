@@ -104,15 +104,12 @@ def test_config_round_trips_through_a_fresh_load(gallery_dir, tmp_path):
 
 
 def test_normalise_roots_refuses_what_would_break_ids(tmp_path):
+    """Nested and repeated roots are no longer refused: they are merged (test_nested_roots.py)."""
     a = tmp_path / "a"
     b = a / "b"
     b.mkdir(parents=True)
     c = tmp_path / "c"
     c.mkdir()
-    _r, errors = gcfg.normalise_roots([{"path": str(a)}, {"path": str(b)}])
-    assert any("嵌套" in e for e in errors), errors
-    _r, errors = gcfg.normalise_roots([{"path": str(a)}, {"path": str(a)}])
-    assert any("重复" in e for e in errors), errors
     _r, errors = gcfg.normalise_roots([{"path": str(tmp_path / "missing")}])
     assert any("不是已存在的目录" in e for e in errors), errors
     for bad in ("_x", ".x", "a/b", "a:b", "CON", "x."):

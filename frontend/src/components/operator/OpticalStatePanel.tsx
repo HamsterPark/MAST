@@ -3,7 +3,7 @@ import clsx from "clsx";
 import { Section, Badge, ErrorNote, Spinner, EmptyNote } from "@/components/ui";
 import {
   useClearSlot,
-  useIsOpticalStation,
+  useHasOperatorPrompts,
   useOpticalHistory,
   useOpticalState,
   useSetSlot,
@@ -39,8 +39,8 @@ import { OperatorNameField } from "./OperatorNameField";
 // writes it; the AI reads it, and every spectrum's sidecar records the snapshot taken
 // when it was acquired. A value that has run out of date is shown in red.
 //
-// Shown for optical stations only (`station_profile: "optical"`); an STM station never
-// loads it.
+// Shown only on a station with the operator service (capability `operator_prompts`, the
+// optical station by default); an STM or a generic station never loads it.
 
 const INPUT =
   "rounded border border-mast-border bg-mast-bg px-3 py-1.5 text-sm text-mast-text placeholder:text-mast-muted focus:border-mast-accent focus:outline-none";
@@ -268,8 +268,8 @@ function OpticalStateBody() {
   );
 }
 
-/** The optical-state section; nothing at all on an STM station. */
+/** The optical-state section; nothing at all on a station without the operator service. */
 export function OpticalStatePanel() {
-  if (!useIsOpticalStation()) return null;
+  if (!useHasOperatorPrompts()) return null;
   return <OpticalStateBody />;
 }

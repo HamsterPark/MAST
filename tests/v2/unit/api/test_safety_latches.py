@@ -215,6 +215,39 @@ def test_comms_breaker_is_read_here_for_the_first_time():
     assert row["detail"]["cooldown_remaining_s"] == 12.5
 
 
+def test_comms_breaker_says_recovering_apart_from_tripped():
+    """`latched` 一个布尔分不出「冷却中」和「恢复中」—— 而读它的人(操作员、简报里的
+    agent)要分开:前者等冷却,后者通常一两秒内自己好。读的是**真熔断器**的快照,
+    钉住字段名这份契约。"""
+    from mast.core.comms_health import CommsCircuitBreaker
+
+    now = [1000.0]
+    breaker = CommsCircuitBreaker(clock=lambda: now[0])
+    for _ in range(3):
+        breaker.record_failure("timed out")
+
+    class _Live:
+        def comms_snapshot(self) -> dict:
+            return breaker.snapshot()
+
+    def _why() -> str:
+        body = _client(_App(pool=_Live(), watchdog=_Watchdog())).get(
+            "/api/safety/latches").json()
+        row = _by_id(body)["comms_breaker"]
+        assert row["latched"] is True
+        return row["why"]
+
+    tripped = _why()
+    assert "冷却中" in tripped and "恢复中" not in tripped
+    now[0] += 21.0                                    # cooldown over, nobody probing yet
+    waiting = _why()
+    assert "恢复中" in waiting and "下一次计数调用" in waiting
+    ok, _probe = breaker.admit()
+    assert ok
+    now[0] += 1.5
+    assert "探针在途 1.5 s" in _why()
+
+
 def test_watchdog_latch_says_it_is_the_inverse_kind():
     """看门狗的闩挂着**不拒绝任何东西** —— 挂着代表网撤了。
     和「拒绝一切」的闩并成一个 bool 会让人读反。"""

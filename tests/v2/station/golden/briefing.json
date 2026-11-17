@@ -1,0 +1,116 @@
+{
+ "note": "answers of the probe on the source commit, normalised by _invariants.normalize",
+ "optical": {
+  "has_section": {
+   "instrument": false,
+   "live": false,
+   "prefs": false,
+   "recent_files": false,
+   "recent_spectra": true,
+   "station": true,
+   "tip": false
+  },
+  "optical_rules": [
+   "Rules (optical station):",
+   "  1. Run optical skills with mast_run (find them with mast_find_skills, read the card with mast_skill_card); mast_act's STM action vocabulary does not exist here.",
+   "  2. WITec write access is handed over by a person: the operator presses \"COM Automation\" in WITec Control before any skill can write. Without it skills fail plainly - do not retry in a loop; ask with mast_ask_operator.",
+   "  3. Steps that need a person's hands (change a λ/2 plate, turn the analyzer, change the objective, close vendor software) go through mast_ask_operator, then mast_wait for the reply. You cannot answer or attest for the operator.",
+   "  4. Switching laser emission on (LaserEmissionOn) needs the device configuration to allow it and the operator's current laser_area_safe attestation (valid 8 h); switching it off (LaserEmissionOff) is always allowed.",
+   "  5. The manual optical state (which λ/2 plate is in, the objective, the analyzer angle ...) can only be written by the operator and is recorded in every spectrum's sidecar; read it with ReadOpticalState.",
+   "  6. Serial ports are exclusive: when a port is held by vendor software, ask the operator to close that software."
+  ],
+  "safety_has_envelope": false,
+  "safety_source": "optical station profile",
+  "sections": [
+   "station",
+   "status",
+   "scope",
+   "resume",
+   "optical_state",
+   "operator_prompts",
+   "safety",
+   "recent_actions",
+   "recent_spectra",
+   "alarms",
+   "notes",
+   "recording",
+   "jobs",
+   "operator_requests",
+   "optical_layouts"
+  ],
+  "station_data_profile": "optical",
+  "station_text": "- Station profile: optical (an optical station: no STM / Nanonis; the skill face shows optical and generic skills only)\nRules (optical station):\n  1. Run optical skills with mast_run (find them with mast_find_skills, read the card with mast_skill_card); mast_act's STM action vocabulary does not exist here.\n  2. WITec write access is handed over by a person: the operator presses \"COM Automation\" in WITec Control before any skill can write. Without it skills fail plainly - do not retry in a loop; ask with mast_ask_operator.\n  3. Steps that need a person's hands (change a λ/2 plate, turn the analyzer, change the objective, close vendor software) go through mast_ask_operator, then mast_wait for the reply. You cannot answer or attest for the operator.\n  4. Switching laser emission on (LaserEmissionOn) needs the device configuration to allow it and the operator's current laser_area_safe attestation (valid 8 h); switching it off (LaserEmissionOff) is always allowed.\n  5. The manual optical state (which λ/2 plate is in, the objective, the analyzer angle ...) can only be written by the operator and is recorded in every spectrum's sidecar; read it with ReadOpticalState.\n  6. Serial ports are exclusive: when a port is held by vendor software, ask the operator to close that software.\n- Optical devices: none configured (config/optical_instruments.json is empty or missing)",
+  "status_degraded": [
+   "abort"
+  ],
+  "status_keys": [
+   "abort",
+   "degraded",
+   "jobs",
+   "lock",
+   "mode",
+   "scope",
+   "station"
+  ],
+  "status_station": "optical",
+  "status_text": "- Operating mode: unknown\n- Station profile: optical (an optical station, no STM / Nanonis)\n- Abort / e-stop: unreadable\n- Instrument lock: free"
+ },
+ "probe": "tests/v2/station/_invariants_probe.py",
+ "source": "pre-capability-table",
+ "stm": {
+  "has_section": {
+   "instrument": true,
+   "live": true,
+   "prefs": true,
+   "recent_files": true,
+   "recent_spectra": false,
+   "station": false,
+   "tip": true
+  },
+  "optical_rules": [
+   "Rules (optical station):",
+   "  1. Run optical skills with mast_run (find them with mast_find_skills, read the card with mast_skill_card); mast_act's STM action vocabulary does not exist here.",
+   "  2. WITec write access is handed over by a person: the operator presses \"COM Automation\" in WITec Control before any skill can write. Without it skills fail plainly - do not retry in a loop; ask with mast_ask_operator.",
+   "  3. Steps that need a person's hands (change a λ/2 plate, turn the analyzer, change the objective, close vendor software) go through mast_ask_operator, then mast_wait for the reply. You cannot answer or attest for the operator.",
+   "  4. Switching laser emission on (LaserEmissionOn) needs the device configuration to allow it and the operator's current laser_area_safe attestation (valid 8 h); switching it off (LaserEmissionOff) is always allowed.",
+   "  5. The manual optical state (which λ/2 plate is in, the objective, the analyzer angle ...) can only be written by the operator and is recorded in every spectrum's sidecar; read it with ReadOpticalState.",
+   "  6. Serial ports are exclusive: when a port is held by vendor software, ask the operator to close that software."
+  ],
+  "safety_has_envelope": true,
+  "safety_source": "defaults",
+  "sections": [
+   "status",
+   "scope",
+   "resume",
+   "tip",
+   "instrument",
+   "live",
+   "prefs",
+   "safety",
+   "recent_actions",
+   "recent_files",
+   "alarms",
+   "notes",
+   "recording",
+   "jobs",
+   "operator_requests",
+   "optical_layouts"
+  ],
+  "status_degraded": [
+   "abort",
+   "live"
+  ],
+  "status_keys": [
+   "abort",
+   "connection",
+   "degraded",
+   "jobs",
+   "live",
+   "lock",
+   "mode",
+   "scope"
+  ],
+  "status_station": null,
+  "status_text": "- Operating mode: unknown\n- Abort / e-stop: unreadable\n- Instrument lock: free\n- Nanonis connection: not wired"
+ }
+}

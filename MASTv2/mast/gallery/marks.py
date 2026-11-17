@@ -161,6 +161,81 @@ def _backup_if_due(lay: _paths.Layout) -> bool:
     return True
 
 
+def rekey_prefix(old_prefix: str, new_prefix: str, lay: _paths.Layout | None = None) -> int:
+    """把 id 在 ``old_prefix`` 下的标记搬到 ``new_prefix`` 下。返回搬了几条单条标记。
+
+    用于数据根合并（:class:`mast.gallery.config.RootMerge`）：被并掉的根下的文件，id 从
+    ``<旧根名>/<x>`` 变成 ``<并进的根>/<rel>/<x>``，标记不搬就留在没人用的 id 上。
+
+    一并改：单条标记的键、任何条目与系列的 ``anchor.id``、系列的成员 id、目录键（``days``）。
+    搬走的旧键留墓碑（毫秒戳）：搬之前就排在客户端队列里的旧改动迟到了也写不回去。
+    整个文档在锁里读 → 改 → 原子写，``rev`` 加一，客户端下次刷新拿到新文档。
+    """
+    if not old_prefix.endswith("/") or not new_prefix.endswith("/") or old_prefix == new_prefix:
+        return 0
+    lay = lay or _paths.layout()
+    old_dir, new_dir = old_prefix[:-1], new_prefix[:-1]
+
+    def mv(x):
+        if not isinstance(x, str):
+            return x
+        if x.startswith(old_prefix):
+            return new_prefix + x[len(old_prefix):]
+        return new_dir if x == old_dir else x          # 目录键：文件直接放在根下时就是根名
+
+    with _LOCK:
+        doc = load_marks(lay)
+        stamp = next_ts()
+        tomb = doc.setdefault("tomb", {})
+        moved = 0
+        dirty = False
+        items: dict = {}
+        for k, m in (doc.get("items") or {}).items():
+            nk = mv(k)
+            m2 = copy.deepcopy(m) if isinstance(m, dict) else m
+            changed = nk != k
+            anc = m2.get("anchor") if isinstance(m2, dict) else None
+            if isinstance(anc, dict) and mv(anc.get("id")) != anc.get("id"):
+                anc["id"] = mv(anc["id"])
+                changed = True
+            if changed and isinstance(m2, dict):
+                m2["ts"] = stamp
+                dirty = True
+            if nk != k:
+                tomb[k] = stamp
+                moved += 1
+                prev = items.get(nk)
+                if isinstance(prev, dict) and int(prev.get("ts") or 0) > int(m2.get("ts") or 0):
+                    continue                            # 新 id 上已有更新的标记：不覆盖
+            items[nk] = m2
+        for s in (doc.get("series") or {}).values():
+            if not isinstance(s, dict):
+                continue
+            ids = [mv(i) for i in s.get("ids") or []]
+            anc = s.get("anchor")
+            new_anc = mv(anc.get("id")) if isinstance(anc, dict) else None
+            if ids != list(s.get("ids") or []) or (isinstance(anc, dict) and new_anc != anc.get("id")):
+                s["ids"] = ids
+                if isinstance(anc, dict):
+                    anc["id"] = new_anc
+                s["ts"] = stamp
+                dirty = True
+        days = doc.get("days") or {}
+        if any(mv(d) != d for d in days):
+            doc["days"] = {mv(d): v for d, v in days.items()}
+            dirty = True
+        if not dirty:
+            return 0                                    # 没有挂在这个前缀下的标记：不写盘
+        doc["items"] = items
+        doc["rev"] = int(doc.get("rev") or 0) + 1
+        doc["updated"] = now_str()
+        write_all(doc, lay)
+    if moved:
+        logger.info("gallery marks: %d mark(s) moved from %s to %s (data roots merged)",
+                    moved, old_prefix, new_prefix)
+    return moved
+
+
 # ── 索引元数据（给 md / csv 配参数与路径）─────────────────────────────────
 
 

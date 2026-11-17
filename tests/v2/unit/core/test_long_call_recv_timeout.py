@@ -44,12 +44,11 @@ def _pool_with(sock, nn) -> ConnectionPool:
     pool._struct_lock = threading.RLock()
     pool._locks = {"main": threading.RLock()}
     pool._closed = False
+    # The real breaker, CLOSED: admits every call. (A stand-in with only allow()
+    # stopped matching safe_call once admission became would_admit() + admit().)
+    from mast.core.comms_health import CommsCircuitBreaker
 
-    class _AlwaysAllow:
-        def allow(self):
-            return True
-
-    pool._breaker = _AlwaysAllow()
+    pool._breaker = CommsCircuitBreaker()
     pool.get = lambda role="main": nn                       # type: ignore[assignment]
     pool._role_lock = lambda role: pool._locks["main"]      # type: ignore[assignment]
     pool._on_comms_success = lambda *a, **k: None           # type: ignore[assignment]

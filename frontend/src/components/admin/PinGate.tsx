@@ -54,7 +54,9 @@ function useSetPin(onDone: () => void) {
   return { mut, error };
 }
 
-function SetPinForm({ onDone }: { onDone: () => void }) {
+/** The first-PIN form (POST /api/admin/set-pin). Also embedded in the station-profile
+ *  confirmation, so a first-time operator can set the PIN where it is first asked for. */
+export function SetPinForm({ onDone }: { onDone: () => void }) {
   const [pin, setPin] = useState("");
   const [again, setAgain] = useState("");
   const { mut, error } = useSetPin(onDone);

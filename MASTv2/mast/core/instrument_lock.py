@@ -145,6 +145,12 @@ BYPASS_NAMES: frozenset[str] = frozenset({
     # optics_witec.WITEC_STOP_SKILL_NAMES; a test pins the two together. The other
     # WITec skills take the token: on that station the WITec is the instrument.
     "StopWITec", "CloseWITecShutter", "ReleaseWITecWriteAccess",
+    # Superconducting magnet (7.2.0): RampMagnetField holds the token for the whole
+    # ramp (up to about an hour), so the STOP that freezes it must not wait for it.
+    "StopMagnetRamp",
+    # Sample-stage heating: SetSampleTemperature holds the token through the ramp and the
+    # settling; stopping the ramp or turning the heater off must not wait for it.
+    "HoldSampleTemperature", "HeaterOff",
 })
 
 #: Skills that drive a device which is NOT the Nanonis instrument and has its own
@@ -161,14 +167,14 @@ OFF_INSTRUMENT_NAMES: frozenset[str] = frozenset({
 })
 
 
-def _optical_profile() -> bool:
-    """Whether this process serves the optical station (``mast.station``); unreadable = STM."""
+def _has_nanonis() -> bool:
+    """Whether this station has a Nanonis (``mast.station``); unreadable = STM, which has."""
     try:
         from mast import station
 
-        return bool(station.is_optical())
+        return bool(station.has("nanonis"))
     except Exception:  # noqa: BLE001
-        return False
+        return True
 
 
 class InstrumentBusy(RuntimeError):
@@ -186,10 +192,10 @@ class InstrumentBusy(RuntimeError):
         held = self.holder.get("held_s")
         held_txt = (tr(f"，已持有 {held:.0f}s", f", held for {held:.0f}s")
                     if isinstance(held, (int, float)) else "")
-        # the optical station has no Nanonis: name the instrument neutrally there; an STM
-        # station keeps the exact text it always had
-        same_zh, inst_en = (("同一台仪器", "instrument") if _optical_profile()
-                            else ("同一台 Nanonis ", "Nanonis"))
+        # a station without Nanonis (optical, generic): name the instrument neutrally there;
+        # an STM station keeps the exact text it always had
+        same_zh, inst_en = (("同一台 Nanonis ", "Nanonis") if _has_nanonis()
+                            else ("同一台仪器", "instrument"))
         return tr(
             f"仪器正被占用：{who} 正在执行 {what}{held_txt}。"
             f"'{self.skill}' 未执行——{same_zh}不能被两条链路同时驱动。"

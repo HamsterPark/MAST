@@ -99,7 +99,7 @@ class _FakePool:
         self._path = path
         self.calls = 0
 
-    def safe_call(self, method, *args, role="main"):
+    def safe_call(self, method, *args, role="main", **kw):
         from mast.core.types import NanonisCallRecord
 
         self.calls += 1

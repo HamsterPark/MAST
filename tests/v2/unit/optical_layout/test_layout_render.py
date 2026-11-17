@@ -22,7 +22,7 @@ from mast.optical_layout import render as R
 from mast.optical_layout.model import Layout
 from mast.optical_layout.render import render_png, wavelength_color
 
-from ._layouts import budget_layout, comp, dense_field, det, laser, layout, mirror
+from ._layouts import budget_layout, comp, dense_field, det, laser, layout, mirror, trace_fixture_files
 
 FIXTURES = Path(__file__).resolve().parents[3] / "fixtures" / "optical_layout"
 REPO = Path(__file__).resolve().parents[4]
@@ -51,7 +51,7 @@ def test_the_width_is_clamped(asked, got):
 
 
 def test_every_fixture_draws():
-    for path in sorted(FIXTURES.glob("*.json")):
+    for path in trace_fixture_files():
         doc = json.loads(path.read_text(encoding="utf-8"))
         png = render_png(doc["layout"], doc["expected_trace"], width_px=500)
         assert size(png)[0] == 500 and len(png) > 2000, path.name
@@ -240,3 +240,69 @@ def test_a_cut_trace_draws_no_near_miss_marks():
     full_with, cut_with = render_png(lay, full, width_px=700), render_png(lay, cut, width_px=700)
     assert full_with != full_without, "the complete trace draws the miss"
     assert cut_with == cut_without, "the cut one does not"
+
+# ── the beam (contract v2 §6) ────────────────────────────────────────────────────────────────
+
+
+def test_the_beam_weight_follows_the_power_on_a_log_scale():
+    lo, hi = R.BEAM_WIDTH_PT
+    assert (lo, hi) == (0.6, 2.4)
+    assert R.beam_width(1.0) == pytest.approx(2.4) and R.beam_width(1e-3) == pytest.approx(0.6)
+    assert R.beam_width(1e-2) == pytest.approx(0.6 + 1.8 / 3) and R.beam_width(0.1) == pytest.approx(0.6 + 1.8 * 2 / 3)
+    assert R.beam_width(1e-5) == pytest.approx(0.6) and R.beam_width(0.0) == pytest.approx(0.6)
+    assert R.beam_width(1.0000000002) == pytest.approx(2.4)
+
+
+def _collections(monkeypatch, lay, trace) -> list:
+    from matplotlib.axes import Axes
+
+    got: list = []
+    real = Axes.add_collection
+    with monkeypatch.context() as m:
+        m.setattr(Axes, "add_collection", lambda self, c, *a, **k: (got.append(c), real(self, c, *a, **k))[1])
+        render_png(lay, trace, width_px=600)
+    return got
+
+
+def _texts(monkeypatch, lay, trace) -> list[str]:
+    from matplotlib.axes import Axes
+
+    got: list[str] = []
+    real = Axes.text
+    with monkeypatch.context() as m:
+        m.setattr(Axes, "text", lambda self, x, y, s, *a, **k: (got.append(s), real(self, x, y, s, *a, **k))[1])
+        render_png(lay, trace, width_px=600)
+    return got
+
+
+def test_each_segment_is_as_wide_as_its_power_and_no_light_is_a_grey_dotted_line(monkeypatch):
+    doc = json.loads((FIXTURES / "beam_crossed_polarizers_no_light.json").read_text(encoding="utf-8"))
+    from matplotlib.collections import LineCollection
+
+    cols = [c for c in _collections(monkeypatch, doc["layout"], doc["expected_trace"]) if isinstance(c, LineCollection)]
+    widths = sorted({round(float(w), 6) for c in cols for w in c.get_linewidths()})
+    # p = 1, 1 (after P1: linear 0 deg, all passes), 0.75 and dark
+    assert widths == sorted({round(R.beam_width(1.0), 6), round(R.beam_width(0.75), 6), 0.6})
+    dotted = [c for c in cols if len(c.get_segments()) and all(round(float(w), 6) == 0.6 for w in c.get_linewidths())]
+    assert dotted and all(tuple(round(float(v), 3) for v in col) == (0.55, 0.55, 0.55, 0.9) for col in dotted[0].get_colors())
+    n_dark = sum(1 for t in doc["expected_trace"] for b in t["branches"] for s in b["segments"] if s["beam"]["p"] < 1e-6)
+    assert n_dark == 4 and len(dotted[0].get_segments()) == n_dark
+
+
+def test_the_power_arriving_at_each_terminal_component_is_written_next_to_it(monkeypatch):
+    doc = json.loads((FIXTURES / "pol_malus_two_polarizers.json").read_text(encoding="utf-8"))
+    assert "1.88 mW" in _texts(monkeypatch, doc["layout"], doc["expected_trace"])          # 10 mW x 0.75 x 0.25
+    doc = json.loads((FIXTURES / "pol_hwp_rotates.json").read_text(encoding="utf-8"))
+    texts = _texts(monkeypatch, doc["layout"], doc["expected_trace"])
+    assert {"10 mW", "5 mW", "15 mW"} <= set(texts)
+    doc = json.loads((FIXTURES / "pol_pbs_p_only.json").read_text(encoding="utf-8"))       # no power_mw: shares
+    assert "100 %" in _texts(monkeypatch, doc["layout"], doc["expected_trace"])
+    plain = _texts(monkeypatch, simple(), None)
+    assert "100 %" in plain                                                                 # the detector of the fold
+
+
+def test_a_polarizing_beam_splitter_has_a_shape_of_its_own_with_a_p(monkeypatch):
+    lay = layout([laser("las1", 50, 100), comp("pbs1", "pbs", 200, 100, 135, label="PBS"), det("d", 200, 300, 270)])
+    assert "P" in _texts(monkeypatch, lay, None)
+    as_bs = layout([laser("las1", 50, 100), comp("pbs1", "beam_splitter", 200, 100, 135, label="PBS"), det("d", 200, 300, 270)])
+    assert render_png(lay, width_px=500) != render_png(as_bs, width_px=500)

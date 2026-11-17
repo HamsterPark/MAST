@@ -23,7 +23,7 @@ import time
 from nanonis_spm import Nanonis
 
 from mast.config import NanonisConfig
-from mast.core.comms_health import CommsCircuitBreaker, format_comms_down
+from mast.core.comms_health import CLOSED, CommsCircuitBreaker, format_comms_down
 from mast.core.types import NanonisCallRecord
 
 # Ensure monkey-patch is applied before any Nanonis usage
@@ -93,6 +93,12 @@ _CLOSE_LOCK_TIMEOUT_S = 5.0
 #: ``nanonis_patch._LIB_BOGUS_TIMEOUT_S``（1000 s）：到了那个值，patch 会把它
 #: 当成 nanonis_spm 泄漏出来的假超时而换回默认值，抬高就白做了。
 _MAX_CALL_RECV_TIMEOUT_S = 900.0
+
+#: Slack on top of a call's own wire budget before the breaker treats the
+#: HALF-OPEN probe it holds as abandoned (see :meth:`ConnectionPool._probe_lease_s`):
+#: logging, the occupant hint's connection-table scan, scheduling — the parts of a
+#: call no socket timeout bounds.
+_PROBE_LEASE_SLACK_S = 10.0
 
 #: Prefix on ``NanonisCallRecord.error`` when the call never touched the socket
 #: because the role lock was busy. Machine-checkable so the urgent path can tell
@@ -185,6 +191,17 @@ def is_transport_failure(record) -> bool:
 
 def _mark_transport(record) -> None:
     setattr(record, _TRANSPORT_FLAG, True)
+
+
+def _emergency_lock_wait(lock_timeout_s: float | None) -> float:
+    """Role-lock wait for an emergency call let past a comms breaker that would
+    have refused it: the caller's own, but at most :data:`EMERGENCY_LOCK_TIMEOUT_S`.
+    The pool default (``None`` = 30 s) and "wait forever" (``<= 0``; also NaN) both
+    become :data:`EMERGENCY_LOCK_TIMEOUT_S` — such a call never queues."""
+    if lock_timeout_s is None:
+        return EMERGENCY_LOCK_TIMEOUT_S
+    t = float(lock_timeout_s)
+    return min(t, EMERGENCY_LOCK_TIMEOUT_S) if t > 0 else EMERGENCY_LOCK_TIMEOUT_S
 
 
 class ConnectionPool:
@@ -335,7 +352,8 @@ class ConnectionPool:
     def safe_call(self, method_name: str, *args, role: str = "main",
                   lock_timeout_s: float | None = None,
                   count_health: bool = True,
-                  recv_timeout_s: float | None = None) -> NanonisCallRecord:
+                  recv_timeout_s: float | None = None,
+                  _urgent: bool = False) -> NanonisCallRecord:
         """Execute a Nanonis method safely with timing and error capture.
 
         ``recv_timeout_s`` 只给**在仪器端阻塞很久才回话**的命令用
@@ -365,21 +383,74 @@ class ConnectionPool:
         retries and the "three consecutive failures" condition could never
         accumulate. Reserved for continuous read-only monitoring (the current
         monitor's ~20 Hz oscilloscope poll); anything that acts on the
-        instrument must stay counted."""
+        instrument must stay counted. Because such a call never reports back, it
+        also never carries the breaker's HALF-OPEN probe: it runs only while the
+        breaker is CLOSED and is short-circuited in OPEN and HALF_OPEN alike.
+
+        Emergency traffic is never refused by the breaker: any call on
+        ``role="emergency"``, and any call made through :meth:`urgent_call`
+        (``_urgent``, set only there). It is still reported, takes no probe and
+        holds nobody up. Let past a breaker that would have refused it, it also
+        does not queue: its role-lock wait is capped at
+        :data:`EMERGENCY_LOCK_TIMEOUT_S` (never "forever"). Why:
+        :mod:`mast.core.comms_health` (SAFETY)."""
         record = NanonisCallRecord(method=method_name, args=args)
 
         if self._closed:
             record.error = "ConnectionPool is closed"
             return record
 
+        # EMERGENCY TRAFFIC IS NEVER REFUSED BY THE BREAKER (a
+        # behaviour change): the dedicated emergency port, and the urgent path
+        # (E-STOP, watchdog SafeRetract) including its main-port withdraw
+        # fallback. The breaker's verdict is shared by four sockets and lags the
+        # link; a withdraw it refuses is a withdraw that never happens.
+        #
+        # What the gate used to buy, and what replaces it. When the breaker was
+        # written, role locks were unbounded and a dead
+        # socket could hold a call ~1000 s (nanonis_spm's leaked timeout) or
+        # forever (EOF busy loop): an emergency call on a dead link hung holding
+        # its role lock and every later one queued behind it. Refusing them at
+        # once avoided that pile-up. A later change bounded the socket
+        # waits and the role locks and added urgent_call; what is left — a plain
+        # safe_call on role="emergency" (env-alarm retract, EmergencyRetract)
+        # waits up to 30 s for its lock — is closed below: let past a breaker
+        # that would refuse it, an emergency call waits at most
+        # EMERGENCY_LOCK_TIMEOUT_S for the role lock and never queues.
+        bypass = _urgent or role == "emergency"
+
         # COMMS CIRCUIT BREAKER (field trace). If the link has been
         # judged down (≥ N consecutive TCP failures), short-circuit here WITHOUT
         # touching the socket: return a clear comms-down error immediately rather
         # than adding another ~5 s timeout, and leave the fragile port alone.
         # The breaker itself releases one probe once the cooldown elapses.
-        if not self._breaker.allow():
-            record.error = format_comms_down(self._breaker)
-            return record
+        #
+        # Only a call that WILL report its outcome may take that probe. A
+        # count_health=False call (current pump, aux / env / Z-burst pollers)
+        # never calls record_success / record_failure, so a probe it took never
+        # came back: from then on every call on every role, the emergency
+        # withdraw included, was refused, while the breaker said half_open and
+        # comms_healthy() said True (reproduced
+        # on the real pool). Such a call is admitted only while CLOSED
+        # (may_probe=False) and never holds the probe.
+        #
+        # Two steps. Here, before queueing for the role lock, only
+        # would_admit(), which changes nothing: an OPEN breaker still refuses at
+        # once. The probe itself is handed out by admit() after the lock is held
+        # (below), so a call that waits up to _ROLE_LOCK_TIMEOUT_S on a busy role
+        # never sits on the probe while every other role is refused, and the
+        # lock-busy exit cannot leave with it.
+        if not self._breaker.would_admit(may_probe=count_health):
+            if not bypass:
+                record.error = format_comms_down(self._breaker)
+                return record
+            # An emergency call the breaker would have refused: it goes, but it
+            # does not queue (see the EMERGENCY note above).
+            lock_timeout_s = _emergency_lock_wait(lock_timeout_s)
+            logger.warning(
+                "ConnectionPool: emergency '%s' on role '%s' sent past the %s comms "
+                "breaker (role-lock wait capped at %.1f s)", method_name, role,
+                self._breaker.state(), lock_timeout_s)
 
         # Serialise the whole transaction PER ROLE: get + the socket round-trip
         # + any reconnect must be atomic w.r.t. another thread on the same role,
@@ -411,8 +482,19 @@ class ConnectionPool:
                     "ConnectionPool: role '%s' lock not acquired in %.1fs — "
                     "'%s' refused rather than queued", role, waited, method_name)
             return record
+        probe = 0
         try:
           recv_to = self._module_open_budget(role, method_name, recv_timeout_s)
+          if bypass:
+              admitted, probe = True, 0       # never the probe, never refused
+          else:
+              admitted, probe = self._breaker.admit(
+                  may_probe=count_health, lease_s=self._probe_lease_s(recv_to))
+          if not admitted:
+              # The breaker moved while this call waited for the lock: it
+              # opened, or another caller took the probe.
+              record.error = format_comms_down(self._breaker)
+              return record
           # What went wrong on the first try, kept for the error text: when the
           # resend fails too, the SECOND exception is usually a consequence (the
           # controller resetting the replacement connection while it is still
@@ -511,7 +593,16 @@ class ConnectionPool:
                 record.error = f"{type(e).__name__}: {e}"
                 return record
         finally:
-            lk.release()
+            try:
+                if probe:
+                    # EVERY exit after admit() passes here. A probe that
+                    # reported (record_success / record_failure) is already gone
+                    # and this is a no-op; any other exit — method not found, a
+                    # non-socket exception, an exception escaping safe_call —
+                    # returns it, so the next counted call probes the link.
+                    self._breaker.abandon_probe(probe, f"{role} {method_name}")
+            finally:
+                lk.release()
 
         return record
 
@@ -547,6 +638,33 @@ class ConnectionPool:
         if not grace:
             return recv_timeout_s
         return max(float(recv_timeout_s or 0.0), _MODULE_OPEN_RECV_S)
+
+    def _probe_lease_s(self, recv_to: float | None) -> float:
+        """How long THIS call may hold the breaker's HALF-OPEN probe.
+
+        Its longest legitimate time on the wire — the probe is handed out only
+        once the role lock is held, so no lock wait is in it: two tries, each up
+        to the recv budget that applies (``recv_to``, else the pool's
+        ``timeout_s``; never above :data:`_MAX_CALL_RECV_TIMEOUT_S`), one graceful
+        reconnect between them (connect timeout + :data:`_STALE_DRAIN_TOTAL_S`),
+        plus :data:`_PROBE_LEASE_SLACK_S`. An ordinary 5 s call gets ~22 s, a
+        600 s spectroscopy sweep ~1212 s: the lease never cuts a live probe
+        short, and a leak from an ordinary call blocks for seconds, not for the
+        ~30 min a single cap sized for the longest call would allow."""
+        cfg = getattr(self, "_config", None)   # a pool built with __new__ has none
+        per_try = recv_to if recv_to is not None else getattr(cfg, "timeout_s", None)
+        try:
+            per_try = float(per_try)
+        except (TypeError, ValueError):
+            per_try = _MAX_CALL_RECV_TIMEOUT_S
+        if per_try != per_try:                  # NaN: unknown budget, assume the longest
+            per_try = _MAX_CALL_RECV_TIMEOUT_S
+        per_try = min(max(per_try, 0.0), _MAX_CALL_RECV_TIMEOUT_S)
+        try:
+            connect = float(getattr(cfg, "connect_timeout_s", 0.3) or 0.3)
+        except (TypeError, ValueError):
+            connect = 0.3
+        return 2.0 * per_try + connect + _STALE_DRAIN_TOTAL_S + _PROBE_LEASE_SLACK_S
 
     def _followups(self) -> dict:
         # Created lazily as well as in __init__: a pool built with __new__ (one
@@ -611,10 +729,16 @@ class ConnectionPool:
 
     def reconnect_role(self, role: str, why: str = "") -> bool:
         """用户触发的优雅重连：退役旧 socket 并重新连接。
-        
+
         走 FIN、排空迟到字节、关闭和新建流程；不使用可能阻塞单客户端端口的强制关闭。
         此入口处理自动恢复没有检测或解决的故障。主动重试会清除该角色的退避计数，
-        不应被上一次失败的退避窗口阻止。"""
+        不应被上一次失败的退避窗口阻止。
+
+        熔断器没闭合时，操作员的显式重连同时**结束冷却、重新放一个探针**
+        （:meth:`CommsCircuitBreaker.rearm_probe`）：下一次计数调用就去验证链路。
+        不直接判为闭合 —— 握手成功不等于 Nanonis 在答话（端口卡死时连得上、
+        答不了）；闭合会把排着的调用一次放到没验证过的链路上。不论这次重连
+        成没成都放：操作员要的是「现在就再试」；没连上的话探针很快失败，冷却重来。"""
         if self._closed:
             return False
         if role not in _ROLE_ATTR:
@@ -627,7 +751,12 @@ class ConnectionPool:
             pass
         logger.warning("ConnectionPool: 用户请求重连角色 '%s'%s",
                        role, f" ({why})" if why else "")
-        return bool(self._reconnect_role(role))
+        ok = bool(self._reconnect_role(role))
+        try:
+            self._breaker.rearm_probe(f"operator reconnect of '{role}'")
+        except Exception:  # noqa: BLE001 — the reconnect itself already happened
+            logger.debug("rearm_probe failed", exc_info=True)
+        return ok
 
     def break_role(self, role: str, why: str = "") -> bool:
         """LAST RESORT: close *role*'s socket from another thread.
@@ -684,15 +813,18 @@ class ConnectionPool:
         So: wait only :data:`EMERGENCY_LOCK_TIMEOUT_S`; if the lock is still
         held, :meth:`break_role` the socket and try once more. A retract that
         costs a Nanonis restart beats a retract that never happens.
+
+        For the same reason the comms breaker never refuses these calls, on any
+        role (they are still reported): see :mod:`mast.core.comms_health`.
         """
         rec = self.safe_call(method_name, *args, role=role,
-                             lock_timeout_s=lock_timeout_s)
+                             lock_timeout_s=lock_timeout_s, _urgent=True)
         if not is_lock_busy(rec):
             return rec
         if not self.break_role(role, f"urgent {method_name} could not acquire the lock"):
             return rec
         return self.safe_call(method_name, *args, role=role,
-                              lock_timeout_s=lock_timeout_s)
+                              lock_timeout_s=lock_timeout_s, _urgent=True)
 
     # ── comms circuit breaker plumbing ───────────────────────────────────
 
@@ -726,8 +858,20 @@ class ConnectionPool:
         return self._breaker.snapshot()
 
     def comms_healthy(self) -> bool:
-        """False once the breaker has tripped (link judged down)."""
-        return not self._breaker.is_open()
+        """True only while the breaker is CLOSED: the link answered last time.
+
+        HALF_OPEN is not healthy. It used to count as healthy (``not
+        is_open()``), and every caller of this method is a zero-TCP gate in
+        front of ``count_health=False`` traffic: the current monitor's park
+        loop and its status ``connected`` (monitoring/service.py), the Z-noise
+        burst (envhistory/recorder.py) and NanonisSignalSensor.read
+        (environment/nanonis_env.py). After a cooldown they all resumed
+        uncounted calls, and one of those took the probe and never returned it.
+        Uncounted calls are refused until CLOSED anyway (see safe_call), so they
+        now park until a counted caller (watchdog, state refresh, a skill)
+        verifies the link. "Recovering" is told apart from "down" by
+        ``comms_snapshot()["state"]``: ``half_open`` vs ``open``."""
+        return self._breaker.state() == CLOSED
 
     def _reconnect_state_for(self, role: str) -> dict[str, float]:
         with self._struct_lock:

@@ -346,6 +346,102 @@ def reconcile_envelope(
     )
 
 
+# ── 最近一次对账的缓存 ────────────────────────────────────────────────────
+#
+# 对账原本只往日志和台账里写一次，之后没有任何东西读它：开机时记一条 WARNING，
+# 几天后 ``SetZPosition`` 被「global safety bounds」拒掉，拒绝信息里却完全看不出
+# 这条线其实比仪器行程窄（典型情形：进针后 Z 落在包络下沿附近，之后所有下压
+# 命令都被拒）。
+#
+# 缓存只存**findings 与读数**（不是 SafetyLimits），仍然没有任何路径能改包络。
+# 它的用途是三处「读」：拒绝信息、``GET /api/safety/limits`` 的响应头、
+# 初始化清单的 outstanding 列表。
+
+import threading as _threading
+import time as _time
+
+_last_lock = _threading.Lock()
+_last: "tuple[EnvelopeReconciliation, float] | None" = None
+
+
+def remember_reconciliation(result: EnvelopeReconciliation) -> None:
+    """记下最近一次对账结果（进程内）。开机对账与按需 probe 都调它。"""
+    global _last
+    with _last_lock:
+        _last = (result, _time.time())
+
+
+def last_reconciliation() -> "tuple[EnvelopeReconciliation, float] | None":
+    """``(结果, 对账时刻 epoch 秒)``；还没对过账返回 ``None``（= 不知道，不是「一致」）。"""
+    with _last_lock:
+        return _last
+
+
+def _forget_reconciliation() -> None:  # 仅测试用
+    global _last
+    with _last_lock:
+        _last = None
+
+
+def _same_bound(a: float, b: float) -> bool:
+    return abs(a - b) <= 1e-6 * max(abs(a), abs(b), 1e-30)
+
+
+def active_narrower_findings(limits: Any) -> tuple[EnvelopeFinding, ...]:
+    """缓存里**此刻仍然成立**的 NARROWER findings。
+
+    「仍然成立」= 该字段在 *limits*（当前生效值）里还是对账当时那个值。管理员在
+    对账之后改过覆写，旧 finding 就自动失效 —— 不会出现修好了还一直报错的情况，
+    也不需要为此重新读一遍硬件。
+    """
+    cached = last_reconciliation()
+    if cached is None:
+        return ()
+    out = []
+    for f in cached[0].findings:
+        if f.direction != NARROWER:
+            continue
+        cur = getattr(limits, f.field_name, None)
+        if isinstance(cur, (int, float)) and _same_bound(float(cur), f.configured):
+            out.append(f)
+    return tuple(out)
+
+
+def narrower_hint(bound: float, side: str) -> str:
+    """给「撞上了全局安全下限/上限」的拒绝信息补一句：这条线比实测行程窄。
+
+    *bound* 是被撞上的那条限值，*side* 为 ``"min"`` 或 ``"max"``（字段名里的
+    ``_min_`` / ``_max_``）。没有对账记录、没有匹配的 NARROWER finding、或
+    finding 已因覆写被改而过期 ⇒ 返回空串（不猜）。
+    """
+    cached = last_reconciliation()
+    if cached is None:
+        return ""
+    result, ts = cached
+    token = f"_{side}_"
+    for f in result.findings:
+        if f.direction != NARROWER or token not in f.field_name:
+            continue
+        if not _same_bound(float(bound), f.configured):
+            continue
+        when = _time.strftime("%Y-%m-%d %H:%M", _time.localtime(ts))
+        return (
+            f". NOTE: the configured envelope {f.field_name} = {f.configured:.6g} is "
+            f"NARROWER than the measured instrument travel ({f.measured:.6g}, from "
+            f"{f.source}, reconciled {when}) -- this rejection comes from a stale or "
+            f"undersized envelope, not from the hardware. Fix (operator only, never "
+            f"beyond the measured travel): set {f.field_name} on the instrument-init "
+            f"page (safety envelope group) or via POST "
+            f"/api/admin/overrides/safety_limits. Do NOT retry or work around it."
+        )
+    return ""
+
+
+def describe_narrower(limits: Any) -> list[str]:
+    """给 API / 初始化页用的人话列表（只含此刻仍成立的 NARROWER）。"""
+    return [f.describe() for f in active_narrower_findings(limits)]
+
+
 def report_reconciliation(result: EnvelopeReconciliation) -> None:
     """把对账结果**大声**说出去：日志 + 诊断台账。绝不抛异常。
 
@@ -357,7 +453,10 @@ def report_reconciliation(result: EnvelopeReconciliation) -> None:
         if result.ok:
             logger.info("安全包络对账：与实测行程一致")
             return
-        level = logger.error if result.wider else logger.warning
+        narrower = [f for f in result.findings if f.direction == NARROWER]
+        # 配置比行程窄的也是 ERROR：它不危险，但会把后续的命令挡在门外
+        # （此前只有 wider 走 ERROR，窄的那条在日志里一闪而过）。
+        level = logger.error if (result.wider or narrower) else logger.warning
         level("安全包络对账：%s", result.summary())
         for f in result.findings:
             level("  %s", f.describe())
@@ -376,6 +475,7 @@ def report_reconciliation(result: EnvelopeReconciliation) -> None:
                 measured={k: v for k, v in result.measured.items()},
                 unreadable=list(result.unreadable),
                 z_limits_enabled=result.z_limits_enabled,
+                narrower=[f.field_name for f in narrower],
                 # 对账只报告；这条 flag 是给读台账的人看的，别把它读成"已处理"。
                 auto_applied=False,
             )
@@ -413,6 +513,7 @@ def reconcile_at_boot(runtime: Any, *, background: bool = True) -> Any:
 
     def _run() -> EnvelopeReconciliation:
         result = reconcile_envelope(safe_call, limits)
+        remember_reconciliation(result)
         report_reconciliation(result)
         return result
 
@@ -435,6 +536,11 @@ def reconcile_at_boot(runtime: Any, *, background: bool = True) -> Any:
 
 
 __all__ = [
+    "active_narrower_findings",
+    "describe_narrower",
+    "last_reconciliation",
+    "narrower_hint",
+    "remember_reconciliation",
     "EnvelopeFinding",
     "EnvelopeReconciliation",
     "NARROWER",

@@ -12,12 +12,14 @@ import { describe, it } from "node:test";
 
 import {
   decodeMap2dFrame,
+  decodeMap2dRowsFrame,
+  isIncrementalKind,
+  isMapKind,
   decodeScalarFrame,
   decodeSpectrumFrame,
   decodeStatusFrame,
   decodeXyFrame,
   epochSeconds,
-  isIncrementalKind,
   map2dGeometry,
   normalizeStreamMeta,
   parseLiveMessage,
@@ -254,5 +256,31 @@ describe("SeqRanges", () => {
     r.add(5, 4);
     r.add(Number.NaN, 3);
     assert.equal(r.isEmpty(), true);
+  });
+});
+
+describe("map2d_rows（一帧一行）", () => {
+  it("解出一行；ix0 缺省为 0；null 是没读数，不是 0", () => {
+    assert.deepEqual(decodeMap2dRowsFrame({ t: 5, iy: 2, values: { Z: [1, null, 3] } }),
+      { t: 5, iy: 2, ix0: 0, values: { Z: [1, null, 3] } });
+  });
+
+  it("格式不对的整帧不要", () => {
+    for (const f of [
+      { t: 1, iy: 0, values: { Z: 1 } },                  // not a row
+      { t: 1, iy: 0, values: { Z: [1, 2], I: [1] } },     // ragged
+      { t: 1, iy: 0.5, values: { Z: [1] } },
+      { t: 1, iy: 0, ix0: "1", values: { Z: [1] } },
+      { t: 1, iy: 0, values: { Z: [] } },
+      { t: 1, values: { Z: [1] } },
+    ]) {
+      assert.equal(decodeMap2dRowsFrame(f), null, JSON.stringify(f));
+    }
+  });
+
+  it("是增量 kind、是一幅图", () => {
+    assert.equal(isIncrementalKind("map2d_rows"), true);
+    assert.equal(isMapKind("map2d_rows") && isMapKind("map2d"), true);
+    assert.equal(isMapKind("xy"), false);
   });
 });

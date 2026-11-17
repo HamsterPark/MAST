@@ -121,6 +121,10 @@ class InstrumentInitResponse(BaseModel):
     safety_source: str = ""
     #: 安全包络覆写是否还等着重启才生效（None = 说不准）。
     safety_restart_pending: Optional[bool] = None
+    #: 此刻生效的包络里，被最近一次对账判为「比实测行程**窄**」的字段（人话）。
+    #: 非空时这些字段的条目会并入 ``outstanding_required``、``needs_setup`` 为真：
+    #: 窄的包络不危险，但会把隧穿侧的命令挡在门外。
+    envelope_narrower: list[str] = Field(default_factory=list)
     degraded: bool = False
 
 

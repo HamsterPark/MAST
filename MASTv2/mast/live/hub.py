@@ -35,6 +35,7 @@ EventBus 上只发指针式的状态变化（契约陷阱 12）。
 
 from __future__ import annotations
 
+import bisect
 import json
 import logging
 import math
@@ -51,16 +52,28 @@ from mast.i18n import tr
 
 logger = logging.getLogger(__name__)
 
-KINDS: tuple[str, ...] = ("spectrum", "scalar", "xy", "map2d", "status")
+KINDS: tuple[str, ...] = ("spectrum", "scalar", "xy", "map2d", "map2d_rows", "status")
 #: 推给浏览器时只留最新一帧的 kind（契约 §7）。其余是增量：不丢，只合批。
 LATEST_ONLY_KINDS: frozenset[str] = frozenset({"spectrum", "scalar"})
+#: 按「位置」保留的 kind：map2d 一个像素一帧（键 (ix, iy)），map2d_rows 一行一帧（键 iy）。
+#: 同一位置的新帧顶掉旧帧（不算丢）；其余 kind 是按时间的环形缓冲。
+KEYED_KINDS: frozenset[str] = frozenset({"map2d", "map2d_rows"})
+#: 声明时要给地图几何（nx, ny, x0, y0, dx, dy, x_unit, y_unit）的 kind。
+MAP_KINDS: frozenset[str] = KEYED_KINDS
 
-#: 每个流保留多少帧（map2d 是像素数）。契约 §7 的默认值；``declare(retain=)`` 可改，但不超过上限。
+#: 每个流保留多少帧（map2d 是像素数，map2d_rows 是行数）。契约 §7 的默认值；``declare(retain=)``
+#: 可改，但不超过上限。
 DEFAULT_RETAIN: dict[str, int] = {"spectrum": 200, "scalar": 5000, "xy": 20000,
-                                  "map2d": 262144, "status": 500}
+                                  "map2d": 262144, "map2d_rows": 4096, "status": 500}
 MAX_RETAIN: dict[str, int] = {"spectrum": 2000, "scalar": 100_000, "xy": 200_000,
-                              "map2d": 262144, "status": 5000}
+                              "map2d": 262144, "map2d_rows": 4096, "status": 5000}
 MAP2D_MAX_PIXELS = 262144
+#: map2d_rows 的 nx / ny 上限（一行最多 4096 个值，一幅最多 4096 行）。
+MAP_ROWS_MAX_SIDE = 4096
+#: 每帧在内存里的固定开销（``_Frame``、文本对象头、OrderedDict 条目、键），按字符计进预算。
+#: 实测：逐像素帧约 390 B，其中文本只有约 64 字符。只按文本计时，预算把真实占用
+#: 低估好几倍 —— 256 Mi 的「上限」实际放进了约 1.5 GiB。
+FRAME_OVERHEAD_CHARS = 320
 #: 流的总数上限；超出时先淘汰最早结束的流，没有已结束的再淘汰最久没动静的。
 MAX_STREAMS = 256
 #: 所有流保留的帧文本合计上限（按字符数近似字节）。超了先整条淘汰已结束的流，再从占用最大的
@@ -178,6 +191,28 @@ def _values(v: Any) -> dict[str, float | None]:
     return out
 
 
+def _row_values(v: Any) -> dict[str, list]:
+    """map2d_rows 一帧的 ``values``：{名称: 一维数值数组}，各通道等长；非有限值 → None。"""
+    if not isinstance(v, Mapping) or not v:
+        raise LiveError(tr("map2d_rows 的 values 必须是非空的 {名称: 数组}",
+                           "values of map2d_rows must be a non-empty {name: array}"))
+    if len(v) > MAX_VALUES:
+        raise LiveError(tr(f"values 最多 {MAX_VALUES} 个通道（实际 {len(v)}）", f"values allows at most {MAX_VALUES} channels (actual {len(v)})"))
+    out: dict[str, list] = {}
+    n: int | None = None
+    for name, arr in v.items():
+        if not isinstance(name, str) or not name.strip() or len(name) > MAX_NAME:
+            raise LiveError(tr(f"values 的通道名不合法：{name!r}", f"Invalid channel name in values: {name!r}"))
+        a = _num_array(arr, f"values[{name!r}]")
+        if n is None:
+            n = len(a)
+        elif len(a) != n:
+            raise LiveError(tr(f"同一行的各通道必须等长（{name!r} 有 {len(a)} 个，前面的有 {n} 个）",
+                               f"All channels of a row must have the same length ({name!r} has {len(a)}, earlier ones {n})"))
+        out[name] = a
+    return out
+
+
 def _json_safe(obj: Any, depth: int = 0) -> Any:
     """meta 只留 JSON 表达得了的东西。非有限 float → None；numpy → Python；别的对象 → str()。
     meta 是给人看的描述，一个 datetime 不值得让整条流声明失败。"""
@@ -233,7 +268,7 @@ def _map_geometry(meta: dict) -> tuple[int, int]:
 def _retain_for(kind: str, retain: Any, geometry: tuple[int, int] | None) -> int:
     hi = MAX_RETAIN[kind]
     if geometry is not None:
-        hi = min(hi, geometry[0] * geometry[1])
+        hi = min(hi, geometry[1] if kind == "map2d_rows" else geometry[0] * geometry[1])
     if retain is None:
         return min(DEFAULT_RETAIN[kind], hi)
     if isinstance(retain, bool) or not isinstance(retain, int) or retain < 1:
@@ -278,6 +313,19 @@ def _build_frame(kind: str, frame: Any, geometry: tuple[int, int] | None,
         if not (0 <= ix < nx and 0 <= iy < ny):
             raise LiveError(tr(f"像素 ({ix}, {iy}) 不在 {nx}×{ny} 的图里", f"Pixel ({ix}, {iy}) is not inside the {nx}×{ny} map"))
         return {"t": t, "ix": ix, "iy": iy, "values": _values(frame.get("values"))}, (ix, iy)
+    if kind == "map2d_rows":
+        assert geometry is not None
+        nx, ny = geometry
+        iy = _int(frame.get("iy"), "iy")
+        ix0 = _int(frame.get("ix0", 0), "ix0")
+        if not 0 <= iy < ny:
+            raise LiveError(tr(f"行 iy={iy} 不在 0…{ny - 1} 里", f"Row iy={iy} is outside 0…{ny - 1}"))
+        rows = _row_values(frame.get("values"))
+        n = len(next(iter(rows.values())))
+        if ix0 < 0 or ix0 + n > nx:
+            raise LiveError(tr(f"这一行的 ix0={ix0} 加 {n} 个值超出了 nx={nx}",
+                               f"ix0={ix0} plus {n} values overruns nx={nx}"))
+        return {"t": t, "iy": iy, "ix0": ix0, "values": rows}, iy
     # status
     text = frame.get("text")
     if not isinstance(text, str):
@@ -293,15 +341,21 @@ def _build_frame(kind: str, frame: Any, geometry: tuple[int, int] | None,
 # ── 存储 ──────────────────────────────────────────────────────────────────────
 
 class _Frame:
-    """一帧的存档：seq、序列化好的 JSON 文本、引用的轴版本（spectrum）、像素键（map2d）。"""
+    """一帧的存档：seq、序列化好的 JSON 文本、引用的轴版本（spectrum）、位置键（map2d 是
+    (ix, iy)，map2d_rows 是 iy）。"""
 
     __slots__ = ("seq", "text", "axis_ver", "key")
 
-    def __init__(self, seq: int, text: str, axis_ver: int, key: tuple[int, int] | None) -> None:
+    def __init__(self, seq: int, text: str, axis_ver: int, key: Any) -> None:
         self.seq = seq
         self.text = text
         self.axis_ver = axis_ver
         self.key = key
+
+
+def _cost(text: str) -> int:
+    """一帧计进预算的量：文本字符数加固定开销（见 :data:`FRAME_OVERHEAD_CHARS`）。"""
+    return len(text) + FRAME_OVERHEAD_CHARS
 
 
 class _Axis:
@@ -324,7 +378,7 @@ class _Axis:
 class _Stream:
     __slots__ = ("id", "kind", "title", "source", "x_label", "x_unit", "y_label", "y_unit",
                  "meta_text", "geometry", "retain", "uid", "created_t", "last_t", "ended_t",
-                 "seq", "axis_ver", "axes", "frames", "chars", "evicted_upto")
+                 "seq", "axis_ver", "axes", "frames", "chars", "evicted_upto", "order", "order_dead")
 
     def __init__(self, sid: str, kind: str, geometry: tuple[int, int] | None, retain: int, *,
                  seq: int, axis_ver: int, now: float) -> None:
@@ -342,24 +396,60 @@ class _Stream:
         self.seq = seq
         self.axis_ver = axis_ver
         self.axes: OrderedDict[int, _Axis] = OrderedDict()
-        self.frames: Any = OrderedDict() if kind == "map2d" else deque()
+        self.frames: Any = None
+        self.order: list[_Frame] = []
+        self.order_dead = 0
+        self.reset_frames()
         self.chars = 0
         # 已经不在保留区里的最大 seq（容量淘汰；map2d 同像素被新值覆盖不算）。新建的流 = 之前的都不在了。
         self.evicted_upto = seq
 
+    @property
+    def keyed(self) -> bool:
+        return self.kind in KEYED_KINDS
+
+    def reset_frames(self) -> None:
+        """清空保留区。按位置保留的 kind 另有一份按 seq 递增的索引 ``order``：OrderedDict 只能
+        从一头找，REST 翻页时 ``since`` 落在中间要逐帧走过去；索引让 :func:`_select` 二分定位。
+        被覆盖、被裁掉的条目在索引里惰性作废（``frames[key] is not f``），过半时压缩一次。"""
+        self.frames = OrderedDict() if self.keyed else deque()
+        self.order = []
+        self.order_dead = 0
+
+    def index_add(self, f: _Frame, replaced: bool) -> None:
+        if not self.keyed:
+            return
+        self.order.append(f)
+        if replaced:
+            self.index_drop()
+
+    def index_drop(self) -> None:
+        """一个索引条目作废了（被覆盖或被裁掉）。作废的超过一半就压缩。"""
+        if not self.keyed:
+            return
+        self.order_dead += 1
+        if self.order_dead > len(self.frames):
+            self.order = [f for f in self.order if self.frames.get(f.key) is f]
+            self.order_dead = 0
+
+    def live(self, f: _Frame) -> bool:
+        return self.frames.get(f.key) is f
+
     def newest_first(self) -> Iterator[_Frame]:
-        return reversed(self.frames.values()) if self.kind == "map2d" else reversed(self.frames)
+        return reversed(self.frames.values()) if self.keyed else reversed(self.frames)
 
     def newest(self) -> _Frame | None:
         return next(self.newest_first(), None)
 
     def oldest(self) -> _Frame | None:
-        it = self.frames.values() if self.kind == "map2d" else self.frames
+        it = self.frames.values() if self.keyed else self.frames
         return next(iter(it), None)
 
     def pop_oldest(self) -> _Frame:
-        if self.kind == "map2d":
-            return self.frames.popitem(last=False)[1]
+        if self.keyed:
+            f = self.frames.popitem(last=False)[1]
+            self.index_drop()
+            return f
         return self.frames.popleft()
 
     def describe(self) -> dict:
@@ -391,7 +481,23 @@ def _select(st: _Stream, since: int | None,
     if since < 0:
         f = st.newest()
         return ([f] if f is not None else []), False, None
-    out: list[_Frame] = []
+    gap = (since + 1, st.evicted_upto) if since > 0 and st.evicted_upto > since else None
+    if st.keyed:
+        # 二分定位 since，再往后取一页：O(log N + 页大小)。逐帧从最新往回走的写法，在 512² 的
+        # 逐像素流上每页都要走一遍整个保留区。
+        out: list[_Frame] = []
+        more = False
+        order = st.order
+        for i in range(bisect.bisect_right(order, since, key=lambda f: f.seq), len(order)):
+            f = order[i]
+            if not st.live(f):
+                continue
+            if limit is not None and len(out) >= limit:
+                more = True
+                break
+            out.append(f)
+        return out, more, gap
+    out = []
     for f in st.newest_first():
         if f.seq <= since:
             break
@@ -400,7 +506,6 @@ def _select(st: _Stream, since: int | None,
     more = False
     if limit is not None and len(out) > limit:
         out, more = out[:limit], True
-    gap = (since + 1, st.evicted_upto) if since > 0 and st.evicted_upto > since else None
     return out, more, gap
 
 
@@ -535,7 +640,10 @@ class LiveHub:
                 "y_label": _text(y_label, "y_label"), "y_unit": _text(y_unit, "y_unit", limit=40),
             }
             meta_d = _clean_meta(meta)
-            geometry = _map_geometry(meta_d) if kind == "map2d" else None
+            geometry = _map_geometry(meta_d) if kind in MAP_KINDS else None
+            if kind == "map2d_rows" and geometry is not None and max(geometry) > MAP_ROWS_MAX_SIDE:
+                raise LiveError(tr(f"map2d_rows 的 nx / ny 最大 {MAP_ROWS_MAX_SIDE}：{geometry}",
+                                   f"nx / ny of map2d_rows are at most {MAP_ROWS_MAX_SIDE}: {geometry}"))
             keep = _retain_for(kind, retain, geometry)
             meta_text = _dumps(meta_d)
         except Exception as exc:  # noqa: BLE001
@@ -556,7 +664,7 @@ class LiveHub:
                     self._chars -= st.chars
                     st.chars = 0
                     st.kind, st.geometry = kind, geometry
-                    st.frames = OrderedDict() if kind == "map2d" else deque()
+                    st.reset_frames()
                     st.axes.clear()
                     st.uid = secrets.token_hex(4)
                     st.evicted_upto = st.seq
@@ -655,26 +763,42 @@ class LiveHub:
         except Exception as exc:  # noqa: BLE001
             self._refuse(exc, f"end:{stream_id}")
 
+    def drop(self, stream_id: str) -> None:
+        """立即删掉一个流（和容量淘汰一样：留墓碑，同一个 id 再声明时 seq 接着编；订阅者收到
+        ``evict``，目录里随即消失）。给「旧的已经没人要了」的发布方用 —— 例如扫描地图的实时
+        扫描每帧一个流，只留最近几帧，不等预算满了才淘汰。"""
+        try:
+            with self._lock:
+                st = self._streams.get(stream_id) if isinstance(stream_id, str) else None
+                if st is None:
+                    raise LiveError(tr(f"流 {stream_id!r} 还没 declare", f"Stream {stream_id!r} has not been declared yet"))
+                self._evict(st, "发布方删除")
+        except Exception as exc:  # noqa: BLE001
+            self._refuse(exc, f"drop:{stream_id}")
+
     # —— 保留与淘汰（持锁）——
     def _store(self, st: _Stream, f: _Frame) -> None:
-        if st.kind == "map2d":
+        replaced = False
+        if st.keyed:
             old = st.frames.pop(f.key, None)
-            if old is not None:          # 同一像素的新值顶掉旧值：不算丢
-                st.chars -= len(old.text)
-                self._chars -= len(old.text)
+            if old is not None:          # 同一位置的新值顶掉旧值：不算丢
+                st.chars -= _cost(old.text)
+                self._chars -= _cost(old.text)
+                replaced = True
             st.frames[f.key] = f
         else:
             st.frames.append(f)
-        st.chars += len(f.text)
-        self._chars += len(f.text)
+        st.index_add(f, replaced)
+        st.chars += _cost(f.text)
+        self._chars += _cost(f.text)
         self._trim(st)
 
     def _trim(self, st: _Stream, keep: int | None = None) -> None:
         limit = st.retain if keep is None else keep
         while len(st.frames) > limit:
             f = st.pop_oldest()
-            st.chars -= len(f.text)
-            self._chars -= len(f.text)
+            st.chars -= _cost(f.text)
+            self._chars -= _cost(f.text)
             st.evicted_upto = max(st.evicted_upto, f.seq)
 
     def _evict(self, st: _Stream, why: str) -> None:

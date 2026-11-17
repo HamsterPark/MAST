@@ -215,6 +215,11 @@ REMEDY_TOOL_NAMES: frozenset[str] = frozenset({
     "StopWITec",
     "CloseWITecShutter",
     "ReleaseWITecWriteAccess",
+    # superconducting magnet STOP (7.2.0), mirrored from BYPASS_NAMES
+    "StopMagnetRamp",
+    # sample-stage heating: hold the ramp / heater off, mirrored from BYPASS_NAMES
+    "HoldSampleTemperature",
+    "HeaterOff",
 })
 
 #: 不靠名字、靠 metadata 标签认出来的解药。与 ``instrument_lock.BYPASS_TAGS`` 同义。

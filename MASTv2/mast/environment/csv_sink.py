@@ -75,15 +75,27 @@ class EnvironmentCsvSink:
         self._handles: dict[Path, Any] = {}
         self._last_fsync: dict[Path, float] = {}
         self._disabled_until = 0.0
+        self._closed = False
         self._warned = False
         self.written = 0
         self.failed = 0
+        #: 写的时候作用域已经换了的读数（排队跨过了一次切换）：同一实验只进实验级
+        #: 文件，换了实验就不写。
+        self.rescoped = 0
 
     # ── 写入 ──────────────────────────────────────────────────────────
 
-    def write(self, sensor: str, value: float, unit: str, status: str) -> None:
-        """写一条读数。**永不抛，永不阻塞。**"""
-        if time.monotonic() < self._disabled_until:
+    def write(self, sensor: str, value: float, unit: str, status: str,
+              *, ts: float | None = None, scope_ids=None) -> None:
+        """写一条读数。**永不抛，永不阻塞。**
+
+        监控线程把整轮读数交给归档线程排队写，写的时候可能已经晚了，所以读数那一刻的
+        事实跟着读数一起来：``ts`` 是读到它的时刻（epoch 秒；行里的时间戳和按 UTC 日
+        轮转都按它），``scope_ids`` 是当时的（实验，样品）。作用域在排队期间换过，这条
+        读数就不能落进新样品的目录、也不能标成新样品：同一实验只写实验级文件、行里标
+        原来的样品；换了实验就不写（它的行已经进了库）。不给就按现在。
+        """
+        if self._closed or time.monotonic() < self._disabled_until:
             return
         try:
             scope = self._scope()
@@ -94,8 +106,20 @@ class EnvironmentCsvSink:
         exp_dir, sample_dir, eid, sid = scope
         if exp_dir is None:
             return
+        if scope_ids is not None:
+            r_eid, r_sid = scope_ids
+            if (r_eid, r_sid) != (eid, sid):
+                self.rescoped += 1
+                if r_eid != eid:
+                    return
+                eid, sid, sample_dir = r_eid, r_sid, None
 
         now = datetime.now(timezone.utc)
+        if ts is not None:
+            try:
+                now = datetime.fromtimestamp(float(ts), timezone.utc)
+            except (TypeError, ValueError, OverflowError, OSError):
+                pass
         row = ",".join((
             now.isoformat(timespec="milliseconds"),
             f"{now.timestamp():.3f}",
@@ -155,6 +179,8 @@ class EnvironmentCsvSink:
         self._close_all()
 
     def close(self) -> None:
+        """关掉所有句柄，此后拒收读数（关停时晚到的写入不再重开文件）。"""
+        self._closed = True
         self._close_all()
 
     def _close_all(self) -> None:
@@ -174,8 +200,10 @@ class EnvironmentCsvSink:
 
     def stats(self) -> dict:
         return {"written": self.written, "failed": self.failed,
+                "rescoped": self.rescoped,
                 "open_files": len(self._handles),
-                "disabled": time.monotonic() < self._disabled_until}
+                "disabled": time.monotonic() < self._disabled_until,
+                "closed": self._closed}
 
 
 def _stem(sensor: str) -> str:

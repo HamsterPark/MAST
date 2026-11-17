@@ -1,15 +1,17 @@
 ---
 name: mast-operator
-description: "Operate a MAST-controlled instrument station - a scanning tunneling microscope (STM, Nanonis) or an optical Raman / SHG station - through the mast_* MCP tools - read the briefing, set the experiment and sample, look at the instrument (mast_observe), take one action per observation with its token (mast_act, mast_run), measure from the archived frames, wait on the server (mast_wait), keep GUIDE.md and WORKING.md, ask the operator, and hand over."
-when_to_use: "Use for any request that touches the STM or MAST - scanning and imaging, approach and withdraw, bias and setpoint, tip conditioning, spectroscopy (STS, dI/dV, grids), drift, looking at or measuring frames and spectra (profiles, FFT, blobs, differences), detectors, waiting for scans, experiment records, notes, handover. Trigger words - STM, scanning tunneling microscope, Nanonis, MAST, scan, tip, bias, setpoint, spectroscopy, dI/dV, approach, withdraw, frame, observe, 扫描隧道显微镜, 针尖, 扫描, 谱, 偏压, 设定点, 进针, 退针, 帧, 观测, 测量, 实验记录, 交接. On an optical station (no STM; WITec confocal Raman / SHG, lasers, power meter, temperature controller) it also applies to - acquiring spectra, Raman, SHG, excitation wavelength or power series, polarization or temperature series, laser, WITec, 拉曼, 光谱, 激光, 偏振, 光学站."
+description: "Operate a MAST-controlled instrument station - a scanning tunneling microscope (STM, Nanonis), an optical Raman / SHG station or a generic station (configured devices and sensors, no STM, no WITec) - through the mast_* MCP tools - read the briefing, set the experiment and sample, look at the instrument (mast_observe), take one action per observation with its token (mast_act, mast_run), measure from the archived frames, wait on the server (mast_wait), keep GUIDE.md and WORKING.md, ask the operator, and hand over."
+when_to_use: "Use for any request that touches the STM or MAST - scanning and imaging, approach and withdraw, bias and setpoint, tip conditioning, spectroscopy (STS, dI/dV, grids), drift, looking at or measuring frames and spectra (profiles, FFT, blobs, differences), detectors, waiting for scans, experiment records, notes, handover. Trigger words - STM, scanning tunneling microscope, Nanonis, MAST, scan, tip, bias, setpoint, spectroscopy, dI/dV, approach, withdraw, frame, observe, 扫描隧道显微镜, 针尖, 扫描, 谱, 偏压, 设定点, 进针, 退针, 帧, 观测, 测量, 实验记录, 交接. On an optical station (no STM; WITec confocal Raman / SHG, lasers, power meter, temperature controller) it also applies to - acquiring spectra, Raman, SHG, excitation wavelength or power series, polarization or temperature series, laser, WITec, 拉曼, 光谱, 激光, 偏振, 光学站; on a generic station also to its spectrometer, light sources, power meter, temperature controller and sensors, 通用站."
 ---
 
 # Operating MAST from Claude Code
 
 MAST is the control system of a real instrument station: a scanning tunneling microscope
-(Nanonis) or an optical Raman / SHG station with no STM. `mast_briefing` says which; on an optical
-station read [the optical station page](references/en/09-optical-station.md) first (the rest of this
-page describes the STM station). The `mast` MCP
+(Nanonis), an optical Raman / SHG station with no STM, or a generic station with neither an STM nor a
+WITec. `mast_briefing` says which; on an optical station read
+[the optical station page](references/en/09-optical-station.md) first, on a generic station
+[the generic station page](references/en/11-generic-station.md) (the rest of this page describes the
+STM station). The `mast` MCP
 server of this plugin talks to MAST's external agent API, and you act through its `mast_*`
 tools. Treat every action as physical: a wrong parameter can crash the tip or damage the sample.
 
@@ -186,4 +188,5 @@ Full guide (also served as MCP resources `mast://guide/en/...` and `mast://guide
 - API reference: [English](references/en/07-api-reference.md) · [中文](references/zh/07-api-reference.md)
 - Troubleshooting: [English](references/en/08-troubleshooting.md) · [中文](references/zh/08-troubleshooting.md)
 - Optical station: [English](references/en/09-optical-station.md) · [中文](references/zh/09-optical-station.md)
+- Generic station (no STM, no WITec): [English](references/en/11-generic-station.md) · [中文](references/zh/11-generic-station.md)
 - Optical layout (read the operator's drawing of the table, comment on it): [English](references/en/10-optical-layout.md) · [中文](references/zh/10-optical-layout.md)

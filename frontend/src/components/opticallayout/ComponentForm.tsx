@@ -6,7 +6,8 @@ import { Checkbox } from "@/components/controls";
 import { parseNumberInput } from "@/lib/operatorPrompts";
 import type { Annotations, ComponentType, LayoutComponent, Links, OpticalLayout } from "@/lib/opticalLayout/types";
 import { COMPONENT_TYPES, LIMITS } from "@/lib/opticalLayout/types";
-import { CATALOG, angleMeaning, propFields, typeLabel, type PropField } from "@/lib/opticalLayout/catalog";
+import { CATALOG, angleMeaning, propField, propFields, typeLabel, typeNote, visiblePropFields, type PropField } from "@/lib/opticalLayout/catalog";
+import { beamHeightOf, heightText, usesHeights } from "@/lib/opticalLayout/heights";
 import {
   changeType,
   getComponent,
@@ -23,7 +24,8 @@ import {
   setProp,
   setSourceWavelengths,
 } from "@/lib/opticalLayout/edit";
-import { arrivingWavelengths, ownWavelengths, truncation, type DetailedTrace } from "@/lib/opticalLayout/trace";
+import { arrivingWavelengths, ownWavelengths, truncation, type DetailedEvent, type DetailedTrace } from "@/lib/opticalLayout/trace";
+import { polarizationText, powerText, spotText } from "@/lib/opticalLayout/beam";
 import { isAimable } from "@/lib/opticalLayout/align";
 import { nearestHole } from "@/lib/opticalLayout/geometry";
 import type { HitIndicator } from "@/lib/opticalLayout/indicators";
@@ -164,7 +166,24 @@ function PropEditor({ c, field, ctx }: { c: LayoutComponent; field: PropField; c
   }
 }
 
-function HitList({ hits, aperture, cut }: { hits: readonly HitIndicator[]; aperture: number; cut: boolean }) {
+/** The event a hit indicator was made from (same tree, branch, component and path), for its beam state. */
+function eventOf(trace: DetailedTrace, h: HitIndicator): DetailedEvent | undefined {
+  const tree = trace.find((t) => t.source === h.source && t.wavelength_nm === h.wavelength_nm);
+  const br = tree?.branches.find((b) => b.branch === h.branch);
+  return br?.events.find((e) => e.component === h.componentId && e.path_mm === h.path_mm);
+}
+
+/** "12.3 mW · Ø1.20 mm · linear 30°": the beam arriving at the component (v2 section 5). */
+function BeamLine({ trace, h }: { trace: DetailedTrace; h: HitIndicator }) {
+  const b = eventOf(trace, h)?.beam;
+  if (!b) return null;
+  const parts = [powerText(b.p, b.mw)];
+  if (b.d_mm !== null) parts.push(spotText(b.d_mm));
+  parts.push(polarizationText(b.s));
+  return <div className="text-mast-muted">{tr("到达：", "Arriving: ")}{parts.join(" · ")}</div>;
+}
+
+function HitList({ hits, aperture, cut, trace, heights = false }: { hits: readonly HitIndicator[]; aperture: number; cut: boolean; trace: DetailedTrace; /** the layout uses heights: say how far off the axis in height */ heights?: boolean }) {
   if (hits.length === 0) {
     // a cut trace cannot say that nothing reaches it: the light that would is the light that was not traced
     return <p className="text-xs text-mast-faint">{cut ? tr("追迹被截断，不知道有没有光打到它。", "The trace is cut: it is not known whether a beam reaches it.") : tr("现在没有光打到它。", "No beam reaches it right now.")}</p>;
@@ -181,11 +200,13 @@ function HitList({ hits, aperture, cut }: { hits: readonly HitIndicator[]; apert
             {h.fraction < 0.999 && <span className="text-mast-faint">{Math.round(h.fraction * 100)}%</span>}
           </div>
           <div className="font-mono tabular-nums text-mast-muted">
-            Δ {h.offset_mm.toFixed(2)} mm ({Math.round((Math.abs(h.offset_mm) / aperture) * 100)}%) · {h.incidence_deg.toFixed(1)}° · {tr("路径", "path")} {h.path_mm.toFixed(1)} mm (+{h.leg_mm.toFixed(1)})
+            Δ {h.offset_mm.toFixed(2)} mm ({Math.round((Math.abs(h.offset_mm) / aperture) * 100)}%){heights && <> · Δz {h.dz_mm.toFixed(2)} mm</>} · {h.incidence_deg.toFixed(1)}° · {tr("路径", "path")} {h.path_mm.toFixed(1)} mm (+{h.leg_mm.toFixed(1)})
           </div>
+          <BeamLine trace={trace} h={h} />
           {h.reason === "back_hit" && <div className="text-mast-danger">{tr("光打在背面。", "The beam arrives at the back.")}</div>}
           {h.reason === "blocked" && <div className="text-mast-warn">{tr("光在这里被挡住。", "The beam is blocked here.")}</div>}
           {h.reason === "off_center" && <div className="text-mast-warn">{tr("偏离中心超过口径的 20%。", "More than 20% of the aperture off centre.")}</div>}
+          {h.reason === "off_height" && <div className="text-mast-warn">{tr("高度偏离光轴超过口径的 20%。", "Off its axis in height by more than 20% of the aperture.")}</div>}
         </li>
       ))}
     </ul>
@@ -237,6 +258,9 @@ function PlaceAlong({ c, ctx }: { c: LayoutComponent; ctx: InspectorCtx }) {
   );
 }
 
+/** The power box of a fibre output that a fibre input feeds: the trace does not use it (v2 section 4.2). */
+const fedPowerHint = (): string => tr("续接时不用（功率来自来光 × coupling）", "Not used while it is fed (the power is what arrives × coupling)");
+
 export function ComponentForm({ c, ctx }: { c: LayoutComponent; ctx: InspectorCtx }) {
   const { layout, edit, readOnly, actions, issues } = ctx;
   const hits = ctx.indicators.get(c.id) ?? [];
@@ -247,7 +271,15 @@ export function ComponentForm({ c, ctx }: { c: LayoutComponent; ctx: InspectorCt
   const setA = (patch: Partial<Annotations>) => edit((l) => setAnnotation(l, c.id, patch));
   const setL = (patch: Partial<Links>) => edit((l) => setLinks(l, c.id, patch));
   const aIssue = (key: string) => issuesFor(issues, c.id, `.annotations.${key}`)[0]?.message ?? null;
-  const fields = propFields(c.type);
+  // the heights (3D contract section 7) sit with the position, not among the type's parameters
+  const hasFields = propFields(c.type).some((f) => f.group !== "position");
+  // a field that only means something next to another one (the angle of linear light, the M² of a beam
+  // with a diameter) is shown when that one is set, or when it has a value of its own that has to go
+  const fields = visiblePropFields(c.type, c.props);
+  const zField = propField(c.type, "z_mm");
+  const zOutField = propField(c.type, "z_out_mm");
+  const beamHeight = heightText(beamHeightOf(layout.table));
+  const note = typeNote(c.type);
   const feeder = c.type === "fiber_out" ? layout.components.find((o) => o.type === "fiber_in" && o.props["continues_at"] === c.id) : undefined;
   const arriving = feeder ? arrivingWavelengths(ctx.trace, feeder.id) : [];
   const own = ownWavelengths(c).filter((w): w is number => w !== null);
@@ -306,6 +338,17 @@ export function ComponentForm({ c, ctx }: { c: LayoutComponent; ctx: InspectorCt
       <Group title={tr("位置与方向", "Position and direction")}>
         <NumberRow label="x" unit="mm" value={c.x_mm} disabled={readOnly} rules={{ step: 1, min: -LIMITS.coordAbs, max: LIMITS.coordAbs }} onCommit={(v) => v !== null && edit((l) => setPosition(l, c.id, v, getComponent(l, c.id)?.y_mm ?? c.y_mm))} />
         <NumberRow label="y" unit="mm" value={c.y_mm} disabled={readOnly} rules={{ step: 1, min: -LIMITS.coordAbs, max: LIMITS.coordAbs }} onCommit={(v) => v !== null && edit((l) => setPosition(l, c.id, getComponent(l, c.id)?.x_mm ?? c.x_mm, v))} />
+        {zField && (
+          <PropEditor
+            c={c}
+            ctx={ctx}
+            field={{
+              ...zField,
+              hint: tr(`光轴中心（光源：出口）离台面的高度；不填 = 台面光束高度 ${beamHeight} mm`, `Height of the optical axis (a source: its exit) above the table top; empty = the table's beam height, ${beamHeight} mm`),
+            }}
+          />
+        )}
+        {zOutField && <PropEditor c={c} ctx={ctx} field={zOutField} />}
         <NumberRow label={tr("角度", "Angle")} unit="°" value={c.angle_deg} disabled={readOnly} hint={angleMeaning(c.type)} rules={{ step: 1 }} onCommit={(v) => v !== null && edit((l) => setAngle(l, c.id, v))} />
         <NumberRow label={tr("口径", "Aperture")} unit="mm" value={c.aperture_mm} disabled={readOnly} rules={{ step: 1, min: LIMITS.apertureMin, max: LIMITS.apertureMax }} onCommit={(v) => v !== null && edit((l) => setAperture(l, c.id, v))} />
         {hole && (
@@ -346,13 +389,14 @@ export function ComponentForm({ c, ctx }: { c: LayoutComponent; ctx: InspectorCt
         {CATALOG[c.type].role !== "source" && <PlaceAlong c={c} ctx={ctx} />}
       </Group>
 
-      {fields.length > 0 && (
+      {(hasFields || note) && (
         <Group title={tr("类型参数", "Parameters")}>
+          {note && <p className="text-xs text-mast-muted">{note}</p>}
           {feeder && (
             <p className="rounded-mast-ctl border border-mast-info-border bg-mast-info-bg px-2 py-1 text-xs text-mast-text">
               {tr(
-                `它是光纤耦合 ${feeder.label || feeder.id} 的另一端：追迹时它只发到达那里的光，不用自己的波长设置（服务器仍要求填一个）。`,
-                `It is the far end of the fibre input ${feeder.label || feeder.id}: the trace lights it with what arrives there and ignores its own wavelength (the server still wants one).`,
+                `它是光纤耦合 ${feeder.label || feeder.id} 的另一端：追迹时它发到达那里的光，波长随来光，功率是到达的功率乘耦合效率；偏振和光束直径用这里的设置，自己的波长和功率不用（服务器仍要求填一个波长）。`,
+                `It is the far end of the fibre input ${feeder.label || feeder.id}: the trace lights it with what arrives there, at the arriving wavelength and with the arriving power times the coupling; the polarisation and beam diameter set here are used, its own wavelength and power are not (the server still wants a wavelength).`,
               )}
               {mismatch && (
                 <>
@@ -366,13 +410,13 @@ export function ComponentForm({ c, ctx }: { c: LayoutComponent; ctx: InspectorCt
             </p>
           )}
           {fields.map((f) => (
-            <PropEditor key={f.key} c={c} field={f} ctx={ctx} />
+            <PropEditor key={f.key} c={c} field={feeder && f.key === "power_mw" ? { ...f, hint: fedPowerHint() } : f} ctx={ctx} />
           ))}
         </Group>
       )}
 
       <Group title={tr("对准情况", "Alignment")} badge={hits.length > 0 ? <Badge tone={hits.some((h) => h.level === "bad") ? "DANGEROUS" : hits.some((h) => h.level === "warn") ? "WARN" : "AUTO"}>{hits.length}</Badge> : undefined}>
-        <HitList cut={truncation(ctx.trace) !== null} hits={hits} aperture={c.type === "iris" && typeof c.props["open_mm"] === "number" && (c.props["open_mm"] as number) > 0 ? (c.props["open_mm"] as number) : c.aperture_mm} />
+        <HitList cut={truncation(ctx.trace) !== null} trace={ctx.trace} hits={hits} heights={usesHeights(layout)} aperture={c.type === "iris" && typeof c.props["open_mm"] === "number" && (c.props["open_mm"] as number) > 0 ? (c.props["open_mm"] as number) : c.aperture_mm} />
       </Group>
 
       <Group title={tr("注释", "Annotations")}>

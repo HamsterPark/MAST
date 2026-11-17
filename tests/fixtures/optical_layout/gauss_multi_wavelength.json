@@ -1,0 +1,344 @@
+{
+  "name": "gauss_multi_wavelength",
+  "description": "One source with two wavelengths (488 and 785 nm), each tree with all of power_mw (30 mW each), the same 1.5 mm waist and M^2 = 1.2, so each its own zR = pi 0.75^2 / (1.2 lambda). The dichroic (edge 600 nm, reflects short) reflects 488 (+45 deg turns to -45 deg: s = [0, -1, 0]) and transmits 785 (stays +45 deg, s = [0, 1, 0]).",
+  "layout": {
+    "schema": 1,
+    "id": "two-colours",
+    "title": "One source, two wavelengths, a dichroic: each its own Rayleigh range",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 50.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelengths_nm": [
+            488.0,
+            785.0
+          ],
+          "power_mw": 30.0,
+          "polarization": "linear",
+          "pol_angle_deg": 45.0,
+          "beam_diameter_mm": 1.5,
+          "m2": 1.2
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "dm1",
+        "type": "dichroic",
+        "label": "DM1",
+        "x_mm": 250.0,
+        "y_mm": 100.0,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "edge_nm": 600.0,
+          "reflects": "short"
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det_b",
+        "type": "detector",
+        "label": "DB",
+        "x_mm": 250.0,
+        "y_mm": 600.0,
+        "angle_deg": 270.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det_r",
+        "type": "detector",
+        "label": "DR",
+        "x_mm": 1050.0,
+        "y_mm": 100.0,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 488.0,
+      "beam": {
+        "source_mw": 30.0,
+        "m2": 1.2
+      },
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 100.0,
+              "x1": 250.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                "q": [
+                  0.0,
+                  3017.66712
+                ]
+              },
+              "passes": []
+            },
+            {
+              "x0": 250.0,
+              "y0": 100.0,
+              "x1": 250.0,
+              "y1": 600.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  -1.0,
+                  0.0
+                ],
+                "q": [
+                  200.0,
+                  3017.66712
+                ]
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "dm1",
+              "action": "reflect",
+              "x": 250.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 200.0,
+              "beam": {
+                "p": 1.0,
+                "mw": 30.0,
+                "d_mm": 1.503290807,
+                "s": [
+                  0.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "det_b",
+              "action": "stop",
+              "x": 250.0,
+              "y": 600.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 700.0,
+              "beam": {
+                "p": 1.0,
+                "mw": 30.0,
+                "d_mm": 1.539827858,
+                "s": [
+                  0.0,
+                  -1.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "las1",
+      "wavelength_nm": 785.0,
+      "beam": {
+        "source_mw": 30.0,
+        "m2": 1.2
+      },
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 100.0,
+              "x1": 250.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                "q": [
+                  0.0,
+                  1875.95103
+                ]
+              },
+              "passes": []
+            },
+            {
+              "x0": 250.0,
+              "y0": 100.0,
+              "x1": 1050.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                "q": [
+                  200.0,
+                  1875.95103
+                ]
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "dm1",
+              "action": "transmit",
+              "x": 250.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 200.0,
+              "beam": {
+                "p": 1.0,
+                "mw": 30.0,
+                "d_mm": 1.508500597,
+                "s": [
+                  0.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "det_r",
+              "action": "stop",
+              "x": 1050.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 1000.0,
+              "beam": {
+                "p": 1.0,
+                "mw": 30.0,
+                "d_mm": 1.699809183,
+                "s": [
+                  0.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ]
+}

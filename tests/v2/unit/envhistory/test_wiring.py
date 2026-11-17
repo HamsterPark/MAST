@@ -6,7 +6,8 @@ implemented, tested and simply never wired, which looks from the outside exactly
 like a feature that does not work.
 
 ``EnvironmentMonitor.read_all()`` deliberately does NOT feed the sinks — that
-happens in ``_loop`` — so :func:`_cycle` mirrors one iteration of the loop body.
+happens in the background: ``_loop`` queues each cycle and the archive thread
+writes it — so :func:`_cycle` mirrors one cycle of that path.
 :func:`test_the_background_loop_actually_feeds_the_sinks` starts the real thread
 and pins that equivalence, so the mirror cannot silently drift away from the
 loop it stands in for. Everything else uses the mirror, because a test that
@@ -233,7 +234,8 @@ def test_a_broken_history_sink_cannot_stop_the_csv_sink(tmp_path):
 def test_the_background_loop_actually_feeds_the_sinks(rig):
     """Pins the equivalence :func:`_cycle` assumes.
 
-    ``read_all()`` does not touch the sinks — only ``_loop`` does. If that ever
+    ``read_all()`` does not touch the sinks — only the background loop does
+    (``_loop`` queues each cycle, the archive thread writes it). If that ever
     changes (or the sinks stop being called at all), every mirror-based test
     above would keep passing while nothing was recorded on the real machine.
     """

@@ -11,8 +11,10 @@ import {
   fmtBytes,
   fmtSpan,
   isDutyCycleSeries,
+  orderSensors,
   preferLogScale,
   rangeWindow,
+  seriesPanelState,
   spectrumPickerLabel,
   spectrumSeries,
   statusLabel,
@@ -380,5 +382,33 @@ describe("spectrumPickerLabel", () => {
     const s = spectrumPickerLabel({ ts: 5, quietness: "quiet" }, ts);
     assert.ok(!s.includes("0.00"));
     assert.ok(!s.includes("V"));
+  });
+});
+
+describe("orderSensors (the stacked trend strips)", () => {
+  it("puts the preferred sensors first, in their own order, then the rest alphabetically", () => {
+    assert.deepEqual(
+      orderSensors(["zeta", "tunnel_current", "alpha", "vacuum", "temperature", "helium_level"]),
+      ["temperature", "vacuum", "helium_level", "tunnel_current", "alpha", "zeta"],
+    );
+  });
+  it("does not depend on the order the server listed them in", () => {
+    const a = ["b", "temperature", "a", "c"];
+    assert.deepEqual(orderSensors(a), orderSensors([...a].reverse()));
+  });
+  it("copes with missing preferred sensors, duplicates and empty names", () => {
+    assert.deepEqual(orderSensors(["vacuum", "x", "vacuum", "", "x"]), ["vacuum", "x"]);
+    assert.deepEqual(orderSensors([]), []);
+  });
+});
+
+describe("seriesPanelState", () => {
+  it("tells no buckets, only empty buckets, and drawable buckets apart", () => {
+    assert.equal(seriesPanelState([]), "empty");
+    assert.equal(
+      seriesPanelState([pt(1, { mean: null, n: 0, n_excluded: 30 }), pt(2, { mean: null, n: 0, n_excluded: 30 })]),
+      "undrawable",
+    );
+    assert.equal(seriesPanelState([pt(1, { mean: null, n: 0 }), pt(2)]), "ok");
   });
 });

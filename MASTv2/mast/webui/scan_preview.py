@@ -97,6 +97,47 @@ def _norm_key(p: Path | str) -> str:
         return os.path.normcase(str(p))
 
 
+#: Directories discovery never walks INTO (lower-case names, plus EVERY dot-directory;
+#: a search dir the caller names is still listed). None of them holds scans: ``current_monitor`` is the
+#: tunnelling-current monitor's store (``mast.monitoring.store._default_dir``,
+#: experiments/current_monitor, one .npy per second), ``_gallery`` is the gallery's
+#: state dir (the gallery's own walk skips the same names, ``gallery.inventory``).
+_DISCOVERY_PRUNE_DIR_NAMES: frozenset[str] = frozenset(
+    {"current_monitor", "_gallery", ".mast", "__pycache__", ".git"})
+
+
+def _walk_for_scans(dirpath: str, depth: int, di: int, max_depth: int,
+                    norm_wanted: tuple[str, ...],
+                    hits: list[tuple[int, int, int, int, Path]]) -> None:
+    """Depth-first, in scandir order -- the order glob's nested selectors produced."""
+    try:
+        with os.scandir(dirpath) as it:
+            entries = list(it)
+    except OSError:
+        return
+    sidecar = depth > 0 and os.path.basename(dirpath).lower() in _NON_SCAN_DIR_NAMES
+    subdirs: list[str] = []
+    for ent in entries:
+        try:
+            is_dir = ent.is_dir()            # follows links, as glob's "*" did
+        except OSError:
+            continue
+        if is_dir:
+            if (depth < max_depth and ent.name.lower() not in _DISCOVERY_PRUNE_DIR_NAMES
+                    and not ent.name.startswith(".")):
+                subdirs.append(ent.path)
+            continue
+        if sidecar:
+            continue
+        name = os.path.normcase(ent.name)
+        for xi, ext in enumerate(norm_wanted):
+            if name.endswith(ext):
+                hits.append((di, depth, xi, len(hits), Path(ent.path)))   # len = walk order
+                break
+    for sub in subdirs:
+        _walk_for_scans(sub, depth + 1, di, max_depth, norm_wanted, hits)
+
+
 def collect_scan_stats(
     *search_dirs: str | None,
     max_depth: int = _MAX_SEARCH_DEPTH,
@@ -110,24 +151,24 @@ def collect_scan_stats(
     time, and a second stat is also a second chance to disagree with the first
     while Nanonis is writing."""
     wanted = tuple(e.lower() for e in exts) if exts else _SCAN_EXTS
-    files: list[Path] = []
-    for d in search_dirs:
+    # ONE scandir per directory instead of one pathlib glob per (depth, extension):
+    # the old loop listed every directory at depth >= 3 once per extension per deeper
+    # pattern -- 24 listings for the 8 default extensions. Under experiments_dir that
+    # includes current_monitor/segments/<day>/ (over half a million .npy on a long-running install),
+    # so one /api/scans/latest request listed ~13 M entries. The hits are sorted back
+    # into the old (search dir, depth, extension, walk order) sequence before the
+    # dedup below, so the result, its order and the first-seen copy are unchanged.
+    hits: list[tuple[int, int, int, int, Path]] = []
+    norm_wanted = tuple(os.path.normcase(e) for e in wanted)   # glob's case rule
+    for di, d in enumerate(search_dirs):
         if not d:
             continue
         p = Path(d)
         if not p.exists():
             continue
-        for depth in range(max_depth + 1):
-            for ext in wanted:
-                pattern = "/".join(["*"] * depth) + f"/*{ext}" if depth > 0 else f"*{ext}"
-                # depth 0 = files sitting directly in a dir the CALLER named.
-                # Never second-guess that one: if someone points discovery at a
-                # folder called `env`, they meant that folder. The sidecar rule
-                # only applies to directories we walked into ourselves.
-                if depth == 0:
-                    files.extend(p.glob(pattern))
-                else:
-                    files.extend(f for f in p.glob(pattern) if _is_scan_file(f))
+        _walk_for_scans(str(p), 0, di, max_depth, norm_wanted, hits)
+    hits.sort(key=lambda h: h[:4])
+    files: list[Path] = [h[4] for h in hits]
     seen: set[str] = set()
     # Stat up front so a file that vanishes between glob() and the sort (common
     # while Nanonis is actively writing / rotating scan files) cannot crash the

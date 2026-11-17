@@ -1,0 +1,501 @@
+{
+  "name": "power_fibre_first_arrival",
+  "description": "Two branches of one beam (BS1, R = 0.3) reach the same fibre coupler FC1 (coupling 0.5), the reflected one first in branch order. One tree per (fibre output, wavelength): FO1 is fed by that first branch only - source_mw = 50 x 0.3 x 0.5 = 7.5 mW, not the sum of both branches (25 mW).",
+  "layout": {
+    "schema": 1,
+    "id": "fibre-first",
+    "title": "Two branches reach one fibre: the first one feeds it",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 50.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 633.0,
+          "power_mw": 50.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "bs1",
+        "type": "beam_splitter",
+        "label": "BS1",
+        "x_mm": 250.0,
+        "y_mm": 100.0,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "reflect_fraction": 0.3
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "m_r",
+        "type": "mirror",
+        "label": "MR",
+        "x_mm": 250.0,
+        "y_mm": 400.0,
+        "angle_deg": 315.0,
+        "aperture_mm": 25.4,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "m_t",
+        "type": "mirror",
+        "label": "MT",
+        "x_mm": 600.0,
+        "y_mm": 100.0,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.4,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "fi1",
+        "type": "fiber_in",
+        "label": "FC1",
+        "x_mm": 600.0,
+        "y_mm": 400.0,
+        "angle_deg": 225.0,
+        "aperture_mm": 5.0,
+        "props": {
+          "continues_at": "fo1",
+          "coupling": 0.5
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "fo1",
+        "type": "fiber_out",
+        "label": "FO1",
+        "x_mm": 600.0,
+        "y_mm": 700.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 633.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "pm1",
+        "type": "power_meter",
+        "label": "PM1",
+        "x_mm": 900.0,
+        "y_mm": 700.0,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 633.0,
+      "beam": {
+        "source_mw": 50.0,
+        "m2": null
+      },
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 100.0,
+              "x1": 250.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "bs1",
+              "action": "split",
+              "x": 250.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 200.0,
+              "beam": {
+                "p": 1.0,
+                "mw": 50.0,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "split"
+        },
+        {
+          "branch": "0.r",
+          "fraction": 0.3,
+          "segments": [
+            {
+              "x0": 250.0,
+              "y0": 100.0,
+              "x1": 250.0,
+              "y1": 400.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.3,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            },
+            {
+              "x0": 250.0,
+              "y0": 400.0,
+              "x1": 600.0,
+              "y1": 400.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.3,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "m_r",
+              "action": "reflect",
+              "x": 250.0,
+              "y": 400.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 500.0,
+              "beam": {
+                "p": 0.3,
+                "mw": 15.0,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "fi1",
+              "action": "stop",
+              "x": 600.0,
+              "y": 400.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 850.0,
+              "beam": {
+                "p": 0.3,
+                "mw": 15.0,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "stop"
+        },
+        {
+          "branch": "0.t",
+          "fraction": 0.7,
+          "segments": [
+            {
+              "x0": 250.0,
+              "y0": 100.0,
+              "x1": 600.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.7,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            },
+            {
+              "x0": 600.0,
+              "y0": 100.0,
+              "x1": 600.0,
+              "y1": 400.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.7,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "m_t",
+              "action": "reflect",
+              "x": 600.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 550.0,
+              "beam": {
+                "p": 0.7,
+                "mw": 35.0,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "fi1",
+              "action": "stop",
+              "x": 600.0,
+              "y": 400.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 850.0,
+              "beam": {
+                "p": 0.7,
+                "mw": 35.0,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    },
+    {
+      "source": "fo1",
+      "wavelength_nm": 633.0,
+      "beam": {
+        "source_mw": 7.5,
+        "m2": null
+      },
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 600.0,
+              "y0": 700.0,
+              "x1": 900.0,
+              "y1": 700.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "pm1",
+              "action": "stop",
+              "x": 900.0,
+              "y": 700.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 300.0,
+              "beam": {
+                "p": 1.0,
+                "mw": 7.5,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ]
+}

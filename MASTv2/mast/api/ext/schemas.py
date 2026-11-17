@@ -76,13 +76,13 @@ STRUCTURED_FIELDS = ("title", "options", "number_min", "number_max", "unit", "at
                      "severity", "timeout_s")
 
 
-def _optical_station() -> bool:
-    """``mast.station``: this process serves the optical station. Never true on an STM station,
-    and unreadable = STM."""
+def _structured_prompts_here() -> bool:
+    """``mast.station``: this station has structured operator prompts (the optical and the
+    generic station). Never true on an STM station, and unreadable = STM."""
     try:
         from mast import station
 
-        return bool(station.is_optical())
+        return bool(station.has("operator_prompts"))
     except Exception:  # noqa: BLE001
         return False
 
@@ -91,10 +91,11 @@ class RequestBody(BaseModel):
     """A question or request for the operator.
 
     Free text (``kind`` question | action | info, or any other word up to 40 characters) goes
-    to the operator-request list exactly as before. On the **optical station** a ``kind`` that
-    names a structured prompt (``confirm`` | ``choice`` | ``number`` | ``text`` | ``attest``)
-    makes an operator prompt with the fields below; only the operator can answer it. The
-    structured fields are refused (422) when ``kind`` is not a structured one.
+    to the operator-request list exactly as before. On a station with structured operator
+    prompts (the **optical** and the **generic** station) a ``kind`` that names a structured
+    prompt (``confirm`` | ``choice`` | ``number`` | ``text`` | ``attest``) makes an operator
+    prompt with the fields below; only the operator can answer it. The structured fields are
+    refused (422) when ``kind`` is not a structured one.
 
     On an **STM station** there are no structured prompts: every request is a free-text
     request, whatever its ``kind`` (the text is stored as given) and the structured fields are
@@ -107,15 +108,16 @@ class RequestBody(BaseModel):
         """On an STM station the body is what it was before structured prompts existed: only
         ``message`` and ``kind`` count, and a structured field is dropped *before* it is
         validated, so even a malformed one is ignored without an error."""
-        if isinstance(data, dict) and not _optical_station():
+        if isinstance(data, dict) and not _structured_prompts_here():
             return {k: v for k, v in data.items() if k not in STRUCTURED_FIELDS}
         return data
 
     message: str = Field(..., min_length=1, max_length=4000)
     kind: str = Field("question", max_length=40,
                       description="question | action | info (free text), or - on the optical "
-                                  "station only - a structured prompt: confirm | choice | number | "
-                                  "text | attest. On an STM station every kind is a text request")
+                                  "and the generic station - a structured prompt: confirm | choice | "
+                                  "number | text | attest. On an STM station every kind is a text "
+                                  "request")
     title: str | None = Field(None, max_length=200,
                               description="structured: short heading (default: the first line of message)")
     options: list[RequestOption] | None = Field(

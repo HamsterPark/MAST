@@ -373,8 +373,9 @@ class RemoteServer:
         return "\n".join((
             f"This MCP server runs on the MAST computer {self.name} and is reached over Tailscale. "
             "Everything its tools do happens on THAT computer, not on the machine you run on.",
-            "- The mast_* tools operate its instrument station (a scanning tunneling microscope or "
-            "an optical station) through MAST; the MAST rules below apply to them.",
+            "- The mast_* tools operate its instrument station (a scanning tunneling microscope, "
+            "an optical station or a generic station) through MAST; the MAST rules below apply to "
+            "them.",
             "- mast_service shows whether MAST's main service runs, and starts, restarts or stops "
             "it; the mast_* tools need it running. Nobody has to click anything on that computer.",
             "- mast_fetch saves files on that computer and answers with the path there; read them "

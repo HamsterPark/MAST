@@ -77,7 +77,7 @@ export const LIVE_READINGS_STALE_AFTER_MS = 15_000;
 export const LIVE_READINGS_WS_KEEPALIVE_POLL_MS = 10_000;
 
 // ════════════════════════════════════════════════════════════════════════════
-// Current monitoring (pages/MonitoringPage.tsx) — a DIFFERENT budget from the one above,
+// Signal monitoring (pages/MonitoringPage.tsx) — a DIFFERENT budget from the one above,
 // and it is worth saying why, because the numbers look inconsistent otherwise.
 //
 // The chain has no instrument in it at all:

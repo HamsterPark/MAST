@@ -86,7 +86,7 @@ def render_cluster_panel(scan_path: str, result: dict,
         from matplotlib.figure import Figure
         from scipy.ndimage import binary_erosion, label
 
-        from mast._runtime_paths import project_root
+        from mast._runtime_paths import data_root
         from mast.data.processors import plane_subtract
         from mast.io.nanonis_files import read_sxm
         from mast.vision.roundness import background_level
@@ -185,7 +185,7 @@ def render_cluster_panel(scan_path: str, result: dict,
                 sp.set_visible(False)
         fig.tight_layout(pad=0.4)
 
-        d = (out_dir or (project_root() / "artifacts" / "cluster_panels"))
+        d = (out_dir or (data_root() / "artifacts" / "cluster_panels"))
         d.mkdir(parents=True, exist_ok=True)
         # 文件名带源帧名 + 内容指纹:同一张帧重判不会互相覆盖,
         # 而历史里每一条旁白仍然指向**它自己当时那一张**(见 scan_monitor 的里程碑图说明)。

@@ -28,13 +28,14 @@ import { describe, it } from "node:test";
 
 import {
   confirmCopy,
+  profileBlurb,
   profileEffects,
   profileLabel,
   switchBlocker,
   switchRisk,
 } from "../src/lib/stationProfile.ts";
 
-describe("profileEffects：两种画像各意味着什么", () => {
+describe("profileEffects：三种画像各意味着什么", () => {
   it("STM 站：连 Nanonis、起三个线程、自动探测按配置、STM 技能、不装操作员服务", () => {
     const text = profileEffects("stm").join("\n");
     for (const needle of ["连接 Nanonis", "撞针看门狗", "电流监控", "串口自动探测", "STM 技能", "不安装操作员提示服务"]) {
@@ -49,28 +50,58 @@ describe("profileEffects：两种画像各意味着什么", () => {
     }
   });
 
-  it("两边条数一样多、没有空句", () => {
-    const [a, b] = [profileEffects("stm"), profileEffects("optical")];
-    assert.equal(a.length, b.length);
-    for (const line of [...a, ...b]) assert.ok(line.trim().length > 10, JSON.stringify(line));
+  it("通用站（契约 §1.2 / §1.4 / §3）：不连 Nanonis、线程不起、自动探测默认关但可以打开、外部设备技能、装操作员服务", () => {
+    const text = profileEffects("generic").join("\n");
+    for (const needle of [
+      "不连接 Nanonis",
+      "撞针看门狗",
+      "串口自动探测默认关闭",
+      "可以在设置里打开",
+      "外部设备的技能",
+      "看不到 STM 技能和 WITec 技能",
+      "环境读数",
+      "安装操作员提示服务和激光撤销监听",
+    ]) {
+      assert.ok(text.includes(needle), `通用站的说明里没有「${needle}」`);
+    }
+    // 两句旧的错误文案不能回来：通用站不是强制关，也装操作员服务
+    assert.ok(!text.includes("强制关闭"), "通用站的自动探测是默认关（default_off），不是强制关");
+    assert.ok(!text.includes("不安装操作员提示服务"), "通用站有 operator_prompts，装操作员服务");
+  });
+
+  it("三种画像条数一样多（并排比得了）、没有空句、互不相同", () => {
+    const all = (["stm", "optical", "generic"] as const).map((p) => profileEffects(p));
+    for (const lines of all) assert.equal(lines.length, all[0]!.length);
+    for (const line of all.flat()) assert.ok(line.trim().length > 10, JSON.stringify(line));
+    assert.equal(new Set(all.map((l) => l.join("\n"))).size, 3);
   });
 });
 
 describe("switchRisk：选错的后果按方向说", () => {
-  it("STM → optical：不拨 Nanonis，撞针看门狗和电流监控都不起", () => {
+  it("STM / generic → optical：不拨 Nanonis，撞针看门狗和电流监控都不起；通用站的自动探测被强制关", () => {
     const t = switchRisk("optical");
     assert.ok(t.includes("其实是 STM 站"));
-    for (const needle of ["不会连接 Nanonis", "撞针看门狗", "电流监控"]) assert.ok(t.includes(needle), needle);
+    for (const needle of ["不会连接 Nanonis", "撞针看门狗", "电流监控", "其实是通用站", "强制关闭"]) assert.ok(t.includes(needle), needle);
   });
 
-  it("optical → stm：串口自动探测恢复，*IDN? 和 Modbus 帧，操作员服务与撤销监听不再安装", () => {
+  it("optical / generic → stm：串口自动探测恢复，*IDN? 和 Modbus 帧，会去连 Nanonis，操作员服务与撤销监听不再安装", () => {
     const t = switchRisk("stm");
-    assert.ok(t.includes("其实是光学站"));
-    for (const needle of ["串口自动探测会恢复", "*IDN?", "Modbus", "撤销监听"]) assert.ok(t.includes(needle), needle);
+    assert.ok(t.includes("其实是光学站或通用站"));
+    for (const needle of ["串口自动探测会恢复", "*IDN?", "Modbus", "连接 Nanonis", "撤销监听"]) assert.ok(t.includes(needle), needle);
   });
 
-  it("两个方向说的不是同一句", () => {
-    assert.notEqual(switchRisk("stm"), switchRisk("optical"));
+  it("stm / optical → generic：STM 站的看门狗不起；光学站看不到 WITec 技能、手动状态只剩签署", () => {
+    const t = switchRisk("generic");
+    assert.ok(t.includes("其实是 STM 站") && t.includes("其实是光学站"), t);
+    for (const needle of ["不会连接 Nanonis", "撞针看门狗", "电流监控", "看不到 WITec 技能", "激光区域签署"]) {
+      assert.ok(t.includes(needle), needle);
+    }
+    // 通用站照样装撤销监听（laser_safety），所以「不再自动关光」不是它的风险
+    assert.ok(!t.includes("不会再自动关光"), t);
+  });
+
+  it("三个方向说的各不相同", () => {
+    assert.equal(new Set([switchRisk("stm"), switchRisk("optical"), switchRisk("generic")]).size, 3);
   });
 });
 
@@ -84,14 +115,22 @@ describe("confirmCopy：确认框里的全部文字", () => {
     assert.ok(back.title.includes(profileLabel("stm")) && back.confirmLabel.includes(profileLabel("stm")));
   });
 
-  it("两种画像都列出来，顺序固定（stm、optical），只有要改成的那个 selected", () => {
-    assert.deepEqual(c.profiles.map((p) => p.profile), ["stm", "optical"]);
-    assert.deepEqual(c.profiles.map((p) => p.selected), [false, true]);
-    assert.deepEqual(confirmCopy("optical", "stm").profiles.map((p) => p.selected), [true, false]);
+  it("三种画像都列出来，顺序固定（stm、optical、generic），只有要改成的那个 selected", () => {
+    assert.deepEqual(c.profiles.map((p) => p.profile), ["stm", "optical", "generic"]);
+    assert.deepEqual(c.profiles.map((p) => p.selected), [false, true, false]);
+    assert.deepEqual(confirmCopy("optical", "stm").profiles.map((p) => p.selected), [true, false, false]);
+    assert.deepEqual(confirmCopy("stm", "generic").profiles.map((p) => p.selected), [false, false, true]);
     for (const p of c.profiles) {
       assert.equal(p.label, profileLabel(p.profile));
-      assert.deepEqual(p.lines, profileEffects(p.profile));
+      assert.equal(p.blurb, profileBlurb(p.profile), "每一栏先说这种站是什么");
+      assert.deepEqual(p.lines, profileEffects(p.profile), "再说它开什么、关什么");
     }
+  });
+
+  it("改成通用站：标题、按钮、风险都按通用站说", () => {
+    const g = confirmCopy("stm", "generic");
+    assert.ok(g.title.includes("通用站") && g.confirmLabel.includes("通用站"), g.title);
+    assert.equal(g.risk, switchRisk("generic"));
   });
 
   it("写了选错的后果，且是按目标方向说的", () => {
@@ -116,8 +155,37 @@ describe("confirmCopy：确认框里的全部文字", () => {
     assert.ok(env && env.includes("MAST_STATION_PROFILE") && env.includes("不会改变实际运行的画像"), String(env));
   });
 
-  it("stm / optical 是身份字符串，不经过 tr()", () => {
-    for (const p of c.profiles) assert.ok(p.profile === "stm" || p.profile === "optical");
+  it("stm / optical / generic 是身份字符串，不经过 tr()", () => {
+    for (const p of c.profiles) assert.ok(p.profile === "stm" || p.profile === "optical" || p.profile === "generic");
+  });
+});
+
+describe("confirmCopy：第一次使用、存的就是正在运行的画像", () => {
+  it("第一次使用：说明还没存过、现在按默认运行，仍然要管理 PIN", () => {
+    const c = confirmCopy("stm", "generic", "default", { firstRun: true, active: "stm" });
+    assert.ok(c.intro.includes("还没有保存过站点类型"), c.intro);
+    assert.ok(c.intro.includes("默认的「STM 站」"), c.intro);
+    assert.ok(c.intro.includes("管理 PIN"), c.intro);
+  });
+
+  it("确认默认值（from === to）：标题和按钮是「确认是」，不是「改成」", () => {
+    const c = confirmCopy("stm", "stm", "default", { firstRun: true, active: "stm" });
+    assert.ok(c.title.startsWith("确认这台机器是「STM 站」"), c.title);
+    assert.ok(c.confirmLabel.startsWith("确认是「STM 站」"), c.confirmLabel);
+    assert.ok(!c.title.includes("改成"), c.title);
+  });
+
+  it("存的就是正在运行的画像：明说不需要重启；否则照旧说要重启才生效", () => {
+    assert.ok(confirmCopy("stm", "stm", "default", { active: "stm", firstRun: true }).restart.includes("不需要重启"));
+    assert.ok(confirmCopy("optical", "stm", "settings", { active: "stm" }).restart.includes("不需要重启"), "改回正在运行的那个也不用重启");
+    const pending = confirmCopy("stm", "generic", "settings", { active: "stm" }).restart;
+    assert.ok(pending.includes("重启 MAST 服务") && pending.includes("不会立刻改变任何东西"), pending);
+    // 不知道正在运行什么（health 还没回）时，不能许诺「不需要重启」
+    assert.ok(!confirmCopy("stm", "stm", "default", { firstRun: true }).restart.includes("不需要重启"));
+  });
+
+  it("不是第一次使用时，说明照旧是「现在保存的是…」", () => {
+    assert.ok(confirmCopy("optical", "stm", "settings", { active: "optical" }).intro.startsWith("现在保存的是「光学站」"));
   });
 });
 
@@ -145,6 +213,36 @@ describe("switchBlocker：确认按钮什么时候能按", () => {
 
   it("正在保存 → 不能按（不重复提交）", () => {
     assert.equal(switchBlocker({ ...ok, busy: true }), "busy");
+  });
+});
+
+describe("确认框的整个流程：未设 PIN → 先设 PIN → 再确认", () => {
+  // 对话框的每一步由两样东西决定：pin-status 的回答（pinIsSet）和操作员敲进去的 PIN。
+  // 这里按真实顺序把它们走一遍，看确认按钮在每一步的状态；对话框怎么把这几步接起来，下面「接线：对话框」
+  // 钉住源码，浏览器里的完整一遍在 e2e/station-capabilities.spec.ts 的首次使用用例。
+  it("每一步的确认按钮：先挡在「没设 PIN」，设好后挡在「没填」，填了才能按，提交中再挡住", () => {
+    const steps: { what: string; pin: string; pinIsSet: boolean | undefined; busy: boolean; want: string | null }[] = [
+      { what: "刚打开，PIN 状态还没回来", pin: "", pinIsSet: undefined, busy: false, want: "empty_pin" },
+      { what: "回来了：这台机器没有 PIN", pin: "", pinIsSet: false, busy: false, want: "no_pin_set" },
+      { what: "在框里的设 PIN 表单里设好了，pin-status 刷新", pin: "", pinIsSet: true, busy: false, want: "empty_pin" },
+      { what: "再输一次 PIN", pin: "2468", pinIsSet: true, busy: false, want: null },
+      { what: "按下确认，保存中", pin: "2468", pinIsSet: true, busy: true, want: "busy" },
+    ];
+    for (const s of steps) {
+      assert.equal(switchBlocker({ pin: s.pin, pinIsSet: s.pinIsSet, busy: s.busy }), s.want, s.what);
+    }
+  });
+
+  it("把这几步接起来的源码：设 PIN 表单刷新 pin-status、刷新后换出 PIN 输入框、确认把 PIN 交给卡片、卡片带着 PIN 写", () => {
+    const lf = (rel: string) => readFileSync(join(SRC, rel), "utf8").replace(/\r\n/g, "\n");
+    const gate = lf("components/admin/PinGate.tsx");
+    assert.match(gate, /queryClient\.invalidateQueries\(\{ queryKey: \["admin", "pin-status"\] \}\)/);
+    const dlg = lf("components/settings/StationProfileDialog.tsx");
+    assert.match(dlg, /queryKey: \["admin", "pin-status"\]/, "对话框读的就是被刷新的那一个查询");
+    assert.match(dlg, /\{pinIsSet === false \? \(/, "没 PIN 时是设 PIN 表单，有了 PIN（或状态未知）才是输入框");
+    assert.match(dlg, /if \(blocker === null\) onConfirm\(pin\);/);
+    const card = topLevelFunction(lf("pages/SettingsPage.tsx"), "StationProfileCard");
+    assert.match(card, /setProfile\.mutate\(\{ profile: pending, pin \}/);
   });
 });
 
@@ -191,6 +289,18 @@ describe("接线：点一下只问，只有确认才写，写的时候带 PIN", 
     assert.ok(choose, "找不到 choose");
     assert.ok(!choose[0].includes(".mutate("), "choose 不能直接写");
     assert.match(choose[0], /setPending\(/, "choose 只是把选择挂起来等确认");
+  });
+
+  it("三个选项来自 PROFILES；第一次使用时点当前这一项也要确认（否则没法把默认值存下来，首次提示永远不消失）", () => {
+    assert.match(page, /const STATION_CHOICES: \{ value: StationProfile; label: string \}\[\] = PROFILES\.map\(/);
+    const choose = /const choose = \(v: StationProfile\) => \{[\s\S]*?\n {2}\};/.exec(card)!;
+    assert.match(choose[0], /setPending\(v === configured && !firstRun \? null : v\)/);
+    assert.match(card, /\{firstRun && <StationSetupSteps where="card" profile=\{profile\} \/>\}/);
+  });
+
+  it("对话框知道正在运行的画像和是不是第一次使用（文案要据此说要不要重启）", () => {
+    assert.match(card, /active=\{loaded \? profile : undefined\}/);
+    assert.match(card, /firstRun=\{firstRun\}/);
   });
 
   it("整张卡里只有一处 setProfile.mutate，在确认回调里，并且带着 PIN", () => {
@@ -248,9 +358,11 @@ describe("接线：对话框", () => {
     assert.match(dlg, /const blocker = switchBlocker\(\{ pin, pinIsSet, busy \}\)/);
   });
 
-  it("文案来自 confirmCopy，两种画像都渲染出来", () => {
-    assert.match(dlg, /const copy = confirmCopy\(from, to, source\)/);
+  it("文案来自 confirmCopy，三种画像都渲染出来，每栏有「是什么」和「开关什么」", () => {
+    assert.match(dlg, /const copy = confirmCopy\(from, to, source, \{ active, firstRun \}\)/);
     assert.match(dlg, /copy\.profiles\.map/);
+    assert.match(dlg, /\{p\.blurb\}/);
+    assert.match(dlg, /p\.lines\.map/);
     for (const field of ["copy.title", "copy.intro", "copy.risk", "copy.restart", "copy.envNote", "copy.confirmLabel"]) {
       assert.ok(dlg.includes(field), `对话框没渲染 ${field}`);
     }
@@ -274,6 +386,19 @@ describe("接线：对话框", () => {
     assert.match(dlg, /pinIsSet === false/);
     assert.match(dlg, /<Link to="\/settings\/admin"/);
     assert.match(dlg, /queryKey: \["admin", "pin-status"\]/, "和高级页的 PIN 门共用同一个查询键");
+  });
+
+  it("首次使用把流程串起来：没 PIN 时就地设（高级页那一份表单，不是另写一份），设好之前不出现 PIN 输入框", () => {
+    assert.match(dlg, /import \{ SetPinForm \} from "@\/components\/admin\/PinGate";/);
+    assert.match(dlg, /\{pinIsSet === false \? \(/);
+    const noPin = dlg.slice(dlg.indexOf("{pinIsSet === false ? ("), dlg.indexOf(") : (", dlg.indexOf("{pinIsSet === false ? (")));
+    assert.match(noPin, /<SetPinForm onDone=\{\(\) => setPin\(""\)\} \/>/);
+    assert.ok(!noPin.includes('type="password"'), "没 PIN 的分支里不该有确认用的 PIN 输入框");
+    // 那份表单就是高级页 PinGate 里的同一个组件：同一个接口、同一条至少 4 位的规则
+    const gate = readFileSync(join(SRC, "components/admin/PinGate.tsx"), "utf8").replace(/\r\n/g, "\n");
+    assert.match(gate, /export function SetPinForm\(\{ onDone \}: \{ onDone: \(\) => void \}\)/);
+    assert.match(gate, /api\.POST\("\/api\/admin\/set-pin"/);
+    assert.match(gate, /queryClient\.invalidateQueries\(\{ queryKey: \["admin", "pin-status"\] \}\)/, "设好之后刷新 PIN 状态，对话框才会换出输入框");
   });
 });
 

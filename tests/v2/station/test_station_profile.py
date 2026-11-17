@@ -46,7 +46,7 @@ def test_default_is_stm():
 
 def test_the_identity_strings_are_exactly_what_the_api_and_the_files_carry():
     # compared, stored and sent over the API; never translated
-    assert station.PROFILES == ("stm", "optical")
+    assert station.PROFILES == ("stm", "optical", "generic")
     assert station.SETTINGS_KEY == "station_profile" and station.SETTINGS_KEY in KNOWN_KEYS
     assert station.ENV_VAR == "MAST_STATION_PROFILE"
 
@@ -125,7 +125,10 @@ def test_editing_the_setting_after_boot_does_not_change_what_the_process_is(capl
     assert station.restart_pending() is True
     d = station.describe()
     assert d == {"profile": "stm", "configured": "optical", "source": "settings",
-                 "boot_profile": "stm", "restart_pending": True}
+                 "boot_profile": "stm", "restart_pending": True,
+                 # what the running process has, not what the setting says
+                 "capabilities": ["nanonis", "stm_safety", "stm_actions", "scan_map"],
+                 "serial_autodetect": "default_on"}
 
 
 def test_booting_as_optical_stays_optical_when_the_setting_is_cleared():

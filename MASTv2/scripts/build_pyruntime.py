@@ -337,6 +337,12 @@ def strip_runtime(runtime_dir: Path) -> int:
     return n
 
 
+#: ``.pyc`` 里 ``co_filename`` 写的前缀。不给 ``-d`` 时 compileall 写源文件的绝对路径，
+#: 即构建机路径（D:\<用户名>\...），安装包里 5151 个 .pyc 都带着它。importlib 加载时会把
+#: ``co_filename`` 改回真实源路径（``_fix_co_filename``），所以中性前缀不影响运行时回溯。
+PYC_DDIR = "pyruntime/Lib/site-packages"
+
+
 def compile_all(runtime_dir: Path) -> None:
     """用**运行时自己的** python.exe 预编译。
 
@@ -345,8 +351,13 @@ def compile_all(runtime_dir: Path) -> None:
     """
     exe = runtime_dir / "python.exe"
     sp = runtime_dir / "Lib" / "site-packages"
+    # -B and -f are both load-bearing. Starting the runtime's interpreter imports
+    # site-packages/sitecustomize.py, and without -B that import writes its .pyc
+    # with the ABSOLUTE path; compileall then sees an up-to-date .pyc and skips it
+    # (seen once: 1 of 5151 left with the build path). -f recompiles every
+    # file with the neutral -d prefix regardless.
     r = subprocess.run(
-        [str(exe), "-m", "compileall", "-q", "-j", "0", str(sp)],
+        [str(exe), "-B", "-m", "compileall", "-f", "-q", "-j", "0", "-d", PYC_DDIR, str(sp)],
         capture_output=True, encoding="utf-8", errors="replace", timeout=1800)
     # compileall 对少数文件报语法错是正常的（py2 残留、模板文件），不算失败；
     # 但**完全跑不起来**要抛。

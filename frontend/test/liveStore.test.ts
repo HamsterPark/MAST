@@ -365,3 +365,98 @@ describe("正在产出（lastLiveMs）", () => {
     assert.equal(s.get("q")!.lastLiveMs, 7000, "隔太久：不知道那几帧是什么时候来的");
   });
 });
+
+// ── rows, lazy buffers, forgetting gone streams ──────────────
+
+describe("map2d_rows（一帧一行）", () => {
+  const ROWS = { meta: { nx: 4, ny: 3, x0: 0, y0: 0, dx: 1, dy: 1 } };
+
+  it("一帧写满一行，逐像素进写入日志；视图照常按行读增量", () => {
+    const s = storeWith(meta("r", "map2d_rows", ROWS));
+    s.applyFrame("r", 1, { t: 1, iy: 2, ix0: 0, values: { Z: [1, 2, null, 4] } });
+    const b = s.get("r")!.buf;
+    if (b.kind !== "map2d") throw new Error("kind");
+    const img = b.values.get("Z")!;
+    assert.deepEqual([...img.slice(8, 12)].map((v) => (Number.isNaN(v) ? null : v)), [1, 2, null, 4]);
+    assert.equal(b.filled, 4, "a null pixel was written too: it is a hole, not missing");
+    assert.deepEqual(map2dChangesSince(b, 0).full, true);
+    s.applyFrame("r", 2, { t: 1, iy: 0, ix0: 1, values: { Z: [7, 8] } });     // a segment
+    assert.deepEqual(map2dChangesSince(b, 4), { full: false, idx: [1, 2], next: 6 });
+    assert.deepEqual(b.last, { ix: 2, iy: 0 });
+  });
+
+  it("旧帧晚到不盖新值，越界与格式不对的整帧拒收", () => {
+    const s = storeWith(meta("r", "map2d_rows", ROWS));
+    s.applyFrame("r", 5, { t: 1, iy: 1, values: { Z: [5, 5, 5, 5] } });
+    s.get("r")!.missing.add(3, 3);
+    s.applyFrame("r", 3, { t: 1, iy: 1, values: { Z: [3, 3, 3, 3] } });
+    const b = s.get("r")!.buf;
+    if (b.kind !== "map2d") throw new Error("kind");
+    assert.deepEqual([...b.values.get("Z")!.slice(4, 8)], [5, 5, 5, 5]);
+    assert.equal(s.applyFrame("r", 6, { t: 1, iy: 3, values: { Z: [1, 1, 1, 1] } }), "invalid");
+    assert.equal(s.applyFrame("r", 7, { t: 1, iy: 0, ix0: 2, values: { Z: [1, 1, 1] } }), "invalid");
+    assert.equal(s.applyFrame("r", 8, { t: 1, iy: 0, values: { Z: [1, 2], I: [1] } }), "invalid");
+    assert.equal(b.outOfRange, 2);
+  });
+
+  it("几何变了也清空重来", () => {
+    const s = storeWith(meta("r", "map2d_rows", ROWS));
+    const reset = s.applyStreams([meta("r", "map2d_rows", { meta: { ...ROWS.meta, ny: 5 } })],
+      { full: true, trustLastSeq: false });
+    assert.deepEqual(reset, ["r"]);
+  });
+});
+
+describe("懒分配与忘掉 gone 的流", () => {
+  const BIG = { meta: { nx: 512, ny: 512, x0: 0, y0: 0, dx: 1, dy: 1 } };
+
+  it("目录里出现的 map 流不分配大块内存，第一帧到了才分配", () => {
+    const s = storeWith(meta("m", "map2d", BIG), meta("r", "map2d_rows", BIG));
+    for (const id of ["m", "r"]) {
+      const b = s.get(id)!.buf;
+      if (b.kind !== "map2d") throw new Error("kind");
+      assert.equal(b.pixelSeq, null, `${id}: allocated on sight`);
+      assert.equal(b.log.length, 0);
+    }
+    s.applyFrame("r", 1, { t: 1, iy: 0, values: { Z: new Array(512).fill(1) } });
+    const b = s.get("r")!.buf;
+    if (b.kind !== "map2d") throw new Error("kind");
+    assert.equal(b.pixelSeq!.length, 512 * 512);
+    assert.equal(b.log.length, MAP2D_LOG_CAPACITY);
+  });
+
+  it("gone 且没人看的流被删掉；还有人看的留着", () => {
+    const s = storeWith(meta("a", "map2d_rows", BIG), meta("b", "map2d_rows", BIG), meta("c", "xy"));
+    s.applyStreams([meta("c", "xy")], { full: true, trustLastSeq: false });
+    assert.ok(s.get("a")!.gone && s.get("b")!.gone);
+    const removed = s.dropGone((id) => id === "b");
+    assert.deepEqual(removed, ["a"]);
+    assert.equal(s.get("a"), undefined);
+    assert.ok(s.get("b"), "a watched stream must stay until its last view leaves");
+    assert.deepEqual(s.dropGone(() => false), ["b"]);
+  });
+
+  it("连续扫描 200 帧、服务端留 16 帧：本地不再一帧一帧地攒", () => {
+    const s = new LiveStore({ now: () => 1_000 });
+    const dir = (lo: number, hi: number) => {
+      const items = [meta("local/scan/live", "scalar", { uid: "st", last_seq: 1 })];
+      for (let n = lo; n <= hi; n++) {
+        items.push(meta(`local/scan/live/${n}`, "map2d_rows", { ...BIG, uid: `u${n}`, last_seq: 512, ended: n < hi }));
+      }
+      return items;
+    };
+    for (let n = 1; n <= 200; n++) {
+      s.applyStreams(dir(Math.max(1, n - 16), n), { full: true, trustLastSeq: false });
+      s.dropGone(() => false);
+    }
+    let maps = 0;
+    let bytes = 0;
+    for (const st of s.states()) {
+      if (st.buf.kind !== "map2d") continue;
+      maps += 1;
+      bytes += (st.buf.pixelSeq?.byteLength ?? 0) + st.buf.log.byteLength;
+    }
+    assert.ok(maps <= 17, `${maps} map streams kept`);
+    assert.equal(bytes, 0, "streams nobody subscribed to hold buffers");
+  });
+});

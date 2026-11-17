@@ -22,6 +22,7 @@ import { EmptyNote, ErrorNote, Spinner } from "@/components/ui";
 import { tr } from "@/lib/i18n";
 import { useHardwareModules } from "@/api/hardwareModules";
 import { useInstrumentHolder, useManualDevices, useManualReadouts, useTipState } from "@/api/manual";
+import { useStationCapabilities } from "@/hooks/useStationCapabilities";
 import { runSkill } from "@/components/skills/SkillRunButton";
 import { ManualReadoutsContext, type ManualReadoutsValue } from "@/hooks/useManual";
 import { DEGRADED_SOURCE_LABEL, groupDevices, readoutPlan, type DeviceGroup } from "@/lib/manual/protocol";
@@ -85,7 +86,11 @@ function StopAllButton() {
 }
 
 function TipAndToken() {
-  const tip = useTipState();
+  // The tip line is the Nanonis tip: a station without Nanonis has none, so the line is not
+  // drawn and its reading is never asked for (it would poll /api/hardware/live-readings).
+  const station = useStationCapabilities();
+  const nanonis = station.has("nanonis");
+  const tip = useTipState(station.ready && nanonis);
   const holder = useInstrumentHolder();
   const r = tip.data?.readings;
   const tipText =
@@ -101,11 +106,13 @@ function TipAndToken() {
   const h = holder.data;
   return (
     <div className="flex flex-col gap-0.5 text-xs">
-      <span className={clsx(r?.withdrawn === false ? "text-mast-warn" : "text-mast-muted")}>
-        {tr("针尖：", "Tip: ")}<b className="text-mast-text">{tipText}</b> · {fb}
-        {scan}
-        {r?.stale ? tr("（读数陈旧）", " (stale reading)") : ""}
-      </span>
+      {nanonis && (
+        <span className={clsx(r?.withdrawn === false ? "text-mast-warn" : "text-mast-muted")}>
+          {tr("针尖：", "Tip: ")}<b className="text-mast-text">{tipText}</b> · {fb}
+          {scan}
+          {r?.stale ? tr("（读数陈旧）", " (stale reading)") : ""}
+        </span>
+      )}
       <span className={clsx(h ? "text-mast-warn" : "text-mast-muted")}>
         {tr("仪器令牌：", "Instrument token: ")}
         {holder.isError ? (

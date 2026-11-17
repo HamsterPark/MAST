@@ -6,8 +6,11 @@ Top-level entry point is :func:`build_environment_sensors`, called from the GUI
 
 1. Build every sensor declared in ``environment_sensors.json`` (pinned port,
    user name, alarm thresholds).
-2. If ``autodetect`` is on, scan the remaining COM ports and probe each for a
-   DL-7 vacuum gauge (Modbus) then a Lakeshore monitor (SCPI ``*IDN?``).
+2. If ``autodetect`` is on, scan the remaining COM ports: identity queries
+   first (``*IDN?`` — Lake Shore temperature instruments, the Lake Shore Model 625
+   magnet supply, the Cryomagnetics LM-510 level monitor; see
+   :func:`identify_port`), and the binary DL-7 Modbus probe only on a port that
+   stayed silent through all of them.
 3. Always append the helium / noise placeholders, and a vacuum / temperature
    placeholder for any kind not found — so the Lab Console Environment panel
    keeps showing every row honestly (``N/A`` when no hardware), and the program
@@ -25,13 +28,26 @@ from typing import Iterable
 from mast.environment.alarm import AlarmSpec
 from mast.environment.base import EnvironmentSensor
 from mast.environment.config import autodetect_policy, load_config, normalise_sensor
+from mast.environment.cryomag_lm510 import (
+    LM510LevelSensor,
+    LM510Link,
+    probe_lm510,
+)
+from mast.environment.cryomag_lm510 import SUPPORTED_BAUD as LM510_BAUD
 from mast.environment.dl7_vacuum import DL7VacuumSensor, probe_dl7
+from mast.environment.lakeshore_625 import (
+    Model625Link,
+    Model625Sensor,
+    probe_model625,
+)
+from mast.environment.lakeshore_625 import SUPPORTED_BAUD as MODEL625_BAUD
 from mast.environment.lakeshore_temp import (
     HEALTH_CLEAN,
     HEALTH_UNKNOWN,
     LakeshoreTemperatureSensor,
     default_channels,
     discover_lakeshore,
+    is_temperature_model,
     probe_lakeshore,
 )
 from mast.environment.placeholders import (
@@ -73,6 +89,48 @@ def _shared_transport(transports: dict, settings) -> "object":
     transport = open_transport(settings)   # lazy — does not touch the port yet
     transports[key] = transport
     return transport
+
+
+def _shared_link(transports: dict, settings, factory) -> "object":
+    """One instrument link (``Model625Link`` / ``LM510Link``) per port.
+
+    The link owns the identity check and the command spacing for the whole
+    instrument, so every sensor reading that instrument must go through the SAME
+    link — two links on one transport would each verify identity and interleave
+    commands without honouring each other's spacing. Stored in the same pool as
+    the transports under ``"<PORT>#link"``.
+    """
+    transport = _shared_transport(transports, settings)
+    key = f"{str(settings.port).upper()}#link"
+    link = transports.get(key)
+    if link is None or getattr(link, "transport", None) is not transport:
+        link = factory(transport)
+        transports[key] = link
+    return link
+
+
+def _magnet625_settings(port: str, baudrate: int = 9600) -> SerialSettings:
+    # The character format is fixed by the instrument (7O1); only the baud is a choice.
+    return SerialSettings(port=port, baudrate=int(baudrate), bytesize=7, parity="O",
+                          stopbits=1, timeout=0.6)
+
+
+def _lm510_settings(port: str, baudrate: int = 9600) -> SerialSettings:
+    return SerialSettings(port=port, baudrate=int(baudrate), bytesize=8, parity="N",
+                          stopbits=1, timeout=0.8)
+
+
+def _magnet625_sensors(port: str, settings, transports: dict) -> list[EnvironmentSensor]:
+    """Field + current readings of a Model 625 (one shared, identity-checked link)."""
+    link = _shared_link(transports, settings, lambda t: Model625Link(t, port=port))
+    return [Model625Sensor(link, name="magnet_field", quantity="field"),
+            Model625Sensor(link, name="magnet_current", quantity="current")]
+
+
+def _lm510_sensors(port: str, settings, transports: dict) -> list[EnvironmentSensor]:
+    """Channel-1 level of an LM-510 (single-channel units are the common case)."""
+    link = _shared_link(transports, settings, lambda t: LM510Link(t, port=port))
+    return [LM510LevelSensor(link, name="helium_level", channel=1)]
 
 
 def _build_one(entry: dict, transports: dict | None = None) -> EnvironmentSensor | None:
@@ -121,7 +179,35 @@ def _build_one(entry: dict, transports: dict | None = None) -> EnvironmentSensor
                 unit=entry.get("unit", "K"),
                 alarm=alarm,
                 command=entry.get("command", "KRDG?"),
+                model=str(entry.get("model") or ""),
             )
+        if stype == "lakeshore_625":
+            # READ-ONLY magnet supply. Only the port, the baud and which quantity
+            # to report come from the config; nothing in the entry can reach the
+            # wire (the driver builds every byte from its own whitelist).
+            port = str(entry.get("port") or "").strip()
+            baud = int(entry.get("baudrate", 9600))
+            if not port or baud not in MODEL625_BAUD:
+                logger.warning("environment: %r (lakeshore_625) needs a port and a "
+                               "baud in %s — skipped", name, sorted(MODEL625_BAUD))
+                return None
+            link = _shared_link(pool, _magnet625_settings(port, baud),
+                                lambda t: Model625Link(t, port=port))
+            return Model625Sensor(link, name=name,
+                                  quantity=str(entry.get("quantity", "field")),
+                                  alarm=alarm)
+        if stype == "cryomag_lm510":
+            port = str(entry.get("port") or "").strip()
+            baud = int(entry.get("baudrate", 9600))
+            channel = int(entry.get("channel", 1))
+            if not port or baud not in LM510_BAUD or channel not in (1, 2):
+                logger.warning("environment: %r (cryomag_lm510) needs a port, a baud in "
+                               "%s and channel 1|2 — skipped", name, sorted(LM510_BAUD))
+                return None
+            link = _shared_link(pool, _lm510_settings(port, baud),
+                                lambda t: LM510Link(t, port=port))
+            return LM510LevelSensor(link, name=name, channel=channel, alarm=alarm,
+                                    min_interval_s=float(entry.get("min_interval_s", 10.0)))
         if stype == "nanonis_signal":
             # Owned by core.runtime, not by this module: it needs a live
             # ConnectionPool, and environment/ must not import core/. See
@@ -179,7 +265,7 @@ def _lakeshore_sensors(port: str, lsci,
     shared = _shared_transport(pool, settings) if settings is not None else None
     fallback = [LakeshoreTemperatureSensor(
         name=f"{model} ({port})", settings=settings, transport=shared,
-        channel=default_channels(model)[0])]
+        channel=default_channels(model)[0], model=getattr(lsci, "model", "") or "")]
     try:
         from mast.environment.lakeshore_temp import discover_lakeshore
 
@@ -230,7 +316,8 @@ def _lakeshore_sensors(port: str, lsci,
                 # The operator's own name wins. Without one, the channel letter
                 # is still more use than the model name repeated N times.
                 name=(label or f"{model} {c.channel}") + f" ({port})",
-                settings=settings, transport=shared, channel=c.channel))
+                settings=settings, transport=shared, channel=c.channel,
+                model=getattr(lsci, "model", "") or ""))
         logger.info("autodetect: %s on %s → %d input(s): %s", model, port,
                     len(out), ", ".join(
                         f"{c.channel}={(c.label or '?').strip()}" for c in live))
@@ -241,9 +328,68 @@ def _lakeshore_sensors(port: str, lsci,
         return fallback
 
 
+#: Identification results of :func:`identify_port`.
+KIND_LAKESHORE_TEMP = "lakeshore_temp"
+KIND_LAKESHORE_625 = "lakeshore_625"
+KIND_LAKESHORE_OTHER = "lakeshore_other"
+KIND_LM510 = "cryomag_lm510"
+
+
+def identify_port(port: str, *, timeout: float = 0.5) -> tuple[str, object, bool]:
+    """``(kind, info, heard)`` for one serial port. Writes only identity queries.
+
+    Order and what each step may write:
+
+    1. ``*IDN?`` CR LF at 57600 / 9600 / 115200, 7O1 (Lake Shore family). An
+       ``LSCI`` answer is then classified by MODEL: a temperature instrument
+       (``lakeshore_temp``), the Model 625 magnet supply (``lakeshore_625``), or
+       anything else (``lakeshore_other`` — reported, never polled).
+    2. CR, then ``*IDN?`` CR at the LM-510's 8N1 bauds (``cryomag_lm510``).
+    3. ``*IDN?`` CR LF at 19200 / 38400 7O1 — a 625 set to a non-default baud.
+
+    ``heard`` is True if ANY step got bytes back. A port that talked is not a
+    Modbus-only DL-7 gauge, so the caller must not send it the binary DL-7 frame
+    (probing an instrument's command parser with binary is how a "harmless"
+    probe stops being harmless). ``kind`` is ``""`` when nothing was identified.
+    """
+    heard: list[bytes] = []
+
+    def _rec(b: bytes) -> None:
+        if b:
+            heard.append(b)
+
+    lsci = probe_lakeshore(port, on_reply=_rec)
+    if lsci is not None:
+        model = getattr(lsci, "model", "") or ""
+        if "625" in model.upper():
+            return KIND_LAKESHORE_625, lsci, True
+        if is_temperature_model(model):
+            return KIND_LAKESHORE_TEMP, lsci, True
+        return KIND_LAKESHORE_OTHER, lsci, True
+    lm = probe_lm510(port, on_reply=_rec)
+    if lm is not None:
+        return KIND_LM510, lm, True
+    m625 = probe_model625(port, candidates=((19200, 7, "O", 1), (38400, 7, "O", 1)),
+                          on_reply=_rec)
+    if m625 is not None:
+        return KIND_LAKESHORE_625, m625, True
+    if heard:
+        # What came back, so "answered but was not recognised" can be told apart next time:
+        # a truncated "LSCI,M…", wrong-baud junk, or another instrument's answer. A past
+        # start-up miss left only the INFO line, not the bytes.
+        logger.info("autodetect: %s replies heard but not identified (first %d of %d): %s",
+                    port, min(4, len(heard)), len(heard),
+                    ", ".join(repr(b[:40]) for b in heard[:4]))
+    return "", None, bool(heard)
+
+
 def autodetect_sensors(skip_ports: set[str] | None = None,
                        transports: dict | None = None) -> list[EnvironmentSensor]:
-    """Scan COM ports and return sensors for any DL-7 / Lakeshore found.
+    """Scan COM ports and return sensors for any known instrument found.
+
+    Recognised: Lake Shore temperature instruments, the Lake Shore Model 625
+    magnet supply (read-only field/current), the Cryomagnetics LM-510 level
+    monitor (read-only level) and DL-7 vacuum gauges.
 
     ``skip_ports`` (upper-cased device names) are ports already claimed by
     configured sensors — they are not probed again. ``transports`` is the
@@ -269,18 +415,42 @@ def autodetect_sensors(skip_ports: set[str] | None = None,
         logger.info("autodetect: probing %s (%s)", info.device,
                     (info.description or "no description").strip() or "no description")
         try:
-            # Lakeshore FIRST, deliberately. Identifying it costs one ASCII
-            # query ("*IDN?"), which a Modbus gauge ignores on a CRC mismatch.
-            # probe_dl7 instead writes a raw Modbus frame, and probing a
-            # Lakeshore with that puts binary bytes into a temperature
-            # CONTROLLER's command parser. It is harmless (no CRLF terminator,
-            # so the instrument never executes it), but "harmless binary at a
-            # heater controller" is not a thing to do when a pure query settles
-            # the same question first (2026-07-27).
-            lsci = probe_lakeshore(info.device)
-            if lsci is not None:
-                found.extend(_lakeshore_sensors(info.device, lsci, pool))
+            # Identity queries FIRST, deliberately. Identifying an ASCII
+            # instrument costs one "*IDN?", which a Modbus gauge ignores on a CRC
+            # mismatch. probe_dl7 instead writes a raw Modbus frame, and probing
+            # an instrument with that puts binary bytes into its command parser —
+            # a temperature controller's, or a magnet supply's. So the DL-7
+            # frame only goes to a port that stayed SILENT through every identity
+            # query.
+            kind, ident, heard = identify_port(info.device)
+            if kind == KIND_LAKESHORE_TEMP:
+                found.extend(_lakeshore_sensors(info.device, ident, pool))
                 skip.add(dev)
+                continue
+            if kind == KIND_LAKESHORE_625:
+                found_at = ident[0] if isinstance(ident, tuple) else ident.settings
+                logger.info("autodetect: Lake Shore Model 625 magnet supply on %s "
+                            "(read-only: field + current)", info.device)
+                found.extend(_magnet625_sensors(
+                    info.device, _magnet625_settings(info.device, found_at.baudrate), pool))
+                skip.add(dev)
+                continue
+            if kind == KIND_LM510:
+                logger.info("autodetect: Cryomagnetics LM-510 level monitor on %s "
+                            "(read-only, never starts a measurement)", info.device)
+                found.extend(_lm510_sensors(
+                    info.device, _lm510_settings(info.device, ident[0].baudrate), pool))
+                skip.add(dev)
+                continue
+            if kind == KIND_LAKESHORE_OTHER:
+                logger.warning("autodetect: %s answered as Lake Shore %s, which MAST has "
+                               "no driver for — not polled", info.device,
+                               getattr(ident, "model", "?"))
+                skip.add(dev)
+                continue
+            if heard:
+                logger.info("autodetect: %s answered but was not recognised; the DL-7 "
+                            "Modbus probe is skipped for a port that talks", info.device)
                 continue
             if probe_dl7(info.device):
                 from mast.environment.dl7_vacuum import DL7_BAUD
@@ -347,17 +517,21 @@ def build_environment_sensors(*, include_placeholders: bool = True,
         has_vacuum = any(isinstance(s, (DL7VacuumSensor, VacuumSensor)) for s in sensors)
         has_temp = any(isinstance(s, (LakeshoreTemperatureSensor, TemperatureSensor))
                        for s in sensors)
+        has_helium = any(isinstance(s, (LM510LevelSensor, HeliumLevelSensor)) for s in sensors)
         if not has_vacuum:
             sensors.append(VacuumSensor())
         if not has_temp:
             sensors.append(TemperatureSensor())
-        # Helium / noise still have no dedicated driver, so they stay
-        # placeholders — UNLESS the caller is about to supply a real one (a
-        # level meter wired into a Nanonis analogue input arrives as a
-        # ``nanonis_signal`` sensor built by core.runtime).
-        for placeholder in (HeliumLevelSensor(), NoiseSensor()):
-            if placeholder.name() not in reserved:
-                sensors.append(placeholder)
+        # Helium has a driver now (Cryomagnetics LM-510); noise still has none.
+        # A placeholder is added only for a kind nothing real covers — and not
+        # when the caller is about to supply a real one (a level meter wired into
+        # a Nanonis analogue input arrives as a ``nanonis_signal`` sensor built by
+        # core.runtime). Adding the placeholder next to a real LM-510 named
+        # "helium_level" would make the dedup below rename one of them.
+        if not has_helium and HeliumLevelSensor().name() not in reserved:
+            sensors.append(HeliumLevelSensor())
+        if NoiseSensor().name() not in reserved:
+            sensors.append(NoiseSensor())
 
     # Guard against name collisions (monitor keys by name()).
     seen: set[str] = set()
@@ -406,8 +580,61 @@ def _lakeshore_suggestions(snap, port: str) -> list[dict]:
             "port": port,
             "channel": ch.channel,
             "unit": "K",
+            # Kept so a later boot knows which instrument this is without asking it:
+            # temperature control is offered only for a Model 335.
+            "model": snap.model or "",
             **line,
         })
+    return out
+
+
+def _describe_magnet625(port: str, ident) -> dict:
+    """Discovery entry for a Model 625: identity, full read-only state, suggestions."""
+    found_at = ident[0] if isinstance(ident, tuple) else ident.settings
+    settings = _magnet625_settings(port, found_at.baudrate)
+    out: dict = {"kind": KIND_LAKESHORE_625, "identified": True,
+                 "model": "MODEL625", "idn": getattr(ident, "idn", "")}
+    link = Model625Link(open_transport(settings), port=port)
+    try:
+        st = link.read_state()
+        out.update({"model": st.model or "MODEL625", "idn": st.idn,
+                    "firmware": st.firmware, "serial_number": st.serial_number,
+                    "magnet": st.as_dict()})
+    except Exception as exc:  # noqa: BLE001 - identity alone is still worth showing
+        logger.debug("discover: 625 state read on %s failed: %s", port, exc)
+    finally:
+        link.close()
+    line = {"baudrate": settings.baudrate}
+    out["suggested_sensors"] = [
+        {"id": f"magnet625_{port}_field".lower(), "name": "magnet_field",
+         "type": KIND_LAKESHORE_625, "port": port, "quantity": "field", **line},
+        {"id": f"magnet625_{port}_current".lower(), "name": "magnet_current",
+         "type": KIND_LAKESHORE_625, "port": port, "quantity": "current", "unit": "A",
+         **line},
+    ]
+    return out
+
+
+def _describe_lm510(port: str, ident) -> dict:
+    """Discovery entry for an LM-510: identity, channel-1 state, suggestion."""
+    settings = _lm510_settings(port, ident[0].baudrate)
+    fields = ident[1] if isinstance(ident, tuple) else {}
+    out: dict = {"kind": KIND_LM510, "identified": True,
+                 "model": fields.get("model", "LM-510"), "idn": fields.get("idn", ""),
+                 "firmware": fields.get("firmware", ""),
+                 "serial_number": fields.get("serial_number", "")}
+    link = LM510Link(open_transport(settings), port=port)
+    try:
+        out["level_meter"] = link.read_state(1).as_dict()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("discover: LM-510 state read on %s failed: %s", port, exc)
+    finally:
+        link.close()
+    out["suggested_sensors"] = [
+        {"id": f"lm510_{port}_1".lower(), "name": "helium_level",
+         "type": KIND_LM510, "port": port, "channel": 1,
+         "baudrate": settings.baudrate},
+    ]
     return out
 
 
@@ -455,9 +682,20 @@ def discover_devices(*, timeout: float = 0.5) -> list[dict]:
             "suggested_sensors": [],
         }
         try:
-            # Same ordering rule as autodetect_sensors: pure query first.
-            snap = discover_lakeshore(port, timeout=timeout)
-            if snap is not None:
+            # Same ordering rule as autodetect_sensors: identity queries first,
+            # the binary DL-7 frame only to a port that stayed silent.
+            kind, ident, heard = identify_port(port, timeout=timeout)
+            snap = (discover_lakeshore(port, timeout=timeout)
+                    if kind == KIND_LAKESHORE_TEMP else None)
+            if kind == KIND_LAKESHORE_625:
+                entry.update(_describe_magnet625(port, ident))
+            elif kind == KIND_LM510:
+                entry.update(_describe_lm510(port, ident))
+            elif kind == KIND_LAKESHORE_OTHER:
+                entry.update({"kind": KIND_LAKESHORE_OTHER, "identified": True,
+                              "model": getattr(ident, "model", ""),
+                              "idn": getattr(ident, "idn", "")})
+            elif snap is not None:
                 entry.update({
                     "kind": "lakeshore_temp",
                     "identified": True,
@@ -470,7 +708,7 @@ def discover_devices(*, timeout: float = 0.5) -> list[dict]:
                     "outputs": [o.as_dict() for o in snap.outputs],
                     "suggested_sensors": _lakeshore_suggestions(snap, port),
                 })
-            elif probe_dl7(port, timeout=timeout):
+            elif not heard and probe_dl7(port, timeout=timeout):
                 entry.update({
                     "kind": "dl7_vacuum",
                     "identified": True,
@@ -549,6 +787,7 @@ __all__ = [
     "build_environment_sensors",
     "build_sensors_from_config",
     "autodetect_sensors",
+    "identify_port",
     "discover_devices",
     "has_real_sensors",
     "is_real_sensor",

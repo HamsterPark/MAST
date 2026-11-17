@@ -103,12 +103,17 @@ class SettingsWriteRequest(BaseModel):
     # memory, vision models, wishlist feedback). Default OFF; vision models load at
     # service start, so a change needs a restart. No admin PIN.
     legacy_features_enabled: Optional[bool] = None
-    # Station profile ("stm" | "optical"). Any other value is refused by the write
+    # Station profile ("stm" | "optical" | "generic"). Any other value is refused by the write
     # route (not stored): a typo must not quietly turn an STM station into something
     # else. In admin_pin.GUARDED_KEYS: a write without the admin PIN is refused
     # (pin_required), because the choice decides at the next start whether Nanonis is
     # dialled and which watchdogs run. Read side: SettingsResponse.station_profile.
     station_profile: Optional[str] = None
+    # Serial auto-detection switch (docs/v2/design/generic_station.md §1.4): true / false;
+    # unset = the profile's default (STM on, generic off; the optical station ignores it).
+    # In admin_pin.GUARDED_KEYS: switching it on probes every free serial port at the next
+    # start or rescan. Read side: SettingsResponse.serial_autodetect.
+    serial_autodetect: Optional[bool] = None
     # LangGraph 退出的两个切换面（2026-08-26/27）。写入侧与读出侧**必须成对**——
     # 只加一边的结果是「表单存得进读不回」，而这条闸门（test_settings_write_
     # reachability）正是为此存在的：它抓到了我只改 KNOWN_KEYS 的那一版。

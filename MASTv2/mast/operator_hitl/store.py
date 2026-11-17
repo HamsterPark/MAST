@@ -279,9 +279,11 @@ class PersistentPromptBackend(InMemoryPromptBackend):
 # ── optical state ──────────────────────────────────────────────────────────────
 
 
-def load_slot_definitions(path: Path) -> tuple[OpticalSlot, ...]:
-    """The slots defined in *path* (``config/optical_station.json``), else
-    :data:`DEFAULT_SLOTS`.
+def load_slot_definitions(path: Path, *,
+                          defaults: tuple[OpticalSlot, ...] | None = None) -> tuple[OpticalSlot, ...]:
+    """The slots defined in *path* (``config/optical_station.json``), else *defaults*
+    (:data:`DEFAULT_SLOTS` when not given; the generic station passes its own,
+    ``optical_state.GENERIC_DEFAULT_SLOTS``).
 
     Format: ``{"slots": [{id, label, kind, options, unit, min, max, valid_for_s,
     description}, ...], "extend_defaults": false}`` (a bare list works too). With
@@ -289,9 +291,10 @@ def load_slot_definitions(path: Path) -> tuple[OpticalSlot, ...]:
     A missing file is normal (defaults); a file that exists but is unreadable or wrong is a
     WARNING that names the problem, and the defaults apply — never a half-applied file.
     """
+    base = tuple(defaults) if defaults is not None else DEFAULT_SLOTS
     raw = _read_json(path, "optical-station config")
     if raw is None:
-        return DEFAULT_SLOTS
+        return base
     try:
         extend = False
         if isinstance(raw, dict):
@@ -310,13 +313,13 @@ def load_slot_definitions(path: Path) -> tuple[OpticalSlot, ...]:
                 raise ValueError(f"choice slot {s.id!r} has no options")
         if not extend:
             return tuple(defined)
-        by_id = {s.id: s for s in DEFAULT_SLOTS}
+        by_id = {s.id: s for s in base}
         by_id.update({s.id: s for s in defined})
         return tuple(by_id.values())
     except Exception as exc:  # noqa: BLE001 - KeyError (no id), ValueError, OpticalStateError ...
         logger.warning("optical-station config %s is not usable (%s: %s); using the built-in "
                        "slots", path, type(exc).__name__, exc)
-        return DEFAULT_SLOTS
+        return base
 
 
 class PersistentOpticalStateStore(OpticalStateStore):
@@ -330,12 +333,14 @@ class PersistentOpticalStateStore(OpticalStateStore):
     """
 
     def __init__(self, root: str | os.PathLike | None = None, *,
-                 slots: tuple[OpticalSlot, ...] | list[OpticalSlot] | None = None) -> None:
+                 slots: tuple[OpticalSlot, ...] | list[OpticalSlot] | None = None,
+                 default_slots: tuple[OpticalSlot, ...] | None = None) -> None:
         self.directory = operator_dir(root)
         self.config_path = station_config_path(root)
         self.state_path = self.directory / STATE_FILE
         self.history_path = self.directory / HISTORY_FILE
-        super().__init__(tuple(slots) if slots is not None else load_slot_definitions(self.config_path))
+        super().__init__(tuple(slots) if slots is not None
+                         else load_slot_definitions(self.config_path, defaults=default_slots))
         self._load_values()
 
     # -- loading ---------------------------------------------------------------------

@@ -1,23 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type { components } from "@/api/schema";
 import { Badge, Card, DegradedNote, EmptyNote, ErrorNote, Section, Spinner } from "@/components/ui";
 import { Button, Field, RadioGroup, SelectField } from "@/components/controls";
-import { EnvSeriesChart } from "@/components/envhistory/EnvSeriesChart";
+import { EnvSensorPanel } from "@/components/envhistory/EnvSensorPanel";
 import { SpectrumViewer, type SpectrumLike } from "@/components/envhistory/SpectrumViewer";
 import {
   RANGES,
   channelLabel,
-  coverageOf,
   fmtBytes,
   fmtSpan,
   fmtTs,
+  orderSensors,
   rangeWindow,
   spectrumPickerLabel,
-  statusLabel,
-  statusTone,
-  worstOf,
 } from "@/lib/envHistory";
 import { ENV_HISTORY_SERIES_POLL_MS, ENV_HISTORY_STATUS_POLL_MS } from "@/lib/pollRates";
 import { useStickyTab } from "@/hooks/useStickyTab";
@@ -44,26 +41,21 @@ type SpectraList = components["schemas"]["SpectraListResponse"];
 // the extremes and the worst status survive the merge, so zooming out can never
 // hide an excursion that really happened.
 //
+// ── the trends view ────────────────────────────────────────────────────────
+// One strip per sensor, stacked on one shared time axis (cursor and zoom are synced), and the
+// time-range buttons apply to all of them. There is no series picker: the operator should not
+// have to know which channel to ask for. There is no overlay either — it existed to show that
+// two channels sharing one serial port are recorded at the same moment, and stacked strips on
+// one time axis show that just as well, with counted / excluded on every strip.
+//
 // Tunnelling current is gated: only readings taken while nothing was driving the
 // instrument are counted, because during a scan that signal is topography, not
 // environment. The gaps are real and `instrument_quiet` explains them.
 
 const STATUS_KEY = ["env-history", "status"] as const;
 
-/**
- * A series' unit, from the sensor list.
- *
- * Used to decide what may be overlaid on what: only same-unit series are
- * offered as a comparison, because they are the only ones that can honestly
- * share one Y axis.
- */
-function unitOf(list: { sensors?: { sensor: string; unit?: string | null }[] } | undefined,
-                name: string): string {
-  return list?.sensors?.find((s) => s.sensor === name)?.unit ?? "";
-}
-
-/** Series the operator most likely wants first, in order of preference. */
-const PREFERRED = ["temperature", "vacuum", "helium_level", "tunnel_current"];
+/** All strips share one cursor / zoom group. */
+const SYNC_KEY = "env-history-trends";
 
 type View = "series" | "spectra";
 
@@ -78,13 +70,6 @@ export default function EnvHistoryPage() {
   // SubTabs, so the SubTabs memory mechanism does not apply.
   const [view, setView] = useStickyTab<View>(
     "env-history.view", VIEWS.map((v) => v.value), "series");
-  const [sensor, setSensor] = useState<string>("");
-  // Comparison series. The backend reads all sensors in one tick and stores them
-  // on one time base, so two curves should land on the same bucket grid. Showing
-  // one curve at a time and flipping between them would instead look like two
-  // non-overlapping data sets (a symptom of serial-port handle contention, not of
-  // scheduling); overlaying them makes simultaneity visible.
-  const [compareSensor, setCompareSensor] = useState<string>("");
   // Stores the span itself, not an index into RANGES: an index-based default
   // silently changes meaning when an entry is inserted. `null` means "all" and
   // is a valid value.
@@ -113,46 +98,29 @@ export default function EnvHistoryPage() {
     refetchInterval: ENV_HISTORY_SERIES_POLL_MS,
   });
 
+  const list = sensors.data?.sensors;
   const names = useMemo(
-    () => (sensors.data?.sensors ?? []).map((s) => s.sensor).filter(Boolean),
-    [sensors.data],
+    () => orderSensors((list ?? []).map((x) => x.sensor)),
+    [list],
   );
-
-  // Pick a default series once the list arrives, preferring the ones an
-  // operator actually opens this page for.
-  useEffect(() => {
-    if (sensor || !names.length) return;
-    const pick = PREFERRED.find((p) => names.includes(p)) ?? names[0];
-    if (pick) setSensor(pick);
-  }, [names, sensor]);
+  const unitByName = useMemo(() => new Map((list ?? []).map((x) => [x.sensor, x.unit ?? ""])), [list]);
 
   const window = useMemo(() => rangeWindow(rangeS, Date.now()), [rangeS]);
 
-  const series = useQuery({
-    queryKey: ["env-history", "series", sensor, window.since ?? "all"],
-    enabled: !!sensor,
-    queryFn: async () => {
-      const { data, error } = await api.GET("/api/env-history/series", {
-        params: { query: { sensor, since: window.since, max_points: 2000 } },
-      });
-      if (error) throw error;
-      return data as Series;
-    },
-    refetchInterval: ENV_HISTORY_SERIES_POLL_MS,
-  });
-
-  // Fetch the second series with the same window and parameters; only then are the two curves comparable.
-  const compareSeries = useQuery({
-    queryKey: ["env-history", "series", compareSensor, window.since ?? "all"],
-    enabled: !!compareSensor && compareSensor !== sensor,
-    queryFn: async () => {
-      const { data, error } = await api.GET("/api/env-history/series", {
-        params: { query: { sensor: compareSensor, since: window.since, max_points: 2000 } },
-      });
-      if (error) throw error;
-      return data as Series;
-    },
-    refetchInterval: ENV_HISTORY_SERIES_POLL_MS,
+  // One request per sensor, same window and same polling interval for all (the backend has no
+  // batch endpoint). Query keys are the same as the single-series page used.
+  const seriesQs = useQueries({
+    queries: names.map((sensor) => ({
+      queryKey: ["env-history", "series", sensor, window.since ?? "all"],
+      queryFn: async () => {
+        const { data, error } = await api.GET("/api/env-history/series", {
+          params: { query: { sensor, since: window.since, max_points: 2000 } },
+        });
+        if (error) throw error;
+        return data as Series;
+      },
+      refetchInterval: ENV_HISTORY_SERIES_POLL_MS,
+    })),
   });
 
   const spectra = useQuery({
@@ -185,18 +153,6 @@ export default function EnvHistoryPage() {
 
   const st = status.data;
   const degraded = !!st?.degraded;
-  const points = series.data?.points ?? [];
-  const worst = worstOf(points);
-  const cover = coverageOf(points);
-  const unit = series.data?.unit ?? "";
-  // Only offer comparison series with the same unit. Kelvin against kelvin is
-  // comparable; kelvin against pascal would need a second Y axis (whose relative
-  // height is the plotter's choice and suggests correlations nobody measured) or
-  // forcing two quantities onto one axis, so such options are not offered.
-  const comparePoints =
-    compareSensor && compareSensor !== sensor ? (compareSeries.data?.points ?? []) : [];
-  const compareCover = coverageOf(comparePoints);
-
   return (
     <div className="p-5">
       <Section
@@ -217,25 +173,6 @@ export default function EnvHistoryPage() {
         <Section title={tr("趋势", "Trends")}>
           <Card>
             <div className="mb-3 flex flex-wrap items-end gap-3">
-              <Field label={tr("序列", "Series")}>
-                <SelectField
-                  value={sensor}
-                  onChange={setSensor}
-                  options={names.map((n) => ({ value: n, label: n }))}
-                />
-              </Field>
-              <Field label={tr("叠加对比", "Overlay comparison")}>
-                <SelectField
-                  value={compareSensor}
-                  onChange={setCompareSensor}
-                  options={[
-                    { value: "", label: tr("（不对比）", "(no comparison)") },
-                    ...names
-                      .filter((n) => n !== sensor && unitOf(sensors.data, n) === unit)
-                      .map((n) => ({ value: n, label: n })),
-                  ]}
-                />
-              </Field>
               <div>
                 <div className="mb-1 text-xs text-mast-faint">{tr("时间范围", "Time range")}</div>
                 <div className="flex flex-wrap gap-1">
@@ -250,67 +187,17 @@ export default function EnvHistoryPage() {
                   ))}
                 </div>
               </div>
-              <div className="ml-auto flex items-center gap-2 text-xs">
-                {/* Tone follows severity: "unavailable" (the mildest non-ok) is not drawn as red as "alarm". */}
-                {worst !== "ok" && <Badge tone={statusTone(worst)}>{statusLabel(worst)}</Badge>}
-                {cover.excluded > 0 && (
-                  <span
-                    className="text-mast-faint"
-                    title={tr(
-                      "被排除的读数：传感器当时没给出有效值（多个通道共用一个串口时，" +
-                        "同一时刻只有一个拿得到句柄，另一个就是空的），" +
-                        "或者（隧道电流）仪器当时正在被驱动 —— 那种情况下这个信号是形貌不是环境。" +
-                        "它们不进统计。",
-                      "Excluded readings: the sensor returned no valid value at the time " +
-                        "(when several channels share one serial port only one can hold the handle " +
-                        "at a time and the other reads empty), or (tunnelling current) the instrument " +
-                        "was being driven, in which case the signal is topography, not environment. " +
-                        "They are not counted in the statistics.",
-                    )}
-                  >
-                    {tr(
-                      `已计入 ${cover.counted} 条 · 未计入 ${cover.excluded} 条`,
-                      `${cover.counted} counted · ${cover.excluded} excluded`,
-                    )}
-                  </span>
+              <div className="ml-auto text-xs text-mast-faint">
+                {tr(
+                  "每个传感器一张图，共用同一条时间轴（光标与缩放联动）；拖选放大，双击还原。",
+                  "One chart per sensor on a shared time axis (cursor and zoom are linked); drag to zoom, double-click to reset.",
                 )}
               </div>
             </div>
 
-            {/* Counted / excluded for both series side by side answer "are they saved
-                at the same time?". With a shared serial port only one channel holds the
-                handle at a time, so the two sides come out exactly complementary; both
-                counts growing means both channels are recording. */}
-            {compareSensor && compareSensor !== sensor && (
-              <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-mast-muted">
-                <span>
-                  {sensor}{tr("：已计入 ", ": counted ")}
-                  <span className="tabular-nums">{cover.counted}</span>
-                  {tr(" · 未计入 ", " · excluded ")}
-                  <span className="tabular-nums">{cover.excluded}</span>
-                </span>
-                <span>
-                  {compareSensor}{tr("：已计入 ", ": counted ")}
-                  <span className="tabular-nums">{compareCover.counted}</span>
-                  {tr(" · 未计入 ", " · excluded ")}
-                  <span className="tabular-nums">{compareCover.excluded}</span>
-                </span>
-                {cover.counted > 0 && compareCover.counted > 0 ? (
-                  <span className="text-mast-auto">{tr("两路都在记录", "Both channels are recording")}</span>
-                ) : (
-                  <span className="text-mast-warn">
-                    {tr(
-                      "只有一路有读数——多为共用串口时另一路拿不到句柄",
-                      "Only one channel has readings, usually because the other could not get the shared serial port handle",
-                    )}
-                  </span>
-                )}
-              </div>
-            )}
-
-            {series.isLoading && <Spinner />}
-            {series.error != null && <ErrorNote error={series.error} />}
-            {!series.isLoading && !series.error && !names.length && (
+            {sensors.isLoading && <Spinner />}
+            {sensors.error != null && <ErrorNote error={sensors.error} />}
+            {!sensors.isLoading && !sensors.error && !names.length && (
               <EmptyNote
                 label={tr(
                   "还没有任何历史。记录器需要跑够一个统计桶（默认一分钟）才会出现第一个点。",
@@ -318,33 +205,26 @@ export default function EnvHistoryPage() {
                 )}
               />
             )}
-            {/* Buckets exist but nothing is drawable: "this sensor gave no valid reading in
-                this period" is a fact to state, not an empty state. */}
-            {!series.isLoading && !series.error && !!names.length && !!sensor &&
-              cover.buckets > 0 && cover.drawable === 0 && (
-                <EmptyNote
-                  label={tr(
-                    `${sensor} 在这个时间范围内没有任何有效读数（${cover.buckets} 个统计桶，` +
-                      `${cover.excluded} 条读数全部被排除）。记录器一直在跑 —— 是这个传感器没读到值。`,
-                    `${sensor} has no valid readings in this time range (${cover.buckets} statistics buckets, ` +
-                      `all ${cover.excluded} readings excluded). The recorder is running; the sensor simply returned no values.`,
-                  )}
-                />
-              )}
-            {!series.isLoading && !series.error && !!names.length && (
-              <EnvSeriesChart
-                sensor={sensor}
-                unit={series.data?.unit ?? ""}
-                points={points}
-                bucketS={series.data?.bucket_s_effective ?? 60}
-                thinned={!!series.data?.thinned}
-                compare={
-                  compareSensor && compareSensor !== sensor
-                    ? { sensor: compareSensor, points: comparePoints }
-                    : null
-                }
-              />
-            )}
+            {/* Keyed on the range: a new window starts from an unzoomed x axis on every strip. */}
+            <div key={String(rangeS)} className="space-y-2">
+              {names.map((name, i) => {
+                const q = seriesQs[i];
+                return (
+                  <EnvSensorPanel
+                    key={name}
+                    sensor={name}
+                    unit={unitByName.get(name) ?? ""}
+                    unitFromSeries={q?.data?.unit}
+                    loading={!!q?.isLoading}
+                    error={q?.error}
+                    points={q?.data?.points ?? []}
+                    bucketS={q?.data?.bucket_s_effective ?? 60}
+                    thinned={!!q?.data?.thinned}
+                    syncKey={SYNC_KEY}
+                  />
+                );
+              })}
+            </div>
           </Card>
         </Section>
       ) : (

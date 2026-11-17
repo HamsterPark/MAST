@@ -171,6 +171,54 @@ def _safe_mtime(p) -> float:
         return 0.0
 
 
+def _iso_utc(ts: float) -> str:
+    """A unix time as ISO 8601 UTC (``2026-11-12T03:04:05Z``), or ``""``.
+
+    ``_safe_mtime`` reports an unreadable file as 0.0, which is a sort key, not a
+    time: printed, it would claim the scan was written on 1 January 1970 and a
+    time filter would file it as the oldest thing on the map. Anything that is
+    not a plausible positive timestamp comes back as "" — undated."""
+    try:
+        import datetime as _dt
+        import math
+        t = float(ts)
+        if not math.isfinite(t) or t <= 0:
+            return ""
+        return (_dt.datetime.fromtimestamp(t, tz=_dt.timezone.utc)
+                .isoformat(timespec="seconds").replace("+00:00", "Z"))
+    except (OverflowError, OSError, ValueError, TypeError):
+        return ""
+
+
+def _stamp_with_offset(ts: str, tz: Any = None) -> str:
+    """A marker timestamp as ISO 8601 WITH the UTC offset in force on its date.
+
+    Markers are stamped ``datetime.now().isoformat()`` (storage.log_marker):
+    naive wall-clock time on this PC. A browser elsewhere — the map over the
+    tailnet — read that as ITS local time, and reading it at this PC's CURRENT
+    offset instead is wrong in a zone with daylight saving for every marker
+    from the other half of the year (and turned a browser in the same zone from
+    right to wrong). Each stamp gets the offset of its own date, by the zone's
+    rules: ``2026-07-01T12:00:00+02:00`` and ``2026-01-15T12:00:00+01:00`` in
+    Berlin. A stamp that already names its offset, or does not parse, is
+    returned as is.
+
+    ``tz`` is for tests (a ``zoneinfo.ZoneInfo``); None means this PC's zone. A
+    wall-clock time inside a spring-forward gap or an autumn repeat is
+    ambiguous by nature; the first reading (fold 0) is taken.
+    """
+    if not ts:
+        return ts
+    try:
+        import datetime as _dt
+        d = _dt.datetime.fromisoformat(ts)
+        if d.tzinfo is not None:
+            return ts
+        return (d.replace(tzinfo=tz) if tz is not None else d.astimezone()).isoformat()
+    except (OverflowError, OSError, ValueError, TypeError):
+        return ts
+
+
 def _epoch_boundary_ts(app: Any, exp_id, sample_id) -> float:
     """Unix time of the last lateral coarse move, or 0.0 if there was none.
 
@@ -289,13 +337,15 @@ def _recent_scan_images(app: Any, limit: int = 12, extra_paths: list | None = No
                 b64 = uri.split(",", 1)[1] if uri and "," in uri else ""
                 if not b64:
                     continue
+                mt = _safe_mtime(p)
                 out.append(ScanImage(
                     image_b64=b64, center_x_m=meta["cx"], center_y_m=meta["cy"],
                     width_m=meta["w"], height_m=meta["h"],
                     angle_deg=float(meta.get("angle", 0.0) or 0.0),
                     name=os.path.basename(str(p)), path=str(p),
                     stale_epoch=bool(epoch_boundary_ts
-                                     and _safe_mtime(p) < epoch_boundary_ts)))
+                                     and mt < epoch_boundary_ts),
+                    mtime=_iso_utc(mt)))
             except Exception:  # noqa: BLE001 — one bad file must not break the map
                 continue
         _SCAN_IMG_CACHE["key"] = key
@@ -362,7 +412,8 @@ def _live_scan_image(app: Any, frame_view) -> "ScanImage | None":
                 break
         if newest is None:
             return None
-        if (_t.time() - _safe_mtime(newest)) > _LIVE_FRAME_MAX_AGE_S:
+        newest_mtime = _safe_mtime(newest)
+        if (_t.time() - newest_mtime) > _LIVE_FRAME_MAX_AGE_S:
             return None
         import base64
         return ScanImage(
@@ -373,7 +424,8 @@ def _live_scan_image(app: Any, frame_view) -> "ScanImage | None":
             height_m=frame_view.height_m if frame_view.height_m is not None
             else frame_view.width_m,
             angle_deg=float(frame_view.angle_deg or 0.0),
-            name=os.path.basename(str(newest)), path=str(newest))
+            name=os.path.basename(str(newest)), path=str(newest),
+            mtime=_iso_utc(newest_mtime), live=True)
     except Exception as exc:  # noqa: BLE001 — an underlay must never 500 the map
         logger.debug("live scan image assembly failed: %s", exc)
         return None
@@ -999,7 +1051,8 @@ def get_scan_map(request: Request) -> ScanMapResponse:
                 skill_name=getattr(m, "skill_name", "") or "",
                 status=getattr(m, "status", "done") or "done",
                 source=getattr(m, "source", "skill") or "skill",
-                timestamp=getattr(m, "timestamp", "") or "",
+                # with the offset of its own date (DST-correct), not naive
+                timestamp=_stamp_with_offset(getattr(m, "timestamp", "") or ""),
                 coord_epoch=getattr(m, "coord_epoch", None),
             )
         )

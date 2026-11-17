@@ -189,6 +189,10 @@ def test_an_unknown_layout_and_an_installation_without_layouts_are_plain_answers
     assert err and "unknown_layout" in text
     text, err, _ = mcp.call("mast_optical_layout_comment", {"layout_id": "nope", "text": "x"})
     assert err and "unknown_layout" in text
-    text, err, _ = mcp.call("mast_briefing")
-    assert not err and "## status" in text and "## optical_layouts" not in text, "an empty section is not in the digest"
+    # two sections, not the whole briefing: on a loaded machine (two pytest workers and more) the whole one has
+    # taken longer than the MCP client's 30 s; the rule under test - an empty section is left out of the
+    # digest - is the same for a section asked for by name
+    text, err, _ = mcp.call("mast_briefing", {"sections": ["status", "optical_layouts"]})
+    assert not err, text
+    assert "## status" in text and "## optical_layouts" not in text, "an empty section is not in the digest"
     assert '"optical_layouts":{"ok":true' in text, "but it is in the data, empty"

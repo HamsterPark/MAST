@@ -4,6 +4,7 @@ import { api } from "@/api/client";
 import { Card, Badge, DegradedNote } from "@/components/ui";
 import { Field, TextField, Button } from "@/components/controls";
 import { tr } from "@/lib/i18n";
+import { apiError } from "@/lib/apiError";
 
 // Add/remove library members — POST /api/literature/libraries/{id}/members (add) and
 // POST /api/literature/libraries/{id}/members/remove (remove). Paste work_ids /
@@ -29,14 +30,14 @@ export function AddMembers({ libraryId }: { libraryId: string | null }) {
       if (!libraryId) throw new Error(tr("先在上方选择一个库（检索此库）", "Select a library above first (\"Search this library\")"));
       const ids = parseIds(idsText);
       if (ids.length === 0) throw new Error(tr("粘贴至少一个 work_id / DOI", "Paste at least one work_id / DOI"));
-      const { data, error } = await api.POST(
+      const { data, error, response } = await api.POST(
         "/api/literature/libraries/{library_id}/members",
         {
           params: { path: { library_id: libraryId } },
           body: { work_ids: ids, reason: reason.trim(), added_by: "user" },
         },
       );
-      if (error) throw error;
+      if (error) throw apiError(error, response);
       return data;
     },
     onSuccess: (d) => {
@@ -50,14 +51,14 @@ export function AddMembers({ libraryId }: { libraryId: string | null }) {
       if (!libraryId) throw new Error(tr("先在上方选择一个库（检索此库）", "Select a library above first (\"Search this library\")"));
       const ids = parseIds(idsText);
       if (ids.length === 0) throw new Error(tr("粘贴至少一个 work_id / DOI", "Paste at least one work_id / DOI"));
-      const { data, error } = await api.POST(
+      const { data, error, response } = await api.POST(
         "/api/literature/libraries/{library_id}/members/remove",
         {
           params: { path: { library_id: libraryId } },
           body: { work_ids: ids },
         },
       );
-      if (error) throw error;
+      if (error) throw apiError(error, response);
       return data;
     },
     onSuccess: (d) => {

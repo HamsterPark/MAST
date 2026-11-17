@@ -138,6 +138,25 @@ def _enum_value(v: Any) -> str:
     return str(getattr(v, "value", v) or "").lower()
 
 
+#: why the station gate withholds a skill, per station profile (display only; the STM and the
+#: optical texts are the ones they always were)
+_WITHHELD_REASON: dict[str, Any] = {
+    "stm": lambda: tr("只属于光学站（这是一台 STM 站，站点画像是 stm）",
+                      "Belongs to the optical station only (this is an STM station: the station profile is stm)"),
+    "optical": lambda: tr("不属于光学站（这个技能要 STM / Nanonis；站点画像是 optical）",
+                          "Not part of the optical station (this skill needs an STM / Nanonis; the station profile is optical)"),
+    "generic": lambda: tr("不属于通用站（这个技能要 STM / Nanonis 或 WITec，这台站都没有；站点画像是 generic）",
+                          "Not part of the generic station (this skill needs an STM / Nanonis or a WITec, and this "
+                          "station has neither; the station profile is generic)"),
+}
+
+
+def _withheld_reason() -> str:
+    from mast import station as _station
+
+    return (_WITHHELD_REASON.get(_station.current_profile()) or _WITHHELD_REASON["stm"])()
+
+
 def _station_hidden(registry: Any) -> frozenset[str]:
     """Skills this station profile withholds (``station_face``): on an STM station only the
     optical station's own skills (none until their modules register some); empty whenever the
@@ -335,14 +354,7 @@ def skill_card(name: str, request: Request):
 
         f = compute(registry=registry)
         if name in f.station:
-            from mast import station as _station
-
-            if _station.is_optical():
-                face = {"disabled": True, "reason": tr("不属于光学站（这个技能要 STM / Nanonis；站点画像是 optical）",
-                                                       "Not part of the optical station (this skill needs an STM / Nanonis; the station profile is optical)")}
-            else:
-                face = {"disabled": True, "reason": tr("只属于光学站（这是一台 STM 站，站点画像是 stm）",
-                                                       "Belongs to the optical station only (this is an STM station: the station profile is stm)")}
+            face = {"disabled": True, "reason": _withheld_reason()}
         elif name in f.hardware:
             face = {"disabled": True, "reason": tr("硬件模块关闭（这台仪器没有这个硬件）", "Hardware module disabled (this instrument does not have this hardware)")}
         elif name in f.advanced:

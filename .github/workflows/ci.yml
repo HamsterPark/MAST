@@ -1,5 +1,9 @@
-# Skill-contribution CI — only what the skill checker, contrib's own tests and the docs guards need.
-# 技能投稿的最小 CI：依赖只装 MASTv2/requirements-ci.txt。全量无硬件测试要十几分钟，不在这里跑。
+# CI for pull requests. Job "compliance": only what the skill checker, contrib's own tests and the docs guards need.
+# Job "backend": a broader pytest subset (.github/ci_backend_subset.txt). Job "frontend": type check and unit tests.
+# The full test suite needs more dependencies and more time than this CI has; maintainers run it in the
+# development repository before each release (see CONTRIBUTING.md).
+# 公开仓 CI：compliance = 技能检查器 / contrib 自带测试 / 文档守卫；backend = 更宽的 pytest 子集；frontend = 前端。
+# 依赖只装 MASTv2/requirements-ci.txt。全量测试在维护者的开发仓里发布前跑，不在这里跑。
 name: skill-contributions
 
 on:
@@ -40,3 +44,50 @@ jobs:
           tests/v2/unit/skills/test_contrib_compliance.py
           tests/v2/unit/skills/test_skill_check_mutations.py
           tests/v2/unit/docs
+
+  backend:
+    # Every file in the list passes on the exported tree with only MASTv2/requirements-ci.txt installed.
+    # 清单里的每个文件都在导出的公开树上、只装 requirements-ci.txt 的条件下实测通过。
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: MASTv2
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: MASTv2/requirements-ci.txt
+
+      - name: Install the CI dependencies
+        run: python -m pip install -r MASTv2/requirements-ci.txt
+
+      - name: Backend test subset
+        run: python -m pytest -q -p no:cacheprovider "@.github/ci_backend_subset.txt"
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test:unit

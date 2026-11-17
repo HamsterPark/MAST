@@ -876,6 +876,18 @@ def _get_effective_limits(limits: SafetyLimits) -> SafetyLimits:
     return limits
 
 
+def _narrower_hint(bound: float, side: str) -> str:
+    """If the violated bound is an envelope found NARROWER than the measured
+    instrument travel, say so (see ``envelope_reconcile.narrower_hint``). Never
+    raises and never changes the verdict -- it only explains it."""
+    try:
+        from mast.core.envelope_reconcile import narrower_hint
+
+        return narrower_hint(bound, side)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 class SafetyGuard:
     """Three-layer safety: parameter bounds, state guards, approval levels."""
 
@@ -1009,10 +1021,12 @@ class SafetyGuard:
                     if value < global_min - _FLOAT_SLACK * abs(global_min):
                         violations.append(
                             f"Parameter '{name}' = {value} violates global safety minimum {global_min}"
+                            + _narrower_hint(global_min, "min")
                         )
                     if value > global_max + _FLOAT_SLACK * abs(global_max):
                         violations.append(
                             f"Parameter '{name}' = {value} violates global safety maximum {global_max}"
+                            + _narrower_hint(global_max, "max")
                         )
                     break
 

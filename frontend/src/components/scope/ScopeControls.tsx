@@ -16,11 +16,17 @@ import { useState } from "react";
 import { Button } from "../controls";
 import { tr } from "@/lib/i18n";
 import { useClearSample, useCurrentScope, useSwitchExperiment, useSwitchSample } from "@/api/scope";
+import { useStationCapabilities } from "@/hooks/useStationCapabilities";
 import { NewExperimentDialog, NewSampleDialog } from "./NewScopeDialogs";
 import { ExperimentPicker, SamplePicker } from "./ScopePickers";
 import { TipControls } from "./TipControls";
 
 export function ScopeControls() {
+  // The tip register belongs to a station with an STM, i.e. with Nanonis (generic_station.md
+  // §1.2: the backend gates its tip-register tools on `nanonis` too); it asks /api/tips as
+  // soon as it mounts, so it waits until the station has said it has one.
+  const station = useStationCapabilities();
+  const hasTip = station.ready && station.has("nanonis");
   const scope = useCurrentScope();
   const switchExp = useSwitchExperiment();
   const switchSmp = useSwitchSample();
@@ -110,10 +116,12 @@ export function ScopeControls() {
 
       {/* The tip is instrument-level: a sibling of experiment/sample, not a child.
           It sits here because it belongs to the same "what am I working on now"
-          flow, but it persists across experiments. */}
-      <div className="border-t border-mast-border pt-2">
-        <TipControls />
-      </div>
+          flow, but it persists across experiments. Only on a station with an STM tip. */}
+      {hasTip && (
+        <div className="border-t border-mast-border pt-2">
+          <TipControls />
+        </div>
+      )}
 
       <ExperimentPicker
         open={expPicker}

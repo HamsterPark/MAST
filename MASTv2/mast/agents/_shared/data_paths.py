@@ -27,7 +27,7 @@ import os
 import re
 from pathlib import Path
 
-from mast._runtime_paths import project_root
+from mast._runtime_paths import data_root, project_root
 
 __all__ = [
     "project_root",
@@ -52,27 +52,27 @@ def _env_dir(var: str) -> Path | None:
 
 
 def drafts_dir(*, create: bool = False) -> Path:
-    """Manuscript drafts. ``MAST_DRAFTS_DIR`` env > <project_root>/data/drafts.
+    """Manuscript drafts. ``MAST_DRAFTS_DIR`` env > <data_root>/data/drafts.
 
     **SUPERSEDED (2026-07-29).** Drafts and reports now live inside the owning
     experiment's folder (``<experiment>/reports/<doc-dir>/vNNN.md``, written by
     ``mast.documents.store``). This resolver is kept for migration and for
     reading pre-existing files; nothing new should be written here.
     """
-    d = _env_dir("MAST_DRAFTS_DIR") or project_root() / "data" / "drafts"
+    d = _env_dir("MAST_DRAFTS_DIR") or data_root() / "data" / "drafts"
     if create:
         d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def reviews_dir(*, create: bool = False) -> Path:
-    """Review reports. ``MAST_REVIEWS_DIR`` env > <project_root>/data/reviews.
+    """Review reports. ``MAST_REVIEWS_DIR`` env > <data_root>/data/reviews.
 
     **SUPERSEDED (2026-07-29).** Reviews are now documents in the experiment
     folder (``<experiment>/reports/<doc-dir>/``) with ``target_doc_id`` recording
     what they reviewed. Kept for migration and compatibility reads only.
     """
-    d = _env_dir("MAST_REVIEWS_DIR") or project_root() / "data" / "reviews"
+    d = _env_dir("MAST_REVIEWS_DIR") or data_root() / "data" / "reviews"
     if create:
         d.mkdir(parents=True, exist_ok=True)
     return d
@@ -80,7 +80,7 @@ def reviews_dir(*, create: bool = False) -> Path:
 
 def reports_dir(*, create: bool = False) -> Path:
     """Exported self-contained HTML reports. ``MAST_REPORTS_DIR`` env >
-    <project_root>/data/reports.
+    <data_root>/data/reports.
 
     Separate from drafts/: a draft is the editable working copy, an export is
     the thing you hand to someone. Keeping them apart means an export can be
@@ -91,7 +91,7 @@ def reports_dir(*, create: bool = False) -> Path:
     re-exporting no longer destroys the previous deliverable. Kept for migration
     and compatibility reads only.
     """
-    d = _env_dir("MAST_REPORTS_DIR") or project_root() / "data" / "reports"
+    d = _env_dir("MAST_REPORTS_DIR") or data_root() / "data" / "reports"
     if create:
         d.mkdir(parents=True, exist_ok=True)
     return d
@@ -99,7 +99,7 @@ def reports_dir(*, create: bool = False) -> Path:
 
 def figures_dir(*, create: bool = True) -> Path:
     """Where data_processing renders figures, and what ``list_figures`` lists.
-    ``MAST_FIGURES_DIR`` env > <project_root>/data/figures.
+    ``MAST_FIGURES_DIR`` env > <data_root>/data/figures.
 
     **No longer embed_figure's destination (2026-07-29):** it now copies the
     figure into the experiment's own pool ``<experiment>/reports/_assets/`` and
@@ -107,7 +107,7 @@ def figures_dir(*, create: bool = True) -> Path:
     folder is moved to another machine. This directory remains the SOURCE pool
     (and the read path for figures embedded by older builds).
     """
-    d = _env_dir("MAST_FIGURES_DIR") or project_root() / "data" / "figures"
+    d = _env_dir("MAST_FIGURES_DIR") or data_root() / "data" / "figures"
     if create:
         d.mkdir(parents=True, exist_ok=True)
     return d
@@ -116,20 +116,21 @@ def figures_dir(*, create: bool = True) -> Path:
 def experiment_db_path() -> Path:
     """The v1 experiment-log DB (the one Records/feedback write to).
 
-    ``MAST_EXPERIMENT_DB`` env > <project_root>/experiments/mast_experiments.db
+    ``MAST_EXPERIMENT_DB`` env > <data_root>/experiments/mast_experiments.db
     — the same canonical location ``mast.config`` uses, NOT the old
     ``data/experiments.db`` guess that never matched a real deployment.
     """
     env = os.environ.get("MAST_EXPERIMENT_DB", "").strip()
     if env:
         return Path(env).expanduser()
-    return project_root() / "experiments" / "mast_experiments.db"
+    return data_root() / "experiments" / "mast_experiments.db"
 
 
 def v2_experiment_db_path() -> Path:
     """The **v2** records DB (``logging/v2`` — campaigns / plans / claims …).
 
-    ``MAST_DATA_DIR`` env > ``<project_root>/experiments/mast_experiments_v2.db``.
+    ``<data_root>/experiments/mast_experiments_v2.db`` — i.e. ``MAST_DATA_DIR`` env >
+    ``<project_root>/experiments/mast_experiments_v2.db`` (see ``_runtime_paths.data_root``).
 
     ⚠️ This is NOT byte-for-byte ``logging.v2.storage.open_store()``'s default.
     That function falls back to ``Path(".")`` — the **current working directory**
@@ -151,9 +152,7 @@ def v2_experiment_db_path() -> Path:
     Callers that must agree with the live v2 writers should pass this path INTO
     ``open_store(path)`` rather than calling ``open_store()`` bare.
     """
-    env = os.environ.get("MAST_DATA_DIR", "").strip()
-    root = Path(env).expanduser() if env else project_root()
-    return root / "experiments" / "mast_experiments_v2.db"
+    return data_root() / "experiments" / "mast_experiments_v2.db"
 
 
 _SLUG_RE = re.compile(r"[^\w一-鿿-]+")

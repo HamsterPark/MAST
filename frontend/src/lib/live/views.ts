@@ -234,7 +234,7 @@ export function valueUnit(meta: StreamMeta, channel: string | null): string | nu
     if (typeof u === "string" && u) return u;
   }
   if (typeof m.value_unit === "string" && m.value_unit) return m.value_unit;
-  if (meta.kind === "map2d" || perChannel) return null;
+  if (meta.kind === "map2d" || meta.kind === "map2d_rows" || perChannel) return null;
   return meta.y_unit;
 }
 

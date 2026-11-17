@@ -538,13 +538,17 @@ def test_only_the_optical_profile_waits_for_human_nodes(monkeypatch, profile, ex
 
 
 def test_an_unreadable_profile_counts_as_stm(monkeypatch):
+    """Unreadable where it is read (``station.current_profile``, under the capability table), on
+    a station configured as optical - so ``False`` can only come from the STM fallback."""
     from mast import station
     from mast.api import direct_exec
 
     def boom():
         raise RuntimeError("settings store is gone")
 
-    monkeypatch.setattr(station, "is_optical", boom)
+    monkeypatch.setenv("MAST_STATION_PROFILE", "optical")
+    assert direct_exec._waits_for_human_nodes() is True
+    monkeypatch.setattr(station, "current_profile", boom)
     assert direct_exec._waits_for_human_nodes() is False
 
 

@@ -45,7 +45,23 @@ function c(type: Parameters<typeof newComponent>[0], id: string, x: number, y: n
   return newComponent(type, id, { x, y }, { angle_deg: angle, ...(props ? { props } : {}), ...(label ? { label } : {}), ...(aperture ? { aperture_mm: aperture } : {}) });
 }
 
-function demo(): OpticalLayout {
+/**
+ * The readable demo. Besides the alignment cases of v1 (an off-centre objective, a mirror hit on its
+ * back, a power meter no beam reaches) it shows the beam physics of v2 (docs/v2/design/optical_layout_v2.md):
+ *   * pump 532 nm, 50 mW, linear p, Ø0.7 mm: λ/2 at 15° turns it to 30°, BS1 picks off 30 % (the mirror
+ *     image, 150°, which a λ/4 at 0° makes elliptical: ψ 0°, χ −30°), the PBS sends the s part (25 %) to a
+ *     dump and lets p (75 %) through, a Galilean telescope (f −50 / 100) doubles the diameter, M2 reflects
+ *     98 %, the objective (f 20 mm, 80 %) focuses it onto the sample, which sits in the focus (a waist of
+ *     Ø8 µm 20.06 mm behind the objective; the sample at 20.07 mm, on the 0.01 mm grid, so that both foci fall
+ *     inside the segment and the narrative has a focus line for each beam);
+ *   * probe 1064 nm, 200 mW, unpolarised, Ø2.5 mm with M² 1.1, through a filter of 90 %; at the
+ *     off-centre objective its spot reaches past the aperture (a "spot exceeds the aperture" warning); its waist,
+ *     Ø12 µm, lies 0.05 mm before the sample, where its spot is Ø14 µm;
+ *   * a fibre output with a 4 µm mode spreads to about Ø17 mm, L1 collimates it and L4 focuses it into a
+ *     fibre input of 60 % coupling; the far end emits s-polarised light into an analyzer set to p, so
+ *     nothing reaches the camera (an "extinguished" warning and a beam drawn as no light).
+ */
+export function demo(): OpticalLayout {
   let l = emptyLayout("shg-demo", "SHG excitation path (demo)");
   l = {
     ...l,
@@ -54,20 +70,27 @@ function demo(): OpticalLayout {
     updated_by: "ana",
     notes: "Demo layout from the development mock. 532 nm pump and 1064 nm probe are combined on a dichroic mirror and focused on the sample.",
     components: [
-      c("laser", "las1", 62.5, 112.5, 0, { wavelength_nm: 532, power_mw: 50 }, "Pump 532"),
-      c("laser", "las2", 62.5, 412.5, 0, { wavelength_nm: 1064, power_mw: 200 }, "Probe 1064"),
-      c("waveplate", "hwp1", 162.5, 112.5, 0, { retardance: "half" }, "HWP1"),
+      c("laser", "las1", 62.5, 112.5, 0, { wavelength_nm: 532, power_mw: 50, polarization: "linear", pol_angle_deg: 0, beam_diameter_mm: 0.7 }, "Pump 532"),
+      c("laser", "las2", 62.5, 412.5, 0, { wavelength_nm: 1064, power_mw: 200, polarization: "unpolarized", beam_diameter_mm: 2.5, m2: 1.1 }, "Probe 1064"),
+      c("waveplate", "hwp1", 162.5, 112.5, 0, { retardance: "half", fast_axis_deg: 15 }, "HWP1"),
       c("beam_splitter", "bs1", 262.5, 112.5, 135, { reflect_fraction: 0.3 }, "BS1"),
+      c("waveplate", "qwp1", 262.5, 187.5, 90, { retardance: "quarter", fast_axis_deg: 0 }, "QWP1"),
       c("detector", "det1", 262.5, 262.5, 270, undefined, "Pickoff"),
-      c("mirror", "m2", 462.5, 112.5, 135, undefined, "M2"),
-      c("filter", "flt1", 162.5, 412.5, 0, { pass_min_nm: 1000, pass_max_nm: 1100 }, "LP1000"),
+      c("pbs", "pbs1", 312.5, 112.5, 135, undefined, "PBS1"),
+      c("beam_dump", "bd1", 312.5, 212.5, 270, undefined, "Dump (s)"),
+      c("lens", "len2", 362.5, 112.5, 0, { focal_mm: -50 }, "L2 (f −50)"),
+      c("lens", "len3", 412.5, 112.5, 0, { focal_mm: 100 }, "L3 (f 100)"),
+      c("mirror", "m2", 462.5, 112.5, 135, { throughput: 0.98 }, "M2"),
+      c("filter", "flt1", 162.5, 412.5, 0, { pass_min_nm: 1000, pass_max_nm: 1100, throughput: 0.9 }, "LP1000"),
       c("dichroic", "dm1", 462.5, 412.5, 135, { edge_nm: 600, reflects: "short" }, "DM1"),
-      c("objective", "obj1", 812.5, 416.5, 0, undefined, "OBJ1"),
-      c("sample", "smp1", 912.5, 412.5, 180, { reflects: false }, "Sample"),
-      c("fiber_out", "fo1", 612.5, 662.5, 0, { wavelength_nm: 532 }, "Fibre out"),
+      c("objective", "obj1", 812.5, 416.5, 0, { throughput: 0.8 }, "OBJ1"),
+      c("sample", "smp1", 832.57, 412.5, 180, { reflects: false }, "Sample"),
+      c("fiber_out", "fo1", 612.5, 662.5, 0, { wavelength_nm: 532, power_mw: 5, polarization: "linear", pol_angle_deg: 0, beam_diameter_mm: 0.004 }, "Fibre out"),
       c("lens", "len1", 712.5, 662.5, 0, { focal_mm: 100 }, "L1"),
-      c("fiber_in", "fi1", 812.5, 662.5, 180, { continues_at: "fo2" }, "Fibre in"),
-      c("fiber_out", "fo2", 612.5, 762.5, 0, { wavelength_nm: 532 }, "Fibre out 2"),
+      c("lens", "len4", 762.5, 662.5, 0, { focal_mm: 50 }, "L4"),
+      c("fiber_in", "fi1", 812.5, 662.5, 180, { continues_at: "fo2", coupling: 0.6 }, "Fibre in"),
+      c("fiber_out", "fo2", 612.5, 762.5, 0, { wavelength_nm: 532, polarization: "linear", pol_angle_deg: 90, beam_diameter_mm: 0.5 }, "Fibre out 2"),
+      c("polarizer", "pol1", 712.5, 762.5, 0, { axis_deg: 0 }, "Analyzer (crossed)"),
       c("camera", "cam1", 812.5, 762.5, 180, undefined, "Camera"),
       c("mirror", "m9", 1062.5, 112.5, 315, undefined, "M9 (back side)"),
     ],
@@ -75,8 +98,8 @@ function demo(): OpticalLayout {
   l = setAnnotation(l, "las1", { model: "Samba 532", manufacturer: "Cobolt", function: "pump", connection: "COM13" });
   l = setAnnotation(l, "hwp1", { model: "PRM1Z8 + half-wave plate", manufacturer: "Thorlabs", function: "power / polarisation", motorized: true, actuator: "KDC101", connection: "USB, satellite", extra: [{ key: "mount", value: "KM100" }] });
   l = setLinks(l, "hwp1", { device_id: "hwp_rot", slot: "excitation_waveplate" });
-  l = setAnnotation(l, "obj1", { model: "LMPLFLN 50x", manufacturer: "Olympus", function: "focus on the sample", notes: "Worked at the 4 mm off-centre position on purpose in this demo." });
-  l = setProp(l, "obj1", "focal_mm", 3.6);
+  l = setAnnotation(l, "obj1", { model: "M Plan Apo 10X", manufacturer: "Mitutoyo", function: "focus on the sample", notes: "Worked at the 4 mm off-centre position on purpose in this demo." });
+  l = setProp(l, "obj1", "focal_mm", 20);
   l = addText(l, { x: 640, y: 860 }, "enclosure door").layout;
   l = addComponent(l, "power_meter", { x: 1112.5, y: 412.5 }, { id: "pm1", label: "Power" }).layout;
   return l;

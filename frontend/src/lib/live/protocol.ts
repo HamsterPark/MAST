@@ -32,7 +32,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 /** 前端认得、有专门画法的 kind。别的 kind 照样列出，用通用视图。 */
-export const KNOWN_KINDS = ["spectrum", "scalar", "xy", "map2d", "status"] as const;
+export const KNOWN_KINDS = ["spectrum", "scalar", "xy", "map2d", "map2d_rows", "status"] as const;
 export type KnownKind = (typeof KNOWN_KINDS)[number];
 
 export function isKnownKind(k: string): k is KnownKind {
@@ -45,7 +45,12 @@ export function isKnownKind(k: string): k is KnownKind {
  * seq 跳号是常态，不是丢帧。
  */
 export function isIncrementalKind(kind: string): boolean {
-  return kind === "xy" || kind === "map2d" || kind === "status";
+  return kind === "xy" || kind === "map2d" || kind === "map2d_rows" || kind === "status";
+}
+
+/** 一幅图的 kind：map2d 一帧一个像素，map2d_rows 一帧一行（同一种缓冲、同一种画法）。 */
+export function isMapKind(kind: string): boolean {
+  return kind === "map2d" || kind === "map2d_rows";
 }
 
 export interface StreamMeta {
@@ -304,6 +309,14 @@ export interface Map2dFrame {
   values: Record<string, number | null>;
 }
 
+/** map2d_rows：一帧一行（或一行里从 ix0 起的一段），各通道数组等长。 */
+export interface Map2dRowsFrame {
+  t: number | null;
+  iy: number;
+  ix0: number;
+  values: Record<string, (number | null)[]>;
+}
+
 export interface StatusFrame {
   t: number | null;
   text: string;
@@ -345,6 +358,24 @@ export function decodeMap2dFrame(f: unknown): Map2dFrame | null {
   if (ix === null || iy === null || !values) return null;
   if (!Number.isInteger(ix) || !Number.isInteger(iy)) return null;
   return { t: finite(f.t), ix, iy, values };
+}
+
+/** 一行帧；格式不对（不是数组、各通道不等长、下标不是整数）就整帧不要。null 是「这一点没读数」。 */
+export function decodeMap2dRowsFrame(f: unknown): Map2dRowsFrame | null {
+  if (!isObj(f) || !isObj(f.values)) return null;
+  const iy = finite(f.iy);
+  const ix0 = f.ix0 === undefined ? 0 : finite(f.ix0);
+  if (iy === null || ix0 === null || !Number.isInteger(iy) || !Number.isInteger(ix0)) return null;
+  const values: Record<string, (number | null)[]> = {};
+  let n = -1;
+  for (const [name, raw] of Object.entries(f.values)) {
+    if (!Array.isArray(raw)) return null;
+    if (n === -1) n = raw.length;
+    else if (raw.length !== n) return null;
+    values[name] = raw.map((v) => finite(v));
+  }
+  if (n <= 0) return null;
+  return { t: finite(f.t), iy, ix0, values };
 }
 
 export function decodeStatusFrame(f: unknown): StatusFrame | null {

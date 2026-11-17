@@ -282,6 +282,13 @@ function wantedStreams(): Set<string> {
   return out;
 }
 
+/** 服务端不再列、也没人在看的流，从本地缓存里删掉（LiveStore.dropGone）。 */
+function forgetGone(): void {
+  for (const id of store.dropGone((x) => (streamWatchers.get(x) ?? 0) > 0)) {
+    historyDone.delete(id);
+  }
+}
+
 function clearTimer(t: ReturnType<typeof setTimeout> | undefined): undefined {
   if (t !== undefined) clearTimeout(t);
   return undefined;
@@ -484,6 +491,7 @@ function handleMessage(raw: string): void {
         newGeneration,
       });
       for (const id of reset) historyDone.delete(id);
+      forgetGone();
       resubscribeFresh(reset);
       queueSync();
       return;
@@ -601,6 +609,22 @@ function scheduleBackfill(id: string): void {
   void runBackfill(id).finally(() => backfilling.delete(id));
 }
 
+/**
+ * Resume filling this stream's gaps, if it has any (no-op otherwise, and while a
+ * backfill is already running or waiting to retry).
+ *
+ * A backfill run stops after LIVE_BACKFILL_MAX_PAGES pages and is otherwise
+ * re-triggered only by the next frame or `dropped`. A stream that went quiet
+ * with gaps left — a slow remote client that fell behind on a scan which then
+ * finished — would keep them for good. A view that cares about completeness
+ * (the scan map's live scan) calls this while its stream is quiet and still
+ * missing frames.
+ */
+export function ensureBackfill(id: string): void {
+  const st = store.get(id);
+  if (st && !st.missing.isEmpty()) scheduleBackfill(id);
+}
+
 async function runBackfill(id: string): Promise<void> {
   for (let page = 0; page < LIVE_BACKFILL_MAX_PAGES; page++) {
     const st = store.get(id);
@@ -704,6 +728,7 @@ async function pollTick(gen: number): Promise<void> {
         newGeneration: noteHub(list.hub),
       });
       for (const id of reset) historyDone.delete(id);
+      forgetGone();
     }
   }
   for (const id of wantedStreams()) {
@@ -793,8 +818,12 @@ export function watchStream(id: string): () => void {
     if (done) return;
     done = true;
     const n = (streamWatchers.get(id) ?? 1) - 1;
-    if (n <= 0) streamWatchers.delete(id);
-    else streamWatchers.set(id, n);
+    if (n <= 0) {
+      streamWatchers.delete(id);
+      // The last view of a stream the server no longer lists: nothing will ever
+      // ask for it again, so it leaves the local cache too.
+      if (store.get(id)?.gone) forgetGone();
+    } else streamWatchers.set(id, n);
     ensureRunning();
   };
 }

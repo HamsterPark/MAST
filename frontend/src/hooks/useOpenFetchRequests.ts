@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import { apiError } from "@/lib/apiError";
 
 /**
  * Number of unresolved fetch requests on the literature fetch board.
@@ -22,8 +23,8 @@ export function useOpenFetchRequests(): number {
   const q = useQuery({
     queryKey: ["literature", "fetch-board", "open-count"],
     queryFn: async () => {
-      const { data, error } = await api.GET("/api/literature/fetch-board");
-      if (error) throw error;
+      const { data, error, response } = await api.GET("/api/literature/fetch-board");
+      if (error) throw apiError(error, response);
       return data;
     },
     refetchInterval: POLL_MS,

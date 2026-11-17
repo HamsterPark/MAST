@@ -118,9 +118,17 @@ class Observation:
     frames: list[str]
     token: str | None = None
     created: float = field(default_factory=time.time)
-    #: ``(label, png)`` pictures that are not archive frames: the optical station's newest
-    #: spectrum (``mast.vista.optical``). Empty on an STM station.
+    #: ``(label, png)`` pictures that are not archive frames: the newest spectrum of a station
+    #: without Nanonis (``mast.vista.optical``). Empty on an STM station.
     pictures: list = field(default_factory=list)
+
+
+#: how a refused named action names the station and its skills (``station profile ->
+#: (this, its skills)``); display only
+_NOT_HERE: dict[str, tuple[str, str]] = {
+    "optical": ("an optical station", "optical skills"),
+    "generic": ("a generic station", "this station's skills"),
+}
 
 
 @dataclass(frozen=True)
@@ -386,15 +394,32 @@ class VistaService:
         return direct_exec.live_runtime(self._ctx)
 
     @staticmethod
-    def _optical() -> bool:
-        """Optical station profile (``mast.station``): ``observe`` shows spectra and the
-        optical state instead of scans and the Nanonis readings. Never true on an STM
-        station, and read live from the process profile, so a unit test can flip it."""
+    def _has(cap: str) -> bool:
+        """A capability of this station (``mast.station``), read live from the process profile
+        so a unit test can flip it. Without ``nanonis`` (the optical and the generic station)
+        ``observe`` shows spectra and the station's state instead of scans and the Nanonis
+        readings; without ``stm_actions`` the named actions are refused. Unreadable = the
+        STM's answer."""
+        from mast import station
+
         try:
-            from mast import station
-            return station.is_optical()
+            return station.has(cap)
+        except ValueError:
+            raise
         except Exception:  # noqa: BLE001 - no profile information: STM, as before
-            return False
+            return cap in station.capabilities_of(station.DEFAULT_PROFILE)
+
+    @staticmethod
+    def _station_name() -> str:
+        from mast import station
+
+        return station.current_profile()
+
+    def _environment(self) -> dict:
+        """The environment sensors' newest readings, from the monitor's cache (``sensor_echo``)."""
+        from mast import station_view
+
+        return station_view.environment_readings(getattr(self._ctx, "environment_monitor", None))
 
     def _disabled_names(self) -> frozenset[str]:
         if self._disabled is None:
@@ -591,17 +616,20 @@ class VistaService:
         skill = str(body.get("skill") or "").strip() or None
         if bool(action) == bool(skill):
             raise VistaError(422, "invalid_request", "give exactly one of `action` or `skill`")
-        if action and self._optical():
-            # The named actions (scan, withdraw, set_bias, ...) are the STM's vocabulary. An
-            # optical station has no such instrument: say so and point at the right door,
-            # before the observation token is touched (this refusal costs nothing).
+        if action and not self._has("stm_actions"):
+            # The named actions (scan, withdraw, set_bias, ...) are the STM's vocabulary. A
+            # station without them (optical, generic) has no such instrument: say so and point
+            # at the right door, before the observation token is touched (this refusal costs
+            # nothing).
+            prof = self._station_name()
+            this, its = _NOT_HERE.get(prof, ("a station without the STM", "this station's skills"))
             raise VistaError(
                 422, "not_available_on_this_station",
-                f"Action {action!r} belongs to the STM's vocabulary; this is an optical station "
-                "(no STM / Nanonis). Run optical skills with mast_run (find them with "
+                f"Action {action!r} belongs to the STM's vocabulary; this is {this} "
+                f"(no STM / Nanonis). Run {its} with mast_run (find them with "
                 "mast_find_skills, read mast_skill_card first); an instrument-driving skill still "
                 "needs the `after` token of your latest observation.",
-                station="optical")
+                station=prof)
         meta = _clean_meta(body.get("client_meta"))
         cs = self.register(caller, meta)
         request_id = str(body.get("request_id") or "").strip()[:120] or None
@@ -688,10 +716,11 @@ class VistaService:
 
         t0 = time.monotonic()
         t_wall0 = time.time()
-        optical = self._optical()
+        optical = not self._has("nanonis")
         try:
-            # Optical station: no controller save folder to watch. What an act produces is
-            # spectra, found afterwards by comparing the experiment folder with this list.
+            # A station without Nanonis (optical, generic): no controller save folder to watch.
+            # What an act produces is spectra, found afterwards by comparing the experiment
+            # folder with this list.
             sdir = None if optical else self._session_dir(fresh=True)
             before = _listing(sdir)
             spectra_before = None
@@ -907,12 +936,12 @@ class VistaService:
     def _observe(self, caller: Any, *, kind: str) -> dict:
         ws = self.workspace()
         pictures: list = []
-        if self._optical():
-            # Optical station: the newest spectrum (summary + one picture) and the optical
-            # state echo. No scan archive, no Nanonis readings.
+        if not self._has("nanonis"):
+            # A station without Nanonis (optical, generic): the newest spectrum (summary + one
+            # picture) and the station's state echo. No scan archive, no Nanonis readings.
             newest = None
             latest, pictures = self._optical_latest()
-            payload: dict = {"observe": True, "station": "optical", "workspace": ws.id,
+            payload: dict = {"observe": True, "station": self._station_name(), "workspace": ws.id,
                              "turn": ws.turn, "latest_frame": latest,
                              "instrument": self._read_state(caller), "last_act": ws.last_act()}
         else:
@@ -953,11 +982,15 @@ class VistaService:
         """The state echo. ``settle`` (after an act): a withdrawn tip's current is re-read until
         it has decayed, for a bounded time (:mod:`mast.vista.state`); an observation reads once
         and only flags a reading that has not decayed."""
-        if self._optical():
+        if not self._has("nanonis"):
             # No Nanonis readbacks to run; the echo reads the devices this process already
-            # has open (never opens one) and the signed optical state. ``settle`` is the
-            # STM's withdrawn-tip current decay and means nothing here.
-            return optical_echo()
+            # has open (never opens one), the signed manual state where there is one
+            # (``operator_prompts``) and the environment readings where they are the
+            # station's readings (``sensor_echo``). ``settle`` is the STM's withdrawn-tip
+            # current decay and means nothing here.
+            return optical_echo(operator=self._has("operator_prompts"),
+                                environment=self._environment() if self._has("sensor_echo")
+                                else None)
         from mast.api import direct_exec
 
         ec, missing = direct_exec.build_context(self._ctx, owner=caller.owner,
@@ -1237,7 +1270,7 @@ class VistaService:
         Returns the entries archived as external frames."""
         if self._ctx is None or not self._clients_active() or self.gate.in_flight():
             return []
-        if self._optical():
+        if not self._has("nanonis"):
             return []             # no controller save folder to poll (see `_optical_latest`)
         sdir = self._session_dir()
         if sdir is None:

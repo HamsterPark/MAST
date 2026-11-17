@@ -80,6 +80,9 @@ interface MarksState {
 const nextTs = tsClock();
 let timer: ReturnType<typeof setTimeout> | null = null;
 let initPromise: Promise<void> | null = null;
+/** Counts local edits. `reload` compares it before and after its fetch: an edit made in between may
+ *  not be in the fetched document, and replacing the local one with it would lose the edit on screen. */
+let localEdits = 0;
 /** Retry timer for when the service is not up; keep only one so repeated component mounts do not stack several. */
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -133,6 +136,7 @@ function requestBody(p: Patch): components["schemas"]["GalleryMarksPatch"] {
 
 export const useMarksStore = create<MarksState>()((set, get) => {
   const schedule = () => {
+    localEdits++;
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => void get().flush(), 350);
     persistPending(get().pending);
@@ -279,15 +283,28 @@ export const useMarksStore = create<MarksState>()((set, get) => {
       return true;
     },
 
+    // Replace the local document by the server's. Never at the cost of an unsaved mark:
+    //   * a batch in flight (busy) has left `pending` but may not have reached the server, so a
+    //     document fetched now can lack it: wait for the flush to end first (bounded);
+    //   * an edit made while the fetch was running may be missing from it: discard that fetch and
+    //     take a fresh one (the edit is in `pending` or in flight by then);
+    //   * what is still in `pending` is laid over the fetched document either way.
+    // Gives up quietly after a few tries; the visibility refresh will catch up.
     reload: async () => {
-      const d = await fetchDoc();
-      if (!d) return;
-      set((s) => ({
-        doc: applyPatchLocal(d, s.pending),
-        savedAt: d.updated ?? s.savedAt,
-        online: true,
-        epoch: s.epoch + 1,
-      }));
+      for (let attempt = 0; attempt < 3; attempt++) {
+        for (let i = 0; get().busy && i < 100; i++) await new Promise((r) => setTimeout(r, 50));
+        const before = localEdits;
+        const d = await fetchDoc();
+        if (!d) return;
+        if (get().busy || localEdits !== before) continue;
+        set((s) => ({
+          doc: applyPatchLocal(d, s.pending),
+          savedAt: d.updated ?? s.savedAt,
+          online: true,
+          epoch: s.epoch + 1,
+        }));
+        return;
+      }
     },
   };
 });

@@ -6,6 +6,7 @@ import { Button, Field, TextField, useToast } from "@/components/controls";
 import { DeviceScanButton, InstrumentStateCard } from "@/components/admin/DeviceScanner";
 import { settingsWriteProblem, type SettingsPatch } from "@/lib/settingsWrite";
 import { tr } from "@/lib/i18n";
+import { useStationCapabilities } from "@/hooks/useStationCapabilities";
 
 /** Hardware: Nanonis connection (editable host + 4 TCP ports + reconnect) and
  *  environment sensors (CRUD + rescan). Host/ports persist via POST /api/settings; reconnect via
@@ -281,6 +282,17 @@ function SensorsCard({ readOnly = false }: { readOnly?: boolean }) {
   });
 
   const sensors = q.data?.sensors ?? [];
+  // `autodetect` is the file's flag. Where serial auto-detection is not simply "as configured"
+  // (optical: forced off; generic: off unless switched on, generic_station.md §1.4) the file
+  // does not decide, so the badge shows what the service says is in effect. On an STM station,
+  // and with a service that does not say, it is the file's flag as before.
+  const station = useStationCapabilities();
+  const effective = (q.data as { autodetect_effective?: unknown } | undefined)?.autodetect_effective;
+  const autoOn =
+    (station.serialAutodetect === "forced_off" || station.serialAutodetect === "default_off") &&
+    typeof effective === "boolean"
+      ? effective
+      : q.data?.autodetect;
 
   return (
     <Card>
@@ -288,7 +300,7 @@ function SensorsCard({ readOnly = false }: { readOnly?: boolean }) {
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-mast-text">{tr("环境传感器", "Environment sensors")}</span>
           {q.data && !q.data.degraded && (
-            <Badge tone={q.data.autodetect ? "AUTO" : "INFO"}>{q.data.autodetect ? tr("自动探测", "Auto-detect") : tr("手动", "Manual")}</Badge>
+            <Badge tone={autoOn ? "AUTO" : "INFO"}>{autoOn ? tr("自动探测", "Auto-detect") : tr("手动", "Manual")}</Badge>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -382,9 +394,14 @@ function SensorsCard({ readOnly = false }: { readOnly?: boolean }) {
  *  to Advanced → Hardware connection; sensors become view-only. The admin tab passes
  *  the default (editable). */
 export function HardwareManager({ readOnly = false }: { readOnly?: boolean }) {
+  // The Nanonis card reads (and on the admin tab dials) the Nanonis endpoints: only on a
+  // station with Nanonis, and only once the station has said so. The environment sensors and
+  // the instrument readout belong to every station (a generic station manages its sensors here).
+  const station = useStationCapabilities();
+  const nanonisReads = station.ready && station.has("nanonis");
   return (
     <div className="grid grid-cols-1 gap-4">
-      <NanonisCard readOnly={readOnly} />
+      {nanonisReads && <NanonisCard readOnly={readOnly} />}
       <SensorsCard readOnly={readOnly} />
       {/* Read-only instrument readout (inputs + heater state). Shown on both
           surfaces: it is pure reference, and whether the heater is on is something

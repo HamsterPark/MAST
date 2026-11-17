@@ -89,8 +89,8 @@ and [external-agent integration](docs/external/).
   record spanned about 99 hours. The maintainer reports this
   deployment experience. Selected de-identified figures appear in the README;
   complete experimental datasets and full logs remain outside this release.
-- **Public 7.1.6 software validation:** on 2026-11-07, the Windows / Python 3.13
-  run on the exported tree recorded **19,755 passed**; 1 timing-dependent failure that passed on rerun, 68 skipped and 2 expected failures; **1,931 frontend unit tests**
+- **Public 7.3.1 software validation:** on 2026-11-17, the Windows / Python 3.13
+  run on the exported tree recorded **21,458 passed**; 68 skipped and 2 expected failures; **2,946 frontend unit tests**
   and the frontend build with typechecking passed. Commands, environment and scope are recorded in
   [the snapshot notes](docs/OPEN_SOURCE_NOTES.md).
 - **External interface:** `/api/ext/v1` and its MCP integration extend the
@@ -103,6 +103,14 @@ and [external-agent integration](docs/external/).
   instrument doubles. The visual harness is in real-instrument use
   (maintainer-reported); hardware validation of the TERS and optical-station
   paths is pending.
+- **Cryogenic instruments, generic station and live scan (7.1.8–7.3.1):** field
+  ramps (`MASTv2/mast/instruments/magnet_625.py`), sample-stage temperature
+  control (`MASTv2/mast/instruments/heater_335.py`), the generic station profile
+  and the live scan on the scan map (`MASTv2/mast/monitoring/scan_live.py`) have
+  software tests with instrument doubles. Read-only use of the magnet supply and
+  the temperature controller on a real instrument is maintainer-reported;
+  hardware validation of field ramps, temperature control and the live scan is
+  pending.
 - **Experimental extensions:** `MASTv2/mast/conduct/`, `MASTv2/mast/agentruntime/`,
   `MASTv2/mast/goals/`, the skill workshop/market and qPlus paths explore longer
   planning, execution and instrument capabilities; hardware validation is pending.

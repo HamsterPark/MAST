@@ -37,7 +37,7 @@ from mast_mcp.config import load_config
 from mast_mcp.tools import INSTRUCTIONS, Toolbox
 
 #: sha256 (first 16 hex digits) of the surface. Update it only on purpose (see above).
-SURFACE = "260ccdc0cbbd2362"
+SURFACE = "9f3c4726f53d9bb5"   # rules 17-18 (reverse field, zone tables) + the generic station (first line, rule 15, briefing environment)
 
 
 def surface() -> str:

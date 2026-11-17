@@ -1,7 +1,18 @@
 """Small builders for layouts in tests (plain dicts, as a client would send them)."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
+
+#: the shared fixtures (``tests/fixtures/optical_layout``)
+FIXTURE_DIR = Path(__file__).resolve().parents[3] / "fixtures" / "optical_layout"
+#: JSON files in that folder that are not traces: how powers are written (contract v2 §12.3)
+NOT_TRACE_FIXTURES = frozenset({"power_text_cases.json"})
+
+
+def trace_fixture_files() -> list[Path]:
+    """The trace fixtures of the folder, sorted (every ``*.json`` but :data:`NOT_TRACE_FIXTURES`)."""
+    return sorted(p for p in FIXTURE_DIR.glob("*.json") if p.name not in NOT_TRACE_FIXTURES)
 
 
 def comp(cid: str, typ: str, x: float, y: float, angle: float = 0.0, *, label: str | None = None,

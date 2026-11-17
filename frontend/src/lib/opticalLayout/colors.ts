@@ -135,6 +135,36 @@ export function beamStyle(nm: number | null | undefined, fraction: number, theme
   };
 }
 
+/** Relative power below which a beam is drawn as "no light" (v2 section 8.2; beam.ts NO_LIGHT_P; strictly below, as render.py and the checks). */
+export const DARK_P = 1e-6;
+/** The power range the width and opacity follow, logarithmically: 1e-3 of the source and less is the thinnest. */
+export const LOOK_P_MIN = 1e-3;
+export const LOOK_WIDTH = { min: 1, max: 3.2 } as const;
+export const LOOK_OPACITY = { min: 0.42, max: 1 } as const;
+
+export interface BeamLook extends BeamStyle {
+  /** no light: a thin grey dotted line (crossed polarisers, an OD 10 filter) */
+  dark: boolean;
+}
+
+/**
+ * The look of a beam whose power is `p` of its source's (v2 section 8.2): the colour of its wavelength, a
+ * width and opacity that grow with log10(p) from 1e-3 (thinnest, faintest) to 1; at or below 1e-6 a thin
+ * grey dotted line below 1e-6, "no light" (the geometry is still traced, section 4.6); exactly 1e-6 is still light.
+ */
+export function beamLook(nm: number | null | undefined, p: number, theme: ThemeName): BeamLook {
+  const band = spectralBand(nm);
+  if (!(p >= DARK_P)) return { color: "var(--mast-faint)", dash: "1.5 3.5", width: 1, opacity: 0.9, dark: true };
+  const t = Math.min(1, Math.max(0, (Math.log10(Math.min(p, 1)) - Math.log10(LOOK_P_MIN)) / -Math.log10(LOOK_P_MIN)));
+  return {
+    color: wavelengthColor(nm, theme),
+    dash: band === "uv" ? "2 4" : band === "ir" ? "9 5" : null,
+    width: Math.round((LOOK_WIDTH.min + (LOOK_WIDTH.max - LOOK_WIDTH.min) * t) * 100) / 100,
+    opacity: Math.round((LOOK_OPACITY.min + (LOOK_OPACITY.max - LOOK_OPACITY.min) * t) * 100) / 100,
+    dark: false,
+  };
+}
+
 /** "532 nm" for a label; "—" for a ray without a wavelength. */
 export function wavelengthLabel(nm: number | null | undefined): string {
   return typeof nm === "number" && Number.isFinite(nm) ? `${Number(nm.toFixed(2))} nm` : "—";

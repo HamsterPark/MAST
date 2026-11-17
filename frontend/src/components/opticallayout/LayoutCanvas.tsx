@@ -6,9 +6,12 @@ import type { DetailedTrace } from "@/lib/opticalLayout/trace";
 import type { HitIndicator, NearMiss } from "@/lib/opticalLayout/indicators";
 import type { ThemeName } from "@/lib/opticalLayout/colors";
 import { layoutBounds, nearestHole, snapPoint, type SnapMode } from "@/lib/opticalLayout/geometry";
-import { centerOn, fitView, formatLength, panBy, toScreen, toWorld, zoomAt, type View } from "@/lib/opticalLayout/view";
+import { EMPTY_RESIZE_MEMORY, centerOn, fitView, formatLength, panBy, toScreen, toWorld, viewAfterResize, zoomAt, type ResizeMemory, type View } from "@/lib/opticalLayout/view";
 import { createFrameThrottle } from "@/lib/opticalLayout/frame";
 import { LayoutSvg, type ComponentHandlers, type DisplayOptions } from "./LayoutSvg";
+import { nearestSegment, type SegRef, type SegmentHit } from "@/lib/opticalLayout/beamDraw";
+import { beamAt, polarizationText, powerText, spotText } from "@/lib/opticalLayout/beam";
+import { wavelengthColor, wavelengthLabel } from "@/lib/opticalLayout/colors";
 
 // The interactive canvas: pan, zoom, select, drag, drop from the palette, the tools'
 // clicks. The picture itself is <LayoutSvg>, which is memoised; everything that changes
@@ -20,6 +23,8 @@ import { LayoutSvg, type ComponentHandlers, type DisplayOptions } from "./Layout
 // the ray trace runs at most once per frame), and commits ONE history step on release.
 
 export const PALETTE_MIME = "application/x-mast-optical-type";
+/** what the palette's assemblies carry when dragged (a template id, lib/opticalLayout/templates.ts) */
+export const TEMPLATE_MIME = "application/x-mast-optical-template";
 
 export type CanvasTool = "select" | "aim" | "measure";
 
@@ -61,11 +66,23 @@ interface Props {
   onPreview: (positions: ReadonlyMap<string, Vec> | null) => void;
   onCommitMove: (positions: ReadonlyMap<string, Vec>) => void;
   onDropType: (type: ComponentType, at: Vec) => void;
+  /** an assembly dropped from the palette: its anchor goes here */
+  onDropTemplate?: (id: string, at: Vec) => void;
   onToolPoint: (p: ToolPoint) => void;
   onLockedDrag?: () => void;
   /** drawn above the layout, in screen pixels; re-created freely, nothing below it repaints */
   renderOverlay?: (ctx: { view: View; cursor: Vec | null }) => ReactNode;
+  /** the beam segment the beam inspector shows, highlighted on the canvas */
+  beamPick?: SegRef | null;
+  /**
+   * A plain click on the empty canvas with the select tool, before it clears the selection: the editor picks the
+   * beam under it (and says so by returning true, which keeps the canvas from clearing anything).
+   */
+  onBackgroundClick?: (world: Vec, k: number) => boolean;
 }
+
+/** How close (px) the pointer has to be to a beam for its tooltip, or for a click to pick it. */
+export const BEAM_PICK_PX = 6;
 
 const DRAG_THRESHOLD_PX = 3;
 
@@ -86,8 +103,8 @@ function useElementSize(): [(node: HTMLDivElement | null) => void, { w: number; 
     observer.current = null;
     if (!node) return;
     const publish = (w: number, h: number) => setSize((p) => (Math.abs(p.w - w) < 1 && Math.abs(p.h - h) < 1 ? p : { w: Math.floor(w), h: Math.floor(h) }));
-    const r = node.getBoundingClientRect();
-    publish(r.width, r.height);
+    // the content box, as the observer reports it (the border-box would make a 2 px "resize" right after loading)
+    publish(node.clientWidth, node.clientHeight);
     if (typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver((entries) => {
       const e = entries[0];
@@ -96,7 +113,9 @@ function useElementSize(): [(node: HTMLDivElement | null) => void, { w: number; 
     ro.observe(node);
     observer.current = ro;
   }, []);
-  useEffect(() => () => observer.current?.disconnect(), []);
+  // No effect cleanup that disconnects: React calls the ref with null when the element goes, which disconnects.
+  // A cleanup effect would also run in StrictMode's simulated unmount, which does not call the ref again, and
+  // leave the canvas deaf to every later resize (focus mode, the window) in development.
   return [ref, size];
 }
 
@@ -134,6 +153,34 @@ export function LayoutCanvas(props: Props) {
       setView(fitNow());
     }
   }, [size.w, size.h, fitNonce, view, fitNow]);
+
+  // ── a resize (focus mode, the window) keeps what was in view in view: the middle stays in the middle and the
+  // zoom grows or shrinks with the canvas, so going into focus mode enlarges what one was looking at; going
+  // back to a size it had (leaving focus mode) puts back the view it had, unless somebody panned or zoomed ──
+  const lastSize = useRef<{ w: number; h: number } | null>(null);
+  const resizeMemory = useRef<ResizeMemory>(EMPTY_RESIZE_MEMORY);
+  /** the size before a resize that came during a drag: the view follows it when the drag ends */
+  const resizedInDrag = useRef<{ w: number; h: number } | null>(null);
+  const followResize = useCallback((prev: { w: number; h: number }, now: { w: number; h: number }) => {
+    if (prev.w < 40 || prev.h < 40 || now.w < 40 || now.h < 40) return;
+    if (prev.w === now.w && prev.h === now.h) return;
+    const v = latest.current.view;
+    if (!v) return;
+    const r = viewAfterResize(resizeMemory.current, v, prev, now);
+    resizeMemory.current = r.mem;
+    setView(r.view);
+  }, []);
+  useEffect(() => {
+    const prev = lastSize.current;
+    lastSize.current = { w: size.w, h: size.h };
+    if (!prev) return;
+    // not under a drag: what is being dragged would jump away from the pointer
+    if (drag.current) {
+      if (!resizedInDrag.current) resizedInDrag.current = prev;
+      return;
+    }
+    followResize(prev, size);
+  }, [size.w, size.h, followResize]);
 
   // ── move the view to a requested point, keeping the zoom ──
   useEffect(() => {
@@ -192,6 +239,10 @@ export function LayoutCanvas(props: Props) {
       pendingToolClick.current = null;
       setPanning(false);
       setBand(null);
+      // a resize that came during the drag: the view follows it now
+      const before = resizedInDrag.current;
+      resizedInDrag.current = null;
+      if (before && lastSize.current) followResize(before, lastSize.current);
       if (!d) return;
       if (d.kind === "move") {
         moveThrottle.cancel();
@@ -206,7 +257,7 @@ export function LayoutCanvas(props: Props) {
         panThrottle.flush();
       }
     },
-    [moveThrottle, panThrottle],
+    [moveThrottle, panThrottle, followResize],
   );
 
   // Escape while dragging puts everything back.
@@ -344,8 +395,10 @@ export function LayoutCanvas(props: Props) {
       const moved = d.moved;
       endDrag(true);
       if (!moved && click) {
-        if (cur.tool === "select") cur.onSelect([]);
-        else cur.onToolPoint(click);
+        if (cur.tool === "select") {
+          const k = cur.view?.k;
+          if (!(k && cur.onBackgroundClick?.(click.world, k))) cur.onSelect([]);
+        } else cur.onToolPoint(click);
       }
       return;
     }
@@ -365,12 +418,21 @@ export function LayoutCanvas(props: Props) {
 
   // ── drop from the palette ──
   const onDragOver = (e: ReactDragEvent<HTMLDivElement>) => {
-    if (readOnly || !e.dataTransfer.types.includes(PALETTE_MIME)) return;
+    if (readOnly || !(e.dataTransfer.types.includes(PALETTE_MIME) || e.dataTransfer.types.includes(TEMPLATE_MIME))) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
   };
   const onDrop = (e: ReactDragEvent<HTMLDivElement>) => {
     if (readOnly || !view) return;
+    const template = e.dataTransfer.getData(TEMPLATE_MIME);
+    if (template && props.onDropTemplate) {
+      e.preventDefault();
+      const p = localPoint(e);
+      let w = toWorld(view, p.x, p.y);
+      if (snap !== "off") w = snapPoint(layout.table, w, snap);
+      props.onDropTemplate(template, w);
+      return;
+    }
     const type = e.dataTransfer.getData(PALETTE_MIME);
     if (!isComponentType(type)) return;
     e.preventDefault();
@@ -383,6 +445,16 @@ export function LayoutCanvas(props: Props) {
   // ── read-out ──
   const hole = cursor ? nearestHole(layout.table, cursor) : null;
   const k = view?.k ?? 1;
+
+  // ── the beam under the pointer: its power, spot and polarisation right there (section 8.4) ──
+  // Not while something is being dragged, panned or boxed, not over a component (its own glow says what is
+  // under the pointer), only with the select tool, and only over beams that are drawn (the Beams layer).
+  const busy = panning || band !== null || (drag.current !== null && drag.current.kind === "move" && drag.current.moved);
+  const beamsShown = display.beams;
+  const beamHover: SegmentHit | null = useMemo(
+    () => (cursor && view && beamsShown && tool === "select" && !busy && hover === null ? nearestSegment(trace, cursor, BEAM_PICK_PX / view.k) : null),
+    [cursor, view, beamsShown, tool, busy, hover, trace],
+  );
 
   const cursorStyle = panning ? "grabbing" : tool === "select" ? "default" : "crosshair";
 
@@ -416,6 +488,7 @@ export function LayoutCanvas(props: Props) {
             hover={hover}
             commentCounts={commentCounts}
             handlers={handlers}
+            beamPick={props.beamPick}
           />
         )}
         {view && size.w > 0 && (
@@ -450,6 +523,8 @@ export function LayoutCanvas(props: Props) {
         </button>
       </div>
 
+      {beamHover && view && <BeamTooltip hit={beamHover} trace={trace} layout={layout} view={view} theme={theme} width={size.w} height={size.h} />}
+
       {/* read-out */}
       <div className="pointer-events-none absolute bottom-5 left-9 right-2 flex flex-wrap items-center gap-x-4 gap-y-0.5 font-mono text-[11px] text-mast-muted" aria-live="off">
         <span className="rounded px-1" style={READOUT_BG}>
@@ -465,6 +540,39 @@ export function LayoutCanvas(props: Props) {
         )}
         <span className="rounded px-1" style={READOUT_BG}>{tr(`比例 ${formatLength(1 / k)}/px`, `scale ${formatLength(1 / k)}/px`)}</span>
       </div>
+    </div>
+  );
+}
+
+/** The tooltip of the beam under the pointer: which beam, then power, spot and polarisation at that very point. */
+function BeamTooltip({ hit, trace, layout, view, theme, width, height }: { hit: SegmentHit; trace: DetailedTrace; layout: OpticalLayout; view: View; theme: ThemeName; width: number; height: number }) {
+  const tree = trace[hit.tree];
+  const seg = tree?.branches.find((b) => b.branch === hit.branch)?.segments[hit.segment];
+  if (!tree || !seg) return null;
+  const here = beamAt(tree, seg, hit.along);
+  const name = layout.components.find((c) => c.id === tree.source)?.label || tree.source;
+  const p = toScreen(view, hit.at);
+  // beside the pointer, turned back inwards near the right and bottom edges
+  const left = p.x + 230 > width ? p.x - 14 - 220 : p.x + 14;
+  const top = p.y + 90 > height ? p.y - 14 - 70 : p.y + 14;
+  return (
+    <div className="pointer-events-none absolute z-10 max-w-[220px] rounded-mast-ctl border border-mast-border bg-mast-panel px-2 py-1 text-xs shadow-mast" style={{ left, top }} role="tooltip" data-beam-tooltip="">
+      <div className="flex items-center gap-1.5 font-semibold text-mast-text">
+        <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: wavelengthColor(tree.wavelength_nm, theme) }} />
+        <span className="truncate">{name}</span>
+        <span className="font-mono font-normal text-mast-muted">{wavelengthLabel(tree.wavelength_nm)}</span>
+      </div>
+      {here ? (
+        <div className="font-mono text-mast-muted">
+          <div>
+            {powerText(here.p, here.mw)}
+            {here.d_mm !== null && ` · ${spotText(here.d_mm)}`}
+          </div>
+          <div className="font-sans">{polarizationText(here.s)}</div>
+        </div>
+      ) : (
+        <div className="text-mast-faint">{tr("这条追迹没有光束数据", "this trace has no beam data")}</div>
+      )}
     </div>
   );
 }

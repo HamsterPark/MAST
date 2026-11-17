@@ -23,4 +23,6 @@ def health(request: Request) -> HealthResponse:
         station_profile=prof["profile"],
         station_profile_source=prof["source"],
         station_restart_pending=prof["restart_pending"],
+        station_capabilities=prof["capabilities"],
+        station_serial_autodetect=prof["serial_autodetect"],
     )

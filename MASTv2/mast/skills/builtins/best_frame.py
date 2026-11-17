@@ -60,9 +60,9 @@ DEFAULT_GATE_FRAC = 0.8
 
 
 def _store_path(tag: str):
-    from mast.config import MASTConfig
+    from mast._runtime_paths import data_root
 
-    d = MASTConfig().experiments_dir / "best_frames"
+    d = data_root() / "experiments" / "best_frames"
     d.mkdir(parents=True, exist_ok=True)
     safe = "".join(c if (c.isalnum() or c in "-_") else "_" for c in str(tag))[:80]
     return d / f"{safe or 'default'}.json"

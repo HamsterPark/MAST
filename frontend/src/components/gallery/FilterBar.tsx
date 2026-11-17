@@ -5,15 +5,66 @@
 // below the gallery header; the header height changes as it wraps with window width, so `top`
 // uses the --gallery-head CSS variable that GalleryApp measures and writes.
 
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import type { GalleryItem } from "@/lib/gallery/types";
 import type { ViewName } from "@/lib/gallery/route";
 import { CARD_WIDTH_MAX, CARD_WIDTH_MIN, type Facets, type Filters } from "@/lib/gallery/filters";
 import { fmtB, fullPath } from "@/lib/gallery/format";
+import { parseBound, type EnvFilter } from "@/lib/gallery/env";
 import { useFiltersStore } from "./filtersStore";
 import { CopyButton } from "./clipboard";
 import { SMALL_SELECT } from "./bits";
 import { tr } from "@/lib/i18n";
+
+/** One bound of an environment range: typed as text, committed as a number (or cleared). */
+function Bound({ value, onCommit, placeholder }: { value: number | null; onCommit: (v: number | null) => void; placeholder: string }) {
+  const [text, setText] = useState(value == null ? "" : String(value));
+  useEffect(() => {
+    // Follow outside changes (sanitize, another tab) without fighting the user mid-typing ("1." is 1).
+    if (parseBound(text) !== value) setText(value == null ? "" : String(value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  return (
+    <input
+      className={`${SMALL_SELECT} w-14 font-mono`}
+      value={text}
+      placeholder={placeholder}
+      inputMode="decimal"
+      onChange={(e) => {
+        setText(e.target.value);
+        const v = parseBound(e.target.value);
+        if (v != null || e.target.value.trim() === "") onCommit(v);
+      }}
+    />
+  );
+}
+
+/** Environment range filter. Filters use canonical units, which may differ from what the card shows (kG vs T). */
+function EnvRange({
+  label,
+  unit,
+  title,
+  lo,
+  hi,
+  onChange,
+}: {
+  label: string;
+  unit: string;
+  title: string;
+  lo: number | null;
+  hi: number | null;
+  onChange: (lo: number | null, hi: number | null) => void;
+}) {
+  return (
+    <span className="flex items-center gap-1 whitespace-nowrap" title={title}>
+      {label}
+      <Bound value={lo} placeholder={tr("最小", "min")} onCommit={(v) => onChange(v, hi)} />–
+      <Bound value={hi} placeholder={tr("最大", "max")} onCommit={(v) => onChange(lo, v)} />
+      <span className="text-xs text-mast-muted">{unit}</span>
+    </span>
+  );
+}
 
 function Sel<T extends string>({
   label,
@@ -105,6 +156,50 @@ export function FilterBar({
         onChange={(c) => setF({ c })}
         options={[["", tr("全部", "All")], ["atom", tr("有原子分辨", "Atomic resolution")], ["half", tr("有超结构", "Superstructure")], ["li", tr("有 lock-in dI/dV", "Has lock-in dI/dV")]]}
       />
+      {(fac.env.any || F.env !== "") && (
+        <Sel<EnvFilter>
+          label={tr("环境", "Environment")}
+          title={tr(
+            "保存数据时记下的环境（温度、磁场、真空…）；本功能之前存的文件按环境历史推断",
+            "Environment recorded when the file was saved (temperature, field, vacuum…); files saved before this feature are inferred from the environment history",
+          )}
+          value={F.env}
+          onChange={(env) => setF({ env })}
+          options={[
+            ["", tr("全部", "All")],
+            ["any", tr("有环境标签", "Has env tags")],
+            ["rec", tr("保存时记录的", "Recorded at save")],
+            ["inf", tr("推断的", "Inferred")],
+            ["none", tr("没有", "None")],
+          ]}
+        />
+      )}
+      {fac.env.T && (
+        <EnvRange
+          label={tr("温度", "Temp.")}
+          unit="K"
+          title={tr(
+            "温度范围，单位 K（主温度计；过期的读数不参与）",
+            "Temperature range in K (main thermometer; stale readings are left out)",
+          )}
+          lo={F.tmin}
+          hi={F.tmax}
+          onChange={(tmin, tmax) => setF({ tmin, tmax })}
+        />
+      )}
+      {fac.env.B && (
+        <EnvRange
+          label={tr("磁场", "Field")}
+          unit="T"
+          title={tr(
+            "磁场范围，单位 T、带符号；卡片按电源自己的单位显示（可能是 kG），这里一律换算成 T",
+            "Field range in T, signed; cards show the supply's own unit (may be kG), filters always use T",
+          )}
+          lo={F.bmin}
+          hi={F.bmax}
+          onChange={(bmin, bmax) => setF({ bmin, bmax })}
+        />
+      )}
       <label className="flex items-center gap-1 whitespace-nowrap">
         <input type="checkbox" checked={F.full} onChange={(e) => setF({ full: e.target.checked })} />
         {tr("只看扫完", "Completed scans only")}

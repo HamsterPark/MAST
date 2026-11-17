@@ -21,7 +21,7 @@ import type {
   Vec,
 } from "./types.ts";
 import { LIMITS, SCHEMA_VERSION, isSourceType } from "./types.ts";
-import { CATALOG, DEFAULT_PROP_DECIMALS, cleanProps, labelFromId, nextId, propField, propFields } from "./catalog.ts";
+import { CATALOG, DEFAULT_PROP_DECIMALS, cleanProps, dependencyMet, labelFromId, nextId, propField, propFields } from "./catalog.ts";
 import { canonicalAngle, pyRound, round2, rotateAbout } from "./geometry.ts";
 import { cleanLine, cleanText } from "./text.ts";
 
@@ -289,9 +289,24 @@ export function normalizePropValue(type: ComponentType, key: string, value: unkn
 }
 
 /**
+ * Props that depend on `changed` (PropField.dependsOn, v2 section 3.2) are removed when the dependency
+ * no longer holds: the server refuses `pol_angle_deg` without `polarization = linear` and `m2` without
+ * `beam_diameter_mm`, so switching to unpolarised light drops the angle and clearing the diameter drops
+ * M², and the layout can still be saved. Setting a dependent prop itself is left alone (validate.ts
+ * says what is missing); nothing a caller has just set disappears.
+ */
+function dropUnmetDependents(type: ComponentType, props: Props, changed: string): void {
+  for (const f of propFields(type)) {
+    if (f.dependsOn?.key !== changed || !(f.key in props)) continue;
+    if (!dependencyMet(f, props)) delete props[f.key];
+  }
+}
+
+/**
  * Sets or (undefined / null / "" / an empty list) clears one type parameter. A laser or a
  * fibre output has its wavelength either as one number or as a list, never both, so setting
- * one clears the other.
+ * one clears the other. Changing a parameter that another one depends on removes that one when
+ * the dependency no longer holds (dropUnmetDependents).
  */
 export function setProp(layout: OpticalLayout, id: string, key: string, value: unknown): OpticalLayout {
   return mapSelected(layout, new Set([id]), (c) => {
@@ -301,6 +316,7 @@ export function setProp(layout: OpticalLayout, id: string, key: string, value: u
     if (clear) {
       if (!(key in props)) return c;
       delete props[key];
+      dropUnmetDependents(c.type, props, key);
       return { ...c, props };
     }
     if (Object.is(c.props[key], normalized) || (Array.isArray(normalized) && JSON.stringify(c.props[key]) === JSON.stringify(normalized))) return c;
@@ -309,6 +325,7 @@ export function setProp(layout: OpticalLayout, id: string, key: string, value: u
       if (key === "wavelength_nm") delete props["wavelengths_nm"];
       if (key === "wavelengths_nm") delete props["wavelength_nm"];
     }
+    dropUnmetDependents(c.type, props, key);
     return { ...c, props };
   });
 }
@@ -478,6 +495,21 @@ export function removeText(layout: OpticalLayout, id: string): OpticalLayout {
 export function setTable(layout: OpticalLayout, patch: Partial<TableSpec>): OpticalLayout {
   const differs = (Object.keys(patch) as (keyof TableSpec)[]).some((k) => layout.table[k] !== patch[k]);
   return differs ? { ...layout, table: { ...layout.table, ...patch } } : layout;
+}
+
+/**
+ * Sets the table's beam height (docs/v2/design/optical_layout_3d.md section 2) at 0.01 mm, as the server keeps it,
+ * or (null) removes the key: an absent beam height is 75 mm and is not sent at all.
+ */
+export function setBeamHeight(layout: OpticalLayout, mm: number | null): OpticalLayout {
+  if (mm === null) {
+    if (layout.table.beam_height_mm === undefined) return layout;
+    const rest: TableSpec = { ...layout.table };
+    delete rest.beam_height_mm;
+    return { ...layout, table: rest };
+  }
+  const v = pyRound(mm, 2) + 0;
+  return layout.table.beam_height_mm === v ? layout : { ...layout, table: { ...layout.table, beam_height_mm: v } };
 }
 
 export function setTitle(layout: OpticalLayout, title: string): OpticalLayout {

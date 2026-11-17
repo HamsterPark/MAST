@@ -211,6 +211,7 @@ for sub in (
     # 数据图库（docs/v2/design/data_gallery.md）。它的每一处生产引用都是 api/routes/gallery.py
     # 函数体里的惰性 import（路由在包坏掉时要能 degraded 而不是让整个 app 起不来），
     # PyInstaller 的静态分析看不见 —— 漏了不会报错，只会让打包版的「数据图库」永远 degraded。
+    # 自动增量更新（gallery/autobuild.py）由 mast2_launcher 函数体里惰性 import，同样靠这一句递归带进去。
     "mast.gallery",
     # 7.0 的 VISTA 视觉 harness（docs/v2/architecture/mast7_vista.md）：帧档案、放大镜、
     # 读数、测量、笔记、服务端执行的「一动一观」闸门，以及 runner 子包（无人值守运行器）。
@@ -265,6 +266,16 @@ mast_hidden += [
     "mast.satellite.sim",
     "mast.live",
     "mast.core.port_guard",
+    # 超导磁体调场（7.2.0）：runtime.magnet_controller 与 API 路由都在函数体里惰性 import
+    # 写模块。漏了的表现：急停钩子吞掉 ImportError，**E-STOP 不再给磁体发 STOP**，界面照常。
+    "mast.instruments.magnet_625",
+    "mast.core.magnet_control",
+    "mast.skills.builtins.magnet_control",
+    # 样品台控温（Lake Shore 335）：同样在函数体里惰性 import。漏了的表现：急停钩子吞掉
+    # ImportError，**E-STOP 不再关加热器**，界面照常。
+    "mast.instruments.heater_335",
+    "mast.core.heater_control",
+    "mast.skills.builtins.heater_control",
     # 手动控制面板（契约 §13.1）的描述与读数聚合。api/routes/manual.py 只在 handler 里惰性
     # import 它（三类提供者各自失败只降级，不让路由起不来），静态分析看不见。漏了的表现：
     # 打包版里 GET /api/manual/devices 与 /readouts 一调用就 ModuleNotFoundError，
@@ -456,9 +467,14 @@ data_files = [
     # build rather than shipping a dead button.
     (os.path.join(REPO_ROOT, "setup-ai-ssh.ps1"), "."),
 ]
-# Bundle any prompts/ directories under mast.llm or mast.knowledge
-for _root, _, _files in os.walk(os.path.join(MASTV2_ROOT, "mast", "llm", "prompts")):
+# Bundle any prompts/ directories under mast.llm or mast.knowledge.
+# Skip bytecode caches: a .pyc left by a local test run embeds the absolute
+# source path of the build machine, and the frozen app does not need it.
+for _root, _dirs, _files in os.walk(os.path.join(MASTV2_ROOT, "mast", "llm", "prompts")):
+    _dirs[:] = [_d for _d in _dirs if _d != "__pycache__"]
     for _f in _files:
+        if _f.endswith((".pyc", ".pyo")):
+            continue
         _src = os.path.join(_root, _f)
         _rel = os.path.relpath(_src, MASTV2_ROOT)
         _dst = os.path.dirname(_rel)
@@ -525,6 +541,14 @@ if _src_report.skipped_gitignored:
     print("   源码副本跳过 %d 个 git 忽略的文件（本地生成物/凭据）："
           % len(_src_report.skipped_gitignored))
     for _p in _src_report.skipped_gitignored:
+        print("     %s" % _p)
+
+if _src_report.skipped_private:
+    # 不随包发出的模块（bundle_sources.PRIVATE_MODULES）。PYZ 那一侧见 Analysis 的
+    # excludes / hiddenimports，以及 Analysis 之后那道检查。
+    print("   源码副本跳过 %d 个不随包发出的模块（bundle_sources.PRIVATE_MODULES）："
+          % len(_src_report.skipped_private))
+    for _p in _src_report.skipped_private:
         print("     %s" % _p)
 
 if _src_report.n < _bundle_sources.MIN_FILES:
@@ -599,7 +623,10 @@ a = Analysis(
     pathex=[MASTV2_ROOT, MCP_SERVER_ROOT],
     binaries=extra_binaries,
     datas=extra_datas + data_files,
-    hiddenimports=sorted(set(mast_hidden + extra_hidden)),
+    # 不随包发出的模块（bundle_sources.PRIVATE_MODULES）上面的 collect_submodules 也会列出来，
+    # 这里滤掉，再在下面的 excludes 里挡一次 —— 不指望 PyInstaller 自己分出两者谁优先。
+    hiddenimports=sorted(m for m in set(mast_hidden + extra_hidden)
+                         if not _bundle_sources.is_private(m)),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -664,7 +691,7 @@ a = Analysis(
         # Heavy science extras.
         "pandas.tests",
         "scipy.io.tests",
-    ],
+    ] + sorted(_bundle_sources.PRIVATE_MODULES),
     noarchive=False,
     optimize=0,
 )
@@ -765,6 +792,18 @@ if _pyz_creds:
         "bundle_sources.CREDENTIAL_ALLOWLIST 并写明理由；如果它确实是又一个部署"
         "配置载体，加进本文件的 _KNOWN_CRED_MODULES 并说明为什么它必须进包。"
         % len(_pyz_creds))
+
+
+# ---- 不随包发出的模块：Analysis 之后再核对一次 --------------------------------
+# excludes 与 hiddenimports 的过滤都在上面；这里看 Analysis 实际收了什么。漏进来一个
+# 就中止 —— 带着它发出去的安装包没有办法收回。
+_private_in_pyz = sorted(entry[0] for entry in a.pure
+                         if len(entry) >= 1 and _bundle_sources.is_private(entry[0]))
+if _private_in_pyz:
+    raise SystemExit(
+        "打包中止：%d 个不随包发出的模块进了 Analysis：%s。它们在 "
+        "bundle_sources.PRIVATE_MODULES 里，本该被 excludes 挡住 —— 查是谁换了一种"
+        "写法 import 了它们。" % (len(_private_in_pyz), _private_in_pyz))
 
 
 pyz = PYZ(a.pure)

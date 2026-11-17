@@ -7,6 +7,9 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+#: how the self-check names a station without Nanonis (display only)
+_STATION_LABEL = {"optical": "Optical station", "generic": "Generic station"}
+
 
 def run_system_check(app: Any) -> list[dict]:
     """Run system self-check on startup. Returns list of check results.
@@ -22,21 +25,23 @@ def run_system_check(app: Any) -> list[dict]:
     """
     results: list[dict] = []
 
-    # 光学站画像（mast.station）：没有 Nanonis，下面第 1、2 项不适用 —— 列出四个「未连接」
-    # 和一条「查不到版本」只会让首页的自检表永远带着一片假的故障。
+    # 没有 Nanonis 的站（光学站、通用站；mast.station 的能力 nanonis）：下面第 1、2 项不适用
+    # —— 列出四个「未连接」和一条「查不到版本」只会让首页的自检表永远带着一片假的故障。
     try:
         from mast import station
 
-        optical = station.runtime_is_optical(app)
+        no_nanonis = not station.runtime_has(app, "nanonis")
+        prof = getattr(app, "_station_profile", None)
+        prof = prof if isinstance(prof, str) else station.current_profile()
     except Exception:  # noqa: BLE001 - no profile information: STM, as before
-        optical = False
+        no_nanonis, prof = False, "stm"
 
     # 1. Nanonis TCP connections
-    if optical:
+    if no_nanonis:
         results.append({
             "name": "Station profile",
             "status": "ok",
-            "detail": "Optical station - Nanonis is not used",
+            "detail": f"{_STATION_LABEL.get(prof, prof)} - Nanonis is not used",
         })
     elif app._pool is not None:
         port_names = {
@@ -73,7 +78,7 @@ def run_system_check(app: Any) -> list[dict]:
         # version" even when connected. Use the pool's
         # safe_call and parse the returned Product Line + Version strings.
         rec = (app._pool.safe_call("Util_VersionGet", role="main")
-               if (app._pool and not optical) else None)
+               if (app._pool and not no_nanonis) else None)
         detail = None
         if rec is not None and not getattr(rec, "error", ""):
             parsed = getattr(rec, "return_value", None)
@@ -81,7 +86,7 @@ def run_system_check(app: Any) -> list[dict]:
             strings = [v for v in (vals or []) if isinstance(v, str) and v.strip()]
             if strings:
                 detail = " · ".join(strings[:2])  # Product Line · Version
-        if optical:
+        if no_nanonis:
             pass                     # no Nanonis, so no version row (see above)
         elif detail:
             results.append({"name": "Nanonis version", "status": "ok", "detail": detail})

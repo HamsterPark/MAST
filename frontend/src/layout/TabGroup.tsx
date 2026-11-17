@@ -6,13 +6,16 @@
 // a bare group address (`/settings`) goes.
 //
 // Legacy sections are left out of the strip while legacy features are off; their
-// routes stay and show how to enable them.
+// routes stay and show how to enable them. Sections that need a station capability
+// this station lacks (`requires`) are left out the same way; their routes stay and
+// say which station they belong to (CapabilityOnly).
 
 import { useEffect } from "react";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { SubTabs } from "@/components/controls";
 import { useStickyTab } from "@/hooks/useStickyTab";
 import { useLegacyFeatures } from "@/hooks/useLegacyFeatures";
+import { useStationCapabilities } from "@/hooks/useStationCapabilities";
 import { sectionPath, statusMarker, visibleTabs, type NavTab } from "@/lib/nav";
 
 /**
@@ -28,7 +31,8 @@ function currentSection(pathname: string, to: string, ids: string[]): string | n
 
 function useVisibleTab(to: string): NavTab | undefined {
   const { enabled } = useLegacyFeatures();
-  return visibleTabs(enabled).find((t) => t.to === to);
+  const station = useStationCapabilities();
+  return visibleTabs(enabled, station.has).find((t) => t.to === to);
 }
 
 /**
@@ -79,14 +83,22 @@ export function TabGroup({ to }: { to: string }) {
 /**
  * Where a bare group address goes: the last visited section, else the first.
  * `replace`, so the forwarding address does not break the Back button.
+ *
+ * It waits until the station has said what it has: before that every section counts as
+ * present, and `/monitoring` would forward a generic station to the signal monitor it
+ * does not have. The remembered section is checked against the visible ones at that
+ * moment, not when the remembered value was first read (useStickyTab reads it once).
  */
 export function GroupIndex({ to }: { to: string }) {
   const tab = useVisibleTab(to);
+  const station = useStationCapabilities();
   const ids = (tab?.sections ?? []).map((s) => s.seg);
   const [remembered] = useStickyTab(`group.${to}`, ids, ids[0] ?? "");
   const { search, hash } = useLocation();
+  if (!station.ready) return null;
   if (!tab || !ids.length) return <Navigate to="/" replace />;
-  return <Navigate to={`${sectionPath(tab, remembered)}${search}${hash}`} replace />;
+  const target = ids.includes(remembered) ? remembered : ids[0]!;
+  return <Navigate to={`${sectionPath(tab, target)}${search}${hash}`} replace />;
 }
 
 /**

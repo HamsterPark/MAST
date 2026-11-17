@@ -86,6 +86,9 @@ class TestDataPaths:
 
     def test_project_root_fallback(self, monkeypatch, tmp_path):
         monkeypatch.delenv("MAST_DRAFTS_DIR", raising=False)
+        # conftest points MAST_DATA_DIR at tmp for every test; this one is about
+        # the fallback when nothing but the project root is set.
+        monkeypatch.delenv("MAST_DATA_DIR", raising=False)
         monkeypatch.setenv("MAST2_PROJECT_ROOT", str(tmp_path))
         assert drafts_dir() == tmp_path / "data" / "drafts"
 

@@ -61,6 +61,10 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "cm_z_jump_k",
     "cm_amp_zero_frac",
     "cm_amp_blank_s",
+    # 扫描地图的实时扫描流（monitoring/scan_live.py）。
+    "cm_scan_live_enabled",
+    "cm_scan_live_max_hz",
+    "cm_scan_live_max_mbps",
 )
 
 #: 辅助通道那一组，供 UI 分栏与标定报告点名。EDITABLE_KEYS 仍是唯一的展示清单。
@@ -69,6 +73,12 @@ AUX_KEYS: tuple[str, ...] = (
     "cm_aux_window_s", "cm_aux_keep_hours",
     "cm_z_drift_warn_m_per_s", "cm_z_step_warn_m", "cm_z_headroom_warn_frac",
     "cm_z_jump_k", "cm_amp_zero_frac", "cm_amp_blank_s",
+)
+
+#: 实时扫描那一组（设置页单独一栏）。键名刻意不以 ``_s`` 结尾：设置页按后缀给数值
+#: 配单位，``_mb_s`` 会被读成「秒」。
+SCAN_LIVE_KEYS: tuple[str, ...] = (
+    "cm_scan_live_enabled", "cm_scan_live_max_hz", "cm_scan_live_max_mbps",
 )
 
 FIELD_BOUNDS: dict[str, tuple[float, float]] = {
@@ -122,6 +132,11 @@ FIELD_BOUNDS: dict[str, tuple[float, float]] = {
     "cm_amp_zero_frac": (0.01, 0.8),
     # 下界 0：允许用户把脉冲屏蔽整个关掉（他知道自己没在打脉冲）。
     "cm_amp_blank_s": (0.0, 600.0),
+    "cm_scan_live_enabled": (0.0, 1.0),
+    # 上界 10 Hz：抓帧之间还要受「一行时间」与占空比约束，更高没有意义。
+    "cm_scan_live_max_hz": (0.1, 10.0),
+    # MB/s。下界 0.1：一幅 1024² 帧（4 MB）就是 40 s 一拍，再低这个功能等于关掉。
+    "cm_scan_live_max_mbps": (0.1, 50.0),
 }
 
 #: Chinese label + one-line hint per knob, for the settings UI.
@@ -263,12 +278,30 @@ KNOB_LABELS: dict[str, tuple[str, str]] = {
                "Post-disturbance amplitude blanking (s)"),
            tr("扎针/电脉冲会让振幅大起振;恢复时间须按目标仪器验证",
                "Tip pokes / electrical pulses make the amplitude ring up; verify the recovery time on the target instrument")),
+    "cm_scan_live_enabled": (tr("启用实时扫描", "Enable live scan"),
+           tr("关掉后地图退回视觉监视器的 1/8 进度快照;扫描本身不受影响",
+               "When off, the map falls back to the vision monitor's 1/8-progress snapshots; "
+               "the scan itself is unaffected")),
+    "cm_scan_live_max_hz": (tr("实时扫描最高刷新频率(Hz)",
+               "Live scan maximum refresh rate (Hz)"),
+           tr("实际间隔还不短于 0.5 s、一行扫描时间(这几项最长 10 s),也不短于上次抓帧耗时的 4 倍:"
+              "抓帧最多占 data 口的 1/5",
+               "The actual interval is also no shorter than 0.5 s and one scan line (these at most 10 s), "
+               "and never shorter than 4x the last grab's duration: grabbing takes at most 1/5 of the data port")),
+    "cm_scan_live_max_mbps": (tr("实时扫描抓帧带宽上限(MB/s)",
+               "Live scan grab bandwidth cap (MB/s)"),
+           tr("整帧大小 × 刷新频率不超过它;大幅面扫描会自动放慢,把 data 口让给电流监测。"
+              "超过 4 MiB 的帧(2048² 起)不实时显示,退回 1/8 进度快照",
+               "Frame size x refresh rate stays below this; large frames slow down automatically, "
+               "leaving the data port to the current monitor. Frames over 4 MiB (2048² and up) are not "
+               "streamed; the map keeps the 1/8-progress snapshots")),
 }
 
 #: Knobs that are really booleans (0/1) — the UI renders these as switches.
 BOOL_KEYS: frozenset[str] = frozenset({
     "cm_enabled", "cm_alerts_enabled", "cm_aux_enabled", "cm_aux_alerts_enabled",
     "cm_use_osci2t",
+    "cm_scan_live_enabled",
 })
 
 
@@ -328,6 +361,12 @@ class MonitorThresholds:
     cm_amp_zero_frac: float = 0.30
     cm_amp_blank_s: float = 30.0
 
+    # 扫描地图实时扫描（monitoring/scan_live.py）。默认开：空闲时它一次 Nanonis
+    # 调用都不发，扫描时受 max_hz、带宽上限和占空比三重约束。
+    cm_scan_live_enabled: float = 1.0
+    cm_scan_live_max_hz: float = 2.0
+    cm_scan_live_max_mbps: float = 2.0
+
     # ── convenience accessors (the daemon reads these, not the raw floats) ──
     @property
     def enabled(self) -> bool:
@@ -349,6 +388,10 @@ class MonitorThresholds:
         也该往外发。反过来也一样。
         """
         return self.cm_aux_alerts_enabled >= 0.5
+
+    @property
+    def scan_live_enabled(self) -> bool:
+        return self.cm_scan_live_enabled >= 0.5
 
     @property
     def acquisition_strategy(self) -> str:
@@ -430,7 +473,8 @@ def knob_catalog() -> list[dict]:
             "is_bool": key in BOOL_KEYS,
             # 分组只是给 UI 分栏用的。两组阈值的量纲不同（安培 vs 米/赫兹），
             # 混在一张长表里读的人很容易以为它们是一套。
-            "group": "aux" if key in AUX_KEYS else "current",
+            "group": ("scan_live" if key in SCAN_LIVE_KEYS
+                      else "aux" if key in AUX_KEYS else "current"),
         })
     return out
 
@@ -442,6 +486,7 @@ __all__ = [
     "knob_catalog",
     "EDITABLE_KEYS",
     "AUX_KEYS",
+    "SCAN_LIVE_KEYS",
     "FIELD_BOUNDS",
     "BOOL_KEYS",
 ]

@@ -10,7 +10,7 @@ import { tr } from "@/lib/i18n";
 
 export type ChipKind =
   | "new" | "atom" | "half" | "part" | "dup" | "seg" | "copies" | "gridpart" | "li"
-  | "user" | "ser" | "anc";
+  | "user" | "ser" | "anc" | "env";
 
 const CHIP: Record<ChipKind, string> = {
   new: "bg-mast-info-bg text-mast-info",
@@ -25,6 +25,7 @@ const CHIP: Record<ChipKind, string> = {
   user: "border border-mast-border bg-mast-panel-2 text-mast-text",
   ser: "bg-mast-accent-soft text-mast-accent hover:underline",
   anc: "bg-mast-info-bg text-mast-info",
+  env: "border border-dashed border-mast-border bg-mast-panel-2 italic text-mast-muted",
 };
 
 export function chipClass(kind: ChipKind, extra?: string): string {

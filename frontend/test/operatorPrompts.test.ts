@@ -239,14 +239,14 @@ describe("the nav badge", () => {
   });
 });
 
-describe("the feed the shell reads — only an optical station has one", () => {
+describe("the feed the shell reads — only a station with operator prompts (the optical one by default) has one", () => {
   const open = () => [
     P({ id: "a", severity: "info", created_at: "2026-11-03T10:00:00+00:00" }),
     P({ id: "s", severity: "safety", created_at: "2026-11-03T10:05:00+00:00" }),
     P({ id: "done", status: "answered", answer: { prompt_id: "done", status: "answered", answered_at: "2026-11-03T10:06:00+00:00" } }),
   ];
   const input = (over: Record<string, unknown> = {}) => ({
-    optical: true,
+    hasPrompts: true,
     list: open(),
     loaded: true,
     errorStatus: undefined as unknown,
@@ -282,7 +282,7 @@ describe("the feed the shell reads — only an optical station has one", () => {
       { errorStatus: 404 },
       { list: undefined, loaded: false },
     ]) {
-      const feed = openPromptFeed(input({ optical: false, ...over }));
+      const feed = openPromptFeed(input({ hasPrompts: false, ...over }));
       assert.equal(feed, NO_PROMPT_FEED, "the very same object, so no effect depending on it re-runs");
     }
   });
@@ -297,7 +297,7 @@ describe("the feed the shell reads — only an optical station has one", () => {
   });
 
   it("what the nav badge, the tab title and the alert host make of it is nothing at all", () => {
-    const stm = openPromptFeed(input({ optical: false }));
+    const stm = openPromptFeed(input({ hasPrompts: false }));
     // the tab badge is the free-text requests alone, as before operator prompts existed
     assert.equal(wishlistBadge(stm.openCount, 3), 3);
     assert.equal(wishlistBadge(stm.openCount, 0), 0);

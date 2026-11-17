@@ -22,7 +22,7 @@ import time as _t
 import time
 from pathlib import Path
 
-from mast._runtime_paths import project_root
+from mast._runtime_paths import data_root, project_root
 from mast.i18n import tr
 from mast.config import (
     MASTConfig,
@@ -187,6 +187,50 @@ _SCAN_FILE_FORMATS = {".sxm": "sxm", ".dat": "dat", ".3ds": "3ds", ".h5": "h5",
                       ".tif": "tiff", ".tiff": "tiff"}
 _SCAN_FILE_MAX_BYTES = 512 * 1024 * 1024
 _ARTIFACTS_PER_SKILL = 50
+
+# ── 文件监视：按监视根播种（归档那一跳与环境标签那一跳共用的规则）──────────────
+#: 一个监视根第一次被走到时，它下面的文件只登记、不交出：启动时就在盘上的文件，以及之后才进
+#: 监视集合的根（Nanonis 会话目录晚解析出来、操作员切到一个有旧文件的会话文件夹）里的老文件，
+#: 都不该被当成新存的 —— 否则别的会话的测量被归进当前样品、被补写「保存时记录」的标签，还会
+#: 一次交出上千个。例外只有一条：启动之后才出现的根，这么多秒之内刚存的文件照常交出（新建的
+#: 会话目录在它的第一跳之前就存下的那一个，不然它永远既不归档也不打标）。启动那一轮不放行。
+_WATCH_FIRST_WALK_FRESH_S = 60.0
+#: 归档那一跳一跳最多交出这么多个；超出的不记为已见，下一跳接着交。
+_INGEST_MAX_PER_TICK = 64
+#: 正在长的 .3ds（网格谱一点一点往里写）静置这么久才交给归档，免得每长一个点归档一份半张网格。
+#: 与环境标签记录器的静置门同一个数（mast.envhistory.filetags.tagger.SETTLE_S）。
+_INGEST_3DS_SETTLE_S = 60.0
+#: 归档那一跳的 ``seen`` 里存播种状态的键（不是路径；落盘与修剪时跳过）。
+_INGEST_WALK_KEY = "\x00watch-roots"
+#: 归档那一跳的 ``seen`` 超过这么多条时，删掉已经不存在的文件（与 _map_spectrum_tick 同一个界）。
+_INGEST_SEEN_MAX = 4000
+#: 环境标签那一跳的 ``files`` 超过这么多条时，只留这一轮还看得见的。
+_ENV_TAG_FILES_MAX = 50_000
+
+
+#: Creates the per-runtime single-flight lock of ``_resolve_session_dir`` (stand-ins in tests
+#: have no ``__init__`` to hold it).
+_SESSION_FLIGHT_INIT = _threading.Lock()
+
+
+def _prune_ingest_seen(seen: dict) -> None:
+    """归档那一跳的 ``seen`` 有界：超过 _INGEST_SEEN_MAX 条时删掉已经不存在的文件（播种状态留着）。"""
+    import os
+
+    if len(seen) <= _INGEST_SEEN_MAX:
+        return
+    for p in [q for q in seen if q != _INGEST_WALK_KEY and not os.path.exists(q)]:
+        seen.pop(p, None)
+
+
+def _first_walk_admits(mtime_s: float, now_s: float, *, startup: bool) -> bool:
+    """一个监视根第一次被走到时，它下面这个文件算不算「新存的」（见 _WATCH_FIRST_WALK_FRESH_S）。"""
+    if startup:
+        return False
+    try:
+        return (float(now_s) - float(mtime_s)) <= _WATCH_FIRST_WALK_FRESH_S
+    except (TypeError, ValueError):
+        return False
 
 
 def _artifact_paths(payload: dict) -> list[str]:
@@ -1107,7 +1151,7 @@ def _ensure_buffer_for_gui(app) -> "object":
         try:
             import asyncio
             from mast.buffer.service import BufferService
-            wal_path = project_root() / "experiments" / "vision_buffer.wal.sqlite"
+            wal_path = data_root() / "experiments" / "vision_buffer.wal.sqlite"
             buf = BufferService(wal_path=wal_path, history_size=200)
             loop = _ensure_buffer_loop(app)
             app._buffer_starting = True
@@ -1632,18 +1676,21 @@ class CoreRuntime:
             logger.warning("SettingsStore init/apply failed (using defaults): %s", exc)
             self._settings = None
 
-        # ── 站点画像（docs/v2/design/optical_station_witec.md D1）──────────────────
+        # ── 站点画像与能力（docs/v2/design/optical_station_witec.md、generic_station.md）──
         # 在这里**一次**定下来：下面起不起 Nanonis 连接与线程都看它。note_boot() 把当前
         # 画像记为「本进程启动时的画像」并写进启动日志；设置页之后再改只会让
         # restart_pending 变真，不会让一半的子系统换了画像。必须在设置库发布之后调
         # （锁存绑在发布的那个库上）。读不出来一律 stm —— 今天所有机器的行为。
+        # 下面每一处只问能力（``"nanonis" in caps`` ……），不问画像名：画像只决定 caps 是
+        # mast.station.PROFILE_CAPABILITIES 里的哪一组。画像名只用来写日志。
         try:
             from mast import station as _station
             self._station_profile = _station.note_boot()
         except Exception as exc:  # noqa: BLE001
             logger.warning("station profile unreadable (treating as stm): %s", exc)
             self._station_profile = "stm"
-        optical = self._station_profile == "optical"
+        caps = self._station_caps()
+        station_name = self._station_profile
 
         # Vision tip-quality thresholds: hydrate the process-level holder from the
         # persisted vision_thresholds so tip discrimination uses the operator's
@@ -1792,9 +1839,9 @@ class CoreRuntime:
 
             if not _vision_on():
                 raise RuntimeError("vision models disabled")
-            if optical:
-                # the scorer judges STM tip quality: nothing to score on an optical station
-                raise RuntimeError("optical station profile")
+            if "stm_safety" not in caps:
+                # the scorer judges STM tip quality: nothing to score without a tip
+                raise RuntimeError(f"{station_name} station profile")
 
             def _warm_vision() -> None:
                 try:
@@ -1841,15 +1888,15 @@ class CoreRuntime:
         connected = 0
         try:
             from mast.core.connection import ConnectionPool
-            if optical:
-                # 光学站没有 Nanonis：池对象仍然要有（ExecutionContext 需要 pool 与 state，
-                # api/direct_exec.py build_context），但它不拨号。
-                self._pool = self._build_idle_pool()
-            else:
+            if "nanonis" in caps:
                 self._pool = ConnectionPool(self.config.nanonis)
                 results = self._pool.connect_all()
                 connected = sum(1 for v in results.values() if v)
                 logger.info("ConnectionPool: %d/%d ports connected", connected, len(results))
+            else:
+                # 没有 Nanonis 的站（光学站、通用站）：池对象仍然要有（ExecutionContext 需要
+                # pool 与 state，api/direct_exec.py build_context），但它不拨号。
+                self._pool = self._build_idle_pool()
         except Exception as exc:
             logger.warning("Could not create ConnectionPool: %s", exc)
 
@@ -1868,16 +1915,16 @@ class CoreRuntime:
                 # instead of having ``state.refresh()`` block the main
                 # thread with 8 sequential safe_call(monitor) round-trips.
                 #
-                # 光学站：state 对象在（ExecutionContext 要它），但没有东西可轮询 ——
+                # 没有 Nanonis 的站：state 对象在（ExecutionContext 要它），但没有东西可轮询 ——
                 # 不起这条线程，快照永远是空的默认值。
-                if optical:
-                    logger.info("InstrumentState: optical station profile - background "
-                                "refresh not started (no Nanonis to poll)")
-                else:
+                if "nanonis" in caps:
                     try:
                         self._state.start_background_refresh(interval_s=1.0)
                     except Exception as exc:
                         logger.warning("Could not start state background refresh: %s", exc)
+                else:
+                    logger.info("InstrumentState: %s station profile - background "
+                                "refresh not started (no Nanonis to poll)", station_name)
         except Exception as exc:
             logger.warning("Could not create safety/state: %s", exc)
 
@@ -1963,11 +2010,11 @@ class CoreRuntime:
                 # implemented but never started on the v2 path, leaving the
                 # hardware safety net dead-wired. It polls harmlessly (gets
                 # errors) until Nanonis is connected, then guards the tip.
-                if optical:
-                    logger.info("SafetyWatchdog: optical station profile - not started "
-                                "(no tip to protect)")
-                else:
+                if "stm_safety" in caps:
                     self._ensure_watchdog()
+                else:
+                    logger.info("SafetyWatchdog: %s station profile - not started "
+                                "(no tip to protect)", station_name)
         except Exception as exc:
             logger.warning("Could not create SkillExecutor: %s", exc)
 
@@ -1993,15 +2040,29 @@ class CoreRuntime:
         #
         # Own try/except so a monitoring fault cannot stop the runtime coming up.
         #
-        # 光学站不起它：没有隧道电流可监测，起了也只会停在 comms_down。
-        if optical:
-            logger.info("Current monitor: optical station profile - not started")
-        else:
+        # 没有针尖要保护的站（光学站、通用站）不起它：没有隧道电流可监测，起了也只会停在
+        # comms_down。
+        if "stm_safety" in caps:
             try:
                 from mast.monitoring.service import start_service as _start_current_monitor
                 _start_current_monitor(self)
             except Exception as exc:
                 logger.warning("Could not start the current monitor: %s", exc)
+        else:
+            logger.info("Current monitor: %s station profile - not started", station_name)
+
+        # Scan-map live scan stream (monitoring/scan_live.py, design
+        # docs/v2/design/scan_map_live.md): zero Nanonis calls while idle, data
+        # role only while a scan runs. Own try: a display feature must not keep
+        # the runtime from coming up. It feeds the scan map, so it asks the same
+        # capability as the map activity watcher: a station without STM scan
+        # records (optical, generic) has no scans to stream and starts nothing.
+        if "scan_map" in caps:
+            try:
+                from mast.monitoring.scan_live import start_service as _start_scan_live
+                _start_scan_live(self)
+            except Exception as exc:
+                logger.warning("Could not start the live scan stream: %s", exc)
 
         # TERS 光学侧接入（docs/v2/design/ters_satellite_integration.md §6/§10）：卫星枢纽
         # 起线程、订阅看门狗异常、启动时查一次端口归属。自己的 try：卫星通道坏了不许挡住
@@ -2011,10 +2072,10 @@ class CoreRuntime:
         except Exception as exc:  # noqa: BLE001
             logger.warning("卫星枢纽接线失败（光学侧急停仍会尽力而为）：%s", exc)
 
-        # 操作员提示服务（桌面弹窗 / 声音 / 网页；只有操作员能答）：光学站画像下装上。
-        # STM 站不装 —— 那里一切照旧。
-        if optical:
-            self._install_operator_hitl()
+        # 操作员提示服务（桌面弹窗 / 声音 / 网页；只有操作员能答）：有结构化操作员提示的站
+        # （光学站、通用站）装上。STM 站不装 —— 那里一切照旧。
+        if "operator_prompts" in caps:
+            self._install_operator_hitl(revocation="laser_safety" in caps)
 
         try:
             from mast.logging.storage import ExperimentStorage
@@ -2026,8 +2087,8 @@ class CoreRuntime:
             set_active_log(self._experiment_log)
             # Manual-activity watcher: records hand-driven Nanonis frame/tip
             # moves into the experiment-record map (requirement 3). Best-effort.
-            # 光学站没有 Nanonis 可看，不起。
-            if not optical:
+            # 没有 STM 扫描记录的站（光学站、通用站）没有 Nanonis 可看，不起。
+            if "scan_map" in caps:
                 try:
                     self._start_map_activity_watcher()
                 except Exception as exc:  # noqa: BLE001
@@ -2174,9 +2235,10 @@ class CoreRuntime:
             # Nanonis-backed sensors first: their names must be reserved so
             # build_environment_sensors() does not also emit a placeholder under
             # the same name (the dedup would then rename the REAL one).
-            # 光学站：没有 Nanonis，也就没有它的传感器（隧道电流镜像、nanonis_signal）；
-            # 串口自动探测在 build_environment_sensors 里按同一个画像强制关掉。
-            nanonis_sensors = [] if optical else self._build_nanonis_env_sensors()
+            # 没有 Nanonis 的站也就没有它的传感器（隧道电流镜像、nanonis_signal）；串口自动探测
+            # 开不开在 build_environment_sensors 里按画像定（mast.station.serial_autodetect_default：
+            # 光学站强制关，通用站默认关）。
+            nanonis_sensors = self._build_nanonis_env_sensors() if "nanonis" in caps else []
             sensors = build_environment_sensors(
                 reserved_names=[s.name() for s in nanonis_sensors])
             sensors.extend(nanonis_sensors)
@@ -2198,12 +2260,20 @@ class CoreRuntime:
             self._env_history = self._build_env_history_recorder(sensors)
             sinks = [s for s in (self._env_csv,
                                  getattr(self._env_history, "sink", None)) if s]
+            # 数据文件的环境标签（docs/v2/design/data_env_tags.md）：读数环挂在同一条
+            # 2 秒循环上，只记监视器自己读到的数 —— 不新起采样，不碰设备。它是纯内存的，
+            # 所以接在 live_sinks 上、由读数线程直接喂：归档线程排队或卡住时标签也不旧。
+            self._env_tag_ring = self._build_env_tag_ring()
+            live = [self._env_tag_ring] if self._env_tag_ring is not None else []
             self._monitor = EnvironmentMonitor(
                 sensors=sensors, storage=self._storage, interval_s=2.0,
                 on_alarm=self._on_env_alarm,
                 sinks=sinks or None,
                 scope_provider=self._current_env_scope,
+                live_sinks=live,
             )
+            # 环境标签记录器：钩子只往它的队列里放路径，I/O 全在它按需起的线程上。
+            self._env_tagger = self._build_env_tagger()
             # Feed the coarse-motion vacuum interlock. Injected as a callable so
             # mast.core.vacuum_interlock never imports the environment layer and
             # stays a pure function under test. It carries the sensor's CLASS
@@ -2238,6 +2308,37 @@ class CoreRuntime:
                 _temp.set_channels_source(self.temperature_channels)
             except Exception as exc:  # noqa: BLE001
                 logger.debug("temperature provider wiring failed: %s", exc)
+            # Magnet supply / helium level: same read-only injection shape, so
+            # GetMagnetState / GetHeliumLevel never import the live app.
+            try:
+                from mast.core import cryostat as _cryo
+                _cryo.set_magnet_source(lambda: self.cryostat_states("magnet"))
+                _cryo.set_helium_source(lambda: self.cryostat_states("helium"))
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("cryostat provider wiring failed: %s", exc)
+            # Field control (7.2.0): same injection, plus a shutdown hook. Hooks run
+            # first in shutdown(), before the environment monitor closes the port
+            # that the STOP has to go out on.
+            try:
+                from mast.core import magnet_control as _mc
+                _mc.set_source(self.magnet_controller)
+                # The heater's gate asks through here whether the field is at rest.
+                _mc.set_state_source(self.field_state)
+                self.add_shutdown_hook(self._magnet_shutdown, name="magnet control")
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("magnet control wiring failed: %s", exc)
+            # Sample-stage heating (Lake Shore 335): same injection and shutdown hook. The
+            # models of inputs built from old config entries are learned right away (one
+            # *IDN? each, in the background), so heater-off works from the first minute.
+            try:
+                from mast.core import heater_control as _hc
+                _hc.set_source(self.heater_controller)
+                # The field-control gate asks through here whether a heater is on.
+                _hc.set_interlock_source(self.heater_interlock)
+                self.add_shutdown_hook(self._heater_shutdown, name="heater control")
+                self._learn_lakeshore_models_soon()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("heater control wiring failed: %s", exc)
             # Start the background archive+alarm loop only when at least one REAL
             # hardware sensor is present, so an instrument-free install doesn't
             # spam environment_log with placeholder "unavailable" rows. The Lab
@@ -2383,23 +2484,35 @@ class CoreRuntime:
                 self._voice_client = None
 
 
-    # ── 站点画像（mast.station）──────────────────────────────────────────────────
-    def _is_optical(self) -> bool:
-        """本进程是不是光学站画像。用 ``setup()`` 启动时定下的那个值；``setup()`` 没跑过
-        的实例（测试里的 unwired runtime）退回 ``mast.station`` 的当前画像，缺省 stm。
+    # ── 站点画像与能力（mast.station）────────────────────────────────────────────
+    def _station_caps(self) -> frozenset:
+        """本进程的站点能力：``setup()`` 启动时定下的画像的那一组；``setup()`` 没跑过的实例
+        （测试里的 unwired runtime）用 ``mast.station`` 的当前画像，缺省 stm。永不抛。"""
+        from mast import station as _station
+
+        prof = getattr(self, "_station_profile", None)
+        return _station.capabilities_of(prof) if isinstance(prof, str) else _station.capabilities()
+
+    def _station_has(self, cap: str) -> bool:
+        """``cap`` 在不在本进程的站点能力里。未知能力名抛 ``ValueError``（拼错不能静默变 False）。
 
         ⚠ 被测试拿去当 ``self`` 的替身（``SimpleNamespace``）调用的方法**不能**写
-        ``self._is_optical()`` —— 替身上没有它。那些方法（``_resolve_session_dir`` /
-        ``emergency_stop`` / ``reconnect``）直接调 ``station.runtime_is_optical(self)``。"""
-        try:
-            from mast import station as _station
-            return _station.runtime_is_optical(self)
-        except Exception:  # noqa: BLE001
-            return False
+        ``self._station_has(...)`` —— 替身上没有它。那些方法（``_resolve_session_dir`` /
+        ``emergency_stop`` / ``reconnect``）直接调 ``station.runtime_has(self, ...)``。"""
+        from mast import station as _station
+
+        return _station.runtime_has(self, cap)
+
+    def _station_name(self) -> str:
+        """日志里怎么称呼这台站：``setup()`` 定下的画像，否则进程当前的画像。"""
+        from mast import station as _station
+
+        prof = getattr(self, "_station_profile", None)
+        return prof if isinstance(prof, str) else _station.current_profile()
 
     def _build_idle_pool(self):
-        """光学站的 ConnectionPool：对象在（``ExecutionContext`` 需要 pool 与 state，见
-        ``api/direct_exec.py`` build_context），但**永不拨号**。
+        """没有 Nanonis 的站（光学站、通用站）的 ConnectionPool：对象在（``ExecutionContext``
+        需要 pool 与 state，见 ``api/direct_exec.py`` build_context），但**永不拨号**。
 
         四个端口显式置 0（连接层把 0 当「显式停用」：不连、不重连、不刷日志），所以后面
         任何一处误调 ``safe_call`` 都是一个干净的 ConnectionError，不是一轮轮超时重连。
@@ -2409,13 +2522,29 @@ class CoreRuntime:
         nano = self.config.nanonis
         for attr in ("port_main", "port_monitor", "port_data", "port_emergency"):
             setattr(nano, attr, 0)
-        logger.info("ConnectionPool: optical station profile - Nanonis is not used "
-                    "(all four ports disabled, nothing is dialled)")
+        logger.info("ConnectionPool: %s station profile - Nanonis is not used "
+                    "(all four ports disabled, nothing is dialled)", self._station_name())
         return ConnectionPool(nano)
 
-    def _install_operator_hitl(self) -> None:
+    def _default_operator_slots(self):
+        """The manual-state slots a station starts with when ``config/optical_station.json``
+        does not define its own. ``None`` = the operator_hitl defaults (the WITec bench's,
+        design optical_station_witec.md §6.2) - on a station with ``witec``, and wherever there
+        are no operator prompts at all. A station with operator prompts and no WITec (the generic
+        station) starts with ``laser_area_safe`` only: the attestation that switching a light
+        source on needs (generic_station.md §3.6)."""
+        if self._station_has("witec") or not self._station_has("operator_prompts"):
+            return None
+        from mast.operator_hitl.optical_state import GENERIC_DEFAULT_SLOTS
+
+        return GENERIC_DEFAULT_SLOTS
+
+    def _install_operator_hitl(self, revocation: bool = True) -> None:
         """装操作员提示服务（``mast.operator_hitl.service.install()``）。
-        那个模块不在这份构建里时只记一行，其余照常；它自己坏了要大声说，不能吞。"""
+        那个模块不在这份构建里时只记一行，其余照常；它自己坏了要大声说，不能吞。
+
+        ``revocation``：再装「撤销 laser_area_safe 立即关光」的监听（setup() 按能力
+        ``laser_safety`` 传；直接调这个方法的默认装，和从前一样）。"""
         import importlib
 
         try:
@@ -2434,14 +2563,22 @@ class CoreRuntime:
             logger.warning("operator_hitl.service failed to import: %s", exc)
             return
         try:
-            _hitl_service.install()
-            logger.info("operator_hitl: service installed (optical station profile)")
+            slots = self._default_operator_slots()
+            if slots is None:
+                _hitl_service.install()          # the operator_hitl defaults, as always
+            else:
+                _hitl_service.install(default_slots=slots)
+            logger.info("operator_hitl: service installed (%s station profile)",
+                        self._station_name())
         except Exception as exc:  # noqa: BLE001
             logger.warning("operator_hitl: install failed (%s) - operator prompts stay on "
                            "the in-process backend", exc)
         # The operator withdrawing laser_area_safe (recorded as not safe, or cleared) takes
-        # every light source dark at once (design §6.4). Registered on whichever store is in
-        # force now: install() swaps the store and listeners do not move with it.
+        # every light source dark at once (design §6.4): a station with ``laser_safety``.
+        # Registered on whichever store is in force now: install() swaps the store and
+        # listeners do not move with it.
+        if not revocation:
+            return
         try:
             from mast.instruments import emission_safety
             from mast.operator_hitl import optical_state
@@ -2454,9 +2591,11 @@ class CoreRuntime:
     def reconnect(self) -> int:
         """Attempt to (re)connect to Nanonis. Returns number of ports connected."""
         from mast import station as _station
-        if _station.runtime_is_optical(self):
-            # 光学站没有 Nanonis；「连接」按钮按下去也不该起一池线程。
-            logger.info("reconnect: optical station profile - there is no Nanonis to connect to")
+        if not _station.runtime_has(self, "nanonis"):
+            # 没有 Nanonis 的站（光学站、通用站）：「连接」按钮按下去也不该起一池线程。
+            prof = getattr(self, "_station_profile", None)
+            logger.info("reconnect: %s station profile - there is no Nanonis to connect to",
+                        prof if isinstance(prof, str) else _station.current_profile())
             return 0
         from mast.core.connection import ConnectionPool
         from mast.core.state import InstrumentState
@@ -2485,6 +2624,14 @@ class CoreRuntime:
             _stop_current_monitor()
         except Exception as exc:
             logger.debug("stop current monitor failed: %s", exc)
+
+        # The live scan stream grabs frames on the data role too: same hazard,
+        # same fix (stopped here, restarted at the end).
+        try:
+            from mast.monitoring.scan_live import stop_service as _stop_scan_live
+            _stop_scan_live()
+        except Exception as exc:
+            logger.debug("stop live scan stream failed: %s", exc)
 
         # 同理：环境历史的 Z burst 也在 data 角色上发 TCP。它不是常驻线程（到期
         # 才起、干完就退），所以这里只需要让在飞的那一次收手，不必也不该把整个
@@ -2546,6 +2693,11 @@ class CoreRuntime:
             _start_current_monitor(self)
         except Exception as exc:
             logger.debug("restart current monitor failed: %s", exc)
+        try:
+            from mast.monitoring.scan_live import start_service as _start_scan_live
+            _start_scan_live(self)
+        except Exception as exc:
+            logger.debug("restart live scan stream failed: %s", exc)
         return connected
 
 
@@ -2997,36 +3149,24 @@ class CoreRuntime:
         return {"running": False}
 
     def _current_scan_dirs(self) -> tuple:
-        """Plausible dirs where Nanonis writes .sxm/.dat/.3ds — the map activity
-        watcher scans these for manual scans/spectra. Was never populated in the
-        TS runtime, so `_scan_search_dirs` stayed empty and NO manual spectrum was
-        ever detected."""
-        dirs: list[str] = []
+        """The directories the map activity watcher walks: the Nanonis session dir only.
+
+        That is where Nanonis writes the .sxm/.dat/.3ds an operator saves by hand. The
+        watcher used to walk ``<data_root>/experiments`` and ``working-sessions`` as well:
+        on a rig that has run for a year the experiments tree holds hundreds of thousands
+        of files (monitor segments, thumbnails, the archive copies themselves), the walk
+        was ~10 s of CPU per cycle, and it re-detected our own archive copies as new
+        "manual" spectra. Nothing MAST itself writes there is something to detect: skill
+        saves go through the ingest sink directly. Other consumers that want those trees
+        (records page, briefing, scan-map underlay) add them themselves.
+
+        A directory the controller names that does not exist yet is still returned; the
+        walkers skip it until it appears."""
         try:
             sess = self._resolve_session_dir()
-            if sess:
-                dirs.append(str(sess))
         except Exception:  # noqa: BLE001
-            pass
-        try:
-            from mast._runtime_paths import project_root
-            pr = project_root()
-            for sub in ("working-sessions", "experiments"):
-                d = pr / sub
-                try:
-                    if d.is_dir():
-                        dirs.append(str(d))
-                except OSError:
-                    pass
-        except Exception:  # noqa: BLE001
-            pass
-        seen: set[str] = set()
-        out: list[str] = []
-        for d in dirs:
-            if d and d not in seen:
-                seen.add(d)
-                out.append(d)
-        return tuple(out)
+            sess = None
+        return (str(sess),) if sess else ()
 
     # ── per-run stop Events (审计 致命一(b)) ─────────
     def run_abort_event(self, run_id: str):
@@ -3160,6 +3300,17 @@ class CoreRuntime:
         except Exception as exc:  # noqa: BLE001
             result["errors"].append(f"abort: {exc}")
 
+        # 超导磁体：STOP（冻结在当前电流），后台线程发，与 Nanonis 无关。
+        try:
+            result["magnet"] = self._magnet_emergency_stop(_why)
+        except Exception as exc:  # noqa: BLE001
+            result["errors"].append(f"magnet: {exc}")
+        # 样品台加热：两路 RANGE 0（同面板 ALL OFF），只在初始化里配置了控温的站上。
+        try:
+            result["heater"] = self._heater_emergency_off(_why)
+        except Exception as exc:  # noqa: BLE001
+            result["errors"].append(f"heater: {exc}")
+
         # 光学侧（卫星的 estop + 每个设备 stop、本机光学台 stop_all）排在 Nanonis 之前：
         # 它只入队、毫秒级，而下面的 urgent_call 最坏要等几秒（TERS 契约 §10.1）。
         try:
@@ -3177,10 +3328,12 @@ class CoreRuntime:
 
         pool = getattr(self, "_pool", None)
         from mast import station as _station
-        if pool is not None and _station.runtime_is_optical(self):
-            # 光学站没有 Nanonis：下面五条 TCP 命令只会攒出五条「停不下来」的假错误，
-            # 把真正的光学侧结果（上面的 result["optics"]）淹掉。
-            result["nanonis"] = "not used (optical station profile)"
+        if pool is not None and not _station.runtime_has(self, "nanonis"):
+            # 没有 Nanonis 的站（光学站、通用站）：下面五条 TCP 命令只会攒出五条「停不下来」的
+            # 假错误，把真正的光学侧结果（上面的 result["optics"]）淹掉。
+            _prof = getattr(self, "_station_profile", None)
+            _prof = _prof if isinstance(_prof, str) else _station.current_profile()
+            result["nanonis"] = f"not used ({_prof} station profile)"
             pool = None
         if pool is not None:
             # Stop powered motion FIRST (so a retract isn't out-stepped).
@@ -3216,19 +3369,33 @@ class CoreRuntime:
                     result["emergency_port_disabled"] = True
             except Exception:  # noqa: BLE001
                 pass
-            for verb, thunk in (
+            # A stop counts only if its RECORD carries no error. safe_call /
+            # urgent_call report almost every failure in the record they return
+            # (comms breaker refusal, busy role lock, timeout, a Nanonis error
+            # string); an exception is the rare case. This used to set
+            # stopped_motion=True as soon as one call returned, so an E-STOP whose
+            # three stops were all refused still said motion had stopped. Now it is
+            # True only when all three went through, and every failure is in
+            # errors — the same rule as the withdraw below.
+            stops = (
                 ("AutoApproach_OnOffSet",
                  lambda: _urgent("AutoApproach_OnOffSet", 0, role="emergency")),
                 ("Motor_StopMove",
                  lambda: _urgent("Motor_StopMove", role="emergency")),
                 ("Scan_Action",
                  lambda: _urgent("Scan_Action", 1, 0, role="emergency")),
-            ):
+            )
+            stopped = 0
+            for verb, thunk in stops:
                 try:
-                    thunk()
-                    result["stopped_motion"] = True
+                    rec = thunk()
+                    if getattr(rec, "error", ""):
+                        result["errors"].append(f"{verb}: {rec.error}")
+                    else:
+                        stopped += 1
                 except Exception as exc:  # noqa: BLE001
                     result["errors"].append(f"{verb}: {exc}")
+            result["stopped_motion"] = stopped == len(stops)
             # Retract the tip: emergency port, fall back to main.
             for role in ("emergency", "main"):
                 try:
@@ -3510,6 +3677,12 @@ class CoreRuntime:
             _stop_current_monitor()
         except Exception:  # noqa: BLE001
             pass
+        # Same reason: the live scan stream grabs frames on the data role.
+        try:
+            from mast.monitoring.scan_live import stop_service as _stop_scan_live
+            _stop_scan_live()
+        except Exception:  # noqa: BLE001
+            pass
         # Drain the data-ingest queue. Note this is a courtesy, NOT a
         # correctness requirement: every manifest/CSV/chat write is incremental
         # and atomic, so a hard kill that skips this leaves the experiment folder
@@ -3520,6 +3693,14 @@ class CoreRuntime:
             if ing is not None:
                 ing.flush(timeout=5.0)
                 ing.close()
+        except Exception:  # noqa: BLE001
+            pass
+        # 环境标签：排在归档之后（归档落地的副本会再交一批进来），有界等 2 s。
+        # 它的线程不碰 TCP 也不碰串口；没打完的如实记一句，不强等。
+        try:
+            tagger = getattr(self, "_env_tagger", None)
+            if tagger is not None:
+                tagger.stop(timeout=2.0)
         except Exception:  # noqa: BLE001
             pass
         try:
@@ -4736,6 +4917,430 @@ class CoreRuntime:
             logger.debug("latest pressure sample unavailable: %s", exc)
             return None
 
+    _magnet_ctl_lock = _threading.Lock()
+
+    def magnet_controller(self):
+        """Field controller for the one Model 625 the environment monitor reads.
+
+        ``None`` with no 625, or with more than one (MAST will not guess which magnet
+        a command is for). One controller per link, kept across calls: it tracks the
+        ramp it started. Never raises; does no I/O.
+        """
+        mon = getattr(self, "_monitor", None)
+        if mon is None:
+            return None
+        try:
+            from mast.environment.lakeshore_625 import Model625Sensor
+
+            sensors = dict(getattr(mon, "_sensors", {}) or {})
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("magnet controller: sensors unavailable: %s", exc)
+            return None
+        links: list = []
+        for sensor in sensors.values():
+            inner = getattr(sensor, "_inner", sensor)
+            if isinstance(inner, Model625Sensor):
+                link = getattr(inner, "link", None)
+                if link is not None and not any(link is seen for seen in links):
+                    links.append(link)
+        if len(links) != 1:
+            return None
+        with self._magnet_ctl_lock:
+            ctl = getattr(self, "_magnet_ctl", None)
+            if ctl is not None and ctl.link is links[0]:
+                return ctl
+            try:
+                from mast.instruments.magnet_625 import Magnet625Controller
+
+                ctl = Magnet625Controller(links[0])
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("magnet controller unavailable: %s", exc)
+                return None
+            self._magnet_ctl = ctl
+            return ctl
+
+    def field_state(self) -> dict:
+        """For the heater's plan gate (``core.magnet_control.field_state``): is the field at
+        rest? ``ok``: no Model 625 here; or the one 625 is not being changed by MAST, is not
+        ramping (OPST? ramp-done bit), has no error bit, and answered (its cached fast state,
+        at most 2 s old). Refused (unknown is not at rest): more than one 625, a 625 whose
+        controller cannot be had, a state that cannot be read. Call it with no other
+        instrument's link held. Never raises."""
+        try:
+            from mast.environment.lakeshore_625 import Model625Sensor
+            from mast.instruments.magnet_625 import panel_field_verdict
+
+            mon = getattr(self, "_monitor", None)
+            sensors = dict(getattr(mon, "_sensors", {}) or {}) if mon is not None else {}
+            links: list = []
+            for sensor in sensors.values():
+                inner = getattr(sensor, "_inner", sensor)
+                if isinstance(inner, Model625Sensor):
+                    link = getattr(inner, "link", None)
+                    if link is not None and not any(link is seen for seen in links):
+                        links.append(link)
+            if not links:
+                return {"ok": True, "present": False,
+                        "detail": tr("没有磁体电源（Model 625）", "no magnet supply (Model 625)")}
+            if len(links) > 1:
+                return {"ok": False, "present": True, "detail": tr(
+                    "识别到不止一台 Model 625：MAST 不知道看哪一台在不在扫场，不加热",
+                    "more than one Model 625 is recognised: MAST cannot tell which one to look "
+                    "at, so no heating")}
+            ctl = self.magnet_controller()
+            if ctl is None:
+                return {"ok": False, "present": True, "detail": tr(
+                    "识别到 625，但调场控制器起不来：不知道有没有在扫场，不加热",
+                    "a 625 is recognised but its field controller is unavailable: whether the "
+                    "field is changing is unknown, so no heating")}
+            if getattr(ctl, "busy", False):
+                return {"ok": False, "present": True, "detail": tr(
+                    "MAST 正在改变磁场：一次只做一项低温环境变化，等调场结束",
+                    "MAST is changing the magnet's field: one cryostat change at a time; wait "
+                    "for it")}
+            ok, detail = panel_field_verdict(links[0].fast_state(2.0))
+            return {"ok": ok, "present": True, "detail": detail}
+        except Exception as exc:  # noqa: BLE001 - unknown is not an answer
+            logger.debug("field state failed: %s", exc)
+            return {"ok": False, "present": None, "detail": tr(
+                f"读磁体电源的状态失败：{type(exc).__name__}: {exc}：不加热",
+                f"reading the magnet supply's state failed: {type(exc).__name__}: {exc}: no heating")}
+
+    #: How long the E-STOP thread keeps retrying a STOP that does not go out.
+    _MAGNET_ESTOP_RETRY_S = 30.0
+
+    def _magnet_shutdown(self) -> None:
+        """Graceful stop: no new ramps; freeze a ramp MAST is preparing or running.
+
+        A ramp started at the front panel is left alone.
+        """
+        ctl = getattr(self, "_magnet_ctl", None)
+        if ctl is not None:
+            ctl.begin_shutdown(reason="MAST is shutting down", origin="MAST shutdown")
+
+    def _magnet_emergency_stop(self, why: str) -> str:
+        """E-STOP or a hard environment alarm: send STOP to the 625, off the caller's thread.
+
+        Called directly, never through a skill: while the E-STOP latch is set the
+        ABORT GATE refuses every ``ctx.run``, StopMagnetRamp included. A STOP that does
+        not go out (link busy, port reopening) is retried for ``_MAGNET_ESTOP_RETRY_S``.
+        STOP freezes the output where it is. It does not bring the field to zero, and
+        the briefing says so.
+        """
+        ctl = self.magnet_controller()
+        if ctl is None:
+            return "no magnet supply"
+        reason = (str(why or "").strip() or "MAST E-STOP")[:200]
+        deadline_s = self._MAGNET_ESTOP_RETRY_S
+
+        def _go() -> None:
+            t_end = time.monotonic() + deadline_s
+            while True:
+                res = ctl.stop(reason=reason, origin="MAST E-STOP")
+                if res.get("sent") or res.get("skipped"):
+                    return
+                if time.monotonic() > t_end:
+                    logger.critical("E-STOP: STOP did not reach the Lake Shore 625 within %.0f s "
+                                    "(%s) — the operator must press Stop Output at the panel",
+                                    deadline_s, res.get("error"))
+                    return
+                time.sleep(1.0)
+
+        _threading.Thread(target=_go, name="magnet-estop", daemon=True).start()
+        return "dispatched"
+
+    _heater_ctl_lock = _threading.Lock()
+
+    def _lakeshore_inputs(self) -> "list":
+        """``(transport, [sensors])`` per Lake Shore temperature transport the monitor reads."""
+        mon = getattr(self, "_monitor", None)
+        if mon is None:
+            return []
+        try:
+            from mast.environment.lakeshore_temp import LakeshoreTemperatureSensor
+
+            sensors = dict(getattr(mon, "_sensors", {}) or {})
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("heater controller: sensors unavailable: %s", exc)
+            return []
+        groups: list = []
+        for sensor in sensors.values():
+            inner = getattr(sensor, "_inner", sensor)
+            if not isinstance(inner, LakeshoreTemperatureSensor):
+                continue
+            t = getattr(inner, "transport", None)
+            if t is None:
+                continue
+            for seen, members in groups:
+                if seen is t:
+                    members.append(inner)
+                    break
+            else:
+                groups.append((t, [inner]))
+        return groups
+
+    def _learn_lakeshore_models(self) -> int:
+        """Ask ``*IDN?`` once on each Lake Shore temperature transport whose sensors do not
+        know their model (a config entry adopted before the model was recorded). Read-only
+        I/O on the shared transport: call it off request threads. Returns how many learned."""
+        from mast.environment.lakeshore_temp import identify_model
+
+        n = 0
+        for transport, members in self._lakeshore_inputs():
+            if any(str(getattr(m, "model", "") or "") for m in members):
+                continue
+            model = identify_model(transport)
+            if model:
+                for m in members:
+                    m.model = model
+                n += 1
+        return n
+
+    def _learn_lakeshore_models_soon(self) -> None:
+        """:meth:`_learn_lakeshore_models` on a daemon thread, at most once a minute."""
+        now = time.monotonic()
+        if getattr(self, "_lsci_learning", False) or now - getattr(self, "_lsci_learned_at", -1e9) < 60.0:
+            return
+        self._lsci_learning = True
+
+        def _go() -> None:
+            try:
+                n = self._learn_lakeshore_models()
+                if n:
+                    logger.info("environment: learned the model of %d Lake Shore controller(s)", n)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Lake Shore model learning failed: %s", exc)
+            finally:
+                self._lsci_learned_at = time.monotonic()
+                self._lsci_learning = False
+
+        _threading.Thread(target=_go, name="lakeshore-identify", daemon=True).start()
+
+    def heater_controller(self, *, learn: bool = False):
+        """Temperature control for the one Lake Shore 335 the environment monitor reads.
+
+        A 335 is one transport shared by its input sensors; it qualifies when any of
+        them knows its model is a 335 (auto-detection, an adopted entry, the first
+        settings snapshot, or :meth:`_learn_lakeshore_models`). ``None`` with no 335, or
+        with more than one (MAST will not guess which heater a command is for). One
+        controller per transport, kept across calls: it tracks the change it started.
+
+        Never raises. Does no I/O unless ``learn`` is set: then, when inputs of unknown
+        model are what stands between the caller and a controller, it asks them
+        ``*IDN?`` first (the off paths do this). Without ``learn`` it schedules that on a
+        background thread instead.
+        """
+        def _found() -> list:
+            out = []
+            for t, members in self._lakeshore_inputs():
+                if any("335" in str(getattr(m, "model", "") or "").upper() for m in members):
+                    settings = getattr(members[0], "_settings", None)
+                    out.append((t, str(getattr(settings, "port", "") or "")))
+            return out
+
+        found = _found()
+        if not found:
+            unknown = any(not any(str(getattr(m, "model", "") or "") for m in members)
+                          for _t, members in self._lakeshore_inputs())
+            if unknown:
+                if learn:
+                    try:
+                        self._learn_lakeshore_models()
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("Lake Shore model learning failed: %s", exc)
+                    found = _found()
+                else:
+                    self._learn_lakeshore_models_soon()
+        if len(found) != 1:
+            return None
+        transport, port = found[0]
+        with self._heater_ctl_lock:
+            prev = getattr(self, "_heater_ctl", None)
+            if prev is not None and prev.link.transport is transport:
+                return prev
+            try:
+                from mast.environment.lakeshore_temp import LakeshoreLink
+                from mast.instruments.heater_335 import Heater335Controller
+
+                pin = prev.link.pinned_serial if prev is not None else ""
+                ctl = Heater335Controller(LakeshoreLink(transport, port=port,
+                                                        expected_model="MODEL335",
+                                                        pinned_serial=pin))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("heater controller unavailable: %s", exc)
+                return None
+            self._heater_ctl = ctl
+            return ctl
+
+    def heater_interlock(self) -> dict:
+        """For the field-control gate (``core.heater_control.interlock``): is a Lake Shore
+        335 heater output on, or is MAST heating? Heating and field changes never happen
+        at the same time (a design decision).
+
+        I/O: learns the model of inputs adopted before it was recorded (one ``*IDN?``
+        each), then ``RANGE?`` on both outputs over the 335's identity-checked link. Call it
+        without another instrument's link held. Never raises. ``ok``: no 335 here ("no
+        temperature controller"), or the one 335 reads RANGE 0 on both outputs and MAST is
+        not heating. Refused (unknown is not an answer): more than one 335, a Lake Shore
+        input whose model stays unknown, a 335 that cannot be reached or does not answer.
+        """
+        try:
+            inputs = self._lakeshore_inputs()
+            if any(not any(str(getattr(m, "model", "") or "") for m in members)
+                   for _t, members in inputs):
+                try:
+                    self._learn_lakeshore_models()
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Lake Shore model learning failed: %s", exc)
+                inputs = self._lakeshore_inputs()
+            unknown = [str(getattr(getattr(members[0], "_settings", None), "port", "") or "?")
+                       for _t, members in inputs
+                       if not any(str(getattr(m, "model", "") or "") for m in members)]
+            n335 = sum(1 for _t, members in inputs
+                       if any("335" in str(getattr(m, "model", "") or "").upper() for m in members))
+            cached = getattr(self, "_heater_ctl", None)
+            if unknown:
+                return {"ok": False, "present": None, "detail": tr(
+                    f"{', '.join(unknown)} 上的 Lake Shore 没有回答型号：不知道它是不是开着加热器的 335，不改磁场",
+                    f"the Lake Shore on {', '.join(unknown)} did not say which model it is: it may "
+                    "be a 335 with a heater on, so the field does not change")}
+            if n335 > 1:
+                return {"ok": False, "present": True, "detail": tr(
+                    "识别到不止一台 Lake Shore 335：MAST 不知道看哪一台的加热器，不改磁场",
+                    "more than one Lake Shore 335 is recognised: MAST cannot tell which heater to "
+                    "look at, so the field does not change")}
+            if n335 == 0:
+                if cached is not None and cached.mast_heating():
+                    return {"ok": False, "present": None, "detail": tr(
+                        "MAST 自己的加热还在，但环境监控里已经找不到那台 335：不改磁场",
+                        "MAST's own heating is on but the 335 is no longer in the environment "
+                        "monitor: the field does not change")}
+                return {"ok": True, "present": False,
+                        "detail": tr("没有温控仪（Lake Shore 335）", "no temperature controller (Lake Shore 335)")}
+            ctl = self.heater_controller()
+            if ctl is None:
+                return {"ok": False, "present": True, "detail": tr(
+                    "识别到 335，但温控控制器起不来：不知道加热器开没开，不改磁场",
+                    "a 335 is recognised but its controller is unavailable: whether a heater is "
+                    "on is unknown, so the field does not change")}
+            return ctl.interlock_state()
+        except Exception as exc:  # noqa: BLE001 - unknown is not an answer
+            logger.debug("heater interlock failed: %s", exc)
+            return {"ok": False, "present": None, "detail": tr(
+                f"读加热器状态失败：{type(exc).__name__}: {exc}",
+                f"reading the heater state failed: {type(exc).__name__}: {exc}")}
+
+    #: How long the E-STOP thread keeps sending a heater-off that does not read back off
+    #: before it leaves the retry to the controller's background thread.
+    _HEATER_ESTOP_RETRY_S = 30.0
+
+    def _heater_shutdown(self) -> None:
+        """Graceful stop: no new changes; a ramp MAST is running stops where it is. The
+        heater stays on, regulating: the 335 needs no host to hold a setpoint, and its own
+        temperature limit (required before MAST heats) does not depend on MAST."""
+        ctl = getattr(self, "_heater_ctl", None)
+        if ctl is not None:
+            ctl.begin_shutdown(reason="MAST is shutting down", origin="MAST shutdown")
+
+    def _heater_emergency_off(self, why: str) -> str:
+        """E-STOP or a hard environment alarm: both heater outputs off (like ALL OFF on the
+        panel), off the caller's thread.
+
+        Only where temperature control is set up at initialization, or while MAST's own
+        heating is on: on a station that never opted in, MAST does not write to the 335.
+        The thread resolves the controller itself, learning the model of an input built
+        from an old config entry if it has to (right after a restart), and sends until
+        RANGE? reads 0 on both outputs; after ``_HEATER_ESTOP_RETRY_S`` the controller's
+        background thread keeps retrying. Called directly, never through a skill: while
+        the E-STOP latch is set the ABORT GATE refuses every ``ctx.run``.
+        """
+        inputs = self._lakeshore_inputs()
+        cached = getattr(self, "_heater_ctl", None)
+        if not inputs and cached is None:
+            return "no temperature controller"
+        try:
+            from mast.instruments.heater_335 import HeaterSettings
+
+            configured = bool(HeaterSettings.from_profile().control_configured)
+        except Exception:  # noqa: BLE001
+            configured = False
+        mast_heating = bool(cached is not None and cached.mast_heating())
+        if not configured and not mast_heating:
+            return "temperature control not set up"
+        reason = (str(why or "").strip() or "MAST E-STOP")[:200]
+        deadline_s = self._HEATER_ESTOP_RETRY_S
+
+        def _go() -> None:
+            ctl = self.heater_controller(learn=True) or cached
+            if ctl is None:
+                logger.critical("E-STOP: no Lake Shore 335 to turn the heater off on — the "
+                                "operator must press ALL OFF at the panel")
+                return
+            t_end = time.monotonic() + deadline_s
+            while True:
+                res = ctl.heater_off(reason=reason, origin="MAST E-STOP", outputs=(1, 2))
+                if res.get("confirmed") or res.get("refused"):
+                    return
+                if time.monotonic() > t_end:
+                    logger.critical("E-STOP: the heater does not read off on the Lake Shore 335 "
+                                    "after %.0f s (%s) — retrying in the background; the operator "
+                                    "must press ALL OFF at the panel", deadline_s, res.get("error"))
+                    return
+                time.sleep(1.0)
+
+        _threading.Thread(target=_go, name="heater-estop", daemon=True).start()
+        return "dispatched"
+
+    def cryostat_states(self, kind: str) -> "list[dict]":
+        """Read-only magnet-supply (``kind="magnet"``) or level-meter (``"helium"``) rows.
+
+        One row per monitor sensor of that driver: its latest cached reading, plus
+        — once per instrument — the driver's read-only snapshot (queries only, over
+        the monitor's own identity-checked link; cached a few seconds by the link).
+        ``[]`` = no such instrument here. Never raises.
+        """
+        mon = getattr(self, "_monitor", None)
+        if mon is None:
+            return []
+        try:
+            from mast.environment.cryomag_lm510 import LM510LevelSensor
+            from mast.environment.lakeshore_625 import Model625Sensor
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("cryostat drivers unavailable: %s", exc)
+            return []
+        cls = Model625Sensor if kind == "magnet" else LM510LevelSensor
+        try:
+            sensors = dict(getattr(mon, "_sensors", {}) or {})
+            latest = dict(mon.get_latest() or {})
+        except Exception:  # noqa: BLE001
+            return []
+        out: list[dict] = []
+        seen_links: set[int] = set()
+        for name, sensor in sensors.items():
+            inner = getattr(sensor, "_inner", sensor)
+            if not isinstance(inner, cls):
+                continue
+            reading = latest.get(name)
+            link = getattr(inner, "link", None)
+            row = {
+                "sensor": str(name),
+                "port": str(getattr(link, "port", "") or ""),
+                "value": getattr(reading, "value", None) if reading is not None else None,
+                "unit": str(getattr(reading, "unit", "") or "") if reading is not None else "",
+                "status": str(getattr(reading, "status", "") or "") if reading is not None else "",
+                "timestamp": str(getattr(reading, "timestamp", "") or "") if reading is not None else "",
+            }
+            if link is not None and id(link) not in seen_links:
+                seen_links.add(id(link))
+                try:
+                    snap = inner.instrument_state()
+                    row["instrument"] = snap.as_dict() if snap is not None else None
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("cryostat snapshot failed on %s: %s", name, exc)
+                    row["instrument"] = None
+            out.append(row)
+        return out
+
     def temperature_channels(self) -> "list":
         """这台机器上所有**温度型**通道（``list[TempChannel]``）。永不抛。
 
@@ -4926,12 +5531,16 @@ class CoreRuntime:
         experiment loss instead of just logging into the void (review
         2026-07-03): a vacuum failure or thermal runaway during an unattended
         overnight run used to reach only an unread list. Now a hard alarm:
-          1. persists to the durable environment_log table,
-          2. sets the orchestrator abort Event (stops the autonomous run),
+          1. sets the orchestrator abort Event (stops the autonomous run),
+          2. freezes a magnet ramp and turns MAST's heating off,
           3. bridges an E_STOP into the vision buffer (UI banner + agent-path
-             abort hook), and
+             abort hook),
           4. best-effort retracts the tip via the emergency port (protects it
-             from a vacuum loss / thermal drift).
+             from a vacuum loss / thermal drift), and
+          5. persists the transition to the durable environment_log table.
+        The database write comes LAST: it can wait up to the 5 s busy timeout
+        behind another writer, and the stop actions must not wait behind it
+        (the database can stay busy for minutes at a time).
         A soft ``warning`` only records + surfaces; it does not stop the run.
         """
         try:
@@ -4950,14 +5559,16 @@ class CoreRuntime:
         except Exception as exc:  # pragma: no cover - best-effort
             logger.debug("_on_env_alarm record failed: %s", exc)
 
-        # Persist every transition (warning + alarm) to the durable log so the
-        # overnight history survives a restart. Best-effort.
-        try:
-            if self._storage is not None:
-                self._storage.log_environment(
-                    name, float(reading.value), reading.unit or "", reading.status)
-        except Exception as exc:  # pragma: no cover - best-effort
-            logger.debug("_on_env_alarm persist failed: %s", exc)
+        def _persist() -> None:
+            # Persist every transition (warning + alarm) to the durable log so the
+            # overnight history survives a restart. Best-effort, and called only
+            # after anything urgent: it is a database write.
+            try:
+                if self._storage is not None:
+                    self._storage.log_environment(
+                        name, float(reading.value), reading.unit or "", reading.status)
+            except Exception as exc:  # pragma: no cover - best-effort
+                logger.debug("_on_env_alarm persist failed: %s", exc)
 
         # ── 「读不到」不是「环境故障」 ──────────────────────────────────
         # ``status="error"`` 只说明**那一次读失败了**(sensor.read() 抛了,或者
@@ -4985,10 +5596,12 @@ class CoreRuntime:
                 "读取路径,不要去查真空/温度。",
                 name, prev_status,
             )
+            _persist()
             return
         # Only a HARD alarm triggers stop-loss. A soft warning is surfaced
         # (above) but does not abort a run or move hardware.
         if reading.status != "alarm":
+            _persist()
             return
         _why = tr(f"环境告警:{name} = {reading.value} {reading.unit or ''} "
                   f"越限(was {prev_status})",
@@ -5019,6 +5632,16 @@ class CoreRuntime:
                 ex_ab.set()
         except Exception as exc:  # pragma: no cover
             logger.warning("env-alarm abort set failed: %s", exc)
+        # 2b. Freeze a magnet ramp (STOP), like the E-STOP button does.
+        try:
+            self._magnet_emergency_stop(_why)
+        except Exception as exc:  # pragma: no cover
+            logger.warning("env-alarm magnet stop failed: %s", exc)
+        # 2c. Heaters off (where temperature control is set up), like the E-STOP button.
+        try:
+            self._heater_emergency_off(_why)
+        except Exception as exc:  # pragma: no cover
+            logger.warning("env-alarm heater off failed: %s", exc)
         # 3. Bridge to the vision buffer as an E_STOP (UI banner + agent abort).
         try:
             from mast.buffer.active import get_active_buffer
@@ -5041,6 +5664,8 @@ class CoreRuntime:
                     self._pool.safe_call("ZCtrl_Withdraw", 1, -1, role="main")
         except Exception as exc:  # pragma: no cover
             logger.warning("env-alarm retract failed: %s", exc)
+        # 5. Only now the database record (see the docstring).
+        _persist()
 
 
     def reload_overlay_skills(self, *, reason: str = "manual") -> dict:
@@ -5440,8 +6065,8 @@ class CoreRuntime:
                     import sqlite3
 
                     from langgraph.checkpoint.sqlite import SqliteSaver
-                    from mast._runtime_paths import project_root
-                    ckpt_dir = project_root() / "experiments"
+                    from mast._runtime_paths import data_root
+                    ckpt_dir = data_root() / "experiments"
                     ckpt_dir.mkdir(parents=True, exist_ok=True)
                     conn = sqlite3.connect(
                         str(ckpt_dir / "orchestrator_checkpoints.sqlite"),
@@ -5591,8 +6216,8 @@ class CoreRuntime:
             import sqlite3
 
             from langgraph.checkpoint.sqlite import SqliteSaver
-            from mast._runtime_paths import project_root
-            ckpt_dir = project_root() / "experiments"
+            from mast._runtime_paths import data_root
+            ckpt_dir = data_root() / "experiments"
             ckpt_dir.mkdir(parents=True, exist_ok=True)
             conn = sqlite3.connect(str(ckpt_dir / "orchestrator_checkpoints.sqlite"),
                                    check_same_thread=False)
@@ -5711,68 +6336,117 @@ class CoreRuntime:
             logger.debug("chat meta tools unavailable: %s", exc)
         return tools
 
+    #: How long a resolved Nanonis save dir is reused. MAST's own repoint (scope route) clears
+    #: the cache, so this only bounds how late a change made inside Nanonis is noticed.
+    _SESSION_DIR_TTL_S = 60.0
+    #: After a failed ask (``'main'`` busy with a sweep, a transport error), how long until the
+    #: next one. The last good dir is kept meanwhile.
+    _SESSION_DIR_RETRY_S = 15.0
+    #: The wait for the ``'main'`` role lock. Below ``connection._OPPORTUNISTIC_LOCK_TIMEOUT_S``
+    #: on purpose: a refusal is then a DEBUG line and a 5-minute summary, not an ERROR, and no
+    #: caller (the map watcher included) sits out the 30 s default behind a blocking sweep.
+    _SESSION_DIR_LOCK_TIMEOUT_S = 0.5
+
     def _resolve_session_dir(self) -> str | None:
         """Authoritative Nanonis .sxm output directory from Util_SessionPathGet.
 
-        Cached for about 15 seconds. Return None without hardware so consumers
+        Cached for ``_SESSION_DIR_TTL_S``. Return None without hardware so consumers
         can fall back to working-session directories. Normalize a file prefix
         to a directory because candidate discovery accepts directories only.
+
+        Never waits on the instrument lock for more than ``_SESSION_DIR_LOCK_TIMEOUT_S``: a
+        blocking BiasSpectr/ZSpectr sweep holds ``'main'`` for minutes, and this used to wait
+        30 s per ask (an ERROR line each, API callers queued behind it). When the ask fails
+        the LAST GOOD dir is kept (never nulled) and the next attempt is
+        ``_SESSION_DIR_RETRY_S`` away. One ask at a time: a caller that finds another one in
+        flight returns the cached value instead of queueing.
         """
+        import threading as _th
         import time as _time
         now = _time.monotonic()
         cached = getattr(self, "_session_dir_cache", None)
-        if cached is not None and (now - cached[1]) < 15.0:
+        if cached is not None and (now - cached[1]) < CoreRuntime._SESSION_DIR_TTL_S:
             return cached[0]
 
-        session_dir: str | None = None
         pool = getattr(self, "_pool", None)
         from mast import station as _station
-        if pool is not None and _station.runtime_is_optical(self):
-            pool = None          # 光学站：没有 Nanonis 会话目录可问（不为这个发 TCP）
-        if pool is not None:
-            try:
-                rec = pool.safe_call("Util_SessionPathGet", role="main")
-                if rec is not None and not getattr(rec, "error", None):
-                    parsed = getattr(rec, "return_value", None)
-                    sp = ""
-                    if isinstance(parsed, str):
-                        sp = parsed
-                    elif isinstance(parsed, (list, tuple)) and len(parsed) > 2:
-                        vals = parsed[2]
-                        if isinstance(vals, (list, tuple)):
-                            for item in reversed(vals):  # path follows its size int
-                                if isinstance(item, str):
-                                    sp = item
-                                    break
-                        elif isinstance(vals, str):
-                            sp = vals
-                    sp = _repair_nanonis_path((sp or "").replace("\x00", "").strip())
-                    if sp:
-                        from pathlib import Path as _P
-                        p = _P(sp)
-                        if p.is_dir():
-                            session_dir = str(p)
-                        elif p.parent and str(p.parent) not in (".", "") and p.parent.is_dir():
-                            session_dir = str(p.parent)  # file-prefix → its folder
-                        else:
-                            session_dir = str(p)  # best-effort (may not exist yet)
-            except Exception as exc:  # noqa: BLE001 — degrade, never break the caller
-                logger.debug("session-path resolve failed: %s", exc)
+        if pool is not None and not _station.runtime_has(self, "nanonis"):
+            pool = None          # 没有 Nanonis 的站：没有会话目录可问（不为这个发 TCP）
 
-        self._session_dir_cache = (session_dir, now)
-        # Mirror onto the plain attrs the meta-tool context + records route read.
-        self._session_path = session_dir
-        self._session_dir = session_dir
-        # Publish to the process-level registry so CONTEXT-LESS file searches
-        # (data_processing's get_latest_scan_file runs with no pool) also see
-        # the real Nanonis save dir.
-        if session_dir:
-            try:
-                from mast.core.scan_registry import record_session_dir
-                record_session_dir(session_dir)
-            except Exception:  # noqa: BLE001 — registry is best-effort
-                pass
-        return session_dir
+        with _SESSION_FLIGHT_INIT:
+            flight = getattr(self, "_session_dir_flight", None)
+            if flight is None:
+                flight = self._session_dir_flight = _th.Lock()
+        if not flight.acquire(blocking=False):
+            return cached[0] if cached is not None else None   # someone is asking right now
+        try:
+            now = _time.monotonic()
+            cached = getattr(self, "_session_dir_cache", None)
+            if cached is not None and (now - cached[1]) < CoreRuntime._SESSION_DIR_TTL_S:
+                return cached[0]
+            last_good = cached[0] if cached is not None else None
+
+            session_dir: str | None = None
+            ok = False
+            if pool is not None:
+                try:
+                    rec = pool.safe_call(
+                        "Util_SessionPathGet", role="main",
+                        lock_timeout_s=CoreRuntime._SESSION_DIR_LOCK_TIMEOUT_S)
+                    if rec is not None and not getattr(rec, "error", None):
+                        ok = True
+                        parsed = getattr(rec, "return_value", None)
+                        sp = ""
+                        if isinstance(parsed, str):
+                            sp = parsed
+                        elif isinstance(parsed, (list, tuple)) and len(parsed) > 2:
+                            vals = parsed[2]
+                            if isinstance(vals, (list, tuple)):
+                                for item in reversed(vals):  # path follows its size int
+                                    if isinstance(item, str):
+                                        sp = item
+                                        break
+                            elif isinstance(vals, str):
+                                sp = vals
+                        sp = _repair_nanonis_path((sp or "").replace("\x00", "").strip())
+                        if sp:
+                            from pathlib import Path as _P
+                            p = _P(sp)
+                            if p.is_dir():
+                                session_dir = str(p)
+                            elif p.parent and str(p.parent) not in (".", "") and p.parent.is_dir():
+                                session_dir = str(p.parent)  # file-prefix → its folder
+                            else:
+                                session_dir = str(p)  # best-effort (may not exist yet)
+                except Exception as exc:  # noqa: BLE001 — degrade, never break the caller
+                    logger.debug("session-path resolve failed: %s", exc)
+                    ok = False
+
+            # Stamp AFTER the call: the stamp used to be taken before an ask that could block
+            # 30 s, which left the failure cached under an already expired stamp.
+            done = _time.monotonic()
+            if pool is not None and not ok:
+                # Failed ask: keep the last good dir, retry soon (not at the full TTL).
+                session_dir = last_good
+                stamp = done - (CoreRuntime._SESSION_DIR_TTL_S - CoreRuntime._SESSION_DIR_RETRY_S)
+                self._session_dir_cache = (session_dir, stamp)
+                return session_dir
+            self._session_dir_cache = (session_dir, done)
+            # Mirror onto the plain attrs the meta-tool context + records route read.
+            self._session_path = session_dir
+            self._session_dir = session_dir
+            # Publish to the process-level registry so CONTEXT-LESS file searches
+            # (data_processing's get_latest_scan_file runs with no pool) also see
+            # the real Nanonis save dir.
+            if session_dir:
+                try:
+                    from mast.core.scan_registry import record_session_dir
+                    record_session_dir(session_dir)
+                except Exception:  # noqa: BLE001 — registry is best-effort
+                    pass
+            return session_dir
+        finally:
+            flight.release()
 
     def _conduct_tool_context(self) -> dict:
         """What the conduct tools' plan compiler needs (``make_conduct_tools(context=...)``): the
@@ -6218,10 +6892,10 @@ class CoreRuntime:
         if getattr(self, "_message_store", None) is None:
             return
         try:
-            from mast._runtime_paths import project_root
+            from mast._runtime_paths import data_root
             from mast.agentruntime.migrate import import_all
 
-            ckpt = project_root() / "experiments" / "orchestrator_checkpoints.sqlite"
+            ckpt = data_root() / "experiments" / "orchestrator_checkpoints.sqlite"
             summary = import_all(checkpoint_db=ckpt,
                                  conversation_store=self._conv_store,
                                  message_store=self._message_store)
@@ -6794,6 +7468,10 @@ class CoreRuntime:
                 self._scan_search_dirs = self._current_scan_dirs()
             except Exception:  # noqa: BLE001
                 self._scan_search_dirs = ()
+            # Wall clock of this start: a file last written before it is never a NEW manual
+            # spectrum, even in a dir that is first resolved later (the controller was busy
+            # at start-up) and so was not part of the baseline seed below.
+            self._map_started_wall = _t.time()
             seen: dict[str, float] = {}
             try:
                 for d in (getattr(self, "_scan_search_dirs", ()) or ()):
@@ -6807,6 +7485,14 @@ class CoreRuntime:
                                 pass
             except Exception:  # noqa: BLE001
                 pass
+            # 归档那一跳用自己的 seen：同一份启动基线的拷贝。两跳共用一个字典时,
+            # _map_spectrum_tick 写下的裸 mtime 会被 _data_ingest_tick 当成「已收」——
+            # 第一次被看到时已经存了 ≥ 5 s 的手动 .dat/.3ds 于是永远进不了实验文件夹。
+            # 拷贝而不是空字典：启动那一刻已在盘上的老文件仍然一个都不收（行为不变）。
+            # 之后才进监视集合的根，由那一跳自己按根播种（_data_ingest_tick 的 docstring）。
+            ingest_seen: dict = dict(seen)
+            # 环境标签那一跳的状态（自己的 seen，第一次只登记）。
+            env_tag_state: dict = {}
             tick_n = 0
             while not self._map_watch_stop.is_set():
                 try:
@@ -6826,9 +7512,14 @@ class CoreRuntime:
                     # 只做【发现】，复制交给 ingest sink —— 200 MB 的 .3ds 复制
                     # 在这个线程上会把手动 marker 检测卡住好几秒。
                     try:
-                        self._data_ingest_tick(seen)
+                        self._data_ingest_tick(ingest_seen)
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("data ingest tick error: %s", exc)
+                    # 环境标签：新出现或变了的数据文件交给记录器（只 stat，不读文件）。
+                    try:
+                        self._env_tag_tick(env_tag_state)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("env tag tick error: %s", exc)
                 # 对话导出（~60 s 一次）：一条走 idx_conv_updated 索引的查询，
                 # 没有新消息就什么都不做。这是唯一能保住被 8000 行上限裁掉的
                 # 转录历史的地方。
@@ -6950,6 +7641,7 @@ class CoreRuntime:
         recent_skill = (_t.monotonic()
                         - getattr(self, "_map_last_skill_ts", 0.0)) < 30.0
         now = _t.time()
+        started_wall = getattr(self, "_map_started_wall", None)
         # Refresh the search dirs each tick — the Nanonis session dir can change
         # when the operator opens a new session / starts a new experiment.
         try:
@@ -6974,6 +7666,8 @@ class CoreRuntime:
                     if seen.get(p) == mt:     # this version already processed
                         continue
                     seen[p] = mt              # mark this version processed
+                    if started_wall is not None and mt < started_wall:
+                        continue              # on disk before MAST started: not a new manual op
                     if exp_id is None or recent_skill:
                         continue  # no scope, or skill-owned → not a manual op
                     try:
@@ -7032,6 +7726,12 @@ class CoreRuntime:
         except Exception as exc:  # noqa: BLE001
             logger.warning("ingest sink init failed: %s", exc)
             self._ingest = None
+        # 副本落进实验文件夹 → 环境标签给它补一份 sidecar（docs/v2/design/data_env_tags.md）。
+        try:
+            if self._ingest is not None:
+                self._ingest.set_on_result(self._on_ingest_result)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("ingest -> env tags hook not wired: %s", exc)
 
         # 作用域切换 → 建/轮转实验与样品目录。挂在 scope.subscribe 上而不是塞进
         # ExperimentLog：切换是 logging 层的事，建目录是文件层的事，两者只通过
@@ -7071,6 +7771,9 @@ class CoreRuntime:
 
     def _on_scope_change(self, old, new) -> None:
         """作用域切换后的文件侧动作。已在 scope 的单槽线程池上，可以做 I/O。"""
+        # 环境记录缓存的是旧作用域的目录：作废它，下一条读数按新作用域重新解析。
+        self._env_scope_cache = None
+        self._ingest_scope_cache = None
         try:
             self._ensure_scope_dirs()
         except Exception as exc:  # noqa: BLE001
@@ -7260,19 +7963,82 @@ class CoreRuntime:
             return None, None
         return log.current_experiment_id, log.current_sample_id
 
+    #: How long the environment path reuses a resolved scope before checking it again.
+    _ENV_SCOPE_TTL_S = 60.0
+    #: After a failed or empty resolve, how long before the next attempt.
+    _ENV_SCOPE_RETRY_S = 10.0
+
     def _env_csv_scope(self):
-        """(exp_dir, sample_dir_name, experiment_id, sample_id) 给 CSV sink。
+        """(exp_dir, sample_dir_name, experiment_id, sample_id) 给 CSV sink 与历史 sink。
 
         没有当前实验时返回 None → 读数只进 DB 不落文件（无处可落）。
+
+        **按作用域缓存。** 每一轮环境读数要调它十几次（两个 sink × 每个传感器）。
+        以前每次都走 :meth:`_ensure_scope_dirs`：三次 SQLite 连接，外加重写
+        experiment.json、sample.json、README.md。平时一次几毫秒；
+        库或磁盘一忙，一次可能要十几秒，环境监控一轮被拖到几分钟，
+        所有传感器的历史都断档，磁体温度「太旧」挡住了调场。
+        目录和清单只需在作用域变化时铺一次（启动时和 :meth:`_on_scope_change` 已经
+        在做）。这里同一个（实验，样品）在 ``_ENV_SCOPE_TTL_S`` 内直接复用；解析失败
+        就沿用这个作用域上次的结果（目录不会挪），过 ``_ENV_SCOPE_RETRY_S`` 再试，
+        不让每条读数都再去撞一次正忙的库。
         """
         log = self._experiment_log
         if log is None or not log.current_experiment_id:
             return None
-        scope = self._ensure_scope_dirs()
+        key = (log.current_experiment_id, log.current_sample_id)
+        now = time.monotonic()
+        cached = getattr(self, "_env_scope_cache", None)
+        if cached is not None and cached[0] == key and now < cached[1]:
+            return cached[2]
+        prev = cached[2] if cached is not None and cached[0] == key else None
+        try:
+            scope = self._ensure_scope_dirs()
+        except Exception as exc:  # noqa: BLE001 — 记录路径绝不因建目录失败而抛
+            logger.debug("env scope resolve failed: %r", exc)
+            self._env_scope_cache = (key, now + self._ENV_SCOPE_RETRY_S, prev)
+            return prev
         if not scope:
+            self._env_scope_cache = (key, now + self._ENV_SCOPE_RETRY_S, None)
             return None
         exp_dir, sample_dir = scope
-        return exp_dir, sample_dir, log.current_experiment_id, log.current_sample_id
+        value = (exp_dir, sample_dir, key[0], key[1])
+        self._env_scope_cache = (key, now + self._ENV_SCOPE_TTL_S, value)
+        return value
+
+    #: The archive tick's own scope cache, same TTL as the environment path's.
+    _INGEST_SCOPE_TTL_S = 60.0
+
+    def _ingest_scope(self):
+        """``(exp_dir, sample_dir_name)`` for the archive tick, cached per (experiment, sample).
+
+        The tick runs every ~6 s. Each ``_ensure_scope_dirs`` opens three SQLite connections
+        and rewrites sample.json, experiment.json and README.md (``last_active_at`` changes
+        every time): ~30 file writes a minute for nothing, and on a busy disk the call that
+        took 10-20 s and, on 'database is locked', threw away the whole tick. The directories
+        and manifests only need laying down when the scope changes (startup and
+        ``_on_scope_change`` do that). Cleared by ``_on_scope_change``. A failed resolve keeps
+        this scope's previous answer and is retried after ``_ENV_SCOPE_RETRY_S``; it never
+        raises. Used where the answer only locates the folder; ``_submit_ingest`` (a skill
+        just saved something) still goes through ``_ensure_scope_dirs``."""
+        log = self._experiment_log
+        key = (getattr(log, "current_experiment_id", None), getattr(log, "current_sample_id", None))
+        now = time.monotonic()
+        cached = getattr(self, "_ingest_scope_cache", None)
+        if cached is not None and cached[0] == key and now < cached[1]:
+            return cached[2]
+        prev = cached[2] if cached is not None and cached[0] == key else None
+        try:
+            scope = self._ensure_scope_dirs()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("ingest scope resolve failed: %r", exc)
+            self._ingest_scope_cache = (key, now + CoreRuntime._ENV_SCOPE_RETRY_S, prev)
+            return prev
+        if not scope:
+            self._ingest_scope_cache = (key, now + CoreRuntime._ENV_SCOPE_RETRY_S, None)
+            return None
+        self._ingest_scope_cache = (key, now + CoreRuntime._INGEST_SCOPE_TTL_S, scope)
+        return scope
 
     def _env_csv_enabled(self) -> bool:
         try:
@@ -7378,6 +8144,160 @@ class CoreRuntime:
             logger.warning("Could not create EnvHistoryRecorder: %s", exc)
             return None
 
+    # ── 数据文件的环境标签（docs/v2/design/data_env_tags.md）─────────────
+    #
+    # 三处钩子（技能记录接缝 _record_v2_action、文件监视 _env_tag_tick、实验文件夹副本
+    # _on_ingest_result）都只把路径交给 _submit_env_tags —— 一次加锁的字典操作，不 stat、
+    # 不读文件。取环境值的是记录器自己的工作线程，而它**只读内存缓存**（读数环、
+    # get_latest()、传感器的类型与字段）与环境历史库：不调传感器的任何方法，不拿任何
+    # 设备链路锁（625 的链路锁与磁场扫场监督共用）。
+
+    def _build_env_tag_ring(self):
+        """读数环：EnvironmentMonitor 的又一个 sink（只记监视器自己读到的数）。"""
+        try:
+            from mast.envhistory.filetags.ring import ReadingRing
+            return ReadingRing()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("env tag ring unavailable: %r", exc)
+            return None
+
+    def _build_env_tagger(self):
+        """建环境标签记录器并登记为进程单例（图库设置页从单例读它的状态）。"""
+        try:
+            from mast.envhistory.filetags.tagger import FileEnvTagger, set_tagger
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("env tagger unavailable: %r", exc)
+            return None
+        try:
+            tagger = FileEnvTagger(
+                ring=getattr(self, "_env_tag_ring", None),
+                latest_getter=self._env_latest_readings,
+                meta_getter=self._env_sensor_meta,
+            )
+            set_tagger(tagger)
+            return tagger
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not create the env tagger: %s", exc)
+            return None
+
+    def _env_latest_readings(self) -> dict:
+        """``EnvironmentMonitor.get_latest()`` 的拷贝 —— 监视器缓存里的读数，零 I/O。"""
+        mon = getattr(self, "_monitor", None)
+        if mon is None:
+            return {}
+        try:
+            return dict(mon.get_latest() or {})
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def _env_sensor_meta(self) -> dict:
+        """``{名字: SensorMeta}``：监视器当前的传感器集合按驱动类归类。
+
+        **只看类型与字段，不调传感器的任何方法** —— 基类的 ``is_healthy()`` 里
+        就是一次 ``read()``。拿不到就回空表（记录器退到按单位归类）。"""
+        mon = getattr(self, "_monitor", None)
+        if mon is None:
+            return {}
+        try:
+            from mast.envhistory.filetags.kinds import classify_sensor
+            sensors = dict(getattr(mon, "_sensors", {}) or {})
+        except Exception:  # noqa: BLE001
+            return {}
+        out: dict = {}
+        for name, sensor in sensors.items():
+            try:
+                out[str(name)] = classify_sensor(str(name), sensor)
+            except Exception:  # noqa: BLE001
+                continue
+        return out
+
+    def _env_tagger_or_none(self):
+        tagger = getattr(self, "_env_tagger", None)
+        if tagger is not None:
+            return tagger
+        try:
+            from mast.envhistory.filetags.tagger import get_tagger
+            return get_tagger()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _submit_env_tags(self, paths, *, origin: str = "skill") -> None:
+        """把刚存下的数据文件交给环境标签记录器。只排队，永不阻塞、永不抛。"""
+        try:
+            tagger = self._env_tagger_or_none()
+            if tagger is not None and paths:
+                tagger.submit([str(p) for p in paths if p], origin=origin)
+        except Exception:  # noqa: BLE001 — 打标绝不能连累保存与记录
+            logger.debug("env tag submit skipped", exc_info=True)
+
+    def _env_tag_tick(self, state: dict) -> None:
+        """文件监视的一跳：新出现或 ``(mtime_ns, size)`` 变了的 .sxm/.dat/.3ds 交给记录器。
+
+        **自己的** ``seen``（``state["files"]``），不与另外两跳共用。**按监视根播种**
+        （``state["roots"]``）：一个根第一次被走到时，它下面的文件只登记、不提交 —— 启动之前就在
+        盘上的文件不回头补打；之后才进监视集合的根（Nanonis 会话目录晚解析出来、操作员切到一个
+        有旧文件的会话文件夹）里的老文件也不补打（补了就成了「保存时记录」的假标签，还会一下子
+        塞满队列）。启动之后才出现的根，_WATCH_FIRST_WALK_FRESH_S 之内刚存的照常交出；还不存在的
+        根不播种，等它出现。只 stat、不读文件；记录器关着时照样登记、不提交，免得重新打开时把关着
+        期间存的文件一股脑补打。"""
+        import os
+        import time as _t
+
+        from mast.envhistory.filetags.tagger import walk_data_files
+
+        files: dict = state.setdefault("files", {})
+        roots: set = state.setdefault("roots", set())
+        startup = not state.get("seeded")
+        now = _t.time()
+        walked: set = set()
+        walked_roots: set = set()
+        found: list[str] = []
+        for d in (getattr(self, "_scan_search_dirs", ()) or ()):
+            if not d:
+                continue
+            d = str(d)
+            first_walk = d not in roots
+            if first_walk and not os.path.isdir(d):
+                continue                             # 还不存在（或暂时够不着）：出现时再播种
+            walked_roots.add(d)
+            for path, key in walk_data_files(d):
+                walked.add(path)
+                if files.get(path) == key:
+                    continue
+                files[path] = key
+                if not first_walk or _first_walk_admits(key[0] / 1e9, now, startup=startup):
+                    found.append(path)
+            roots.add(d)
+        state["seeded"] = True
+        if len(files) > _ENV_TAG_FILES_MAX:          # 有界：只留这一轮还看得见的
+            for p in [p for p in files if p not in walked]:
+                files.pop(p, None)
+            # 文件登记被清掉的根，下次出现时要重新播种（否则它的老文件全成了「新的」）。
+            roots.intersection_update(walked_roots)
+        tagger = self._env_tagger_or_none()
+        if tagger is None:
+            return
+        # 在监视线程上（不是保存路径）顺手刷新开关：关掉 / 重新打开几秒内生效。
+        refresh = getattr(tagger, "refresh_settings", None)
+        if callable(refresh):
+            refresh()
+        if found and getattr(tagger, "enabled_cached", True):
+            tagger.submit(found, origin="watcher")
+
+    def _on_ingest_result(self, job, res) -> None:
+        """实验文件夹的副本（或原位登记）落地 → 交给环境标签记录器补一份 sidecar。
+
+        跑在归档线程上，只排队。副本与原件身份相同（复制后 copystat），记录器会从中央记录
+        原样拿原件那一份，不重新计算。"""
+        try:
+            if not getattr(res, "ok", False):
+                return
+            dest = getattr(res, "dest", None)
+            if dest:
+                self._submit_env_tags([str(dest)], origin="copy")
+        except Exception:  # noqa: BLE001
+            logger.debug("env tag copy hook skipped", exc_info=True)
+
     def _sample_dir_for(self, sample_id: str) -> str | None:
         """sample_id → 样品目录名（没有就现算一个并记下来）。"""
         st = self._storage
@@ -7403,21 +8323,33 @@ class CoreRuntime:
     def _data_ingest_tick(self, seen: dict) -> None:
         """扫 Nanonis 保存目录，把新出现的测量文件交给 ingest sink。
 
-        **只做发现，绝不在这个线程上复制。** 与 ``_map_spectrum_tick`` 共用
-        ``seen`` 字典（那边只用 mtime，这边用 (mtime, size) —— 同 mtime 重写也能
-        抓到，所以值是元组时两边都能读）。
+        **只做发现，绝不在这个线程上复制。** ``seen`` 是这一跳**自己的**字典
+        （监视线程开头那份启动基线的拷贝），不与 ``_map_spectrum_tick`` 共用：共用时
+        那边写下的裸 mtime 会被这里当成「已收」，第一次被看到时已存了 ≥ 5 s 的手动
+        .dat/.3ds 就永远不会交出去。值是 (mtime, size) —— 同 mtime 重写也能抓到；
+        启动基线里的裸 mtime 照旧认（老文件不收）。
 
-        ``seen`` 持久化在 ``.mast/ingest_state.json``：重启后不重扫已知文件，
-        而 **MAST 关着的时候 Nanonis 写的文件因为不在 seen 里会被收进来** ——
-        这正是我们要的兜底。
+        ``seen`` 会写到 ``.mast/ingest_state.json``，但启动时**并不读回**（保持现状）：
+        MAST 关着的时候存下的文件不会被补收。
+
+        **按监视根播种**（播种状态存在 ``seen[_INGEST_WALK_KEY]``，跟着这个字典走）：一个根第一次
+        被走到时，它下面的 .sxm/.dat/.3ds 只登记、不交出 —— 启动时就在盘上的文件、之后才进监视
+        集合的根里的老文件，都不归档（别的会话的测量不该被归进当前样品）。启动之后才出现的根，
+        _WATCH_FIRST_WALK_FRESH_S 之内刚存的照常交出；还不存在的根不播种，等它出现。
+
+        一跳最多交出 _INGEST_MAX_PER_TICK 个，**只把这一跳实际处理了的记为已见**（交出、隔离，或
+        认出是我们自己的副本），剩下的下一跳接着交 —— 原来先把全部记成已见、再只交前 64 个，超出
+        的那部分永远不归档。正在长的 .3ds 静置 _INGEST_3DS_SETTLE_S 才交。``seen`` 超过
+        _INGEST_SEEN_MAX 条时删掉已经不存在的文件。
         """
         import glob
         import os
+        import time as _t
 
         sink = getattr(self, "_ingest", None)
         if sink is None or not self._ingest_watcher_enabled():
             return
-        scope = self._ensure_scope_dirs()
+        scope = CoreRuntime._ingest_scope(self)
         exp_dir, sample_dir = scope if scope else (None, None)
 
         from mast.core.experiment_paths import sample_dir as _sd
@@ -7425,14 +8357,25 @@ class CoreRuntime:
 
         active_sample_dir = _sd(exp_dir, sample_dir) if (exp_dir and sample_dir) else None
         log = self._experiment_log
-        found: list[str] = []
+        found: list[tuple[str, tuple]] = []
+        queued: set = set()       # 嵌套的根（会话目录在 experiments 里面）会把同一个文件走到两次
+        now = _t.time()
+        walk = seen.get(_INGEST_WALK_KEY)
+        startup = not isinstance(walk, dict)
+        if startup:
+            walk = seen[_INGEST_WALK_KEY] = {"roots": set()}
+        roots: set = walk.setdefault("roots", set())
 
         for d in (getattr(self, "_scan_search_dirs", ()) or ()):
             if not d:
                 continue
+            d = str(d)
+            first_walk = d not in roots
+            if first_walk and not os.path.isdir(d):
+                continue          # 还不存在（或暂时够不着）：出现时再播种
             for ext in ("**/*.sxm", "**/*.dat", "**/*.3ds"):
                 try:
-                    paths = glob.glob(os.path.join(str(d), ext), recursive=True)
+                    paths = glob.glob(os.path.join(d, ext), recursive=True)
                 except OSError:
                     continue
                 for p in paths:
@@ -7447,17 +8390,32 @@ class CoreRuntime:
                     if prev_key == key or (prev is not None and not isinstance(prev, tuple)
                                            and prev == stt.st_mtime):
                         continue
-                    seen[p] = key
-                    found.append(p)
+                    if p in queued:
+                        continue
+                    if first_walk and not _first_walk_admits(stt.st_mtime, now, startup=startup):
+                        seen[p] = key     # 播种：登记，不交出
+                        continue
+                    if (p.lower().endswith(".3ds")
+                            and now - stt.st_mtime < _INGEST_3DS_SETTLE_S):
+                        continue          # 还在长：不登记，静置够了再交
+                    queued.add(p)
+                    found.append((p, key))
+            roots.add(d)
 
         if not found:
+            _prune_ingest_seen(seen)
             self._persist_ingest_state(exp_dir, seen)
             return
 
-        for p in found[:64]:      # 一跳最多提交这么多，避免首次启动时雪崩
+        handled = 0
+        for p, key in found:
+            if handled >= _INGEST_MAX_PER_TICK:
+                break             # 剩下的不记为已见：下一跳接着交，不会永远漏掉
             zone = classify(p, active_sample_dir=active_sample_dir)
+            seen[p] = key
             if zone is Zone.MANAGED:
-                continue          # 我们自己的副本 —— 递归闸门
+                continue          # 我们自己的副本 —— 递归闸门（不占名额）
+            handled += 1
             if exp_dir is None or not sample_dir:
                 self._quarantine_file(p)
                 continue
@@ -7474,6 +8432,7 @@ class CoreRuntime:
             if zone is Zone.INPLACE_FOREIGN:
                 self._note_stale_session_path(p)
 
+        _prune_ingest_seen(seen)
         self._persist_ingest_state(exp_dir, seen)
 
     def _ingest_watcher_enabled(self) -> bool:
@@ -7492,8 +8451,8 @@ class CoreRuntime:
             import json
             p = exp_dir / ".mast" / "ingest_state.json"
             p.parent.mkdir(parents=True, exist_ok=True)
-            # 只留最近 4000 条，别让这个文件无限长
-            items = list(seen.items())[-4000:]
+            # 只留最近 4000 条，别让这个文件无限长（播种状态那一项不是文件，不落盘）
+            items = [kv for kv in seen.items() if kv[0] != _INGEST_WALK_KEY][-4000:]
             payload = {k: (list(v) if isinstance(v, tuple) else v) for k, v in items}
             tmp = p.with_suffix(".json.tmp")
             tmp.write_text(json.dumps(payload), encoding="utf-8")
@@ -8121,6 +9080,10 @@ class CoreRuntime:
                 if callable(_submit):
                     _submit(aid, arts, source="skill",
                             skill=str(payload.get("skill") or ""))
+                # …and hand them to the env-tag recorder (docs/v2/design/data_env_tags.md). It only queues the paths here; nothing is read on this thread.
+                _tag = getattr(self, "_submit_env_tags", None)
+                if callable(_tag):
+                    _tag(arts, origin="skill")
             else:
                 err = (str(payload.get("error") or "")
                        or str(payload.get("summary") or "")

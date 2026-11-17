@@ -12,6 +12,8 @@ import { api } from "@/api/client";
 import type { GalleryBuildStatus } from "@/lib/gallery/types";
 import { ErrorNote, Spinner } from "@/components/ui";
 import { GALLERY_KEYS, useGalleryConfig, useGalleryStatus } from "./useGalleryData";
+import { GALLERY_ENV_TAGS_KEY, useGalleryEnvTags } from "./useGalleryEnvTags";
+import { envTagStatusLine, parseMaxAge } from "@/lib/gallery/env";
 import { ImportMarksForm } from "./MarkedView";
 import { toast } from "./toast";
 import { SMALL_BTN, SMALL_SELECT } from "./bits";
@@ -39,12 +41,109 @@ const PHASE: Record<string, string> = {
 
 let rowKey = 0;
 
+/**
+ * Environment tags on saved data files (docs/v2/design/data_env_tags.md D10): the switch and the
+ * freshness threshold, plus what the recorder in this process has done. Its own endpoint
+ * (/api/gallery/env-tags) and its own file: this button never sends the data roots, and saving the
+ * roots above never resets these settings.
+ */
+function EnvTagsSection() {
+  const qc = useQueryClient();
+  const cfg = useGalleryEnvTags();
+  const [on, setOn] = useState<boolean | null>(null);
+  const [age, setAge] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    if (!cfg.data || on !== null) return;
+    setOn(cfg.data.enabled ?? true);
+    setAge(String(cfg.data.max_age_s ?? 30));
+  }, [cfg.data, on]);
+
+  const save = async () => {
+    if (!cfg.data) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      // Empty means "leave it as it is" (it is not read as 0); not a number is refused;
+      // a number is clamped to the server's range of 5-600 s rather than have the request refused.
+      const parsed = parseMaxAge(age);
+      if (parsed === null) {
+        setMsg({ ok: false, text: tr("新鲜度阈值要填 5–600 之间的秒数", "The freshness threshold must be a number of seconds, 5–600") });
+        return;
+      }
+      const { data, error } = await api.POST("/api/gallery/env-tags", {
+        body: { enabled: !!on, max_age_s: parsed.value },
+      });
+      if (error || !data) throw new Error(tr("请求失败", "Request failed"));
+      if (!data.ok) {
+        setMsg({ ok: false, text: data.detail || tr("没有保存", "Not saved") });
+        return;
+      }
+      qc.setQueryData(GALLERY_ENV_TAGS_KEY, data);
+      setOn(data.enabled ?? true);
+      setAge(String(data.max_age_s ?? 30));
+      setMsg({ ok: true, text: tr("已保存，几秒内生效。", "Saved; takes effect within seconds.") });
+    } catch (e) {
+      setMsg({ ok: false, text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const st = cfg.data?.status ?? null;
+  return (
+    <section data-gallery-env-setup>
+      <h2 className="mb-1.5 mt-5 text-[1.05rem] font-semibold">{tr("环境标签", "Environment tags")}</h2>
+      <Sub>
+        {tr(
+          "保存数据文件时，MAST 把当时已知的环境（温度、磁场、真空、液位……）写在文件旁边的 .mast/envtags/<文件名>.json 里，数据文件本身一字不动，同时在环境历史库里记一份。只用环境监控已经读到的数，不为打标去读仪器；读数离保存时刻超过下面的秒数，就记为「过期」并写明早了多久。Nanonis 会话目录里也会出现这个 .mast 文件夹；删掉 .mast/envtags 只丢这些记录，不影响数据。本功能之前存的文件，图库按环境历史推断并标「推断」。",
+          "When a data file is saved, MAST writes the environment it knows at that moment (temperature, field, vacuum, level…) to .mast/envtags/<file name>.json beside the file; the data file itself is never touched, and a copy goes into the environment-history database. Only readings the environment monitor already took are used; nothing reads the instruments for this. A reading further from the save than the number of seconds below is recorded as stale, with how old it was. This .mast folder also appears in the Nanonis session directory; deleting .mast/envtags only removes these records, not data. Files saved before this feature are inferred from the environment history and marked \"inferred\".",
+        )}
+      </Sub>
+      <div className="flex flex-wrap items-center gap-3 text-[13px]">
+        <label className="flex items-center gap-1">
+          <input type="checkbox" checked={!!on} disabled={on === null} onChange={(e) => setOn(e.target.checked)} />
+          {tr("保存数据时记录环境", "Record the environment when data is saved")}
+        </label>
+        <label
+          className="flex items-center gap-1"
+          title={tr(
+            "读数时刻与保存时刻相差不超过这么多秒，算当时的值；超过就记为过期（5–600）",
+            "A reading within this many seconds of the save counts as current; further away it is recorded as stale (5–600)",
+          )}
+        >
+          {tr("新鲜度阈值", "Freshness")}
+          <input className={`${SMALL_SELECT} w-14`} value={age} disabled={on === null} onChange={(e) => setAge(e.target.value)} />
+          {tr("秒（5–600）", "s (5–600)")}
+        </label>
+        <button type="button" className={SMALL_BTN} disabled={busy || on === null} onClick={save}>
+          {busy ? tr("保存中…", "Saving…") : tr("保存", "Save")}
+        </button>
+        {msg && <span className={msg.ok ? "text-mast-auto" : "text-mast-danger"}>{msg.text}</span>}
+      </div>
+      <div className="mt-2 font-mono text-xs text-mast-muted" data-gallery-env-status>
+        {st?.active
+          ? envTagStatusLine(st)
+          : tr(
+              "这个进程里没有环境标签记录器（MAST 服务没在跑，或这是单独起的 API 进程）。",
+              "No environment-tag recorder in this process (the MAST service is not running, or this is a standalone API process).",
+            )}
+        {st?.last_error && <div className="mt-0.5 text-mast-warn">{tr("最近的问题：", "Last problem: ")}{st.last_error}</div>}
+      </div>
+    </section>
+  );
+}
+
 export function SetupView() {
   const qc = useQueryClient();
   const cfg = useGalleryConfig();
   const status = useGalleryStatus();
   const [rows, setRows] = useState<RootRow[] | null>(null);
   const [workers, setWorkers] = useState("");
+  const [autoBuild, setAutoBuild] = useState(true);
+  const [autoMin, setAutoMin] = useState("10");
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -52,6 +151,8 @@ export function SetupView() {
     if (!cfg.data || rows) return;
     setRows((cfg.data.roots ?? []).map((r) => ({ key: ++rowKey, ...r })));
     setWorkers(String(cfg.data.workers ?? ""));
+    setAutoBuild(cfg.data.auto_build ?? true);
+    setAutoMin(String(cfg.data.auto_interval_min ?? 10));
   }, [cfg.data, rows]);
 
   const st: GalleryBuildStatus | undefined = status.data;
@@ -63,10 +164,14 @@ export function SetupView() {
     setSaveMsg(null);
     try {
       const w = Number(workers);
+      const m = Number(autoMin);
       const { data, error } = await api.POST("/api/gallery/config", {
         body: {
           roots: rows.map((r) => ({ name: r.name.trim() || null, path: r.path.trim(), enabled: r.enabled })),
           workers: Number.isFinite(w) && w >= 1 ? Math.round(w) : null,
+          auto_build: autoBuild,
+          // Server range is 2-720 minutes; anything else is clamped here instead of being refused.
+          auto_interval_min: Number.isFinite(m) ? Math.min(720, Math.max(2, Math.round(m))) : null,
         },
       });
       if (error || !data) throw new Error(tr("请求失败", "Request failed"));
@@ -77,7 +182,14 @@ export function SetupView() {
       qc.setQueryData(GALLERY_KEYS.config, data);
       setRows((data.roots ?? []).map((r) => ({ key: ++rowKey, ...r })));
       setWorkers(String(data.workers ?? ""));
-      setSaveMsg({ ok: true, text: tr("已保存。改了数据根之后点「增量更新」。", "Saved. After changing data roots, click \"Incremental update\".") });
+      setAutoBuild(data.auto_build ?? true);
+      setAutoMin(String(data.auto_interval_min ?? 10));
+      // `detail` on a successful save says which nested or repeated roots were merged (and whose
+      // marks moved): the server folds them instead of refusing the save.
+      setSaveMsg({ ok: true, text: tr(
+          "已保存。改了数据根后可以点「增量更新」，或等下一轮自动更新。",
+          "Saved. After changing data roots you can click \"Incremental update\", or wait for the next automatic update.",
+        ) + (data.detail ? ` ${data.detail}` : "") });
     } catch (e) {
       setSaveMsg({ ok: false, text: (e as Error).message });
     } finally {
@@ -197,8 +309,25 @@ export function SetupView() {
           {tr("线程", "Threads")}
           <input className={`${SMALL_SELECT} w-14`} value={workers} onChange={(e) => setWorkers(e.target.value)} />
         </label>
+        <label
+          className="flex items-center gap-1"
+          title={tr(
+            "MAST 运行期间定时做增量更新，打开图库页时也会做一次。刚写入（不到 1 分钟）的文件留到下一轮。",
+            "While MAST runs, do an incremental update on a timer, and once when the gallery page is opened. Files written less than a minute ago wait for the next round.",
+          )}
+        >
+          <input type="checkbox" checked={autoBuild} onChange={(e) => setAutoBuild(e.target.checked)} />
+          {tr("自动增量更新，每", "Auto incremental update, every")}
+          <input
+            className={`${SMALL_SELECT} w-14`}
+            value={autoMin}
+            disabled={!autoBuild}
+            onChange={(e) => setAutoMin(e.target.value)}
+          />
+          {tr("分钟（2–720）", "min (2–720)")}
+        </label>
         <button type="button" className={clsx(SMALL_BTN, "!border-mast-accent !bg-mast-accent !text-mast-accent-ink")} disabled={saving || !rows} onClick={save}>
-          {saving ? tr("保存中…", "Saving…") : tr("保存数据根", "Save data roots")}
+          {saving ? tr("保存中…", "Saving…") : tr("保存设置", "Save settings")}
         </button>
         {saveMsg && <span className={saveMsg.ok ? "text-mast-auto" : "text-mast-danger"}>{saveMsg.text}</span>}
       </div>
@@ -231,8 +360,8 @@ export function SetupView() {
       <h2 className="mb-1.5 mt-5 text-[1.05rem] font-semibold">{tr("构建", "Build")}</h2>
       <Sub>
         {tr(
-          "增量更新只处理新文件与大小/修改时刻变了的文件；「全部重出」忽略渲染与判据缓存。构建在后台跑，关掉这一页不影响。",
-          "Incremental update only processes new files and files whose size or modification time changed; \"Rebuild all\" ignores the render and criteria caches. The build runs in the background; closing this page does not affect it.",
+          "增量更新只处理新文件与大小/修改时刻变了的文件；「全部重出」忽略渲染与判据缓存。构建在后台跑，关掉这一页不影响。MAST 启动几分钟后起，会按上面的设置自动做增量更新（自动的那一轮最多用 2 个线程，且不收 1 分钟内刚写入的文件）；你点按钮时若正好在自动更新，它会先停下，随后马上按你的要求跑。MAST 正在调磁场（升降场）时，自动更新会暂停，调完再继续。",
+          "Incremental update only processes new files and files whose size or modification time changed; \"Rebuild all\" ignores the render and criteria caches. The build runs in the background; closing this page does not affect it. A few minutes after MAST starts it also runs incremental updates by itself, as configured above (an automatic round uses at most 2 threads and leaves out files written in the last minute); if you click a button during one, it stops and your build starts right after. While MAST is ramping the magnet field, automatic updates pause and resume once the ramp ends.",
         )}
       </Sub>
       <div className="flex flex-wrap items-center gap-2 text-[13px]">
@@ -256,6 +385,7 @@ export function SetupView() {
           <div>
             {tr("状态：", "Status: ")}
             <b>{PHASE[st.phase] ?? st.phase}</b>
+            {st.trigger === "auto" && tr("（自动更新）", " (automatic)")}
             {running ? tr("（进行中）", " (running)") : ""}
             {st.started && tr(` · 开始 ${st.started}`, ` · started ${st.started}`)}
             {st.finished && tr(` · 结束 ${st.finished}`, ` · finished ${st.finished}`)}
@@ -272,8 +402,10 @@ export function SetupView() {
           )}
           <div className="mt-1 font-mono text-xs text-mast-muted">
             {tr(
-              `条目 ${st.n_files} · 新 ${st.n_new} · 变动 ${st.n_changed} · 渲染 ${st.n_render} · 判据 ${st.n_analysis} · 失败 ${st.n_failed}`,
-              `items ${st.n_files} · new ${st.n_new} · changed ${st.n_changed} · rendered ${st.n_render} · criteria ${st.n_analysis} · failed ${st.n_failed}`,
+              `条目 ${st.n_files} · 新 ${st.n_new} · 变动 ${st.n_changed} · 渲染 ${st.n_render} · 判据 ${st.n_analysis} · 失败 ${st.n_failed}` +
+                (st.n_deferred ? ` · 刚写入、留到下一轮 ${st.n_deferred}` : ""),
+              `items ${st.n_files} · new ${st.n_new} · changed ${st.n_changed} · rendered ${st.n_render} · criteria ${st.n_analysis} · failed ${st.n_failed}` +
+                (st.n_deferred ? ` · ${st.n_deferred} just written, left for the next round` : ""),
             )}
           </div>
           {st.message && <div className="mt-1">{st.message}</div>}
@@ -298,6 +430,8 @@ export function SetupView() {
           )}
         </div>
       )}
+
+      <EnvTagsSection />
 
       <h2 className="mb-1.5 mt-5 text-[1.05rem] font-semibold">{tr("导入原图库的标记", "Import marks from the earlier gallery")}</h2>
       <Sub>

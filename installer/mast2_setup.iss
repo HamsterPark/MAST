@@ -85,6 +85,9 @@ LanguageDetectionMethod=none
 ; Pascal Script "Runtime error … Type mismatch" at ssPostInstall on some
 ; Inno/Windows combinations even though the files were already installed.
 ChangesAssociations=yes
+; Write %TEMP%\Setup Log <date> #nnn.txt on every run. A Pascal Script "Runtime error" box
+; gives only a code offset; without this log nothing records which call raised.
+SetupLogging=yes
 
 [Languages]
 Name: "english";  MessagesFile: "compiler:Default.isl"
@@ -386,7 +389,9 @@ begin
   // metadata.parquet, not the directory: an empty dir is nothing to protect.
   if not FileExists(IndexDir + '\metadata.parquet') then
     Exit;
-  Stamp := GetDateTimeString('yyyymmdd-hhnnss', '-', '');
+  // The separator arguments are Char, not String: '' (zero-length) raises "Type Mismatch"
+  // at run time. The format has no / or : so the values never show up in the stamp.
+  Stamp := GetDateTimeString('yyyymmdd-hhnnss', '-', ':');
   SnapDir := ExpandConstant('{app}\MASTv2\artifacts\literature_index.pre-upgrade-') + Stamp;
   // robocopy exit codes 0..7 are success; 8+ are real failures. Exec's own
   // Boolean result must be checked too — if the shell never launched, rc is

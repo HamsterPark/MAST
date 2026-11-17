@@ -192,8 +192,9 @@ export function hasSafetyPrompt(list: readonly OperatorPrompt[]): boolean {
 
 /** The open prompts as the nav badge, the alert host and the board read them. */
 export interface OpenPromptFeed {
-  /** This station has operator prompts at all (the optical profile). When false the
-   *  rest is empty and nothing under /api/operator is being asked for. */
+  /** This station has operator prompts at all (capability `operator_prompts`, the optical
+   *  station by default). When false the rest is empty and nothing under /api/operator is
+   *  being asked for. */
   enabled: boolean;
   /** open prompts in answering order (safety first, then oldest first) */
   prompts: readonly OperatorPrompt[];
@@ -208,9 +209,10 @@ export interface OpenPromptFeed {
 }
 
 /**
- * What the shell sees on a station without operator prompts: an STM station, or one that
- * has not said what it is yet. It is always the same frozen object, so an effect that
- * depends on it never re-runs, and nothing in it can raise a badge, a toast or a sound.
+ * What the shell sees on a station without operator prompts: an STM or a generic station,
+ * or one that has not said what it has yet. It is always the same frozen object, so an
+ * effect that depends on it never re-runs, and nothing in it can raise a badge, a toast or a
+ * sound.
  */
 export const NO_PROMPT_FEED: OpenPromptFeed = Object.freeze({
   enabled: false,
@@ -223,20 +225,21 @@ export const NO_PROMPT_FEED: OpenPromptFeed = Object.freeze({
 });
 
 /**
- * The feed for one answer of `GET /api/operator/prompts?status=open`. Only an optical
- * station has operator prompts: on any other profile (or before the profile is known) the
- * answer is ignored, even when an earlier one is still sitting in the cache, so the badge
- * never shows a count and the alert host never has anything new to announce there.
+ * The feed for one answer of `GET /api/operator/prompts?status=open`. Only a station with
+ * the operator prompt service has operator prompts (`hasPrompts`): on any other station (or
+ * before its capabilities are known) the answer is ignored, even when an earlier one is
+ * still sitting in the cache, so the badge never shows a count and the alert host never has
+ * anything new to announce there.
  */
 export function openPromptFeed(input: {
-  optical: boolean;
+  hasPrompts: boolean;
   list: readonly OperatorPrompt[] | undefined;
   loaded: boolean;
   /** HTTP status of the last failed request, if there was one */
   errorStatus: unknown;
   persistError: string | null;
 }): OpenPromptFeed {
-  if (!input.optical) return NO_PROMPT_FEED;
+  if (!input.hasPrompts) return NO_PROMPT_FEED;
   const prompts = sortForAnswering(openPrompts(input.list ?? []));
   return {
     enabled: true,

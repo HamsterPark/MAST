@@ -1,0 +1,351 @@
+{
+  "name": "pol_mirror_flips_diagonal",
+  "description": "Anchor D. +45 deg light (s = [0, 1, 0]) on a fold mirror leaves as -45 deg (s = [0, -1, 0]): a reflection keeps the in-plane field and turns the vertical one (Mueller diag(1, 1, -1, -1)) - the angle follows the beam's own frame, e_h = z x d. The beam splitter BS1 (R = 0.3) does the same to its reflected branch (p = 0.3, back to +45) and passes the transmitted one unchanged (p = 0.7, -45).",
+  "layout": {
+    "schema": 1,
+    "id": "flip",
+    "title": "A mirror turns +45 into -45",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 50.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0,
+          "power_mw": 1.0,
+          "polarization": "linear",
+          "pol_angle_deg": 45.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "m1",
+        "type": "mirror",
+        "label": "M1",
+        "x_mm": 150.0,
+        "y_mm": 100.0,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.4,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "bs1",
+        "type": "beam_splitter",
+        "label": "BS1",
+        "x_mm": 150.0,
+        "y_mm": 300.0,
+        "angle_deg": 315.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "reflect_fraction": 0.3
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det_r",
+        "type": "detector",
+        "label": "DR",
+        "x_mm": 350.0,
+        "y_mm": 300.0,
+        "angle_deg": 180.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det_t",
+        "type": "detector",
+        "label": "DT",
+        "x_mm": 150.0,
+        "y_mm": 500.0,
+        "angle_deg": 270.0,
+        "aperture_mm": 10.0,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 532.0,
+      "beam": {
+        "source_mw": 1.0,
+        "m2": null
+      },
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 100.0,
+              "x1": 150.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            },
+            {
+              "x0": 150.0,
+              "y0": 100.0,
+              "x1": 150.0,
+              "y1": 300.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  -1.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "m1",
+              "action": "reflect",
+              "x": 150.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 100.0,
+              "beam": {
+                "p": 1.0,
+                "mw": 1.0,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "bs1",
+              "action": "split",
+              "x": 150.0,
+              "y": 300.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 300.0,
+              "beam": {
+                "p": 1.0,
+                "mw": 1.0,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  -1.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "split"
+        },
+        {
+          "branch": "0.r",
+          "fraction": 0.3,
+          "segments": [
+            {
+              "x0": 150.0,
+              "y0": 300.0,
+              "x1": 350.0,
+              "y1": 300.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.3,
+                "s": [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "det_r",
+              "action": "stop",
+              "x": 350.0,
+              "y": 300.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 500.0,
+              "beam": {
+                "p": 0.3,
+                "mw": 0.3,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  1.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "stop"
+        },
+        {
+          "branch": "0.t",
+          "fraction": 0.7,
+          "segments": [
+            {
+              "x0": 150.0,
+              "y0": 300.0,
+              "x1": 150.0,
+              "y1": 500.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 0.7,
+                "s": [
+                  0.0,
+                  -1.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "det_t",
+              "action": "stop",
+              "x": 150.0,
+              "y": 500.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 500.0,
+              "beam": {
+                "p": 0.7,
+                "mw": 0.7,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  -1.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ]
+}

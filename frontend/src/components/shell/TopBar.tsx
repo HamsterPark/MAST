@@ -18,9 +18,20 @@ import { langTag, tr } from "@/lib/i18n";
 import { LanguageSwitch } from "@/components/shell/LanguageSwitch";
 import { openOnboardingGuide } from "@/components/shell/OnboardingGuide";
 import { useLegacyFeatures } from "@/hooks/useLegacyFeatures";
+import { useStationCapabilities } from "@/hooks/useStationCapabilities";
+import { estopTitle } from "@/lib/stationCapabilities";
+import { profileLabel } from "@/lib/stationProfile";
 
 // Top header bar: logo + product name, inline live hardware readings
 // (B / I / Z / setpoint), and right-aligned connection, model and clock.
+//
+// ── Station capabilities ───────────────────────────────────────────────────
+// The readings row, the "Nanonis · …" status and both Nanonis polls belong to a station
+// with Nanonis (capability `nanonis`). On an optical or a generic station the row is not
+// drawn, the status names the station instead, and neither /api/hardware/live-readings
+// nor /api/nanonis/connection is ever requested: the polls wait until /api/health has
+// said what the station has (`station.ready`), so not even a first request slips out.
+// The E-STOP tooltip says what pressing it does on this station (estopTitle).
 //
 // ── Live readings: WebSocket push, HTTP poll underneath ────────────────────
 // This is the first consumer of the shared /ws/events socket (lib/ws.ts) and the
@@ -133,9 +144,15 @@ export function TopBar() {
   const toggleTheme = useUiStore((s) => s.toggleTheme);
   const { mode: autonomyMode, setMode: setAutonomyMode } = useAutonomyMode();
   const now = useClock();
+  // What this station has. `nanonis` decides what is drawn (an STM station until the service
+  // says otherwise); `stmReads` decides what is requested (only once it has said so).
+  const station = useStationCapabilities();
+  const nanonis = station.has("nanonis");
+  const stmReads = station.ready && nanonis;
 
-  // Hardware emergency stop: the one-click safety action (abort run + stop motion +
-  // retract tip). Always visible in the top bar.
+  // Hardware emergency stop: the one-click safety action (abort run + stop motion, and on
+  // a station that has them: retract the tip, switch the lasers off). Always visible in the
+  // top bar.
   const [estopMsg, setEstopMsg] = useState<string>("");
   const estop = useMutation({
     mutationFn: async () => {
@@ -233,7 +250,7 @@ export function TopBar() {
     },
     [queryClient],
   );
-  useWsEvent("hardware_state", onHardwareState);
+  useWsEvent("hardware_state", onHardwareState, stmReads);
 
   const readings = useQuery({
     // Shares its queryKey with RightPanel + DashboardPage, so all three read one
@@ -244,6 +261,7 @@ export function TopBar() {
     // keeps ticking at 500 ms regardless. This component reads from the push, but the
     // traffic saving only materializes once those two switch over as well.
     queryKey: LIVE_READINGS_KEY,
+    enabled: stmReads,
     queryFn: async () => {
       const { data, error } = await api.GET("/api/hardware/live-readings");
       if (error) throw error;
@@ -255,6 +273,7 @@ export function TopBar() {
 
   const conn = useQuery({
     queryKey: ["nanonis", "connection"],
+    enabled: stmReads,
     queryFn: async () => {
       const { data, error } = await api.GET("/api/nanonis/connection");
       if (error) throw error;
@@ -316,6 +335,9 @@ export function TopBar() {
     : readingsStale
       ? "Nanonis · Stale"
       : "Nanonis · Connected";
+  // What the E-STOP does on this station (retract only with Nanonis, light off only with
+  // laser safety).
+  const estopHint = estopTitle(station.has);
 
   // Scope is read from the server's single pointer. Inferring the current experiment
   // locally (and differently here and in RightPanel) let the top bar and the right
@@ -349,12 +371,13 @@ export function TopBar() {
             squeezed the only compressible element (the chip). Wrapping reads better
             than squeezing the experiment name down to two characters. */}
         <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-x-3 gap-y-1.5">
-          {/* EMERGENCY STOP — always reachable; retracts the tip + aborts the run */}
+          {/* EMERGENCY STOP — always reachable; aborts the run and stops motion everywhere,
+              retracts the tip with Nanonis, switches the light off elsewhere */}
           <button
             type="button"
             onClick={() => estop.mutate()}
             disabled={estop.isPending}
-            title={tr("紧急停止：中止任务 + 停止运动 + 退针", "Emergency stop: abort task + stop motion + retract tip")}
+            title={estopHint}
             className="rounded-mast-badge border border-red-500/60 bg-red-600/90 px-2.5 py-0.5 text-[11.5px] font-bold uppercase tracking-wide text-white shadow-[0_0_8px_rgba(220,38,38,0.5)] hover:bg-red-600 disabled:opacity-60"
           >
             {estop.isPending ? "…" : "E‑STOP"}
@@ -445,19 +468,27 @@ export function TopBar() {
               {tr("实时推送不可用 · 已改定时刷新", "Live push unavailable · using periodic refresh")}
             </span>
           )}
-          <span className="inline-flex items-center gap-1.5 text-xs text-mast-text">
-            <span
-              className="h-[7px] w-[7px] rounded-full bg-mast-auto shadow-[0_0_7px_var(--mast-auto)]"
-              style={
-                !connected
-                  ? { background: "var(--mast-muted)", boxShadow: "none" }
-                  : readingsStale
-                    ? { background: "var(--mast-warn, #d99)", boxShadow: "none" }
-                    : undefined
-              }
-            />
-            {modeText}
-          </span>
+          {nanonis ? (
+            <span className="inline-flex items-center gap-1.5 text-xs text-mast-text">
+              <span
+                className="h-[7px] w-[7px] rounded-full bg-mast-auto shadow-[0_0_7px_var(--mast-auto)]"
+                style={
+                  !connected
+                    ? { background: "var(--mast-muted)", boxShadow: "none" }
+                    : readingsStale
+                      ? { background: "var(--mast-warn, #d99)", boxShadow: "none" }
+                      : undefined
+                }
+              />
+              {modeText}
+            </span>
+          ) : (
+            // No Nanonis here: name the station instead of reporting a link it never has.
+            <span className="inline-flex items-center gap-1.5 text-xs text-mast-text" data-testid="station-kind">
+              <span className="h-[7px] w-[7px] rounded-full" style={{ background: "var(--mast-faint)" }} />
+              {profileLabel(station.profile)}
+            </span>
+          )}
           {legacy && (
             <span className="rounded-mast-badge bg-mast-accent-soft px-2 py-0.5 font-mono text-[11.5px] text-mast-accent">
               {currentModel}
@@ -547,59 +578,62 @@ export function TopBar() {
         </div>
       </div>
 
-      {/* row 2 — grouped live hardware readouts: [tip state] | [feedback loop] | [scan] */}
-      <div className="mast-scroll flex items-center overflow-x-auto border-t border-mast-border px-[18px] py-[7px] font-mono text-xs tabular-nums">
-        {/* group: tip state — Bias, Current */}
-        <div className="flex flex-none items-center gap-3.5 whitespace-nowrap pr-4">
-          <span className="flex items-center gap-1.5">
-            <span className="text-mast-faint">B</span>
-            <span className="text-mast-text" data-testid="reading-bias">{fmt(r?.bias_v, 4)}</span>
-            <span className="text-[10.5px] text-mast-muted">V</span>
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="text-mast-faint">I</span>
-            <span className="text-mast-text">{splitSI(r?.current_a, "A").num}</span>
-            <span className="text-[10.5px] text-mast-muted">{splitSI(r?.current_a, "A").unit}</span>
-          </span>
+      {/* row 2 — grouped live hardware readouts: [tip state] | [feedback loop] | [scan].
+          Only with Nanonis: a station without a tip has no bias, current or Z to show. */}
+      {nanonis && (
+        <div className="mast-scroll flex items-center overflow-x-auto border-t border-mast-border px-[18px] py-[7px] font-mono text-xs tabular-nums">
+          {/* group: tip state — Bias, Current */}
+          <div className="flex flex-none items-center gap-3.5 whitespace-nowrap pr-4">
+            <span className="flex items-center gap-1.5">
+              <span className="text-mast-faint">B</span>
+              <span className="text-mast-text" data-testid="reading-bias">{fmt(r?.bias_v, 4)}</span>
+              <span className="text-[10.5px] text-mast-muted">V</span>
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="text-mast-faint">I</span>
+              <span className="text-mast-text">{splitSI(r?.current_a, "A").num}</span>
+              <span className="text-[10.5px] text-mast-muted">{splitSI(r?.current_a, "A").unit}</span>
+            </span>
+          </div>
+
+          <span className="h-5 w-px flex-none bg-mast-border" />
+
+          {/* group: feedback loop — Z pos, ctrl, setpoint */}
+          <div className="flex flex-none items-center gap-3.5 whitespace-nowrap px-4">
+            <span className="flex items-center gap-1.5">
+              <span className="text-mast-faint">Z</span>
+              <span className="text-mast-text">{splitSI(r?.z_m, "m", { digits: 5 }).num}</span>
+              <span className="text-[10.5px] text-mast-muted">{splitSI(r?.z_m, "m", { digits: 5 }).unit}</span>
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="text-mast-faint">ctrl</span>
+              <span className={zOff ? "text-mast-warn" : "text-mast-text"}>{zOff ? "OFF" : "ON"}</span>
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="text-mast-faint">setpoint</span>
+              <span className="text-mast-text">{splitSI(r?.setpoint_a, "A").num}</span>
+              <span className="text-[10.5px] text-mast-muted">{splitSI(r?.setpoint_a, "A").unit}</span>
+            </span>
+          </div>
+
+          <span className="h-5 w-px flex-none bg-mast-border" />
+
+          {/* group: scan */}
+          <div className="flex flex-none items-center gap-3.5 whitespace-nowrap pl-4">
+            <span className="flex items-center gap-1.5">
+              <span className="text-mast-faint">scan</span>
+              {r?.scan_running ? (
+                <span className="inline-flex items-center gap-1.5 text-mast-auto">
+                  <span className="h-[7px] w-[7px] rounded-full bg-mast-auto" />
+                  RUNNING
+                </span>
+              ) : (
+                <span className="text-mast-muted">STOPPED</span>
+              )}
+            </span>
+          </div>
         </div>
-
-        <span className="h-5 w-px flex-none bg-mast-border" />
-
-        {/* group: feedback loop — Z pos, ctrl, setpoint */}
-        <div className="flex flex-none items-center gap-3.5 whitespace-nowrap px-4">
-          <span className="flex items-center gap-1.5">
-            <span className="text-mast-faint">Z</span>
-            <span className="text-mast-text">{splitSI(r?.z_m, "m", { digits: 5 }).num}</span>
-            <span className="text-[10.5px] text-mast-muted">{splitSI(r?.z_m, "m", { digits: 5 }).unit}</span>
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="text-mast-faint">ctrl</span>
-            <span className={zOff ? "text-mast-warn" : "text-mast-text"}>{zOff ? "OFF" : "ON"}</span>
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="text-mast-faint">setpoint</span>
-            <span className="text-mast-text">{splitSI(r?.setpoint_a, "A").num}</span>
-            <span className="text-[10.5px] text-mast-muted">{splitSI(r?.setpoint_a, "A").unit}</span>
-          </span>
-        </div>
-
-        <span className="h-5 w-px flex-none bg-mast-border" />
-
-        {/* group: scan */}
-        <div className="flex flex-none items-center gap-3.5 whitespace-nowrap pl-4">
-          <span className="flex items-center gap-1.5">
-            <span className="text-mast-faint">scan</span>
-            {r?.scan_running ? (
-              <span className="inline-flex items-center gap-1.5 text-mast-auto">
-                <span className="h-[7px] w-[7px] rounded-full bg-mast-auto" />
-                RUNNING
-              </span>
-            ) : (
-              <span className="text-mast-muted">STOPPED</span>
-            )}
-          </span>
-        </div>
-      </div>
+      )}
     </header>
   );
 }

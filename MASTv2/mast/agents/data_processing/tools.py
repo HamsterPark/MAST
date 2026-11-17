@@ -999,9 +999,11 @@ def _sandbox_getattr(obj, name, *default):
 
 
 def _allowed_npy_roots() -> list:
-    from mast._runtime_paths import project_root
-    root = project_root()
-    return [root / "experiments", root / "session", root / "data",
+    # experiments/ 与 data/ 是 MAST 自己写的数据，跟 data_root()（MAST_DATA_DIR >
+    # project_root）走；没设 MAST_DATA_DIR 时与 project_root() 相同。
+    from mast._runtime_paths import data_root, project_root
+    root, data = project_root(), data_root()
+    return [data / "experiments", root / "session", data / "data",
             root / "stm-datasets", Path.home() / "experiments"]
 
 

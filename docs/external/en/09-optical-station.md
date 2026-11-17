@@ -4,7 +4,8 @@ Most of this guide describes MAST on an STM, where MAST drives a Nanonis control
 runs on **an optical station**: a computer with a confocal Raman / SHG microscope (WITec) and its
 lasers, power meter and temperature controller, and **no STM and no Nanonis at all**. It is the
 same service, the same jobs, tokens, e-stop, records and MCP tools. What changes is what you see
-and what needs a person. This page is the difference.
+and what needs a person. This page is the difference. A station with neither an STM nor a
+WITec is a generic station: see [the generic station page](11-generic-station.md).
 
 ## How you know which station you are on
 

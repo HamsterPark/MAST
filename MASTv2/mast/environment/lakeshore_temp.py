@@ -22,8 +22,12 @@ scraping the logger, while leaving the logger free to run if the user prefers.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
+import threading
+import time
+import weakref
 
 from mast.i18n import tr
 from mast.core.types import SensorReading
@@ -34,6 +38,7 @@ from mast.environment.serial_transport import (
     SerialSettings,
     SerialTransport,
     SerialUnavailable,
+    is_complete_line,
     open_transport,
 )
 
@@ -48,6 +53,14 @@ LSCI_SERIAL_CANDIDATES: tuple[tuple[int, int, str, float], ...] = (
     (9600, 7, "O", 1),    # 218 / 33x default
     (115200, 7, "O", 1),  # 336 high-speed option
 )
+
+#: ``*IDN?`` is asked this many times at each candidate baud (see :func:`probe_lakeshore`):
+#: the first query's terminator clears junk a wrong-baud candidate left in an RS-232
+#: instrument's command buffer, and the second gets the answer.
+IDN_ATTEMPTS = 2
+#: The repeat waits less than the first query. A Lake Shore answers ``*IDN?`` within tens
+#: of milliseconds even at 9600 baud, and a silent port costs this much extra per candidate.
+IDN_RETRY_TIMEOUT_S = 0.25
 
 _NUM_RE = re.compile(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?")
 
@@ -77,7 +90,30 @@ _STATE_QUERIES = frozenset({
     "SETP?",       # setpoint
     "OUTMODE?",    # control mode + control input + powerup-enable
     "RAMP?",       # setpoint ramp on/off + rate
+    # Read by temperature control (mast.instruments.heater_335) before it changes anything;
+    # not part of the settings readout, so the instrument-state panel sends what it always did.
+    "RAMPST?",     # 0 = not ramping, 1 = the setpoint is ramping
+    "HTRSET?",     # output type, heater resistance, max current, max user current, I/P display
+    "PID?",        # P, I, D
+    "MOUT?",       # manual output %, ADDED to the PID output in closed loop
+    "TLIMIT?",     # the instrument's own temperature limit for an input (0 = off)
+    "EMUL?",       # 331/332 emulation: changes what RANGE, HTR, ZONE ... mean
+    "MODE?",       # 0 local, 1 remote, 2 remote with local lockout
+    # One row of an output's zone table: "ZONE? <output 1|2>,<zone 1..10>" (manual p. 126).
+    # Its argument has a comma, so build_query checks it against its own pattern.
+    "ZONE?",
 }) | _SAFE_COMMANDS
+
+#: Queries deliberately ABSENT although they end in '?': reading them changes the
+#: instrument (Model 335 manual, chapter 6). A test pins that none of them ever becomes
+#: sendable.
+#: * ``HTRST?`` "Error condition is cleared upon querying the heater status, which will
+#:   also clear the front panel error message" (p. 116): one poll would erase a heater
+#:   open/short report before the operator saw it.
+#: * ``*ESR?`` and ``OPSTR?`` return a latched register and clear it (pp. 95, 121).
+#: * ``LOCK?`` returns the front-panel lock code in clear.
+FORBIDDEN_QUERIES: frozenset[str] = frozenset({"HTRST?", "*ESR?", "OPSTR?", "LOCK?"})
+assert not (FORBIDDEN_QUERIES & _STATE_QUERIES)
 
 
 def _sanitize_command(command: str) -> str:
@@ -170,13 +206,32 @@ class LakeshoreInfo:
         return f"LakeshoreInfo(model={self.model!r}, {self.settings.label()})"
 
 
+#: Lake Shore temperature monitors / controllers / bridges this driver may poll
+#: with its temperature queries. Other LSCI products answer ``*IDN?`` the same
+#: way — the Model 625 superconducting-magnet supply does — and must NOT be
+#: treated as a thermometer (see ``environment.lakeshore_625``).
+_TEMPERATURE_MODEL_PREFIXES = ("211", "218", "224", "325", "331", "332", "335",
+                             "336", "340", "350", "370", "372")
+
+
+def is_temperature_model(model: str) -> bool:
+    """True for a Lake Shore model string that is a temperature instrument."""
+    m = (model or "").upper().replace("MODEL", "").strip()
+    return any(m.startswith(t) for t in _TEMPERATURE_MODEL_PREFIXES)
+
+
 def probe_lakeshore(port: str, *, candidates=LSCI_SERIAL_CANDIDATES,
-                    timeout: float = 0.5) -> "LakeshoreInfo | None":
+                    timeout: float = 0.5, on_reply=None) -> "LakeshoreInfo | None":
     """Try to identify a Lakeshore instrument on *port*.
 
     Iterates the serial-parameter candidates, sends ``*IDN?``, and returns a
     :class:`LakeshoreInfo` on the first reply containing ``LSCI``. Returns
     ``None`` (never raises) if nothing matches / no pyserial / port busy.
+
+    The returned model may be ANY Lake Shore product; callers that poll
+    temperatures must check :func:`is_temperature_model` first.
+    ``on_reply(bytes)`` is told about every non-empty answer, so the caller can
+    tell a silent port from one where something talked.
     """
     for baud, bits, parity, stop in candidates:
         settings = SerialSettings(port=port, baudrate=baud, bytesize=bits,
@@ -184,14 +239,32 @@ def probe_lakeshore(port: str, *, candidates=LSCI_SERIAL_CANDIDATES,
         transport: SerialTransport | None = None
         try:
             transport = open_transport(settings)
-            reply = transport.transact(b"*IDN?" + LSCI_TERMINATOR,
-                                       read_until=b"\n", timeout=timeout)
-            ok, model = parse_idn(reply)
-            if ok:
-                return LakeshoreInfo(model=model, idn=reply.decode("ascii", "replace").strip(),
-                                     settings=settings)
-            logger.debug("autodetect: %s at %s: reply %r is not a Lakeshore *IDN?",
-                         port, settings.label(), reply)
+            # Asked twice at the same baud before moving on (IDN_ATTEMPTS). The candidate
+            # before this one went out at a wrong baud, and an RS-232 instrument (e.g. a 625
+            # at 9600) decodes that as junk. When the junk holds no line
+            # terminator it stays in the instrument's command buffer, so the first proper
+            # "*IDN?" here joins it into one invalid command and gets no answer. That
+            # query's own CR LF clears the buffer, so the second one is answered.
+            # Motivating case: a port "answered but was not
+            # recognised" while a manual scan minutes later found the 625. Only "*IDN?"
+            # is ever sent, as before.
+            for attempt in range(IDN_ATTEMPTS):
+                reply = transport.transact(b"*IDN?" + LSCI_TERMINATOR, read_until=b"\n",
+                                           timeout=timeout if attempt == 0
+                                           else min(timeout, IDN_RETRY_TIMEOUT_S))
+                if reply and on_reply is not None:
+                    try:
+                        on_reply(bytes(reply))
+                    except Exception:  # noqa: BLE001
+                        pass
+                # Only a finished line identifies anything: "LSCI,M" cut from a 625's
+                # answer would otherwise pass as a Lake Shore of model "M".
+                ok, model = parse_idn(reply) if is_complete_line(reply) else (False, "")
+                if ok:
+                    return LakeshoreInfo(model=model, idn=reply.decode("ascii", "replace").strip(),
+                                         settings=settings)
+                logger.debug("autodetect: %s at %s (try %d): reply %r is not a Lakeshore *IDN?",
+                             port, settings.label(), attempt + 1, reply)
         except (SerialUnavailable, Exception) as exc:
             # DEBUG, one line per candidate: a silent probe is how nobody noticed that
             # MAST had written to a laser's port (optical station).
@@ -291,25 +364,64 @@ def _assert_query(verb: str) -> str:
     return v
 
 
-def _query(transport: SerialLike, verb: str, arg: str = "", *,
-           timeout: float = 0.5) -> str:
-    """Send one whitelisted query and return the trimmed reply text.
+#: The only argument ``ZONE?`` takes: ``<output 1|2>,<zone 1..10>`` (manual p. 126).
+_ZONE_ARG_RE = re.compile(r"[12],(?:[1-9]|10)")
+
+
+def build_query(verb: str, arg: "str | int | None" = None) -> bytes:
+    """The bytes of one whitelisted query, CR LF terminated. Every query this module
+    sends is built here; anything else raises :class:`LakeshoreError`.
 
     The argument is validated strictly rather than coerced: :func:`_sanitize_channel`
     falls back to ``"A"`` on garbage, which is right for a user-supplied channel
     but wrong here — silently rewriting an output number would make the panel
     report output 1's heater state under output 3's heading. Bad argument →
     raise, so the caller degrades that one field to "unknown".
+
+    ``ZONE?`` is the one query whose argument has a comma. It must be exactly
+    ``<1|2>,<1..10>``: no spaces, no third field, nothing after it.
     """
     v = _assert_query(verb)
     payload = v
-    if arg:
+    if v == "ZONE?":
+        token = "" if arg is None else str(arg).strip()
+        if not _ZONE_ARG_RE.fullmatch(token):
+            raise LakeshoreError(f"ZONE? needs '<output 1|2>,<zone 1..10>', got {arg!r}")
+        payload = f"{v} {token}"
+    elif arg is not None and str(arg).strip() != "":
         token = str(arg).strip()
         if not _CHANNEL_RE.match(token):
             raise LakeshoreError(f"unsafe query argument {arg!r}")
         payload = f"{v} {token}"
-    raw = transport.transact(payload.encode("ascii") + LSCI_TERMINATOR,
-                             read_until=b"\n", timeout=timeout)
+    raw = payload.encode("ascii")
+    # Structural invariants on the final bytes: one query, no chaining (the 335 runs
+    # ';'-separated commands), no embedded terminator, printable ASCII only.
+    if b";" in raw or b"\r" in raw or b"\n" in raw or any(c < 0x20 or c > 0x7E for c in raw):
+        raise LakeshoreError(f"refusing malformed payload {payload!r}")
+    return raw + LSCI_TERMINATOR
+
+
+def _gap_kwargs(transport: SerialLike) -> dict:
+    """``{"min_gap_s": MIN_COMMAND_GAP_S}`` for a transport that spaces messages itself,
+    else ``{}``.
+
+    The 335 manual (§6.3.5, p. 104) asks for 50 ms of silence after every message and at
+    most 20 messages a second. Only :class:`LakeshoreLink` used to pass the gap; the
+    monitor's reads (:meth:`LakeshoreTemperatureSensor.read`) and :func:`read_snapshot`
+    went out back to back, and the transport spaces a caller that passes no gap only
+    after one that did.
+    """
+    return {"min_gap_s": MIN_COMMAND_GAP_S} if getattr(transport, "supports_min_gap", False) else {}
+
+
+def _query(transport: SerialLike, verb: str, arg: str = "", *,
+           timeout: float = 0.5) -> str:
+    """Send one whitelisted query (:func:`build_query`) and return the trimmed reply."""
+    v = _assert_query(verb)
+    raw = transport.transact(build_query(v, arg), read_until=b"\n", timeout=timeout,
+                             **_gap_kwargs(transport))
+    if raw and not is_complete_line(raw):
+        raise LakeshoreError(f"{v}: incomplete reply {bytes(raw)!r} (no line end)")
     return raw.decode("ascii", "replace").strip()
 
 
@@ -479,16 +591,100 @@ def _float_or_none(text: str) -> float | None:
         return None
 
 
+#: How long the settings half of a snapshot (input names and types, setpoints, output mode,
+#: ramp) may be reused by the instrument-state panel. These change when a person works the
+#: front panel, or when MAST writes (every MAST write drops the cache at once,
+#: :meth:`LakeshoreLink.mark_sent`); the readings, heater range and heater output are asked
+#: every time.
+SETTINGS_MAX_AGE_S = 60.0
+
+
+class SettingsCache:
+    """The settings half of the last complete :func:`read_snapshot`, one per transport.
+
+    ``generation`` counts invalidations: a sweep that was running while a write went out
+    (the sweep holds no link lock) sees the number changed and does not store what it read.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._data: "dict | None" = None
+        self._at = 0.0
+        self.generation = 0
+
+    def fresh(self, max_age_s: float) -> "dict | None":
+        with self._lock:
+            if self._data is None or time.monotonic() - self._at >= max_age_s:
+                return None
+            return self._data
+
+    def store(self, generation: int, data: dict) -> None:
+        with self._lock:
+            if generation == self.generation:
+                self._data, self._at = data, time.monotonic()
+
+    def invalidate(self) -> None:
+        with self._lock:
+            self.generation += 1
+            self._data = None
+
+
+_SETTINGS_BY_TRANSPORT: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+_SETTINGS_REGISTRY_LOCK = threading.Lock()
+
+
+def settings_cache_for(transport: object) -> "SettingsCache | None":
+    """The :class:`SettingsCache` of *transport* (shared by every sensor and the link on it);
+    ``None`` for an object that cannot be weakly referenced (then nothing is cached)."""
+    with _SETTINGS_REGISTRY_LOCK:
+        try:
+            cache = _SETTINGS_BY_TRANSPORT.get(transport)
+            if cache is None:
+                cache = _SETTINGS_BY_TRANSPORT[transport] = SettingsCache()
+            return cache
+        except TypeError:
+            return None
+
+
+def _read_channel_settings(transport: SerialLike, ch: str, state: "ChannelState",
+                           timeout: float) -> bool:
+    """Ask a channel's name and type; ``True`` when the type (the reply that cannot be
+    legitimately empty) was answered."""
+    try:
+        state.label = _query(transport, "INNAME?", ch, timeout=timeout)
+    except Exception:  # noqa: BLE001 - leave the field unset
+        pass
+    try:
+        codes = _csv_ints(_query(transport, "INTYPE?", ch, timeout=timeout))
+        if codes:
+            state.sensor_type = _SENSOR_TYPES.get(codes[0], str(codes[0]))
+        return bool(codes) and codes[0] >= 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def read_snapshot(transport: SerialLike, *, model: str = "", idn: str = "",
                   port: str = "", channels: list[str] | None = None,
-                  timeout: float = 0.5) -> LakeshoreSnapshot:
+                  timeout: float = 0.5, settings: "SettingsCache | None" = None,
+                  settings_max_age_s: float = 0.0) -> LakeshoreSnapshot:
     """Read the full read-only instrument state over an OPEN transport.
+
+    With *settings* and ``settings_max_age_s`` > 0 the settings half (``*IDN?``, input
+    name and type, output setpoint / mode / ramp) comes from the last COMPLETE sweep when
+    that is younger, so a repeat call asks only the readings, fault bits, heater range and
+    heater output (12 queries instead of 23). A sweep with any unanswered settings query
+    is not stored. Without *settings* every field is asked, as before.
 
     Every failure degrades to a missing field rather than raising: a partially
     answered instrument still yields a useful panel, and this is called from a
     settings page that must never 500. Reuses the caller's transport so it can
     run against the port the EnvironmentMonitor already owns.
     """
+    reuse = (settings.fresh(settings_max_age_s)
+             if settings is not None and settings_max_age_s > 0 else None)
+    generation = settings.generation if settings is not None else 0
+    if not idn and reuse is not None:
+        idn = reuse["idn"]
     if not idn:
         try:
             idn = _query(transport, "*IDN?", timeout=timeout)
@@ -503,10 +699,22 @@ def read_snapshot(transport: SerialLike, *, model: str = "", idn: str = "",
         firmware=parts[3] if len(parts) > 3 else "",
     )
 
-    for ch in (channels or default_channels(model)):
+    chs = list(channels or default_channels(model))
+    outs = default_outputs(model)
+    if reuse is not None and (reuse["channels"] != chs or reuse["outputs"] != outs):
+        reuse = None                     # asked for other inputs than the cached sweep covered
+    kept_ch: dict = {}
+    kept_out: dict = {}
+    types_answered = True
+
+    for ch in chs:
         state = ChannelState(channel=ch)
+        if reuse is not None:
+            state.label, state.sensor_type = reuse["ch"][ch]
+        else:
+            types_answered &= _read_channel_settings(transport, ch, state, timeout)
+            kept_ch[ch] = (state.label, state.sensor_type)
         for verb, setter in (
-            ("INNAME?", lambda v, s=state: setattr(s, "label", v)),
             ("KRDG?", lambda v, s=state: setattr(s, "kelvin", _float_or_none(v))),
             ("CRDG?", lambda v, s=state: setattr(s, "celsius", _float_or_none(v))),
             ("SRDG?", lambda v, s=state: setattr(s, "sensor_value", _float_or_none(v))),
@@ -515,12 +723,6 @@ def read_snapshot(transport: SerialLike, *, model: str = "", idn: str = "",
                 setter(_query(transport, verb, ch, timeout=timeout))
             except Exception:  # noqa: BLE001 - leave the field unset
                 pass
-        try:
-            codes = _csv_ints(_query(transport, "INTYPE?", ch, timeout=timeout))
-            if codes:
-                state.sensor_type = _SENSOR_TYPES.get(codes[0], str(codes[0]))
-        except Exception:  # noqa: BLE001
-            pass
         try:
             # parse_reading_status, NOT ``int(reply or 0)``: the ``or 0`` is what
             # turned a timed-out status query into the bitmask 0, i.e. "clean".
@@ -534,7 +736,7 @@ def read_snapshot(transport: SerialLike, *, model: str = "", idn: str = "",
             state.faults = None
         snap.channels.append(state)
 
-    for out in default_outputs(model):
+    for out in outs:
         o = OutputState(output=out)
         try:
             o.range_code = int(_query(transport, "RANGE?", str(out), timeout=timeout))
@@ -545,6 +747,11 @@ def read_snapshot(transport: SerialLike, *, model: str = "", idn: str = "",
             o.heater_pct = _float_or_none(_query(transport, "HTR?", str(out), timeout=timeout))
         except Exception:  # noqa: BLE001
             pass
+        if reuse is not None:
+            (o.setpoint, o.mode, o.control_input, o.powerup_enabled,
+             o.ramping, o.ramp_rate) = reuse["out"][out]
+            snap.outputs.append(o)
+            continue
         try:
             o.setpoint = _float_or_none(_query(transport, "SETP?", str(out), timeout=timeout))
         except Exception:  # noqa: BLE001
@@ -570,8 +777,29 @@ def read_snapshot(transport: SerialLike, *, model: str = "", idn: str = "",
                 o.ramp_rate = _float_or_none(fields[1].strip())
         except Exception:  # noqa: BLE001
             pass
+        kept_out[out] = (o.setpoint, o.mode, o.control_input, o.powerup_enabled,
+                         o.ramping, o.ramp_rate)
         snap.outputs.append(o)
+    if (settings is not None and reuse is None and idn
+            and types_answered
+            and all(v[0] is not None and v[1] for v in kept_out.values())):
+        # Complete sweep (every settings query answered): keep its settings half.
+        settings.store(generation, {"idn": idn, "channels": chs, "outputs": outs,
+                                    "ch": kept_ch, "out": kept_out})
     return snap
+
+
+def identify_model(transport: SerialLike, *, timeout: float = 0.5) -> str:
+    """One ``*IDN?`` over an open, possibly shared, transport: the model (``MODEL335``)
+    or ``""``. Read-only, never raises, never closes the transport. The runtime asks it
+    for inputs whose sensors were built from a config entry that did not record the
+    model, so temperature control exists right after a restart."""
+    try:
+        reply = _query(transport, "*IDN?", timeout=timeout)
+    except Exception:  # noqa: BLE001 - unknown is "", the caller tries again later
+        return ""
+    ok, model = parse_idn(reply)        # _query already refused a reply without its line end
+    return model.strip().upper() if ok else ""
 
 
 def discover_lakeshore(port: str, *, candidates=LSCI_SERIAL_CANDIDATES,
@@ -586,6 +814,11 @@ def discover_lakeshore(port: str, *, candidates=LSCI_SERIAL_CANDIDATES,
     info = probe_lakeshore(port, candidates=candidates, timeout=timeout)
     if info is None:
         return None
+    if not is_temperature_model(info.model):
+        # A Lake Shore, but not a thermometer (e.g. the Model 625 magnet supply):
+        # return the identity only, without sending it a single temperature query.
+        return LakeshoreSnapshot(model=info.model, idn=info.idn, port=port,
+                                 settings=info.settings)
     transport: SerialTransport | None = None
     try:
         transport = open_transport(info.settings)
@@ -623,8 +856,13 @@ class LakeshoreTemperatureSensor(EnvironmentSensor):
         timeout: float = 0.5,
         transport: SerialLike | None = None,
         command: str = "KRDG?",
+        model: str = "",
     ):
         self._name = name
+        # The instrument's model (``MODEL335``) when known: from auto-detection, from an
+        # adopted config entry, or learned from the first settings snapshot. Temperature
+        # control (core/heater_control) is offered only for a known Model 335.
+        self.model = str(model or "").strip()
         self._channel = _sanitize_channel(channel)
         self._alarm = alarm or AlarmSpec()
         self._timeout = timeout
@@ -649,6 +887,12 @@ class LakeshoreTemperatureSensor(EnvironmentSensor):
     def name(self) -> str:
         return self._name
 
+    @property
+    def transport(self) -> "SerialLike | None":
+        """The (possibly shared) transport this input reads over; ``None`` before first use
+        when the sensor was built from settings alone."""
+        return self._transport
+
     def _ensure_transport(self) -> SerialLike:
         if self._transport is None:
             if self._settings is None:
@@ -672,7 +916,7 @@ class LakeshoreTemperatureSensor(EnvironmentSensor):
             return SensorReading(value=0.0, unit=self._unit, status="unavailable")
         try:
             reply = transport.transact(self._query, read_until=b"\n",
-                                       timeout=self._timeout)
+                                       timeout=self._timeout, **_gap_kwargs(transport))
         except SerialUnavailable:
             # Drop the OS handle so a later read reconnects, but KEEP the
             # transport object: it is shared with the instrument's other inputs
@@ -681,6 +925,10 @@ class LakeshoreTemperatureSensor(EnvironmentSensor):
             # already holding, and that input would never recover.
             self._release_transport()
             return SensorReading(value=0.0, unit=self._unit, status="unavailable")
+        if reply and not is_complete_line(reply):
+            # "+29" cut from "+293.15E+0" is a plausible-looking wrong temperature.
+            logger.debug("Lakeshore %s: incomplete reply %r", self._name, reply)
+            return SensorReading(value=0.0, unit=self._unit, status="error")
         try:
             kelvin = parse_reading(reply)
         except LakeshoreError as exc:
@@ -705,11 +953,16 @@ class LakeshoreTemperatureSensor(EnvironmentSensor):
             return None
         port = self._settings.port if self._settings is not None else ""
         try:
-            return read_snapshot(transport, port=port, channels=channels,
-                                 timeout=self._timeout)
+            snap = read_snapshot(transport, port=port, channels=channels,
+                                 timeout=self._timeout,
+                                 settings=settings_cache_for(transport),
+                                 settings_max_age_s=SETTINGS_MAX_AGE_S)
         except Exception as exc:  # noqa: BLE001 - panel must never 500
             logger.debug("instrument_state on %s failed: %s", self._name, exc)
             return None
+        if snap is not None and snap.model and not self.model:
+            self.model = str(snap.model).strip()     # learned from *IDN?
+        return snap
 
     def close(self) -> None:
         """Release the OS handle. KEEPS the transport object.
@@ -739,9 +992,194 @@ class LakeshoreTemperatureSensor(EnvironmentSensor):
         self._release_transport()
 
 
+# ── identity-checked link (for temperature control) ─────────────────────────
+#: Silence the manual asks for around every message: "Guarantee that no other
+#: communication is started for 50 ms after the last character is transmitted ... Not
+#: initiate communication more than 20 times/s" (Model 335 manual §6.3.5, p. 104).
+MIN_COMMAND_GAP_S = 0.06
+
+
+class WrongController(LakeshoreError):
+    """The port answered ``*IDN?``, but not as the controller the link was made for.
+    Nothing else was sent on that handle."""
+
+
+class LakeshoreLink:
+    """One Lake Shore controller on one port, for a driver that must know WHICH
+    instrument it addresses before every command: temperature control
+    (``mast.instruments.heater_335``). The temperature sensors keep polling the same
+    shared transport directly, as before.
+
+    * Identity first. Every freshly opened handle is asked ``*IDN?`` and must answer
+      ``LSCI,<expected model>``. The serial number of the first answer is pinned; a
+      later handle that answers with another serial is refused. A COM name is not an
+      identity: COM numbers of two instruments can swap when USB adapters are
+      replugged.
+    * Every exchange after that is pinned to the verified handle generation
+      (``transact(expect_generation=...)``), so a reopened port is re-identified, not
+      trusted.
+    * Messages are spaced by :data:`MIN_COMMAND_GAP_S` on the transport itself
+      (``transact(min_gap_s=...)``), so the monitor's polls on the same port keep that
+      distance from these as well.
+
+    It builds query bytes only (:func:`build_query`). The setters live in
+    ``mast.instruments.heater_335``, which writes through :meth:`session`.
+    """
+
+    def __init__(self, transport: SerialLike, *, port: str = "",
+                 expected_model: str = "MODEL335", timeout: float = 0.6,
+                 min_gap_s: float = MIN_COMMAND_GAP_S, pinned_serial: str = ""):
+        self._t = transport
+        self.port = port or str(getattr(getattr(transport, "settings", None), "port", "") or "")
+        self.expected_model = str(expected_model).strip().upper()
+        self._timeout = float(timeout)
+        self._gap = max(0.0, float(min_gap_s))
+        self._lock = threading.RLock()
+        self._last_tx = 0.0
+        self._verified_gen: "int | None" = None
+        self._verified_once = False
+        # Carried over by the runtime when it builds a new link for the same port (after a
+        # rescan), so the pin outlives one controller object.
+        self.pinned_serial: str = str(pinned_serial or "")
+        self.identity: dict = {}
+        self.identity_error: str = ""
+
+    # ── transport plumbing ──
+    @property
+    def transport(self) -> SerialLike:
+        return self._t
+
+    def _pinned(self) -> bool:
+        return bool(getattr(self._t, "supports_generations", False))
+
+    def gap_kwargs(self) -> dict:
+        """``{"min_gap_s": ...}`` when the transport spaces messages itself, else ``{}``."""
+        return {"min_gap_s": self._gap} if getattr(self._t, "supports_min_gap", False) else {}
+
+    def _space(self) -> None:
+        if getattr(self._t, "supports_min_gap", False):
+            return                       # the transport keeps the distance (all callers)
+        wait = self._last_tx + self._gap - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+
+    def _exchange(self, payload: bytes, *, pin: "int | None") -> str:
+        self._space()
+        try:
+            kwargs: dict = {"read_until": b"\n", "timeout": self._timeout, **self.gap_kwargs()}
+            if pin is not None:
+                kwargs["expect_generation"] = pin
+            raw = self._t.transact(payload, **kwargs)
+        finally:
+            self._last_tx = time.monotonic()
+        raw = bytes(raw or b"")
+        if raw and not is_complete_line(raw):
+            raise LakeshoreError(f"{payload.decode('ascii', 'replace').strip()}: "
+                                 f"incomplete reply {raw!r} (no line end)")
+        return raw.decode("ascii", "replace").strip()
+
+    def _identity_current(self) -> bool:
+        if not self._pinned():
+            return self._verified_once
+        if self._verified_gen is None:
+            return False
+        return bool(getattr(self._t, "is_open", False)) and \
+            getattr(self._t, "open_generation", None) == self._verified_gen
+
+    def _verify_identity(self) -> None:
+        """Ask ``*IDN?`` on the (re)opened handle; refuse anything but the pinned unit."""
+        self._verified_gen = None
+        self._verified_once = False
+        was_open = bool(getattr(self._t, "is_open", False))
+        gen_before = getattr(self._t, "open_generation", None)
+        reply = self._exchange(build_query("*IDN?"), pin=None)
+        gen_after = getattr(self._t, "open_generation", None)
+        if self._pinned() and was_open and gen_after != gen_before:
+            # The open handle was replaced by another thread around the exchange (a closed
+            # port reopening for this very query is expected and fine): the answer may
+            # belong to a handle that no longer exists. Verify again on the next use.
+            raise SerialUnavailable(f"{self.port}: handle reopened during the identity check")
+        parts = [p.strip() for p in reply.split(",")]
+        ok = (len(parts) >= 3 and parts[0].upper() == "LSCI"
+              and parts[1].upper() == self.expected_model and bool(parts[2]))
+        serial = parts[2] if ok else ""
+        if ok and self.pinned_serial and serial != self.pinned_serial:
+            ok = False
+            why = f"serial {serial!r}, not the pinned {self.pinned_serial!r}"
+        else:
+            why = f"not LSCI,{self.expected_model}"
+        if not ok:
+            self.identity_error = f"{self.port}: *IDN? answered {reply!r} ({why})"
+            try:
+                self._t.close()          # never poll a port we cannot vouch for
+            except Exception:  # noqa: BLE001
+                pass
+            raise WrongController(self.identity_error)
+        self.pinned_serial = self.pinned_serial or serial
+        self.identity = {"model": parts[1], "serial": serial,
+                         "firmware": parts[3] if len(parts) > 3 else ""}
+        self.identity_error = ""
+        self._verified_once = True
+        if self._pinned():
+            self._verified_gen = getattr(self._t, "open_generation", None)
+
+    def query(self, verb: str, arg: "str | int | None" = None) -> str:
+        """One whitelisted query on an identity-verified handle; the reply text.
+
+        Raises :class:`SerialUnavailable` (port), :class:`WrongController` (identity) or
+        :class:`LakeshoreError` (refused, cut short, or no reply).
+        """
+        payload = build_query(verb, arg)          # refuse BEFORE touching the port
+        with self._lock:
+            if not self._identity_current():
+                self._verify_identity()
+            reply = self._exchange(payload, pin=self._verified_gen if self._pinned() else None)
+        if not reply:
+            raise LakeshoreError(f"{verb}: no reply within {self._timeout:.1f}s")
+        return reply
+
+    @contextlib.contextmanager
+    def session(self, timeout: "float | None" = None):
+        """Hold the link with the identity checked on the open handle. Yields the
+        verified open generation (``None`` on a transport without generations) for
+        ``transact(expect_generation=...)``. No query of this link runs inside the block
+        from another thread; the monitor's own polls still interleave, spaced. Raises like
+        :meth:`query`; :class:`SerialUnavailable` when the lock is not free in *timeout* s.
+        """
+        got = (self._lock.acquire() if timeout is None
+               else self._lock.acquire(timeout=max(0.0, float(timeout))))
+        if not got:
+            raise SerialUnavailable(f"{self.port}: link busy for {timeout} s")
+        try:
+            if not self._identity_current():
+                self._verify_identity()
+            yield self._verified_gen if self._pinned() else None
+        finally:
+            self._lock.release()
+
+    def wait_gap(self) -> None:
+        """Sleep until the next message may go out (no-op when the transport spaces)."""
+        self._space()
+
+    def mark_sent(self) -> None:
+        """A command just went out on this link: restart the spacing clock, and drop the
+        cached instrument-state settings (the panel must not show what was just changed)."""
+        self._last_tx = time.monotonic()
+        cache = settings_cache_for(self._t)
+        if cache is not None:
+            cache.invalidate()
+
+
 __all__ = [
+    "build_query",
+    "identify_model",
+    "FORBIDDEN_QUERIES",
+    "LakeshoreLink",
+    "MIN_COMMAND_GAP_S",
+    "WrongController",
     "parse_idn",
     "parse_reading",
+    "is_temperature_model",
     "default_channels",
     "default_outputs",
     "decode_reading_status",
@@ -752,6 +1190,9 @@ __all__ = [
     "probe_lakeshore",
     "discover_lakeshore",
     "read_snapshot",
+    "SETTINGS_MAX_AGE_S",
+    "SettingsCache",
+    "settings_cache_for",
     "ChannelState",
     "OutputState",
     "LakeshoreSnapshot",

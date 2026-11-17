@@ -141,7 +141,7 @@ describe("framePlaceholder — current-monitor events ", () => {
     });
     assert.ok(p);
     assert.deepEqual(p.source, { kind: "current_monitor", segmentId: 80391 });
-    assert.match(p.label, /电流监控/);
+    assert.match(p.label, /信号监控/);
     // The hint has to say WHY there is no frame, or a drawn curve just raises
     // the same question in a new form.
     assert.match(p.hint, /不是扫描画面/);

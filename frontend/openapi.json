@@ -5962,6 +5962,7 @@
               "led",
               "mirror",
               "beam_splitter",
+              "pbs",
               "dichroic",
               "grating",
               "lens",
@@ -8030,6 +8031,26 @@
             "default": "",
             "title": "Kind",
             "type": "string"
+          },
+          "level_meter": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LevelMeterState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "magnet": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MagnetState"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "model": {
             "default": "",
@@ -10123,6 +10144,65 @@
         "title": "EnvironmentReadingsResponse",
         "type": "object"
       },
+      "EventBeam": {
+        "description": "The beam as it arrives at a component, before the component acts (contract v2 §4.7).",
+        "properties": {
+          "d_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1/e^2 diameter of the Gaussian beam here, mm; null without one",
+            "title": "D Mm"
+          },
+          "mw": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "absolute power in mW (the tree's source_mw times p); null when the source's power is not known",
+            "title": "Mw"
+          },
+          "p": {
+            "description": "power relative to the tree's source",
+            "title": "P",
+            "type": "number"
+          },
+          "s": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 3,
+                "minItems": 3,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "[S1/S0, S2/S0, S3/S0], the normalised Stokes vector in the beam's own frame (e_h = z x d in the table plane, left of the beam; e_v = z, up; S1 = I_h - I_v, S2 = I_+45 - I_-45, angles from e_h towards e_v); null when no light (S0 = 0)",
+            "title": "S"
+          }
+        },
+        "required": [
+          "p",
+          "mw",
+          "d_mm",
+          "s"
+        ],
+        "title": "EventBeam",
+        "type": "object"
+      },
       "ExperimentDetail": {
         "description": "Full experiment detail: header metadata + samples + actions +\nspatial map markers + operator feedback. ``degraded`` / ``found`` let the\nfrontend show an empty-but-not-broken state when storage is unwired or the\nexperiment id does not exist.",
         "properties": {
@@ -11422,6 +11502,31 @@
         "title": "FetchResponse",
         "type": "object"
       },
+      "FigurePdfBody": {
+        "additionalProperties": false,
+        "description": "The figure to convert: the SVG file the editor's \"Figure SVG\" export saves, and a title for the PDF.",
+        "properties": {
+          "svg": {
+            "description": "the figure as a standalone SVG file (root svg in the SVG namespace, sized in px)",
+            "maxLength": 16000000,
+            "minLength": 1,
+            "title": "Svg",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "description": "written into the PDF's properties",
+            "maxLength": 200,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "svg"
+        ],
+        "title": "FigurePdfBody",
+        "type": "object"
+      },
       "FileAttributionEntry": {
         "description": "One row of ``file_locations`` — which experiment/sample a file belongs to.\n\n``abs_path`` is reconstructed from the experiment folder layout and can be\nnull when the folder cannot be located (renamed root, moved data); the\n``origin_path`` the ingest recorded is then the only usable path.",
         "properties": {
@@ -11673,6 +11778,22 @@
         "title": "GalleryAnchor",
         "type": "object"
       },
+      "GalleryAutoRequest": {
+        "description": "Ask for an automatic incremental build. The body is required (a bodyless POST must not be\naccepted: trap on optional request bodies as a CSRF door). The server decides whether one\nactually starts (switch on, a root enabled, nothing running, >= 1 min since the last build).",
+        "properties": {
+          "reason": {
+            "const": "open",
+            "description": "the gallery page was opened / became visible",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "GalleryAutoRequest",
+        "type": "object"
+      },
       "GalleryBuildError": {
         "properties": {
           "id": {
@@ -11769,6 +11890,18 @@
             "title": "N Changed",
             "type": "integer"
           },
+          "n_deferred": {
+            "default": 0,
+            "description": "files written in the last minute, left for the next round (not read, not cached)",
+            "title": "N Deferred",
+            "type": "integer"
+          },
+          "n_env": {
+            "default": 0,
+            "description": "entries whose environment tags changed in this build (a sidecar appeared after the file was first indexed counts) — the index changed even if no file did",
+            "title": "N Env",
+            "type": "integer"
+          },
           "n_failed": {
             "default": 0,
             "title": "N Failed",
@@ -11783,6 +11916,12 @@
           "n_new": {
             "default": 0,
             "title": "N New",
+            "type": "integer"
+          },
+          "n_removed": {
+            "default": 0,
+            "description": "entries dropped because their files are gone",
+            "title": "N Removed",
             "type": "integer"
           },
           "n_render": {
@@ -11826,6 +11965,16 @@
             "description": "render/analysis tasks queued in this build",
             "title": "Total",
             "type": "integer"
+          },
+          "trigger": {
+            "default": "manual",
+            "description": "who started this build: the operator's click, or the automatic updater",
+            "enum": [
+              "manual",
+              "auto"
+            ],
+            "title": "Trigger",
+            "type": "string"
           }
         },
         "title": "GalleryBuildStatus",
@@ -11833,6 +11982,18 @@
       },
       "GalleryConfigResponse": {
         "properties": {
+          "auto_build": {
+            "default": true,
+            "description": "incremental build in the background every auto_interval_min minutes and when the gallery page is opened",
+            "title": "Auto Build",
+            "type": "boolean"
+          },
+          "auto_interval_min": {
+            "default": 10,
+            "description": "minutes between automatic incremental builds (2-720)",
+            "title": "Auto Interval Min",
+            "type": "integer"
+          },
           "degraded": {
             "default": false,
             "title": "Degraded",
@@ -11886,6 +12047,32 @@
       "GalleryConfigUpdate": {
         "description": "Replace the root list (and optionally the worker count). Validation errors\ncome back as ``ok=false`` + ``detail`` and nothing is written.",
         "properties": {
+          "auto_build": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "omitted ⇒ unchanged",
+            "title": "Auto Build"
+          },
+          "auto_interval_min": {
+            "anyOf": [
+              {
+                "maximum": 720.0,
+                "minimum": 2.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "omitted ⇒ unchanged",
+            "title": "Auto Interval Min"
+          },
           "roots": {
             "items": {
               "$ref": "#/components/schemas/GalleryRootIn"
@@ -11931,6 +12118,873 @@
           }
         },
         "title": "GalleryDirMark",
+        "type": "object"
+      },
+      "GalleryEnvAcquisition": {
+        "additionalProperties": true,
+        "properties": {
+          "duration_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration S"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "end_from": {
+            "default": "",
+            "title": "End From",
+            "type": "string"
+          },
+          "end_iso": {
+            "default": "",
+            "title": "End Iso",
+            "type": "string"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "start_from": {
+            "default": "",
+            "title": "Start From",
+            "type": "string"
+          },
+          "start_iso": {
+            "default": "",
+            "title": "Start Iso",
+            "type": "string"
+          }
+        },
+        "title": "GalleryEnvAcquisition",
+        "type": "object"
+      },
+      "GalleryEnvDetail": {
+        "properties": {
+          "degraded": {
+            "default": false,
+            "title": "Degraded",
+            "type": "boolean"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "how": {
+            "default": "none",
+            "description": "sidecar / central record (both made when the file was saved) / inferred from the environment history / nothing known",
+            "enum": [
+              "sidecar",
+              "central",
+              "inferred",
+              "none"
+            ],
+            "title": "How",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "record": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GalleryEnvRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sidecar_path": {
+            "default": "",
+            "title": "Sidecar Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "GalleryEnvDetail",
+        "type": "object"
+      },
+      "GalleryEnvMissing": {
+        "additionalProperties": true,
+        "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "sensor": {
+            "default": "",
+            "title": "Sensor",
+            "type": "string"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "why": {
+            "default": "",
+            "description": "no_reading / invalid",
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "title": "GalleryEnvMissing",
+        "type": "object"
+      },
+      "GalleryEnvRecord": {
+        "additionalProperties": true,
+        "properties": {
+          "acquisition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GalleryEnvAcquisition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "file": {
+            "additionalProperties": true,
+            "title": "File",
+            "type": "object"
+          },
+          "inferred": {
+            "default": false,
+            "title": "Inferred",
+            "type": "boolean"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/GalleryEnvMissing"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "saved_at": {
+            "additionalProperties": true,
+            "title": "Saved At",
+            "type": "object"
+          },
+          "schema": {
+            "default": "",
+            "title": "Schema",
+            "type": "string"
+          },
+          "tagged": {
+            "additionalProperties": true,
+            "title": "Tagged",
+            "type": "object"
+          },
+          "values": {
+            "items": {
+              "$ref": "#/components/schemas/GalleryEnvValueDetail"
+            },
+            "title": "Values",
+            "type": "array"
+          },
+          "window": {
+            "items": {
+              "$ref": "#/components/schemas/GalleryEnvWindowDetail"
+            },
+            "title": "Window",
+            "type": "array"
+          }
+        },
+        "title": "GalleryEnvRecord",
+        "type": "object"
+      },
+      "GalleryEnvSummary": {
+        "description": "``env`` on an index item. Present only when something is known.",
+        "properties": {
+          "B": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GalleryEnvValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "magnetic field"
+          },
+          "L": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GalleryEnvValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "cryogen level"
+          },
+          "P": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GalleryEnvValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "pressure"
+          },
+          "T": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GalleryEnvValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "temperature"
+          },
+          "s": {
+            "default": "r",
+            "description": "r = recorded when the file was saved (sidecar or central record); i = inferred by the gallery from the environment history",
+            "enum": [
+              "r",
+              "i"
+            ],
+            "title": "S",
+            "type": "string"
+          },
+          "wB": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "[min, max] during the acquisition, same unit as B.u",
+            "title": "Wb"
+          },
+          "wL": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "[min, max] during the acquisition, same unit as L.u",
+            "title": "Wl"
+          },
+          "wP": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "[min, max] during the acquisition, same unit as P.u",
+            "title": "Wp"
+          },
+          "wT": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "[min, max] during the acquisition, same unit as T.u",
+            "title": "Wt"
+          },
+          "wr": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "keys (T/B/P/L) whose window came from individual readings, so it covers exactly the acquisition; the other windows come from 1-minute buckets and are wider. Only these mark a card as changed during the acquisition",
+            "title": "Wr"
+          }
+        },
+        "title": "GalleryEnvSummary",
+        "type": "object"
+      },
+      "GalleryEnvTagStatus": {
+        "additionalProperties": true,
+        "description": "The env-tag recorder in THIS process (``mast.envhistory.filetags.tagger``). Counters are\nsince the service started. ``active=false``: no recorder here (standalone API process).",
+        "properties": {
+          "active": {
+            "default": false,
+            "title": "Active",
+            "type": "boolean"
+          },
+          "central_failed": {
+            "default": 0,
+            "description": "central records that could not be written",
+            "title": "Central Failed",
+            "type": "integer"
+          },
+          "central_written": {
+            "default": 0,
+            "title": "Central Written",
+            "type": "integer"
+          },
+          "computed": {
+            "default": 0,
+            "description": "records made from the cached readings",
+            "title": "Computed",
+            "type": "integer"
+          },
+          "cooldown_skipped": {
+            "default": 0,
+            "description": "files in a directory cooling down after a failure",
+            "title": "Cooldown Skipped",
+            "type": "integer"
+          },
+          "cooling_dirs": {
+            "default": 0,
+            "title": "Cooling Dirs",
+            "type": "integer"
+          },
+          "dropped_disabled": {
+            "default": 0,
+            "description": "files dropped because recording was switched off",
+            "title": "Dropped Disabled",
+            "type": "integer"
+          },
+          "dropped_full": {
+            "default": 0,
+            "description": "files dropped because the queue was full",
+            "title": "Dropped Full",
+            "type": "integer"
+          },
+          "empty": {
+            "default": 0,
+            "description": "files saved while nothing was known (no record written)",
+            "title": "Empty",
+            "type": "integer"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "errors": {
+            "default": 0,
+            "description": "unexpected errors inside the recorder (see last_error)",
+            "title": "Errors",
+            "type": "integer"
+          },
+          "failed_write": {
+            "default": 0,
+            "description": "sidecar writes that failed (central record kept)",
+            "title": "Failed Write",
+            "type": "integer"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "max_age_s": {
+            "default": 30.0,
+            "title": "Max Age S",
+            "type": "number"
+          },
+          "pending": {
+            "default": 0,
+            "title": "Pending",
+            "type": "integer"
+          },
+          "reused": {
+            "default": 0,
+            "description": "copies given the original's record",
+            "title": "Reused",
+            "type": "integer"
+          },
+          "same": {
+            "default": 0,
+            "description": "files whose sidecar already described them",
+            "title": "Same",
+            "type": "integer"
+          },
+          "superseded": {
+            "default": 0,
+            "description": "sidecars written after moving a stale one aside",
+            "title": "Superseded",
+            "type": "integer"
+          },
+          "worker_alive": {
+            "default": false,
+            "title": "Worker Alive",
+            "type": "boolean"
+          },
+          "written": {
+            "default": 0,
+            "description": "sidecars written",
+            "title": "Written",
+            "type": "integer"
+          }
+        },
+        "title": "GalleryEnvTagStatus",
+        "type": "object"
+      },
+      "GalleryEnvTagsConfig": {
+        "description": "Environment tags on saved data files (docs/v2/design/data_env_tags.md): the two\nsettings and the recorder in this process. Stored in the gallery state directory\n(``env_tags.json``), not in the gallery ``config.json``: saving the data roots rewrites that\nfile and must not reset these.",
+        "properties": {
+          "degraded": {
+            "default": false,
+            "title": "Degraded",
+            "type": "boolean"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "enabled": {
+            "default": true,
+            "description": "record the known environment beside every newly saved data file (.mast/envtags/<file>.json)",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "max_age_s": {
+            "default": 30.0,
+            "description": "a cached reading counts as current when it is at most this many seconds from the save (5-600); older ones are recorded with their age",
+            "title": "Max Age S",
+            "type": "number"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GalleryEnvTagStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "the recorder in this process; null in a process without one"
+          }
+        },
+        "title": "GalleryEnvTagsConfig",
+        "type": "object"
+      },
+      "GalleryEnvTagsUpdate": {
+        "description": "Change the env-tag settings. An omitted key is unchanged; the data roots are never touched.",
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "omitted ⇒ unchanged",
+            "title": "Enabled"
+          },
+          "max_age_s": {
+            "anyOf": [
+              {
+                "maximum": 600.0,
+                "minimum": 5.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "omitted ⇒ unchanged",
+            "title": "Max Age S"
+          }
+        },
+        "title": "GalleryEnvTagsUpdate",
+        "type": "object"
+      },
+      "GalleryEnvValue": {
+        "description": "One primary value in an item's environment summary (card + filters).",
+        "properties": {
+          "a": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "stale only: how many seconds before the save it was read",
+            "title": "A"
+          },
+          "c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "canonical value for filters: K / T / Pa / % / cm",
+            "title": "C"
+          },
+          "s": {
+            "default": "l",
+            "description": "l = a cached reading near the save; h = the env-history bucket holding the save; o = stale (the last reading before the save, see a); i = inferred later",
+            "enum": [
+              "l",
+              "h",
+              "o",
+              "i"
+            ],
+            "title": "S",
+            "type": "string"
+          },
+          "u": {
+            "default": "",
+            "description": "the sensor's own unit, shown on the card as is",
+            "title": "U",
+            "type": "string"
+          },
+          "v": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "value in the sensor's own unit (4 significant digits)",
+            "title": "V"
+          }
+        },
+        "title": "GalleryEnvValue",
+        "type": "object"
+      },
+      "GalleryEnvValueDetail": {
+        "additionalProperties": true,
+        "properties": {
+          "bucket": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bucket"
+          },
+          "canonical": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical"
+          },
+          "canonical_unit": {
+            "default": "",
+            "title": "Canonical Unit",
+            "type": "string"
+          },
+          "driver": {
+            "default": "",
+            "title": "Driver",
+            "type": "string"
+          },
+          "dt_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "reading time minus save time, s (negative = before)",
+            "title": "Dt S"
+          },
+          "fresh": {
+            "default": true,
+            "title": "Fresh",
+            "type": "boolean"
+          },
+          "iso": {
+            "default": "",
+            "title": "Iso",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "description": "temperature / field / pressure / level / magnet_current / other",
+            "title": "Kind",
+            "type": "string"
+          },
+          "primary": {
+            "default": false,
+            "title": "Primary",
+            "type": "boolean"
+          },
+          "sensor": {
+            "default": "",
+            "description": "sensor name at the time (provenance only)",
+            "title": "Sensor",
+            "type": "string"
+          },
+          "source": {
+            "default": "",
+            "description": "live / history / inferred",
+            "title": "Source",
+            "type": "string"
+          },
+          "span_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "0 for a reading; the bucket width for history",
+            "title": "Span S"
+          },
+          "status": {
+            "default": "",
+            "title": "Status",
+            "type": "string"
+          },
+          "t": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "when MAST got the reading (bucket start for history), epoch s",
+            "title": "T"
+          },
+          "unit": {
+            "default": "",
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "title": "GalleryEnvValueDetail",
+        "type": "object"
+      },
+      "GalleryEnvWindowDetail": {
+        "additionalProperties": true,
+        "properties": {
+          "canonical_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Max"
+          },
+          "canonical_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Min"
+          },
+          "canonical_unit": {
+            "default": "",
+            "title": "Canonical Unit",
+            "type": "string"
+          },
+          "complete": {
+            "default": false,
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "start of the interval actually covered",
+            "title": "From"
+          },
+          "kind": {
+            "default": "",
+            "title": "Kind",
+            "type": "string"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          },
+          "method": {
+            "default": "",
+            "description": "readings / buckets / buckets+readings",
+            "title": "Method",
+            "type": "string"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          },
+          "n": {
+            "default": 0,
+            "title": "N",
+            "type": "integer"
+          },
+          "sensor": {
+            "default": "",
+            "title": "Sensor",
+            "type": "string"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "end of the interval actually covered",
+            "title": "To"
+          },
+          "unit": {
+            "default": "",
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "title": "GalleryEnvWindowDetail",
         "type": "object"
       },
       "GalleryFigureCategory": {
@@ -12513,6 +13567,17 @@
             ],
             "description": "id of the frame this one is a repeat save of",
             "title": "Dup"
+          },
+          "env": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GalleryEnvSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "known environment when the file was saved (or inferred); absent = nothing known"
           },
           "ex": {
             "anyOf": [
@@ -14200,11 +15265,30 @@
             "title": "Skill Registry Wired",
             "type": "boolean"
           },
+          "station_capabilities": {
+            "items": {
+              "enum": [
+                "nanonis",
+                "stm_safety",
+                "stm_actions",
+                "scan_map",
+                "witec",
+                "optical_bench",
+                "operator_prompts",
+                "laser_safety",
+                "sensor_echo"
+              ],
+              "type": "string"
+            },
+            "title": "Station Capabilities",
+            "type": "array"
+          },
           "station_profile": {
             "default": "stm",
             "enum": [
               "stm",
-              "optical"
+              "optical",
+              "generic"
             ],
             "title": "Station Profile",
             "type": "string"
@@ -14223,6 +15307,16 @@
             "default": false,
             "title": "Station Restart Pending",
             "type": "boolean"
+          },
+          "station_serial_autodetect": {
+            "default": "default_on",
+            "enum": [
+              "default_on",
+              "default_off",
+              "forced_off"
+            ],
+            "title": "Station Serial Autodetect",
+            "type": "string"
           },
           "status": {
             "const": "ok",
@@ -14298,6 +15392,131 @@
           }
         },
         "title": "HeartbeatView",
+        "type": "object"
+      },
+      "HeaterControlStatus": {
+        "description": "Sample-stage heating on the Model 335: set up or not, and the change MAST runs.\n\n``present`` False = no Model 335 recognised (or MAST's side not wired).\n``can_heat`` = output, control input and the limits are set at initialization.\n``active`` = the change MAST started and is supervising (``None`` = none); ``last`` =\nhow the previous one ended; ``last_off`` / ``last_hold`` = the latest heater-off / hold.",
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
+          },
+          "busy": {
+            "default": false,
+            "title": "Busy",
+            "type": "boolean"
+          },
+          "can_heat": {
+            "default": false,
+            "title": "Can Heat",
+            "type": "boolean"
+          },
+          "identity": {
+            "additionalProperties": true,
+            "title": "Identity",
+            "type": "object"
+          },
+          "last": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last"
+          },
+          "last_hold": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Hold"
+          },
+          "last_off": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Off"
+          },
+          "port": {
+            "default": "",
+            "title": "Port",
+            "type": "string"
+          },
+          "present": {
+            "default": false,
+            "title": "Present",
+            "type": "boolean"
+          },
+          "settings": {
+            "additionalProperties": true,
+            "title": "Settings",
+            "type": "object"
+          }
+        },
+        "title": "HeaterControlStatus",
+        "type": "object"
+      },
+      "HeaterOffRequest": {
+        "description": "Operator heater-off from the MAST UI. The body is required (a write needs a JSON body).",
+        "properties": {
+          "reason": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "HeaterOffRequest",
+        "type": "object"
+      },
+      "HeaterOffResponse": {
+        "description": "``sent`` True = every RANGE 0 went out on the identity-checked handle;\n``confirmed`` True = every RANGE? read back 0.",
+        "properties": {
+          "confirmed": {
+            "default": false,
+            "title": "Confirmed",
+            "type": "boolean"
+          },
+          "error": {
+            "default": "",
+            "title": "Error",
+            "type": "string"
+          },
+          "present": {
+            "default": false,
+            "title": "Present",
+            "type": "boolean"
+          },
+          "sent": {
+            "default": false,
+            "title": "Sent",
+            "type": "boolean"
+          }
+        },
+        "title": "HeaterOffResponse",
         "type": "object"
       },
       "HistoryResponse": {
@@ -15524,6 +16743,13 @@
             "title": "Derived",
             "type": "array"
           },
+          "envelope_narrower": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Envelope Narrower",
+            "type": "array"
+          },
           "fingerprint_changed": {
             "default": false,
             "title": "Fingerprint Changed",
@@ -15600,7 +16826,7 @@
         "type": "object"
       },
       "InstrumentState": {
-        "description": "Everything MAST can read off an instrument without writing to it.",
+        "description": "Everything MAST can read off an instrument without writing to it.\n\n``kind`` selects which part is filled: ``lakeshore_temp`` → ``channels`` /\n``outputs``; ``lakeshore_625`` → ``magnet``; ``cryomag_lm510`` → ``level_meter``.",
         "properties": {
           "any_heater_on": {
             "default": false,
@@ -15628,6 +16854,26 @@
             "default": "",
             "title": "Kind",
             "type": "string"
+          },
+          "level_meter": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LevelMeterState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "magnet": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MagnetState"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "model": {
             "default": "",
@@ -16774,6 +18020,187 @@
         "title": "LayoutWriteBody",
         "type": "object"
       },
+      "LevelMeterState": {
+        "description": "Cryomagnetics LM-510 level monitor, one channel, read-only.\n\n``level`` is the instrument's LAST COMPLETED reading (MEAS?); MAST never starts\na measurement. ``updates_by_itself`` false = sample mode Off: the number will\nnot refresh until someone starts a reading at the instrument.",
+        "properties": {
+          "boost": {
+            "default": "",
+            "title": "Boost",
+            "type": "string"
+          },
+          "channel": {
+            "default": 1,
+            "title": "Channel",
+            "type": "integer"
+          },
+          "channel_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "LHe or LN2 (TYPE?)",
+            "title": "Channel Type"
+          },
+          "channel_type_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel Type Code"
+          },
+          "control": {
+            "default": "",
+            "description": "refill control status (CTRL?)",
+            "title": "Control",
+            "type": "string"
+          },
+          "ctrl_high": {
+            "default": "",
+            "title": "Ctrl High",
+            "type": "string"
+          },
+          "ctrl_low": {
+            "default": "",
+            "title": "Ctrl Low",
+            "type": "string"
+          },
+          "default_channel": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "channel the mode/interval/units fields describe (CHAN?)",
+            "title": "Default Channel"
+          },
+          "high_alarm": {
+            "default": "",
+            "title": "High Alarm",
+            "type": "string"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "low_alarm": {
+            "default": "",
+            "title": "Low Alarm",
+            "type": "string"
+          },
+          "menu_open": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "an operator has the front-panel menu open",
+            "title": "Menu Open"
+          },
+          "read_at": {
+            "default": 0.0,
+            "title": "Read At",
+            "type": "number"
+          },
+          "sample_interval": {
+            "default": "",
+            "title": "Sample Interval",
+            "type": "string"
+          },
+          "sample_mode": {
+            "default": "",
+            "title": "Sample Mode",
+            "type": "string"
+          },
+          "sensor_fault": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "open sensor or burnout (STAT?)",
+            "title": "Sensor Fault"
+          },
+          "sensor_length": {
+            "default": "",
+            "title": "Sensor Length",
+            "type": "string"
+          },
+          "status_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Code"
+          },
+          "status_flags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Flags"
+          },
+          "unanswered": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unanswered",
+            "type": "array"
+          },
+          "unit": {
+            "default": "",
+            "title": "Unit",
+            "type": "string"
+          },
+          "updates_by_itself": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updates By Itself"
+          }
+        },
+        "title": "LevelMeterState",
+        "type": "object"
+      },
       "LibrariesResponse": {
         "description": "The library list for the 库管理 panel. ``degraded`` is True when the\nlibrary backend is absent/unreachable (standalone dev) — empty, not broken.\n\n**The id to pre-select is ``effective_library_id``**, not\n``active_library_id``. The latter is now only the manual fallback pointer used\nwhen no experiment is active; with an experiment running, adds and searches\ndefault to that experiment's own library instead, and pre-selecting the manual\npointer would show the operator a library nothing is writing to.",
         "properties": {
@@ -17138,6 +18565,9 @@
                 "$ref": "#/components/schemas/LiveMap2DFrame"
               },
               {
+                "$ref": "#/components/schemas/LiveMap2DRowsFrame"
+              },
+              {
                 "$ref": "#/components/schemas/LiveStatusFrame"
               }
             ],
@@ -17210,6 +18640,48 @@
           "values"
         ],
         "title": "LiveMap2DFrame",
+        "type": "object"
+      },
+      "LiveMap2DRowsFrame": {
+        "description": "map2d_rows：一行（或一行里从 ix0 起的一段）；各通道数组等长，ix0 + 长度 ≤ nx。",
+        "properties": {
+          "ix0": {
+            "default": 0,
+            "title": "Ix0",
+            "type": "integer"
+          },
+          "iy": {
+            "title": "Iy",
+            "type": "integer"
+          },
+          "t": {
+            "title": "T",
+            "type": "number"
+          },
+          "values": {
+            "additionalProperties": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "t",
+          "iy",
+          "values"
+        ],
+        "title": "LiveMap2DRowsFrame",
         "type": "object"
       },
       "LiveReadings": {
@@ -17629,6 +19101,7 @@
               "scalar",
               "xy",
               "map2d",
+              "map2d_rows",
               "status"
             ],
             "title": "Kind",
@@ -17653,7 +19126,7 @@
           },
           "meta": {
             "additionalProperties": true,
-            "description": "声明时给的描述。map2d 必有 nx, ny, x0, y0, dx, dy, x_unit, y_unit；spectrum 可带 laser_line_nm（前端切 cm⁻¹ 用）",
+            "description": "声明时给的描述。map2d / map2d_rows 必有 nx, ny, x0, y0, dx, dy, x_unit, y_unit；spectrum 可带 laser_line_nm（前端切 cm⁻¹ 用）",
             "title": "Meta",
             "type": "object"
           },
@@ -17663,7 +19136,7 @@
             "type": "integer"
           },
           "retain": {
-            "description": "保留的帧数上限（map2d 是像素数）",
+            "description": "保留的帧数上限（map2d 是像素数，map2d_rows 是行数）",
             "title": "Retain",
             "type": "integer"
           },
@@ -17851,6 +19324,642 @@
           "values"
         ],
         "title": "LiveXYFrame",
+        "type": "object"
+      },
+      "MagnetControlStatus": {
+        "description": "Field control on the Model 625 (7.2.0): configured or not, and the ramp MAST runs.\n\n``present`` False = no magnet supply recognised (or MAST's side not wired).\n``can_set_field`` = max field and field constant are set at initialization.\n``active`` = the ramp MAST started and is supervising (``None`` = none);\n``last`` = how the previous one ended; ``last_stop`` = the latest STOP sent.",
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
+          },
+          "busy": {
+            "default": false,
+            "title": "Busy",
+            "type": "boolean"
+          },
+          "can_set_field": {
+            "default": false,
+            "title": "Can Set Field",
+            "type": "boolean"
+          },
+          "last": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last"
+          },
+          "last_stop": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Stop"
+          },
+          "port": {
+            "default": "",
+            "title": "Port",
+            "type": "string"
+          },
+          "present": {
+            "default": false,
+            "title": "Present",
+            "type": "boolean"
+          },
+          "settings": {
+            "additionalProperties": true,
+            "title": "Settings",
+            "type": "object"
+          }
+        },
+        "title": "MagnetControlStatus",
+        "type": "object"
+      },
+      "MagnetState": {
+        "description": "Lake Shore Model 625 superconducting-magnet supply, read-only.\n\nEvery field comes from a query; ``null`` = the instrument did not answer that\nquery (unknown), never a default. MAST has no path to change any of these:\nthe driver cannot build a setter (``environment/lakeshore_625.py``).",
+        "properties": {
+          "any_error": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Any Error"
+          },
+          "compliance_v": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compliance V"
+          },
+          "crowbar_discharge": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Crowbar Discharge"
+          },
+          "current_a": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "measured output current (RDGI?), A",
+            "title": "Current A"
+          },
+          "energized": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "|output current| > 10 mA",
+            "title": "Energized"
+          },
+          "external_program": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Program"
+          },
+          "external_program_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Program Code"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "computed field = measured current x field constant (RDGF?)",
+            "title": "Field"
+          },
+          "field_constant": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "field_unit per ampere (FLDS?)",
+            "title": "Field Constant"
+          },
+          "field_unit": {
+            "default": "",
+            "description": "T or kG (FLDS?)",
+            "title": "Field Unit",
+            "type": "string"
+          },
+          "hardware_error_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hardware Error Code"
+          },
+          "hardware_errors": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hardware Errors"
+          },
+          "in_compliance": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "In Compliance"
+          },
+          "interface_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interface Mode"
+          },
+          "interface_mode_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "0 local, 1 remote, 2 remote + lockout",
+            "title": "Interface Mode Code"
+          },
+          "limit_current_a": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Current A"
+          },
+          "limit_rate_a_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Rate A S"
+          },
+          "limit_voltage_v": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Voltage V"
+          },
+          "max_field": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "LIMIT? current x field constant",
+            "title": "Max Field"
+          },
+          "operational_error_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operational Error Code"
+          },
+          "operational_errors": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operational Errors"
+          },
+          "operational_status_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operational Status Code"
+          },
+          "persistent_ramp_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Persistent Ramp Enabled"
+          },
+          "persistent_ramp_rate_a_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Persistent Ramp Rate A S"
+          },
+          "psh_current_ma": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Psh Current Ma"
+          },
+          "psh_delay_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Psh Delay S"
+          },
+          "psh_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "a persistent switch is configured (PSHS?)",
+            "title": "Psh Enabled"
+          },
+          "psh_error_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Psh Error Code"
+          },
+          "psh_errors": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Psh Errors"
+          },
+          "psh_last_current_a": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Psh Last Current A"
+          },
+          "psh_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Psh State"
+          },
+          "psh_state_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "0 off, 1 on, 2 warming, 3 cooling",
+            "title": "Psh State Code"
+          },
+          "quench_detected": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quench Detected"
+          },
+          "quench_detection_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quench Detection Enabled"
+          },
+          "quench_step_limit_a_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quench Step Limit A S"
+          },
+          "ramp_done": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ramp Done"
+          },
+          "ramp_rate_a_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ramp Rate A S"
+          },
+          "ramp_segments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RampSegment"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "RSEGS? 1..5 when segments are enabled; null when not read",
+            "title": "Ramp Segments"
+          },
+          "ramp_segments_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ramp Segments Enabled"
+          },
+          "ramping": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ramping"
+          },
+          "read_at": {
+            "default": 0.0,
+            "title": "Read At",
+            "type": "number"
+          },
+          "remote_voltage_v": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "voltage at the remote-sense leads (RDGRV?)",
+            "title": "Remote Voltage V"
+          },
+          "setpoint_current_a": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Setpoint Current A"
+          },
+          "setpoint_field": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Setpoint Field"
+          },
+          "trigger_current_a": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "current the output would ramp to on a trigger (TRIG?)",
+            "title": "Trigger Current A"
+          },
+          "unanswered": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unanswered",
+            "type": "array"
+          },
+          "voltage_v": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "output voltage at the supply terminals (RDGV?)",
+            "title": "Voltage V"
+          }
+        },
+        "title": "MagnetState",
+        "type": "object"
+      },
+      "MagnetStopRequest": {
+        "description": "Operator STOP from the MAST UI. The body is required (a write needs a JSON body).",
+        "properties": {
+          "reason": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "MagnetStopRequest",
+        "type": "object"
+      },
+      "MagnetStopResponse": {
+        "description": "``sent`` True = STOP went out on the identity-checked handle.",
+        "properties": {
+          "error": {
+            "default": "",
+            "title": "Error",
+            "type": "string"
+          },
+          "present": {
+            "default": false,
+            "title": "Present",
+            "type": "boolean"
+          },
+          "sent": {
+            "default": false,
+            "title": "Sent",
+            "type": "boolean"
+          }
+        },
+        "title": "MagnetStopResponse",
         "type": "object"
       },
       "MaintenanceBody": {
@@ -18806,6 +20915,7 @@
           },
           "timestamp": {
             "default": "",
+            "description": "When it was recorded: ISO 8601 with the UTC offset in force on that date on the instrument PC (2026-07-01T12:00:00.123456+02:00, 2026-01-15T09:30:00+01:00 in a zone with daylight saving). \"\" for a planned step; a stamp that could not be read is passed on as recorded.",
             "title": "Timestamp",
             "type": "string"
           },
@@ -23508,6 +25618,42 @@
         "title": "QuickPromptsWriteResponse",
         "type": "object"
       },
+      "RampSegment": {
+        "description": "One Model 625 ramp segment: ``rate_a_s`` applies while |I| < ``upper_current_a``.",
+        "properties": {
+          "rate_a_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate A S"
+          },
+          "segment": {
+            "title": "Segment",
+            "type": "integer"
+          },
+          "upper_current_a": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upper Current A"
+          }
+        },
+        "required": [
+          "segment"
+        ],
+        "title": "RampSegment",
+        "type": "object"
+      },
       "RearmWatchdogResponse": {
         "properties": {
           "degraded": {
@@ -26283,6 +28429,18 @@
             "title": "Image B64",
             "type": "string"
           },
+          "live": {
+            "default": false,
+            "description": "True for the scan IN PROGRESS (the vision monitor's newest 1/8 milestone image), False for a saved .sxm. A time window filters saved scans by mtime; the scan in progress is always drawn, like the live scan frame it sits in. A client drawing the row-by-row live stream (LiveHub local/scan/live/<n>) hides this image while that stream covers the frame, and uses it as the fallback when the stream is unavailable.",
+            "title": "Live",
+            "type": "boolean"
+          },
+          "mtime": {
+            "default": "",
+            "description": "When the file was last written, ISO 8601 in UTC (e.g. 2026-11-12T03:04:05Z); \"\" when it could not be read. For a saved .sxm that is when Nanonis finished the scan; for the scan in progress, when its newest milestone image was written. Clients use it to show the image's age and to filter the map by time — an image with no mtime must be treated as undated, not as old.",
+            "title": "Mtime",
+            "type": "string"
+          },
           "name": {
             "default": "",
             "title": "Name",
@@ -27221,6 +29379,57 @@
         "title": "SectionConfigWriteResponse",
         "type": "object"
       },
+      "SegmentBeam": {
+        "description": "The beam at the start of a segment (contract v2 §4.7).",
+        "properties": {
+          "p": {
+            "description": "power relative to the tree's source (S0; 1 at the source)",
+            "title": "P",
+            "type": "number"
+          },
+          "q": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 2,
+                "minItems": 2,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "[z, zR] in mm: the complex beam parameter q = z + i zR of the Gaussian beam (z > 0 past the waist); null without one",
+            "title": "Q"
+          },
+          "s": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 3,
+                "minItems": 3,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "[S1/S0, S2/S0, S3/S0], the normalised Stokes vector in the beam's own frame (e_h = z x d in the table plane, left of the beam; e_v = z, up; S1 = I_h - I_v, S2 = I_+45 - I_-45, angles from e_h towards e_v); null when no light (S0 = 0)",
+            "title": "S"
+          }
+        },
+        "required": [
+          "p",
+          "s",
+          "q"
+        ],
+        "title": "SegmentBeam",
+        "type": "object"
+      },
       "SegmentDataResponse": {
         "description": "Decimated waveform for one segment.\n\n``source='envelope'`` means the raw ``.npy`` was swept by the retention\npolicy and this is the stored min/max band instead — coarser, but honest,\nand the UI says so.",
         "properties": {
@@ -27689,12 +29898,28 @@
         "type": "object"
       },
       "SensorsResponse": {
-        "description": "The persisted sensor config. ``autodetect`` mirrors the config flag.\n``degraded`` True when the environment config module can't be read.",
+        "description": "The persisted sensor config. ``autodetect`` mirrors the config flag.\n``degraded`` True when the environment config module can't be read.\n\n``autodetect_effective`` / ``autodetect_reason``: whether the serial scan will really run\nat the next start or rescan, and why - the station profile and the setting\n``serial_autodetect`` can say otherwise than the file (``environment.config.autodetect_policy``,\ndocs/v2/design/generic_station.md §1.4). ``None`` when it cannot be worked out.",
         "properties": {
           "autodetect": {
             "default": true,
             "title": "Autodetect",
             "type": "boolean"
+          },
+          "autodetect_effective": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Autodetect Effective"
+          },
+          "autodetect_reason": {
+            "default": "",
+            "title": "Autodetect Reason",
+            "type": "string"
           },
           "count": {
             "default": 0,
@@ -28254,6 +30479,17 @@
               }
             ],
             "title": "Scan Policy"
+          },
+          "serial_autodetect": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Serial Autodetect"
           },
           "station_profile": {
             "anyOf": [
@@ -28915,6 +31151,17 @@
               }
             ],
             "title": "Scan Policy"
+          },
+          "serial_autodetect": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Serial Autodetect"
           },
           "station_profile": {
             "anyOf": [
@@ -31032,6 +33279,18 @@
       "Table": {
         "additionalProperties": false,
         "properties": {
+          "beam_height_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "height of the beam above the table top, mm (0-10000, 0.01 resolution): the height of every component and source without props.z_mm; not given = 75",
+            "title": "Beam Height Mm"
+          },
           "grid": {
             "default": "metric",
             "enum": [
@@ -32094,9 +34353,17 @@
             "title": "Action",
             "type": "string"
           },
+          "beam": {
+            "$ref": "#/components/schemas/EventBeam"
+          },
           "component": {
             "title": "Component",
             "type": "string"
+          },
+          "dz_mm": {
+            "description": "height of the beam minus that of the component's axis (a periscope: of its entrance for this direction), mm; above 0 the beam is above the axis",
+            "title": "Dz Mm",
+            "type": "number"
           },
           "incidence_deg": {
             "title": "Incidence Deg",
@@ -32107,6 +34374,7 @@
             "type": "number"
           },
           "path_mm": {
+            "description": "path from the source, mm, with the vertical runs inside periscopes",
             "title": "Path Mm",
             "type": "number"
           },
@@ -32117,6 +34385,11 @@
           "y": {
             "title": "Y",
             "type": "number"
+          },
+          "z_mm": {
+            "description": "height of the beam arriving here, mm (contract 3D §4)",
+            "title": "Z Mm",
+            "type": "number"
           }
         },
         "required": [
@@ -32124,15 +34397,60 @@
           "action",
           "x",
           "y",
+          "z_mm",
           "offset_mm",
+          "dz_mm",
           "incidence_deg",
-          "path_mm"
+          "path_mm",
+          "beam"
         ],
         "title": "TraceEvent",
         "type": "object"
       },
+      "TracePass": {
+        "description": "A component a segment passes over or under (contract 3D §3.5): the ray meets its working surface in the\nplane, inside the aperture, but more than half the aperture above or below its axis, and goes on.",
+        "properties": {
+          "component": {
+            "title": "Component",
+            "type": "string"
+          },
+          "dz_mm": {
+            "description": "height of the beam minus that of the component's axis (a periscope: of its entrance for this direction), mm; above 0 the beam passes over it",
+            "title": "Dz Mm",
+            "type": "number"
+          },
+          "x": {
+            "description": "where the ray passes it, in the plane, mm",
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "component",
+          "x",
+          "y",
+          "dz_mm"
+        ],
+        "title": "TracePass",
+        "type": "object"
+      },
       "TraceSegment": {
         "properties": {
+          "beam": {
+            "$ref": "#/components/schemas/SegmentBeam"
+          },
+          "passes": {
+            "description": "the components the segment passes over or under, in the order along it (contract 3D §3.5)",
+            "items": {
+              "$ref": "#/components/schemas/TracePass"
+            },
+            "title": "Passes",
+            "type": "array"
+          },
           "x0": {
             "title": "X0",
             "type": "number"
@@ -32148,19 +34466,30 @@
           "y1": {
             "title": "Y1",
             "type": "number"
+          },
+          "z_mm": {
+            "description": "height of the beam along the segment above the table top, mm (contract 3D §4)",
+            "title": "Z Mm",
+            "type": "number"
           }
         },
         "required": [
           "x0",
           "y0",
           "x1",
-          "y1"
+          "y1",
+          "z_mm",
+          "beam",
+          "passes"
         ],
         "title": "TraceSegment",
         "type": "object"
       },
       "TraceTree": {
         "properties": {
+          "beam": {
+            "$ref": "#/components/schemas/TreeBeam"
+          },
           "branches": {
             "items": {
               "$ref": "#/components/schemas/TraceBranch"
@@ -32186,6 +34515,7 @@
         },
         "required": [
           "source",
+          "beam",
           "branches"
         ],
         "title": "TraceTree",
@@ -32445,6 +34775,41 @@
           "conversation_id"
         ],
         "title": "TranscriptResponse",
+        "type": "object"
+      },
+      "TreeBeam": {
+        "description": "What the beam of a whole tree has in common (contract v2 §4.7).",
+        "properties": {
+          "m2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "beam quality factor M^2 of the tree; null when it has no Gaussian beam",
+            "title": "M2"
+          },
+          "source_mw": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "the source's power in mW (every wavelength of a source has all of power_mw; a fibre continuation what reached its coupler times the coupling); null when not known",
+            "title": "Source Mw"
+          }
+        },
+        "required": [
+          "source_mw",
+          "m2"
+        ],
+        "title": "TreeBeam",
         "type": "object"
       },
       "UpdateTipBody": {
@@ -40001,9 +42366,73 @@
         ]
       }
     },
+    "/api/environment/heater-control": {
+      "get": {
+        "description": "Sample-stage heating status: set up at initialization or not, and the change MAST\nruns. No I/O.",
+        "operationId": "heater_control_status_api_environment_heater_control_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeaterControlStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Heater Control Status",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/environment/heater-control/off": {
+      "post": {
+        "description": "Operator heater-off: RANGE 0 on the configured output and on the one MAST is heating,\nread back until it reads 0 (retried in the background). No PIN; the stage then cools\nby itself. Refused where temperature control is not set up and MAST is not heating:\nthere MAST writes nothing to the 335 (``error`` says to use ALL OFF).",
+        "operationId": "heater_control_off_api_environment_heater_control_off_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HeaterOffRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeaterOffResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Heater Control Off",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/environment/instrument-state": {
       "get": {
-        "description": "Read-only settings/heater readout of the instruments MAST is connected to.\n\nReads over each live sensor's ALREADY-OPEN port instead of taking the bus,\nso the settings panel can refresh while the monitor keeps polling (the\ntransport serialises the two readers). One instrument is reported once even\nthough its inputs are separate sensors sharing that port.\n\nEverything here is a query — the panel can show that a heater is on, and has\nno path to turn one on.",
+        "description": "Read-only settings/heater readout of the instruments MAST is connected to.\n\nReads over each live sensor's ALREADY-OPEN port instead of taking the bus,\nso the settings panel can refresh while the monitor keeps polling (the\ntransport serialises the two readers). One instrument is reported once even\nthough its inputs are separate sensors sharing that port.\n\nEverything here is a query — the panel can show that a heater is on, and has\nno path to turn one on. The same holds for the Lake Shore 625 magnet supply\n(field, current, setpoints, persistent switch, quench/error bits) and the\nCryomagnetics LM-510 (level, status, sample mode): read, never commanded.",
         "operationId": "instrument_state_api_environment_instrument_state_get",
         "responses": {
           "200": {
@@ -40018,6 +42447,70 @@
           }
         },
         "summary": "Instrument State",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/environment/magnet-control": {
+      "get": {
+        "description": "Field control status: configured at initialization or not, and the ramp MAST runs. No I/O.",
+        "operationId": "magnet_control_status_api_environment_magnet_control_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MagnetControlStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Magnet Control Status",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/environment/magnet-control/stop": {
+      "post": {
+        "description": "Operator STOP: freeze the magnet output at its present value. Always allowed, no PIN.\n\nSTOP does not bring the field to zero; it holds it where it is.",
+        "operationId": "magnet_control_stop_api_environment_magnet_control_stop_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MagnetStopRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MagnetStopResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Magnet Control Stop",
         "tags": [
           "admin"
         ]
@@ -41244,6 +43737,48 @@
         ]
       }
     },
+    "/api/gallery/auto": {
+      "post": {
+        "description": "The gallery page was opened: start an automatic incremental build if the server's rules\nallow it (switch on, a root enabled, nothing running, >= 1 min since the last build, past\nthe start-up hold). Always answers with the current status; never waits.",
+        "operationId": "gallery_auto_api_gallery_auto_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GalleryAutoRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GalleryBuildStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Gallery Auto",
+        "tags": [
+          "gallery"
+        ]
+      }
+    },
     "/api/gallery/build": {
       "post": {
         "description": "Start the background build, or report the one already running.",
@@ -41328,7 +43863,7 @@
         ]
       },
       "post": {
-        "description": "Replace the root list. Invalid input writes nothing and says why.",
+        "description": "Replace the root list. Invalid input writes nothing and says why. Nested or repeated roots\nare merged into the outer / first one instead of refused; ``detail`` then says what was merged\n(with ``ok`` true).",
         "operationId": "gallery_config_update_api_gallery_config_post",
         "requestBody": {
           "content": {
@@ -41363,6 +43898,111 @@
           }
         },
         "summary": "Gallery Config Update",
+        "tags": [
+          "gallery"
+        ]
+      }
+    },
+    "/api/gallery/env-tags": {
+      "get": {
+        "description": "环境标签的两个设置，加上本进程记录器的计数。只读，不创建任何东西。",
+        "operationId": "gallery_env_tags_api_gallery_env_tags_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GalleryEnvTagsConfig"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Gallery Env Tags",
+        "tags": [
+          "gallery"
+        ]
+      },
+      "post": {
+        "description": "改环境标签的设置，省略的键不变。只写状态目录的 ``env_tags.json``，不碰数据根。",
+        "operationId": "gallery_env_tags_update_api_gallery_env_tags_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GalleryEnvTagsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GalleryEnvTagsConfig"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Gallery Env Tags Update",
+        "tags": [
+          "gallery"
+        ]
+      }
+    },
+    "/api/gallery/env/{path}": {
+      "get": {
+        "description": "一个条目（``path`` = 条目 id）的完整环境记录：保存时写下的 sidecar、中央记录，或现推断。\n\n只读：读 sidecar、查环境历史库、必要时读数据文件头 64 KiB 核对身份；不写任何东西，也不\n新建环境历史库（docs/v2/design/data_env_tags.md）。条目不在索引里 ⇒ ``how=\"none\"``。永不 500。",
+        "operationId": "gallery_env_api_gallery_env__path__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GalleryEnvDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Gallery Env",
         "tags": [
           "gallery"
         ]
@@ -45120,6 +47760,43 @@
         ]
       }
     },
+    "/api/optical-layouts/figure.pdf": {
+      "post": {
+        "description": "The figure SVG as a one-page vector PDF: text kept as text (Chinese in an embedded subset of MuPDF's CJK\nfont), the page 0.75 pt per pixel of the SVG (its size on paper at 96 px to the inch). 422 when ``svg`` is not\na figure SVG (the detail says why), 501 without PyMuPDF, 500 when MuPDF fails.",
+        "operationId": "figure_pdf_route_api_optical_layouts_figure_pdf_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FigurePdfBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/pdf": {}
+            },
+            "description": "the figure as a vector PDF"
+          },
+          "413": {
+            "description": "the request body is too large (refused before it is read)"
+          },
+          "422": {
+            "description": "the body is not a figure SVG"
+          },
+          "501": {
+            "description": "PyMuPDF is not installed"
+          }
+        },
+        "summary": "Figure Pdf Route",
+        "tags": [
+          "optical-layout"
+        ]
+      }
+    },
     "/api/optical-layouts/{layout_id}": {
       "get": {
         "description": "The layout (as stored: ``layout``), its ray trace (``trace``, the contract's section 4) and\n``links_state`` (the state behind each device / slot link: read from the registry's\nconfiguration and the devices already open, never by opening one). 404 unknown, 500 the file\ncannot be read (it is left untouched).",
@@ -46535,7 +49212,7 @@
     },
     "/api/safety/limits": {
       "get": {
-        "description": "The bounds in force right now — live SafetyGuard first, merged, defaults.\n\nResponse headers carry the provenance without changing the body shape (the\nbody model is re-exported straight from ``config.SafetyLimits``, shared with\nthe core; API-only fields must not be bolted onto it):\n\n  * ``x-safety-limits-source``   — live_guard | merged | defaults\n  * ``x-safety-restart-pending`` — true | false | unknown\n\nNever raises: \"what are the limits\" degrades to the code defaults rather\nthan 500-ing, because a caller who gets no answer here will assume the\ndefaults anyway — better to hand them the defaults and say so.",
+        "description": "The bounds in force right now — live SafetyGuard first, merged, defaults.\n\nResponse headers carry the provenance without changing the body shape (the\nbody model is re-exported straight from ``config.SafetyLimits``, shared with\nthe core; API-only fields must not be bolted onto it):\n\n  * ``x-safety-limits-source``   — live_guard | merged | defaults\n  * ``x-safety-restart-pending`` — true | false | unknown\n  * ``x-safety-envelope-narrower`` — fields (comma-separated) the last\n    reconciliation found NARROWER than the measured instrument travel;\n    ``none`` | ``unknown`` (never reconciled)\n\nNever raises: \"what are the limits\" degrades to the code defaults rather\nthan 500-ing, because a caller who gets no answer here will assume the\ndefaults anyway — better to hand them the defaults and say so.",
         "operationId": "get_safety_limits_api_safety_limits_get",
         "responses": {
           "200": {
@@ -46579,7 +49256,7 @@
     },
     "/api/safety/reconnect-role": {
       "post": {
-        "description": "优雅地重建指定角色的 Nanonis TCP 连接。\n\n为自动重连未能识别或恢复的连接故障提供显式入口。它只更换连接，\n不进针、不开反馈、不改变扫描。沿连接池的 FIN、排空迟到字节、关闭和新建\n流程执行，避免强制关闭影响单客户端端口的恢复。",
+        "description": "优雅地重建指定角色的 Nanonis TCP 连接。\n\n为自动重连未能识别或恢复的连接故障提供显式入口。它只更换连接，\n不进针、不开反馈、不改变扫描。沿连接池的 FIN、排空迟到字节、关闭和新建\n流程执行，避免强制关闭影响单客户端端口的恢复。\n\n通信熔断器没闭合时，同时结束冷却、重新放一个探针：下一次计数调用就验证\n链路（见 ``ConnectionPool.reconnect_role``）。之后的状态看\n``GET /api/safety/latches`` 的 ``comms_breaker``。",
         "operationId": "reconnect_role_api_safety_reconnect_role_post",
         "requestBody": {
           "content": {

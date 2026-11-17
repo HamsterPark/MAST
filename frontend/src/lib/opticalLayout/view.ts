@@ -61,6 +61,46 @@ export function centerOn(v: View, p: Vec, width: number, height: number, minK = 
   return { k, ox: width / 2 - p.x * k, oy: height / 2 + p.y * k };
 }
 
+/**
+ * The view after the viewport changed size from `from` to `to`: the platform point in the middle stays in the
+ * middle, and the zoom changes by the smaller of the two growth factors, so everything that was in view still
+ * is (and larger, when the viewport grew).
+ */
+export function rescaleView(v: View, from: { w: number; h: number }, to: { w: number; h: number }): View {
+  if (!(from.w > 0 && from.h > 0 && to.w > 0 && to.h > 0)) return v;
+  const c = toWorld(v, from.w / 2, from.h / 2);
+  const k = clampK(v.k * Math.min(to.w / from.w, to.h / from.h));
+  return { k, ox: to.w / 2 - c.x * k, oy: to.h / 2 + c.y * k };
+}
+
+/** What the canvas remembers of the sizes it had while nobody panned or zoomed, to go back to them exactly. */
+export interface ResizeMemory {
+  /** the earlier sizes and the views they had, oldest first */
+  stack: ReadonlyArray<{ w: number; h: number; view: View }>;
+  /** the view the last resize produced: the memory holds only while the view is still that one */
+  last: View | null;
+}
+
+export const EMPTY_RESIZE_MEMORY: ResizeMemory = { stack: [], last: null };
+
+const sameView = (a: View, b: View) => a.k === b.k && a.ox === b.ox && a.oy === b.oy;
+
+/**
+ * The view after a resize from `from` to `to`. Growing and shrinking by the smaller factor (rescaleView) are not
+ * each other's inverse, so a size the viewport already had since the view was last touched gets back the view
+ * it had then, exactly: entering and leaving focus mode is a round trip. Panning or zooming in between forgets.
+ */
+export function viewAfterResize(mem: ResizeMemory, current: View, from: { w: number; h: number }, to: { w: number; h: number }): { view: View; mem: ResizeMemory } {
+  const stack = mem.last !== null && sameView(mem.last, current) ? mem.stack : [];
+  const i = stack.findIndex((e) => e.w === to.w && e.h === to.h);
+  if (i >= 0) {
+    const view = stack[i]!.view;
+    return { view, mem: { stack: stack.slice(0, i), last: view } };
+  }
+  const view = rescaleView(current, from, to);
+  return { view, mem: { stack: [...stack, { w: from.w, h: from.h, view: current }].slice(-8), last: view } };
+}
+
 /** The platform rectangle a viewport shows. */
 export function visibleBounds(v: View, width: number, height: number): Bounds {
   const a = toWorld(v, 0, height);

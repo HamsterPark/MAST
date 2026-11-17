@@ -67,8 +67,10 @@ FAILED_STATES = TERMINAL_STATES - {"succeeded"}
 BRIEFING_SECTIONS = ("status", "scope", "resume", "tip", "instrument", "live", "prefs",
                      "safety", "recent_actions", "recent_files", "alarms", "notes",
                      "recording", "jobs", "operator_requests",
-                     # optical station only (tip, instrument, live, prefs and recent_files do not exist there)
+                     # optical and generic stations (tip, instrument, live, prefs and recent_files do not exist there)
                      "station", "optical_state", "operator_prompts", "recent_spectra",
+                     # generic station only: the newest readings of the configured sensors
+                     "environment",
                      # both stations; empty (and left out of the text) until someone draws a layout
                      "optical_layouts")
 
@@ -81,7 +83,7 @@ SHORT_WAIT_SLACK_S = 10.0
 _LONG_WAIT_RULE = "(set your MCP tool timeout to at least 900 s)"
 
 INSTRUCTIONS = """\
-MAST drives a real instrument station: a scanning tunneling microscope (via Nanonis) or an optical station. Rules:
+MAST drives a real instrument station: a scanning tunneling microscope (via Nanonis), an optical station or a generic station. Rules:
 1. Start with mast_briefing: it says which kind of station this is and the rules that apply to it; then mast_observe (latest frame or spectrum, instrument state, observation token). Read the briefing again after a restart, a lost_on_restart job or any surprise.
 2. Set experiment and sample with mast_scope first: without a sample, scans and spectroscopy are refused; the active experiment holds the frame archive, WORKING.md and the records. Inspect the job's recorded fields.
 3. One act, one observation: every instrument action (mast_act, or mast_run of an instrument skill) needs after = next_token of the latest observation, and you look at that observation (its image) before the next act. Codex Code Mode: call image() on the result; one act per code cell. A refusal (observe_first, act_in_flight, same_code_cell, checkpoint_requested) ran nothing; observe_first returns the latest observation with a fresh token.
@@ -96,7 +98,10 @@ MAST drives a real instrument station: a scanning tunneling microscope (via Nano
 12. To stop: mast_cancel acts at the job's next check; a stop or retract skill such as StopScan or WithdrawTip (via mast_run) needs no token and is never blocked by the instrument lock; mast_emergency_stop is for real danger and only the operator clears its latch.
 13. A failed skill is not an API error, and degraded is not empty: read state, result and degraded before concluding.
 14. Finish with the instrument idle (no job running, scan stopped), WORKING.md saved and a mast_handover.
-15. Optical station (the briefing says so): there is no STM; run skills with mast_run (mast_act's scan and withdraw actions do not exist there) and read spectrum numbers (peaks, max counts, saturation) from latest_frame / new_spectra, not from the STM measure tools. WITec write access, manual optics (λ/2 plates, analyzer, objective) and switching a laser on need the operator: ask with mast_ask_operator and mast_wait for the reply; you never answer or attest for them. Read mast://guide/en/09-optical-station.md.
+15. Optical or generic station (the briefing says so): there is no STM; run skills with mast_run (mast_act's scan and withdraw actions do not exist there) and read spectrum numbers (peaks, max counts, saturation) from latest_frame / new_spectra, not from the STM measure tools. WITec write access, manual optics (λ/2 plates, analyzer, objective) and switching a laser on need the operator: ask with mast_ask_operator and mast_wait for the reply; you never answer or attest for them. Read mast://guide/en/09-optical-station.md (generic: 11-generic-station.md).
+16. Capture what worked: when real work makes you write a procedure or tool that proved useful (validated on real data or the instrument), save it as a reusable skill: mast_composite_save if official skills can express it, else mast_propose_skill. Default is a LOCAL skill (gitignored config/custom_skills/, enabled only by the operator): tell the user what you saved and what evidence validated it. Open a pull request (contrib/skills/) only if the user wants one: follow their stated preference, else ask once. Never use a captured skill to bypass a safety gate. Read mast://guide/en/06-contributing-skills.md.
+17. Superconducting magnet (GetMagnetState reports one): change the field only with RampMagnetField, after CheckMagnetFieldChange. Before raising |B|, ask the user; pass their own words as user_authorization and the field they authorized (a magnitude) as authorized_up_to_t. Never write either yourself, and going higher means asking again. A negative target is a reverse field: the user's words must name it ("-2 T"), a ramp never crosses zero (ramp to 0 first, then start a second ramp), and if it is refused for the unverified negative-side ramp segments, ask the operator. The tip must be withdrawn unless you pass require_tip_withdrawn=false. Heating and field changes never overlap: a field change is refused while a Lake Shore 335 heater is on or MAST is heating (HeaterOff first). StopMagnetRamp freezes a ramp at any time (an E-STOP sends STOP too); it does not bring the field to zero. A ramp can take an hour: wait on the job. Read mast://guide/en/03-operating-rules.md.
+18. Sample-stage heating (a Lake Shore 335 temperature controller is recognised): change the stage temperature only with SetSampleTemperature, after CheckSampleTemperatureChange. Before raising the temperature, ask the user; pass their own words, naming the temperature, as user_authorization and that temperature as authorized_up_to_k. Never write either yourself. The tip must be withdrawn unless that was agreed with the user and you pass require_tip_withdrawn=false. No heating while MAST changes the field. HeaterOff turns MAST's heating off at any time (an E-STOP does too); HoldSampleTemperature stops a ramp where it is. Zone tables and the control mode (SetHeaterZoneTable, SetHeaterControlMode) are commissioning steps taken with the operator: never invent zone values. Read mast://guide/en/03-operating-rules.md.
 Guide: mast://guide/en/README.md, mast://guide/zh/README.md."""
 
 
@@ -1004,7 +1009,8 @@ def _job_result(view, **kw) -> tuple[str, bool]:
     "and your operator requests. On an optical station (no STM) the tip, instrument, live and "
     "preference sections give way to the station profile with its rules and configured devices, "
     "the operator-signed optical state, the operator prompts still waiting, and the newest "
-    "spectra; a section the station does not have is refused with the list of those it has. "
+    "spectra; a generic station (no STM, no WITec) also has the environment readings. A section "
+    "the station does not have is refused with the list of those it has. "
     "No hardware I/O, and no device is opened for it. Keywords: 简报, 状态, 续工, 针尖, 仪器档案, 光学站."),
     properties={"sections": _list_p(
         "Optional subset of sections: " + ", ".join(BRIEFING_SECTIONS) + ". Omit for all.")})
@@ -1739,7 +1745,7 @@ def _optional_num(args: dict, key: str) -> float | None:
     "that needs a person: approvals, sample changes, a waveplate or objective swap, actions the "
     "current mode refuses. Never approve human-in-the-loop requests yourself; you cannot answer "
     "one either, only the operator can. Free text: kind question (default), action or info; the "
-    "operator replies with a note. Structured prompts exist on the optical station only; on an "
+    "operator replies with a note. Structured prompts exist on optical and generic stations; on an "
     "STM station every request is a text request: the kind is kept as you wrote it, the "
     "structured fields are ignored and the operator replies in words. Structured: kind confirm "
     "(yes/no), choice (pick one of "

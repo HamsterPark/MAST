@@ -276,6 +276,11 @@ CREATE INDEX IF NOT EXISTS idx_bpoint_baseline ON noise_baseline_point(baseline_
 #: 在每次打开时自动补上，老库不需要迁移脚本 —— 版本号在这里只是如实记账。
 _SCHEMA_VERSION = 11
 
+# Retention sweep: rows claimed per lock hold / per commit, and the pause between
+# batches that lets the acquisition thread's commits through.
+_SWEEP_BATCH = 200
+_SWEEP_YIELD_S = 0.002
+
 #: Feature columns in the order the writer binds them.
 _FEATURE_COLS: tuple[str, ...] = (
     "mean_a", "median_a", "min_a", "max_a", "ptp_a",
@@ -657,7 +662,13 @@ class CurrentMonitorStore:
                 logger.debug("could not create idx_alert_undelivered",
                              exc_info=True)
             try:
-                self._conn.execute("PRAGMA journal_mode=WAL")
+                mode = self._conn.execute("PRAGMA journal_mode=WAL").fetchone()
+                if mode and str(mode[0]).lower() == "wal":
+                    # In WAL, NORMAL syncs at checkpoints instead of on every
+                    # commit: a power cut can lose the last few commits but never
+                    # corrupts the file. The acquisition thread commits ~7x/s on a
+                    # 7200 rpm disk, where each FULL fsync costs 10-30 ms.
+                    self._conn.execute("PRAGMA synchronous=NORMAL")
                 self._conn.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
             except sqlite3.Error:
                 pass
@@ -1801,45 +1812,82 @@ class CurrentMonitorStore:
         still overshoots. That case is reported (``over_budget``) and logged
         rather than left to look like a successful sweep — the disk keeps
         growing and only a human can decide whether to raise the cap or unpin.
+
+        **Lock discipline.** The table only grows (rows are permanent) and each
+        row carries an envelope blob, so a scan of it is seconds on a big
+        database. This used to run three whole-table queries under the lock the
+        acquisition thread commits through: a 5–7 s stall every 600 s on a
+        large database, and the oscilloscope buffer is overwritten after ~2.5 s.
+        Now the scan happens on its own read-only connection (WAL readers never
+        block the writer, and need none of ``self._lock``), a bounded batch at a
+        time, and ``self._lock`` is held only to claim at most ``_SWEEP_BATCH``
+        rows in one short transaction. Files are removed outside the lock.
         """
         removed = 0
         freed = 0
         over_budget = False
         pinned_bytes = 0
+        reader = self._open_scan_conn()
         try:
             cutoff = time.time() - max(0.0, float(keep_hours)) * 3600.0
-            with self._lock:
-                stale = self._conn.execute(
-                    "SELECT id, npy_path, npy_bytes FROM segments"
-                    " WHERE pinned=0 AND npy_path IS NOT NULL AND t_end < ?",
-                    (cutoff,),
-                ).fetchall()
-            for row in stale:
-                freed += self._drop_npy(row)
-                removed += 1
-
             budget = int(max(0.0, float(keep_gb)) * (1 << 30))
-            with self._lock:
-                sizes = self._conn.execute(
-                    "SELECT COALESCE(SUM(npy_bytes),0) AS total,"
-                    " COALESCE(SUM(CASE WHEN pinned=1 THEN npy_bytes ELSE 0 END),0)"
-                    "   AS pinned FROM segments WHERE npy_path IS NOT NULL"
-                ).fetchone()
-            total = int(sizes["total"] or 0)
-            pinned_bytes = int(sizes["pinned"] or 0)
+
+            # Pass 1 — ONE walk over the on-disk rows by id: the age rule is
+            # applied as the walk goes, and the size totals come out of the same
+            # rows, so the table is read once instead of three times.
+            total = 0
+            last_id = 0
+            while True:
+                rows = self._scan_rows(
+                    reader,
+                    "SELECT id, npy_path, npy_bytes, pinned, t_end FROM segments"
+                    " WHERE id > ? AND npy_path IS NOT NULL ORDER BY id LIMIT ?",
+                    (last_id, _SWEEP_BATCH))
+                if not rows:
+                    break
+                last_id = int(rows[-1]["id"])
+                stale = []
+                for row in rows:
+                    nbytes = int(row["npy_bytes"] or 0)
+                    total += nbytes
+                    if row["pinned"]:
+                        pinned_bytes += nbytes
+                    elif float(row["t_end"]) < cutoff:
+                        stale.append(row)
+                if stale:
+                    n_done, n_freed = self._drop_npy_batch(stale)
+                    removed += n_done
+                    freed += n_freed
+                    total -= n_freed
+                time.sleep(_SWEEP_YIELD_S)
+
+            # Pass 2 — only when still over budget: oldest unpinned first. Keyset
+            # on (t_start, id), so ties on t_start are neither skipped nor repeated.
             if total > budget:
-                with self._lock:
-                    candidates = self._conn.execute(
-                        "SELECT id, npy_path, npy_bytes FROM segments"
+                after_t, after_id = float("-inf"), 0
+                while total > budget:
+                    rows = self._scan_rows(
+                        reader,
+                        "SELECT id, npy_path, npy_bytes, t_start FROM segments"
                         " WHERE pinned=0 AND npy_path IS NOT NULL"
-                        " ORDER BY t_start ASC").fetchall()
-                for row in candidates:
-                    if total <= budget:
+                        "   AND (t_start > ? OR (t_start = ? AND id > ?))"
+                        " ORDER BY t_start ASC, id ASC LIMIT ?",
+                        (after_t, after_t, after_id, _SWEEP_BATCH))
+                    if not rows:
                         break
-                    n = self._drop_npy(row)
-                    total -= n
-                    freed += n
-                    removed += 1
+                    after_t, after_id = float(rows[-1]["t_start"]), int(rows[-1]["id"])
+                    batch = []
+                    projected = total
+                    for row in rows:
+                        if projected <= budget:
+                            break
+                        batch.append(row)
+                        projected -= int(row["npy_bytes"] or 0)
+                    n_done, n_freed = self._drop_npy_batch(batch)
+                    removed += n_done
+                    freed += n_freed
+                    total -= n_freed
+                    time.sleep(_SWEEP_YIELD_S)
                 if total > budget:
                     over_budget = True
                     # Log the EDGE, not the state. This condition persists until
@@ -1858,68 +1906,118 @@ class CurrentMonitorStore:
             self._over_budget = over_budget
         except Exception:  # noqa: BLE001
             logger.debug("retention_sweep failed (swallowed)", exc_info=True)
+        finally:
+            if reader is not None:
+                try:
+                    reader.close()
+                except sqlite3.Error:
+                    pass
         return {"removed": removed, "freed_bytes": freed,
                 "pinned_bytes": pinned_bytes, "over_budget": over_budget}
 
+    def _open_scan_conn(self) -> Optional[sqlite3.Connection]:
+        """A private read-only connection for the sweep's scans, or None.
+
+        None (an unopenable path, say) makes :meth:`_scan_rows` fall back to the
+        shared connection under the lock — still one bounded batch at a time.
+        """
+        try:
+            conn = sqlite3.connect(str(self._path), check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA query_only=1")
+            return conn
+        except sqlite3.Error:
+            logger.debug("sweep scan connection unavailable", exc_info=True)
+            return None
+
+    def _scan_rows(self, reader: Optional[sqlite3.Connection], sql: str,
+                   params: tuple) -> list:
+        """One bounded batch of sweep candidates. Lock-free when ``reader`` exists."""
+        if reader is not None:
+            return reader.execute(sql, params).fetchall()
+        with self._lock:
+            return self._conn.execute(sql, params).fetchall()
+
     def _drop_npy(self, row: sqlite3.Row) -> int:
-        """Delete one segment's raw file and null its path. Returns bytes freed.
+        """Delete one segment's raw file and null its path. Returns bytes freed."""
+        return self._drop_npy_batch([row])[1]
+
+    def _drop_npy_batch(self, rows: Sequence[sqlite3.Row]) -> tuple[int, int]:
+        """Delete a batch of segments' raw files. Returns ``(removed, bytes_freed)``.
 
         Claim first, delete second — and re-check ``pinned`` inside the claim.
         A sweep can run for minutes over tens of thousands of rows, releasing the
-        lock between each one, and the two things most likely to pin a segment
+        lock between batches, and the two things most likely to pin a segment
         during that window are exactly the two worth keeping: a tip-shaping skill
         finishing (SKILL_STEP → pin_range) and an operator pressing 「标记为好针尖」.
         Selecting ``pinned=0`` once at the start and trusting it for the rest of
         the sweep would delete the waveform behind a label that was just applied.
 
-        The file is only removed after the row is claimed, and the claim is only
-        kept if the removal succeeded: nulling the path for a file still on disk
-        would orphan it forever (every later sweep filters on
-        ``npy_path IS NOT NULL``) and permanently under-count the disk budget.
-        On Windows this is not hypothetical — ``read_segment_decimated`` opens
-        segments with ``mmap_mode="r"``, and a mapped file cannot be unlinked.
+        The claims of one batch share a single short transaction (the lock is
+        held for at most ``len(rows)`` primary-key UPDATEs and one commit), then
+        the files are removed with the lock released. A claim is only kept if the
+        removal succeeded: nulling the path for a file still on disk would orphan
+        it forever (every later sweep filters on ``npy_path IS NOT NULL``) and
+        permanently under-count the disk budget. On Windows this is not
+        hypothetical — ``read_segment_decimated`` opens segments with
+        ``mmap_mode="r"``, and a mapped file cannot be unlinked; such a row is
+        put back, again as one transaction per batch.
         """
-        seg_id = int(row["id"])
-        size = int(row["npy_bytes"] or 0)
-        path = row["npy_path"]
+        claimed: list = []
         try:
             with self._lock:
-                cur = self._conn.execute(
-                    "UPDATE segments SET npy_path=NULL, npy_bytes=0"
-                    " WHERE id=? AND pinned=0 AND npy_path IS NOT NULL",
-                    (seg_id,),
-                )
-                claimed = int(cur.rowcount or 0) == 1
+                for row in rows:
+                    cur = self._conn.execute(
+                        "UPDATE segments SET npy_path=NULL, npy_bytes=0"
+                        " WHERE id=? AND pinned=0 AND npy_path IS NOT NULL",
+                        (int(row["id"]),),
+                    )
+                    if int(cur.rowcount or 0) == 1:
+                        claimed.append(row)
                 self._conn.commit()
         except Exception:  # noqa: BLE001
             self._rollback()
-            logger.debug("could not claim segment %s for sweep", seg_id, exc_info=True)
-            return 0
-        if not claimed:
-            return 0            # pinned (or already swept) since the snapshot
-
-        if not path:
-            return size
-        p = Path(path)
-        try:
-            if p.is_file():
-                size = size or p.stat().st_size
-                os.remove(p)
-        except OSError:
-            # Put the row back so the file stays visible to a later sweep.
-            logger.debug("could not remove %s — restoring the row", path, exc_info=True)
+            logger.debug("could not claim a segment batch for sweep", exc_info=True)
+            return 0, 0
+        # pinned (or already swept) since the snapshot → not in ``claimed``.
+        freed = 0
+        removed = 0
+        failed: list = []
+        for row in claimed:
+            size = int(row["npy_bytes"] or 0)
+            path = row["npy_path"]
+            if not path:
+                freed += size
+                removed += 1
+                continue
+            p = Path(path)
+            try:
+                if p.is_file():
+                    size = size or p.stat().st_size
+                    os.remove(p)
+            except OSError:
+                # Put the row back so the file stays visible to a later sweep.
+                logger.debug("could not remove %s — restoring the row", path,
+                             exc_info=True)
+                failed.append(row)
+                continue
+            freed += size
+            removed += 1
+        if failed:
             try:
                 with self._lock:
-                    self._conn.execute(
-                        "UPDATE segments SET npy_path=?, npy_bytes=? WHERE id=?",
-                        (str(path), size, seg_id),
-                    )
+                    for row in failed:
+                        self._conn.execute(
+                            "UPDATE segments SET npy_path=?, npy_bytes=? WHERE id=?",
+                            (str(row["npy_path"]), int(row["npy_bytes"] or 0),
+                             int(row["id"])),
+                        )
                     self._conn.commit()
             except Exception:  # noqa: BLE001
                 self._rollback()
-                logger.debug("could not restore npy_path for %s", seg_id, exc_info=True)
-            return 0
-        return size
+                logger.debug("could not restore npy_path for a failed batch",
+                             exc_info=True)
+        return removed, freed
 
     def close(self) -> None:
         with self._lock:
@@ -2024,8 +2122,8 @@ _STORE_LOCK = threading.Lock()
 
 
 def _default_dir() -> Path:
-    from mast._runtime_paths import project_root
-    return Path(project_root()) / "experiments" / "current_monitor"
+    from mast._runtime_paths import data_root
+    return Path(data_root()) / "experiments" / "current_monitor"
 
 
 def get_store() -> CurrentMonitorStore:
@@ -2042,17 +2140,17 @@ def get_store_if_exists() -> "CurrentMonitorStore | None":
     """The store **only if something already made one**. Never creates.
 
     :func:`get_store` creates the DB (and its directories) on first call under
-    ``project_root()/experiments/current_monitor/``. That is right for the
+    ``data_root()/experiments/current_monitor/``. That is right for the
     acquisition daemon — it is the thing whose job is to have a store — and
     wrong for every **passive reader**:
 
     * a reader that creates an empty DB has, by construction, nothing to read,
       so the creation bought nothing;
-    * and in tests it writes into the operator's REAL experiments directory.
-      ``tests/v2/conftest.py`` has autouse guards for the wishlist and the
-      literature registry precisely because that has happened before —
-      **there is no such guard for this store**, so a passive reader calling
-      ``get_store()`` is a pollution path with nothing standing behind it.
+    * and in tests it used to write into the checkout's own experiments
+      directory — on a development machine, next to the operator's real store.
+      Since 2026-11-09 ``tests/v2/conftest.py`` points ``MAST_DATA_DIR`` at tmp
+      for every test and fails a test that touches the checkout's copy, but a
+      reader that never creates is still the right shape.
 
     Passive readers (the agent-facing alert delivery middleware, the
     ``ForgeAuTip`` outer-loop self-check) use THIS. If no monitor has ever run

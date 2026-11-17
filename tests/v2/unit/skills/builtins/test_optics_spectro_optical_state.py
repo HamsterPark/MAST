@@ -208,11 +208,14 @@ def test_anything_but_the_optical_profile_writes_the_old_sidecar(sim_bench, scop
 
 
 def test_an_unreadable_profile_is_an_stm_sidecar(sim_bench, scope, monkeypatch):
+    """Unreadable where it is read (``station.current_profile``, under the capability table), on
+    a station configured as optical - so the STM sidecar can only come from the fallback."""
     from mast import station
 
     def boom():
         raise RuntimeError("settings store is gone")
 
-    monkeypatch.setattr(station, "is_optical", boom)
+    monkeypatch.setenv("MAST_STATION_PROFILE", "optical")
+    monkeypatch.setattr(station, "current_profile", boom)
     _, meta = acquire()
     assert "optical_state" not in meta and "optical_state_error" not in meta

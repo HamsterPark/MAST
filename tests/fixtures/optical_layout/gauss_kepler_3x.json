@@ -1,0 +1,278 @@
+{
+  "name": "gauss_kepler_3x",
+  "description": "Anchor G. 532 nm, 1 mm waist at the laser; lens f = 50 mm 100 mm on, lens f = 150 mm 200 mm after it (a Keplerian 3x expander, focus between the lenses): d = 1.002291 mm at the first lens, 3.000765 mm at the second, 3.014325 mm 1000 mm after it (at D1). 1/q' = 1/q - 1/f at each lens.",
+  "layout": {
+    "schema": 1,
+    "id": "kepler",
+    "title": "Keplerian beam expander 3x (f 50 / 150)",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1500.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 50.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0,
+          "beam_diameter_mm": 1.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "lens1",
+        "type": "lens",
+        "label": "F50",
+        "x_mm": 150.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "focal_mm": 50.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "lens2",
+        "type": "lens",
+        "label": "F150",
+        "x_mm": 350.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "focal_mm": 150.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det1",
+        "type": "detector",
+        "label": "D1",
+        "x_mm": 1350.0,
+        "y_mm": 100.0,
+        "angle_deg": 180.0,
+        "aperture_mm": 25.4,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 532.0,
+      "beam": {
+        "source_mw": null,
+        "m2": 1.0
+      },
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 100.0,
+              "x1": 150.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": [
+                  0.0,
+                  1476.31234
+                ]
+              },
+              "passes": []
+            },
+            {
+              "x0": 150.0,
+              "y0": 100.0,
+              "x1": 350.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": [
+                  -50.0572869,
+                  1.69146839
+                ]
+              },
+              "passes": []
+            },
+            {
+              "x0": 350.0,
+              "y0": 100.0,
+              "x1": 1350.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": [
+                  300.0,
+                  13286.811
+                ]
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "lens1",
+              "action": "transmit",
+              "x": 150.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 100.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": 1.002291481,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "lens2",
+              "action": "transmit",
+              "x": 350.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 300.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": 3.000764605,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "det1",
+              "action": "stop",
+              "x": 1350.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 1300.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": 3.014325203,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ]
+}

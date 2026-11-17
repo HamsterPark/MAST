@@ -1,0 +1,314 @@
+{
+  "name": "height_periscope_up",
+  "description": "A periscope (contract 3D \u00a73.4) lifts a beam at the table's beam height (75 mm, not given) to its exit height z_out_mm 250, light going along its +x (d . n > 0: entrance z_mm, exit z_out_mm). The segment after it is at 250 mm and passes over M_LOW (axis at 75 mm, dz +175 > 12.7: no effect, a pass); M_HIGH and D1 at 250 mm are hit. The vertical run (175 mm) is path: path_mm 150 at P1, 150 + 175 + 400 = 725 at M_HIGH, 1025 at D1, and the Gaussian beam (532 nm, 1 mm, zR = pi 0.5^2 / 532e-6 = 1476.312 mm) spreads over it: d = 1.114077 mm at M_HIGH (1.067143 without the run).",
+  "layout": {
+    "schema": 1,
+    "id": "periscope-up",
+    "title": "A periscope lifts the beam from 75 to 250 mm",
+    "revision": 1,
+    "updated_at": "2026-01-01T00:00:00+00:00",
+    "updated_by": "fixture",
+    "table": {
+      "width_mm": 1200.0,
+      "height_mm": 900.0,
+      "hole_pitch_mm": 25.0,
+      "hole_offset_mm": 12.5,
+      "grid": "metric"
+    },
+    "components": [
+      {
+        "id": "las1",
+        "type": "laser",
+        "label": "L1",
+        "x_mm": 50.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 2.0,
+        "props": {
+          "wavelength_nm": 532.0,
+          "power_mw": 10.0,
+          "beam_diameter_mm": 1.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "per1",
+        "type": "periscope",
+        "label": "P1",
+        "x_mm": 200.0,
+        "y_mm": 100.0,
+        "angle_deg": 0.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "z_out_mm": 250.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "m_low",
+        "type": "mirror",
+        "label": "M_LOW",
+        "x_mm": 400.0,
+        "y_mm": 100.0,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.4,
+        "props": {},
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "m_high",
+        "type": "mirror",
+        "label": "M_HIGH",
+        "x_mm": 600.0,
+        "y_mm": 100.0,
+        "angle_deg": 135.0,
+        "aperture_mm": 25.4,
+        "props": {
+          "z_mm": 250.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      },
+      {
+        "id": "det1",
+        "type": "detector",
+        "label": "D1",
+        "x_mm": 600.0,
+        "y_mm": 400.0,
+        "angle_deg": 270.0,
+        "aperture_mm": 10.0,
+        "props": {
+          "z_mm": 250.0
+        },
+        "annotations": {
+          "model": "",
+          "manufacturer": "",
+          "function": "",
+          "motorized": false,
+          "actuator": "",
+          "connection": "",
+          "datasheet_url": "",
+          "notes": "",
+          "extra": []
+        },
+        "links": {
+          "device_id": null,
+          "slot": null
+        },
+        "locked": false
+      }
+    ],
+    "texts": [],
+    "notes": ""
+  },
+  "expected_trace": [
+    {
+      "source": "las1",
+      "wavelength_nm": 532.0,
+      "beam": {
+        "source_mw": 10.0,
+        "m2": 1.0
+      },
+      "branches": [
+        {
+          "branch": "0",
+          "fraction": 1.0,
+          "segments": [
+            {
+              "x0": 50.0,
+              "y0": 100.0,
+              "x1": 200.0,
+              "y1": 100.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": [
+                  0.0,
+                  1476.31234
+                ]
+              },
+              "passes": []
+            },
+            {
+              "x0": 200.0,
+              "y0": 100.0,
+              "x1": 600.0,
+              "y1": 100.0,
+              "z_mm": 250.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": [
+                  325.0,
+                  1476.31234
+                ]
+              },
+              "passes": [
+                {
+                  "component": "m_low",
+                  "x": 400.0,
+                  "y": 100.0,
+                  "dz_mm": 175.0
+                }
+              ]
+            },
+            {
+              "x0": 600.0,
+              "y0": 100.0,
+              "x1": 600.0,
+              "y1": 400.0,
+              "z_mm": 250.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": [
+                  725.0,
+                  1476.31234
+                ]
+              },
+              "passes": []
+            }
+          ],
+          "events": [
+            {
+              "component": "per1",
+              "action": "transmit",
+              "x": 200.0,
+              "y": 100.0,
+              "z_mm": 75.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 150.0,
+              "beam": {
+                "p": 1.0,
+                "mw": 10.0,
+                "d_mm": 1.005148485,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "m_high",
+              "action": "reflect",
+              "x": 600.0,
+              "y": 100.0,
+              "z_mm": 250.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 45.0,
+              "path_mm": 725.0,
+              "beam": {
+                "p": 1.0,
+                "mw": 10.0,
+                "d_mm": 1.114077155,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "component": "det1",
+              "action": "stop",
+              "x": 600.0,
+              "y": 400.0,
+              "z_mm": 250.0,
+              "offset_mm": 0.0,
+              "dz_mm": 0.0,
+              "incidence_deg": 0.0,
+              "path_mm": 1025.0,
+              "beam": {
+                "p": 1.0,
+                "mw": 10.0,
+                "d_mm": 1.21739437,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "end": "stop"
+        }
+      ]
+    }
+  ]
+}

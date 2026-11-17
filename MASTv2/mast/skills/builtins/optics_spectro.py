@@ -735,6 +735,16 @@ class AcquireSpectrum(BaseSkill):
         return SkillResult(skill_name=name, success=True, data=data, summary=summary)
 
 
+def _manual_state_here() -> bool:
+    """Whether this station keeps a signed manual state (``mast.station``); unreadable = STM."""
+    try:
+        from mast import station
+
+        return bool(station.has("operator_prompts"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _optical_state_fields() -> dict[str, Any]:
     """The manual optical state (which λ/2 is installed, analyzer angle, objective, …) as the
     operator registered it, for the sidecar: ``{"optical_state": {slot: {value, set_by, set_at,
@@ -743,11 +753,12 @@ def _optical_state_fields() -> dict[str, Any]:
     read the sidecar says so (``optical_state: null`` + ``optical_state_error``) instead of
     pretending that nothing was registered.
 
-    **Optical station only.** On an STM station (the TERS bench) the sidecar is what it was
-    before the manual optical state existed: no ``optical_state`` key at all, not even an
-    empty one - the TERS records, their readers and their file hashes stay as they were
-    (the registry is the optical station's, ``mast.station``)."""
-    if not no_stm():                 # no_stm() = "this is the optical station"
+    **Only on a station with operator prompts** (``mast.station`` capability
+    ``operator_prompts``: the optical and the generic station). On an STM station (the TERS
+    bench) the sidecar is what it was before the manual optical state existed: no
+    ``optical_state`` key at all, not even an empty one - the TERS records, their readers and
+    their file hashes stay as they were."""
+    if not _manual_state_here():
         return {}
     try:
         from mast.operator_hitl import optical_state

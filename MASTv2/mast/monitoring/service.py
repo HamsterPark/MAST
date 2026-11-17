@@ -81,6 +81,9 @@ _NO_WAKE_CATEGORIES: frozenset[str] = frozenset({"read", "analysis"})
 STATE_DISABLED = "disabled"
 STATE_NO_POOL = "no_pool"
 STATE_COMMS_DOWN = "comms_down"
+#: Breaker HALF_OPEN: the cooldown is over and the link is about to be verified by
+#: a counted call (watchdog, state refresh, a skill). Not healthy yet, not down.
+STATE_COMMS_RECOVERING = "comms_recovering"
 STATE_PROBING = "probing"
 STATE_RUNNING = "running"
 STATE_UNAVAILABLE = "unavailable"
@@ -416,10 +419,18 @@ class CurrentMonitorService:
                     self._stop.wait(_PAUSED_POLL_S)
                     continue
                 if not _comms_healthy(pool):
-                    # Breaker open: park with zero TCP until it closes.
-                    self._set_state(STATE_COMMS_DOWN,
-                                    tr("TCP 通信已熔断,等待恢复",
-                                       "TCP circuit breaker open, waiting for recovery"))
+                    # Breaker not CLOSED: park with zero TCP until it closes. Our
+                    # calls are count_health=False, so they may not carry the
+                    # half-open probe; a counted caller verifies the link.
+                    if _comms_phase(pool) == "half_open":
+                        self._set_state(STATE_COMMS_RECOVERING,
+                                        tr("TCP 熔断冷却已过,等一次计数调用验证链路",
+                                           "TCP circuit breaker cooldown over, waiting "
+                                           "for one counted call to verify the link"))
+                    else:
+                        self._set_state(STATE_COMMS_DOWN,
+                                        tr("TCP 通信已熔断,等待恢复",
+                                           "TCP circuit breaker open, waiting for recovery"))
                     self._stop.wait(_PAUSED_POLL_S)
                     continue
 
@@ -1371,6 +1382,16 @@ def _comms_healthy(pool) -> bool:
         return bool(fn()) if callable(fn) else True
     except Exception:  # noqa: BLE001
         return True
+
+
+def _comms_phase(pool) -> str:
+    """The breaker's state (``closed`` / ``open`` / ``half_open``); ``""`` when the
+    pool cannot say. Read only to word a parked state — never a reason to send."""
+    try:
+        fn = getattr(pool, "comms_snapshot", None)
+        return str((fn() or {}).get("state") or "").lower() if callable(fn) else ""
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def _plain(v) -> float:

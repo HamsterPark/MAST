@@ -151,10 +151,16 @@ def test_the_sample_description_is_what_summarize_writes():
             c["annotations"] = ann
         return c
 
-    comps = [comp("las1", "laser", 50, 62.5, 0, "L1", {"wavelength_nm": 532}, manufacturer="Cobolt", model="Samba"),
-             comp("m1", "mirror", 112.5, 62.5, 135, "M1", manufacturer="Thorlabs", model="BB1-E02"),
-             comp("hwp1", "waveplate", 112.5, 200, 90, "HWP1", {"retardance": "half"}, motorized=True, actuator="K10CR1", connection="COM12"),
-             comp("d", "detector", 112.5, 300, 270, "D1")]
+    # an s-polarized 50 mW laser, a 99 % mirror, a half-wave plate at 45 deg that turns s into p, a lens that
+    # focuses the 0.7 mm beam (contract optical_layout_v2.md §5: power, spot, polarization, focus in the text)
+    comps = [comp("las1", "laser", 50, 62.5, 0, "L1", {"wavelength_nm": 532, "power_mw": 50, "polarization": "linear",
+                                                       "pol_angle_deg": 90, "beam_diameter_mm": 0.7},
+                  manufacturer="Cobolt", model="Samba"),
+             comp("m1", "mirror", 112.5, 62.5, 135, "M1", {"throughput": 0.99}, manufacturer="Thorlabs", model="BB1-E02"),
+             comp("hwp1", "waveplate", 112.5, 200, 90, "HWP1", {"retardance": "half", "fast_axis_deg": 45},
+                  motorized=True, actuator="K10CR1", connection="COM12"),
+             comp("f1", "lens", 112.5, 250, 90, "F1", {"focal_mm": 50}),
+             comp("d", "detector", 112.5, 350, 270, "D1")]
     comps[2]["links"] = {"device_id": "hwp_rot", "slot": "excitation_waveplate"}
     lay = {"schema": 1, "id": "shg", "title": "SHG excitation", "revision": 12, "updated_by": "ana",
            "updated_at": "2026-11-03T12:00:00+00:00", "components": comps}

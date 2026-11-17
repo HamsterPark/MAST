@@ -91,6 +91,63 @@ RULES: tuple[dict, ...] = (
      "zh": ("用服务端给的帧",
             "扫描图用 /data/frame 取：服务端已经把朝向约定（反向扫描的镜像、扫描方向的翻转）"
             "一次处理对了。")},
+    {"id": "capture-skills",
+     "en": ("Capture what worked as a local skill",
+            "When real work with MAST makes you write a procedure or tool that proved useful "
+            "(validated on real data or on the instrument), save it as a reusable skill: a composite "
+            "(POST /composites) if official skills can express it, else a Python proposal "
+            "(POST /skills/proposals, or scripts/skill_scaffold.py new). Default is LOCAL (config/custom_skills/, "
+            "gitignored, enabled only by the operator); tell the user what you saved and what evidence "
+            "validated it. Open a pull request (contrib/skills/) only if the user wants one: follow their "
+            "stated preference, else ask once. A captured skill never bypasses a safety gate."),
+     "zh": ("好用的做法存成本地技能",
+            "在 MAST 的真实工作里写出了被验证有用的流程或小工具（真实数据或仪器上验证过），就把它存成"
+            "可复用技能：官方技能能表达就做组合技能（POST /composites），否则提交 Python 提议"
+            "（POST /skills/proposals，或 scripts/skill_scaffold.py new）。默认存**本地**"
+            "（config/custom_skills/，已 gitignore，只有操作员能启用），并告诉用户存了什么、用什么证据"
+            "验证过。要不要提 PR（contrib/skills/）由用户决定：按其已表达的偏好，否则问一次。"
+            "存下来的技能不能绕过任何安全门。")},
+    {"id": "magnet-field",
+     "en": ("Change a magnet's field only as the operator set it up",
+            "On a station with a Lake Shore 625 magnet supply, change the field only with "
+            "RampMagnetField, after CheckMagnetFieldChange. Before raising |B|, ask the user; pass "
+            "their own words as user_authorization and the field they authorized (a magnitude) as "
+            "authorized_up_to_t. Never write either yourself, and going higher means asking again. "
+            "A negative target is a reverse field: the user's words must name it (\"-2 T\"), and a "
+            "ramp never crosses zero (ramp to 0 first, then start a second ramp). "
+            "The tip must be withdrawn unless you pass require_tip_withdrawn=false. Heating and "
+            "field changes never overlap: a field change is refused while a Lake Shore 335 heater "
+            "is on or MAST is heating (HeaterOff first). StopMagnetRamp freezes a ramp at any time "
+            "(an E-STOP sends STOP too); it does not bring the field to zero."),
+     "zh": ("磁场只按操作员设定的方式改",
+            "在接了 Lake Shore 625 磁体电源的站上，改变磁场只用 RampMagnetField，先跑 "
+            "CheckMagnetFieldChange。升场前先问用户，把用户授权时说的话逐字填进 user_authorization、"
+            "用户授权到的磁场（绝对值）填进 authorized_up_to_t。两者都不要自己编；要升得更高就重新问。"
+            "负的目标是反向场：用户的话里要明确写出（如「-2 T」），扫场不跨零（先扫到 0，再另起一次）。"
+            "默认要求针尖已退，除非传 require_tip_withdrawn=false。加热和改磁场不同时进行："
+            "Lake Shore 335 的加热器开着或 MAST 在加热时，改磁场一律拒绝（先 HeaterOff）。"
+            "StopMagnetRamp 随时冻结扫场"
+            "（急停也会发 STOP），但不会把磁场归零。")},
+    {"id": "stage-heating",
+     "en": ("Heat the sample stage only as the operator set it up",
+            "On a station with a Lake Shore 335, change the stage temperature only with "
+            "SetSampleTemperature, after CheckSampleTemperatureChange. Before raising the "
+            "temperature, ask the user; pass their own words, naming the temperature, as "
+            "user_authorization and that temperature as authorized_up_to_k. Never write either "
+            "yourself. The tip must be withdrawn unless that was agreed with the user and you pass "
+            "require_tip_withdrawn=false. No heating while MAST changes the field. HeaterOff turns "
+            "MAST's heating off at any time (an E-STOP does too); HoldSampleTemperature stops a ramp "
+            "where it is. Zone tables and the control mode (SetHeaterZoneTable, "
+            "SetHeaterControlMode) are commissioning steps taken with the operator: never invent "
+            "zone values."),
+     "zh": ("样品台加热只按操作员设定的方式做",
+            "在接了 Lake Shore 335 的站上，改变样品台温度只用 SetSampleTemperature，先跑 "
+            "CheckSampleTemperatureChange。升温前先问用户，把用户授权时说的话逐字填进 "
+            "user_authorization（要说到温度）、那个温度填进 authorized_up_to_k，两者都不要自己编。"
+            "默认要求针尖已退；只有事先和用户约定过，才传 require_tip_withdrawn=false。MAST 改磁场时"
+            "不加热。HeaterOff 随时关掉 MAST 的加热（急停也会关），HoldSampleTemperature 把扫温停在"
+            "当前温度附近。分区表和控制模式（SetHeaterZoneTable、SetHeaterControlMode）是和操作员一起"
+            "调试时做的事，分区参数不要自己编。")},
     {"id": "leave-a-trail",
      "en": ("Leave a trail",
             "Write conclusions as notes (POST /notes): MAST's own agents recall them. End with "

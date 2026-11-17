@@ -108,7 +108,7 @@ export function framePlaceholder(frame: FrameLike): FramePlaceholder | null {
   if (src?.kind === "current_monitor") {
     if (src.segmentId !== null) {
       return {
-        label: tr(`电流监控 · 第 ${src.segmentId} 段`, `Current monitor · segment ${src.segmentId}`),
+        label: tr(`信号监控 · 第 ${src.segmentId} 段`, `Signal monitor · segment ${src.segmentId}`),
         hint: tr(
           `这条判断来自隧道电流监控，不是扫描画面 —— 它没有、也不会有帧。` +
             `下面画的是第 ${src.segmentId} 段的电流波形，也就是判据本身读的那段数据。`,
@@ -119,7 +119,7 @@ export function framePlaceholder(frame: FrameLike): FramePlaceholder | null {
       };
     }
     return {
-      label: tr("电流监控 · 无分段", "Current monitor · no segment"),
+      label: tr("信号监控 · 无分段", "Signal monitor · no segment"),
       hint: tr(
         "这条判断来自隧道电流监控，本就没有扫描画面；这一条也没有记下段号，" +
           "所以连波形都定位不到。段号在 cause_ref 里，缺了它就只能这么说。",

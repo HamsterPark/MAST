@@ -30,7 +30,8 @@ KIND_BY_EXT = {".sxm": "f", ".dat": "s", ".3ds": "g"}
 
 #: 永远不往里走的目录（小写）。``_NON_SCAN_DIR_NAMES``（env/signals/monitors）从
 #: ``webui.scan_preview`` 取，这里只补图库自己的状态目录名与几个肯定不是数据的目录。
-_EXTRA_SKIP_DIRS = frozenset({"_gallery", ".mast", "__pycache__", ".git"})
+#: ``current_monitor`` 是电流监控库（每秒一个 .npy，长期运行后可达几十万个）；点号开头的目录也一律不进。
+_EXTRA_SKIP_DIRS = frozenset({"_gallery", ".mast", "__pycache__", ".git", "current_monitor"})
 
 
 @dataclass(frozen=True)
@@ -241,13 +242,29 @@ def in_scope(item_id: str, prefix: str) -> bool:
     return item_id == prefix or item_id.startswith(prefix + "/")
 
 
-def walk_roots(cfg, *, only: str | None = None, state: Path | str | None = None
-               ) -> tuple[list[FileRef], list[str]]:
+#: 修改时刻比「现在」还晚这么多的文件不算「刚写过」：时钟偏差（网络盘、手动改过系统时间）
+#: 造成的未来 mtime 不能让文件永远被推迟。
+FUTURE_SLACK_NS = 5 * 60 * 10**9
+
+
+def walk_roots(cfg, *, only: str | None = None, state: Path | str | None = None,
+               recent_cutoff_ns: int | None = None, now_ns: int | None = None,
+               deferred: list[FileRef] | None = None,
+               mast_dirs: dict | None = None) -> tuple[list[FileRef], list[str]]:
     """``(文件, 走过的范围)``。
 
     「走过的范围」是 id 前缀列表，只有**这次真的遍历到**的根才在里面：清点缓存里
     「文件消失了就删条目」只在这些范围里做 —— 一块暂时拔掉的盘不会让它的全部条目被清空。
+
+    ``recent_cutoff_ns``：修改时刻**晚于**它的文件（Nanonis 可能还在写）不进返回的文件列表，
+    改放进 ``deferred``（调用方传一个空列表接收）。调用方必须把它们当成「还在」—— 不是「已删除」，
+    也不能写进任何缓存；下一轮它们的 ``(size, mtime_ns)`` 稳定下来之后按新文件收。
+
+    ``mast_dirs``（调用方传一个空 dict 接收）：每个走过的目录（``normcase(abspath)``）→ 里面有没有
+    ``.mast`` 子目录。环境标签只去列有的（docs/v2/design/data_env_tags.md）；
+    这里本来就要列目录，记一笔不多花一次 I/O。
     """
+    now = time.time_ns() if now_ns is None else int(now_ns)
     skip = _skip_names()
     state_key = _norm(state) if state is not None else None
     only = normalise_only(only)
@@ -269,8 +286,13 @@ def walk_roots(cfg, *, only: str | None = None, state: Path | str | None = None
             return          # 在 glob 与 stat 之间消失了（仪器正在写）
         seen.add(key)
         rel = os.path.relpath(full, base).replace("\\", "/")
-        files.append(FileRef(id=f"{root.name}/{rel}", root=root.name, rel=rel, path=full,
-                             size=int(st.st_size), mtime_ns=int(st.st_mtime_ns)))
+        ref = FileRef(id=f"{root.name}/{rel}", root=root.name, rel=rel, path=full,
+                      size=int(st.st_size), mtime_ns=int(st.st_mtime_ns))
+        if (recent_cutoff_ns is not None and deferred is not None
+                and recent_cutoff_ns < ref.mtime_ns <= now + FUTURE_SLACK_NS):
+            deferred.append(ref)
+            return
+        files.append(ref)
 
     for root in cfg.roots:
         if not root.enabled:
@@ -288,9 +310,12 @@ def walk_roots(cfg, *, only: str | None = None, state: Path | str | None = None
         if not os.path.isdir(start):
             continue
         for dirpath, dirnames, filenames in os.walk(start):
+            if mast_dirs is not None:
+                mast_dirs[os.path.normcase(os.path.abspath(dirpath))] = any(
+                    d.lower() == ".mast" for d in dirnames)
             dirnames[:] = sorted(
                 d for d in dirnames
-                if d.lower() not in skip
+                if d.lower() not in skip and not d.startswith(".")
                 and (state_key is None or _norm(os.path.join(dirpath, d)) != state_key))
             for fn in sorted(filenames):
                 add(root, base, str(Path(dirpath, fn)))

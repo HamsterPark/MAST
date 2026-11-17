@@ -112,6 +112,8 @@ CORE_NAMES: frozenset[str] = frozenset({
     "ApproachTip", "AutoApproach", "TryEngageController", "Withdraw",
     "SetBias", "SetSetpoint", "ApplyZCtrlPreset",
     "StopScan", "RelocateCoarseXY",
+    # 进针/换区重新进针之后必跑：偏压没到结上时反馈会把针尖推向近接触
+    "VerifyBiasAtJunction",
     # ConditionTip：视觉告警 CRITICAL 路径上的**即时**处置（StopScan →
     # ConditionTip）。这条路上多一次检索就是多让一个坏针尖再扫一会儿，
     # 所以它留在核心，而它的底层零件（TipShape / TipPulse）不留。

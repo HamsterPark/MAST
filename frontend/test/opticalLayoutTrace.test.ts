@@ -27,7 +27,7 @@ import {
   traceLayout,
   traceLayoutDetailed,
 } from "../src/lib/opticalLayout/trace.ts";
-import { comp, foldLayout, layoutOf } from "./helpers/opticalLayout.ts";
+import { comp, foldLayout, layoutOf, segGeom } from "./helpers/opticalLayout.ts";
 
 const near = (a: number, b: number, tol = 1e-6) => assert.ok(Math.abs(a - b) <= tol, `${a} is not within ${tol} of ${b}`);
 
@@ -45,7 +45,7 @@ describe("a fold mirror", () => {
     const b = single(t);
     assert.equal(b.end, "stop");
     assert.equal(b.fraction, 1);
-    assert.deepEqual(b.segments, [
+    assert.deepEqual(segGeom(b.segments), [
       { x0: 50, y0: 62.5, x1: 112.5, y1: 62.5 },
       { x0: 112.5, y0: 62.5, x1: 112.5, y1: 200 },
     ]);
@@ -98,7 +98,7 @@ describe("a fold mirror", () => {
     const b = single(traceLayout(foldLayout({ laserY: 85 })));
     assert.equal(b.events.length, 0);
     assert.equal(b.end, "left_table");
-    assert.deepEqual(b.segments, [{ x0: 50, y0: 85, x1: 2200, y1: 85 }]);
+    assert.deepEqual(segGeom(b.segments), [{ x0: 50, y0: 85, x1: 2200, y1: 85 }]);
   });
 
   it("the edge of the aperture still counts as a hit", () => {
@@ -167,11 +167,11 @@ describe("a beam splitter", () => {
     assert.equal(root.end, "split", "the parent ends at the splitter, the children follow");
     assert.equal(root.segments.length, 1);
     const r = t.branches[1]!;
-    assert.deepEqual(r.segments, [{ x0: 112.5, y0: 62.5, x1: 112.5, y1: 200 }]);
+    assert.deepEqual(segGeom(r.segments), [{ x0: 112.5, y0: 62.5, x1: 112.5, y1: 200 }]);
     assert.equal(r.events[0]?.component, "detR");
     assert.equal(r.events[0]?.path_mm, 200, "the path goes on from the parent");
     const tt = t.branches[2]!;
-    assert.deepEqual(tt.segments, [{ x0: 112.5, y0: 62.5, x1: 250, y1: 62.5 }]);
+    assert.deepEqual(segGeom(tt.segments), [{ x0: 112.5, y0: 62.5, x1: 250, y1: 62.5 }]);
     assert.equal(tt.events[0]?.component, "detT");
   });
 
@@ -404,7 +404,7 @@ describe("limits", () => {
     const l = layoutOf([comp("laser", "las1", 50, 62.5, 180, { props: { wavelength_nm: 532 } })]);
     const b = single(traceLayout(l));
     assert.equal(b.end, "left_table");
-    assert.deepEqual(b.segments, [{ x0: 50, y0: 62.5, x1: -1000, y1: 62.5 }]);
+    assert.deepEqual(segGeom(b.segments), [{ x0: 50, y0: 62.5, x1: -1000, y1: 62.5 }]);
     const up = single(traceLayout(layoutOf([comp("laser", "las1", 50, 62.5, 90, { props: { wavelength_nm: 532 } })])));
     near(up.segments[0]!.y1, 1900);
   });
@@ -598,20 +598,39 @@ describe("fibre links", () => {
 });
 
 describe("the contract form", () => {
-  it("carries exactly the keys of section 4, rounded to 0.001", () => {
+  it("carries exactly the keys of section 4 and the beam keys of v2 section 4.7, rounded as section 4.8 and 12 say", () => {
     const l = layoutOf([
-      comp("laser", "las1", 50, 62.5, 0, { props: { wavelength_nm: 532 } }),
-      comp("grating", "gr1", 112.5004, 62.5, 135),
+      comp("laser", "las1", 50, 62.5, 0, { props: { wavelength_nm: 532, power_mw: 3.3333333, polarization: "linear", pol_angle_deg: 33.33, beam_diameter_mm: 0.123457 } }),
+      comp("grating", "gr1", 112.5004, 62.5, 135, { props: { throughput: 0.333333 } }),
       comp("detector", "det1", 112.5, 200, 270),
     ]);
     const t = traceLayout(l);
     const b = t[0]!.branches[0]!;
-    assert.deepEqual(Object.keys(t[0]!).sort(), ["branches", "source", "wavelength_nm"]);
+    assert.deepEqual(Object.keys(t[0]!).sort(), ["beam", "branches", "source", "wavelength_nm"]);
+    assert.deepEqual(Object.keys(t[0]!.beam!).sort(), ["m2", "source_mw"]);
     assert.deepEqual(Object.keys(b).sort(), ["branch", "end", "events", "fraction", "segments"]);
-    assert.deepEqual(Object.keys(b.segments[0]!).sort(), ["x0", "x1", "y0", "y1"]);
-    assert.deepEqual(Object.keys(b.events[0]!).sort(), ["action", "component", "incidence_deg", "offset_mm", "path_mm", "x", "y"]);
-    assert.deepEqual(Object.keys(b.events[1]!).sort(), ["action", "component", "incidence_deg", "offset_mm", "path_mm", "x", "y"]);
+    // the 3D contract, section 4, adds z_mm and passes to a segment, z_mm and dz_mm to an event
+    assert.deepEqual(Object.keys(b.segments[0]!).sort(), ["beam", "passes", "x0", "x1", "y0", "y1", "z_mm"]);
+    assert.deepEqual(Object.keys(b.segments[0]!.beam!).sort(), ["p", "q", "s"]);
+    for (const e of b.events) {
+      assert.deepEqual(Object.keys(e).sort(), ["action", "beam", "component", "dz_mm", "incidence_deg", "offset_mm", "path_mm", "x", "y", "z_mm"]);
+      assert.deepEqual(Object.keys(e.beam!).sort(), ["d_mm", "mw", "p", "s"]);
+    }
     for (const e of b.events) for (const v of [e.x, e.y, e.offset_mm, e.incidence_deg, e.path_mm]) assert.equal(v, Math.round(v * 1000) / 1000);
+    // the beam numbers at 1e-9, the powers in mW too (section 12; section 4.8 had 6)
+    const at9 = (v: number) => assert.equal(v, Math.round(v * 1e9) / 1e9, `${v} is not rounded to 1e-9`);
+    at9(t[0]!.beam!.source_mw!);
+    assert.equal(t[0]!.beam!.source_mw, 3.3333333, "mW at 1e-9 too (section 12)");
+    assert.equal(t[0]!.beam!.m2, 1);
+    for (const g of b.segments) [g.beam!.p, ...g.beam!.s!].forEach(at9);
+    // q at 9 significant digits (zR runs from µm to km)
+    for (const g of b.segments) for (const v of g.beam!.q!) assert.equal(v, Number(v.toPrecision(9)), `${v} is not at 9 significant digits`);
+    for (const e of b.events) {
+      [e.beam!.p, e.beam!.d_mm!, ...e.beam!.s!].forEach(at9);
+      at9(e.beam!.mw!);
+    }
+    assert.equal(b.events[1]!.beam!.p, 0.333333, "the grating's zero order");
+    assert.equal(b.events[1]!.beam!.mw, 1.111109989, "3.3333333 mW x 0.333333, at 1e-9");
   });
 
   it("the detailed form keeps the exact numbers and the incoming direction", () => {

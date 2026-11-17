@@ -57,7 +57,7 @@ import {
 } from "../src/lib/opticalLayout/edit.ts";
 import { validateComponent } from "../src/lib/opticalLayout/validate.ts";
 import { COMPONENT_TYPES, LIMITS, isSourceType } from "../src/lib/opticalLayout/types.ts";
-import type { OpticalLayout } from "../src/lib/opticalLayout/types.ts";
+import type { ComponentType, OpticalLayout } from "../src/lib/opticalLayout/types.ts";
 import { comp, layoutOf } from "./helpers/opticalLayout.ts";
 
 /** Freezes a layout all the way down: any write to it throws in strict mode. */
@@ -82,7 +82,7 @@ const sample = (): OpticalLayout =>
 
 describe("the catalogue", () => {
   it("covers every type, each once, in a category the palette shows", () => {
-    assert.equal(COMPONENT_TYPES.length, 29);
+    assert.equal(COMPONENT_TYPES.length, 30);
     for (const t of COMPONENT_TYPES) {
       assert.equal(CATALOG[t].type, t);
       assert.ok(CATEGORY_ORDER.includes(CATALOG[t].category), t);
@@ -100,7 +100,7 @@ describe("the catalogue", () => {
 
   it("default apertures and angles follow section 4 and section 2", () => {
     const ap: Record<string, number> = {
-      laser: 2, fiber_out: 2, lamp: 5, led: 5, mirror: 25.4, beam_splitter: 25.4, dichroic: 25.4, grating: 25,
+      laser: 2, fiber_out: 2, lamp: 5, led: 5, mirror: 25.4, beam_splitter: 25.4, pbs: 25.4, dichroic: 25.4, grating: 25,
       lens: 25.4, objective: 10, waveplate: 12.7, polarizer: 12.7, filter: 25.4, window: 25.4, nd: 25.4, aotf: 25.4,
       prism: 25.4, periscope: 25.4, iris: 25.4, shutter: 12.7, sample: 10, detector: 10, camera: 10, spectrometer: 10,
       power_meter: 10, beam_dump: 25.4, blocker: 25.4, fiber_in: 5, custom: 25.4,
@@ -119,14 +119,26 @@ describe("the catalogue", () => {
     }
   });
 
-  it("type parameters are exactly the keys of section 4", () => {
-    assert.deepEqual(allowedPropKeys("laser"), ["wavelength_nm", "wavelengths_nm", "power_mw"]);
-    assert.deepEqual(allowedPropKeys("dichroic"), ["edge_nm", "reflects"]);
-    assert.deepEqual(allowedPropKeys("beam_splitter"), ["reflect_fraction"]);
-    assert.deepEqual(allowedPropKeys("filter"), ["pass_min_nm", "pass_max_nm"]);
-    assert.deepEqual(allowedPropKeys("fiber_in"), ["continues_at"]);
-    assert.deepEqual(allowedPropKeys("custom"), ["behavior"]);
-    assert.deepEqual(allowedPropKeys("mirror"), []);
+  it("type parameters are exactly the keys of section 4, of v2 section 3.2 and of the 3D contract section 2", () => {
+    const beam = ["polarization", "pol_angle_deg", "beam_diameter_mm", "m2"];
+    // the 3D contract: every type takes its height z_mm (after its own keys), a periscope its exit height too
+    const own = (t: ComponentType) => allowedPropKeys(t).filter((k) => k !== "z_mm");
+    for (const t of COMPONENT_TYPES) assert.equal(allowedPropKeys(t).at(-1), "z_mm", t);
+    assert.deepEqual(own("laser"), ["wavelength_nm", "wavelengths_nm", "power_mw", ...beam]);
+    assert.deepEqual(own("fiber_out"), ["wavelength_nm", "wavelengths_nm", "power_mw", ...beam]);
+    assert.deepEqual(own("lamp"), ["wavelength_nm"], "lamps and LEDs are always unpolarised, without a beam size or a power");
+    assert.deepEqual(own("dichroic"), ["edge_nm", "reflects"]);
+    assert.deepEqual(own("beam_splitter"), ["reflect_fraction"]);
+    assert.deepEqual(own("pbs"), [], "the split of a PBS follows from the polarisation");
+    assert.deepEqual(own("filter"), ["pass_min_nm", "pass_max_nm", "throughput"]);
+    assert.deepEqual(own("fiber_in"), ["continues_at", "coupling"]);
+    assert.deepEqual(own("custom"), ["behavior", "throughput"]);
+    assert.deepEqual(own("mirror"), ["throughput"]);
+    assert.deepEqual(own("nd"), ["od"], "ND has its optical density, no throughput");
+    assert.deepEqual(own("periscope"), ["z_out_mm", "throughput"]);
+    // v2 section 3.2: throughput on exactly these types
+    const withThroughput = COMPONENT_TYPES.filter((t) => allowedPropKeys(t).includes("throughput"));
+    assert.deepEqual(withThroughput, ["mirror", "grating", "lens", "objective", "waveplate", "polarizer", "filter", "window", "aotf", "prism", "periscope", "sample", "custom"]);
     for (const t of COMPONENT_TYPES) {
       for (const f of propFields(t)) assert.ok(f.label.length > 0, `${t}.${f.key}`);
     }

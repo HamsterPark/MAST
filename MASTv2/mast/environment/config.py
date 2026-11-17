@@ -41,7 +41,11 @@ CONFIG_FILENAME = "environment_sensors.json"
 #: whose analogue output is wired into the Nanonis. It carries no ``port``, and
 #: it is built by ``core.runtime`` rather than by ``environment.autodetect``,
 #: because it needs a live ConnectionPool and environment/ must not import core/.
-SENSOR_TYPES = ("dl7_vacuum", "lakeshore_temp", "nanonis_signal")
+#: ``lakeshore_625`` (superconducting-magnet supply: ``quantity`` field|current)
+#: and ``cryomag_lm510`` (level monitor: ``channel`` 1|2) are READ-ONLY drivers:
+#: an entry chooses port, baud and what to report, never a command.
+SENSOR_TYPES = ("dl7_vacuum", "lakeshore_temp", "nanonis_signal",
+                "lakeshore_625", "cryomag_lm510")
 
 _DEFAULT: dict[str, Any] = {"autodetect": True, "sensors": []}
 
@@ -160,20 +164,41 @@ def autodetect_policy(cfg: dict | None = None) -> tuple[bool, str]:
     every free port. On the optical station those ports belong to the lasers, the
     temperature controller and the vendors' own software (design
     ``optical_station_witec.md`` pitfall 8), so the **optical station profile forces
-    it off** whatever the file says. Everywhere else the file decides, and its default
-    is unchanged: on (an STM station finds its Lakeshore monitor this way).
+    it off** whatever the file says. The generic station has it **off by default**: its
+    ports may belong to a light source or a vendor program too, and only the operator's
+    setting ``serial_autodetect: true`` switches it on (design ``generic_station.md`` §1.4).
+    On an STM station nothing changed while that setting is unset: the file decides, and its
+    default is on (an STM station finds its Lakeshore monitor this way).
+
+    The file's explicit ``autodetect: false`` always wins (a hand-written kill switch). Its
+    ``true`` does not switch a generic station on: saving a sensor from the UI writes the
+    loader's default ``true`` into the file, and that must not start a serial scan.
     """
+    profile = "stm"
     try:
         from mast import station
 
-        if station.is_optical():
-            return False, "forced off by the optical station profile"
+        profile = station.current_profile()
+        default = station.serial_autodetect_default(profile)
+        setting = station.serial_autodetect_setting()
     except Exception:  # noqa: BLE001 - no profile information: the file decides
-        pass
+        default, setting = "default_on", None
+    if default == "forced_off":
+        return False, f"forced off by the {profile} station profile"
     cfg = cfg if cfg is not None else load_config()
-    if cfg.get("autodetect", True):
-        return True, "enabled in environment_sensors.json (default)"
-    return False, "autodetect is false in environment_sensors.json"
+    file_on = bool(cfg.get("autodetect", True))
+    if setting is None:
+        if default == "default_on":
+            if file_on:
+                return True, "enabled in environment_sensors.json (default)"
+            return False, "autodetect is false in environment_sensors.json"
+        return False, (f"off by default on the {profile} station profile "
+                       "(the setting serial_autodetect switches it on)")
+    if not setting:
+        return False, "switched off by the setting serial_autodetect"
+    if not file_on:
+        return False, "autodetect is false in environment_sensors.json"
+    return True, "switched on by the setting serial_autodetect"
 
 
 __all__ = [

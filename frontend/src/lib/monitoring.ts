@@ -57,8 +57,8 @@ const STATES: Record<string, StateView> = {
     label: tr("已关闭", "Disabled"),
     tone: "default",
     hint: tr(
-      "监控在设置里被关闭。到「设置 → 电流监控」打开后即可启动。",
-      "Monitoring is disabled in settings. Enable it under Settings → Current monitoring to start.",
+      "监控在设置里被关闭。到「设置 → 信号监控」打开后即可启动。",
+      "Monitoring is disabled in settings. Enable it under Settings → Signal monitor to start.",
     ),
   },
   no_pool: {
@@ -75,6 +75,16 @@ const STATES: Record<string, StateView> = {
     hint: tr(
       "Nanonis TCP 链路已熔断，采集暂停中；链路恢复后自动重连。",
       "The Nanonis TCP link has tripped its breaker and acquisition is paused; it reconnects automatically once the link recovers.",
+    ),
+  },
+  // Breaker HALF_OPEN. Not "running" (nothing has verified the link yet) and not
+  // "comms_down" (the cooldown is over; it usually clears within a second or two).
+  comms_recovering: {
+    label: tr("通信恢复中", "Recovering"),
+    tone: "WARN",
+    hint: tr(
+      "熔断冷却已过，正等一次计入熔断统计的调用（看门狗、状态刷新或技能）验证链路；验证通过后采集自动恢复，此前不发 TCP。",
+      "The breaker's cooldown is over and MAST is waiting for one counted call (the watchdog, the state refresh or a skill) to verify the link; acquisition resumes by itself once it does and sends no TCP until then.",
     ),
   },
   probing: {

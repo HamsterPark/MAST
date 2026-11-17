@@ -113,11 +113,15 @@ def test_latest_only_kinds_coalesce_to_one_frame_per_tick(kind, frame):
 @pytest.mark.parametrize("kind, make", [
     ("xy", lambda i: {"x": i, "values": {"v": i}}),
     ("map2d", lambda i: {"ix": i % 8, "iy": i // 8, "values": {"I": i}}),
+    # one row per frame; 30 rows on an 8-row map overwrite each other in the
+    # hub, but each was a frame the subscriber must get
+    ("map2d_rows", lambda i: {"iy": i % 8, "values": {"Z": [i] * 8}}),
     ("status", lambda i: {"text": f"第 {i} 步"}),
 ])
 def test_incremental_kinds_are_batched_never_dropped(kind, make):
     h = _hub()
-    h.declare("s/q/1", kind, title="q", source="s", meta=MAP if kind == "map2d" else None)
+    h.declare("s/q/1", kind, title="q", source="s",
+              meta=MAP if kind in ("map2d", "map2d_rows") else None)
     s = _sub(h)
     _msgs(s)
     for i in range(30):

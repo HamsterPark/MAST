@@ -96,9 +96,9 @@ def _board_path() -> Path:
     if override:
         return Path(override) / "park_board.json"
     try:
-        from mast._runtime_paths import project_root
+        from mast._runtime_paths import data_root
 
-        return Path(project_root()) / "artifacts" / "activation" / "park_board.json"
+        return Path(data_root()) / "artifacts" / "activation" / "park_board.json"
     except Exception:  # noqa: BLE001
         return Path("artifacts") / "activation" / "park_board.json"
 

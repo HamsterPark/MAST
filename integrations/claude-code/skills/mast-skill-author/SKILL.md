@@ -8,6 +8,16 @@ when_to_use: "Use when MAST has no single skill for what you need, when the same
 
 Work down this ladder and stop at the first rung that does the job.
 
+## 0. The habit: capture what worked, locally first
+
+When real work makes you write a procedure or tool that proved useful (validated on real data or
+the instrument), save it as a skill before the session ends and tell the user. Default is LOCAL:
+`python scripts/skill_scaffold.py new <Name> --evidence "..."` then `check <Name>`, or
+`mast_composite_save` / `mast_propose_skill`. Local Python skills live in `config/custom_skills/`
+(gitignored; only the operator enables them). A pull request to `contrib/skills/` is the user's
+choice: follow their stated preference, else ask once. Say what evidence validated it, and never
+use a captured skill to bypass a safety gate. Details: `06-contributing-skills.md`.
+
 ## 1. An official skill already does it
 
 Search by action first: `mast_find_skills` with the verb or Nanonis command ("withdraw",

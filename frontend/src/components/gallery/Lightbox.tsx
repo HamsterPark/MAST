@@ -26,6 +26,7 @@ import { ContextStage, type Side } from "./ContextStage";
 import { Chip, DARK_BTN, Kbd, arText, chipClass, darkRatingOnClass } from "./bits";
 import { CopyButton } from "./clipboard";
 import { LightboxFigureButton } from "./figures/LightboxFigureButton";
+import { EnvPanel } from "./EnvPanel";
 import { tr } from "@/lib/i18n";
 
 const AUTO_KEY = "mast.gallery.auto";
@@ -266,7 +267,7 @@ export function Lightbox({
   }
 
   const node = (
-    <div className="fixed inset-0 z-[60] flex bg-[rgba(10,10,12,.93)] text-[#eee] max-[760px]:flex-col">
+    <div data-gallery-lightbox className="fixed inset-0 z-[60] flex bg-[rgba(10,10,12,.93)] text-[#eee] max-[760px]:flex-col">
       <div
         className={clsx(
           "flex min-w-0 flex-1 justify-center gap-2.5 overflow-auto overscroll-contain p-3.5",
@@ -364,6 +365,8 @@ export function Lightbox({
             {tr("S 选/取消 · [ 起点 · ] 选到这里", "S toggle · [ start · ] select to here")}
           </div>
         </div>
+
+        <EnvPanel it={it} />
 
         <div className="mb-1 mt-2.5 flex flex-wrap items-center gap-[5px]">
           {([

@@ -6,6 +6,7 @@ import type { components } from "../../api/schema";
 import { useCurrentScope } from "../../api/scope";
 import { libraryLabel } from "../../lib/libraryLabel";
 import { tr } from "../../lib/i18n";
+import { apiError, refetchWhileError } from "@/lib/apiError";
 
 type LibrarySummary = components["schemas"]["LibrarySummary"];
 
@@ -49,10 +50,12 @@ export function LibraryManager({
   const librariesQ = useQuery({
     queryKey: ["literature", "libraries"],
     queryFn: async () => {
-      const { data, error } = await api.GET("/api/literature/libraries");
-      if (error) throw error;
+      const { data, error, response } = await api.GET("/api/literature/libraries");
+      if (error) throw apiError(error, response);
       return data;
     },
+    // No polling of its own: after a failure ask again until it works (no page refresh needed).
+    refetchInterval: refetchWhileError,
   });
   // Names an experiment library that has not been lazily created yet. Shares the
   // TopBar cache, so no extra request.
@@ -67,10 +70,10 @@ export function LibraryManager({
       // experiment (exp_<id8>) and its members live in the experiment folder, so
       // only the backend can create it, lazily, on first use. Offering
       // "experiment" here would be silently downgraded to custom by the backend.
-      const { data, error } = await api.POST("/api/literature/libraries", {
+      const { data, error, response } = await api.POST("/api/literature/libraries", {
         body: { name: newName.trim(), scope: "custom" },
       });
-      if (error) throw error;
+      if (error) throw apiError(error, response);
       return data;
     },
     onSuccess: (res) => {
@@ -83,14 +86,14 @@ export function LibraryManager({
 
   const renameM = useMutation({
     mutationFn: async (vars: { id: string; name: string }) => {
-      const { data, error } = await api.PATCH(
+      const { data, error, response } = await api.PATCH(
         "/api/literature/libraries/{library_id}",
         {
           params: { path: { library_id: vars.id } },
           body: { new_name: vars.name.trim() },
         },
       );
-      if (error) throw error;
+      if (error) throw apiError(error, response);
       return data;
     },
     onSuccess: (res) => {
@@ -103,11 +106,11 @@ export function LibraryManager({
 
   const deleteM = useMutation({
     mutationFn: async (id: string) => {
-      const { data, error } = await api.DELETE(
+      const { data, error, response } = await api.DELETE(
         "/api/literature/libraries/{library_id}",
         { params: { path: { library_id: id } } },
       );
-      if (error) throw error;
+      if (error) throw apiError(error, response);
       return data;
     },
     onSuccess: (res, id) => {
@@ -121,11 +124,11 @@ export function LibraryManager({
 
   const activateM = useMutation({
     mutationFn: async (id: string) => {
-      const { data, error } = await api.POST(
+      const { data, error, response } = await api.POST(
         "/api/literature/libraries/{library_id}/activate",
         { params: { path: { library_id: id } } },
       );
-      if (error) throw error;
+      if (error) throw apiError(error, response);
       return data;
     },
     onSuccess: (res) => {
@@ -150,14 +153,14 @@ export function LibraryManager({
 
   const copyM = useMutation({
     mutationFn: async (id: string) => {
-      const { data, error } = await api.POST(
+      const { data, error, response } = await api.POST(
         "/api/literature/libraries/{library_id}/copy",
         {
           params: { path: { library_id: id } },
           body: { to_experiment_id: "" }, // empty = current experiment
         },
       );
-      if (error) throw error;
+      if (error) throw apiError(error, response);
       return data;
     },
     onSuccess: (res) => {
@@ -238,7 +241,7 @@ export function LibraryManager({
 
       {/* list */}
       {librariesQ.isPending && <Spinner />}
-      {librariesQ.isError && <ErrorNote error={librariesQ.error} />}
+      {librariesQ.isError && <ErrorNote error={librariesQ.error} retrying />}
       {data?.degraded && <DegradedNote what={tr("文献库", "Literature libraries")} />}
       {data && !data.degraded && libs.length === 0 && (
         <EmptyNote label={tr("暂无文献库。", "No libraries yet.")} />
@@ -427,25 +430,26 @@ function MemberList({ libraryId }: { libraryId: string }) {
   const detailQ = useQuery({
     queryKey: ["literature", "library-detail", libraryId],
     queryFn: async () => {
-      const { data, error } = await api.GET(
+      const { data, error, response } = await api.GET(
         "/api/literature/libraries/{library_id}",
         { params: { path: { library_id: libraryId } } },
       );
-      if (error) throw error;
+      if (error) throw apiError(error, response);
       return data;
     },
+    refetchInterval: refetchWhileError,
   });
 
   const removeM = useMutation({
     mutationFn: async (workId: string) => {
-      const { data, error } = await api.POST(
+      const { data, error, response } = await api.POST(
         "/api/literature/libraries/{library_id}/members/remove",
         {
           params: { path: { library_id: libraryId } },
           body: { work_ids: [workId] },
         },
       );
-      if (error) throw error;
+      if (error) throw apiError(error, response);
       return data;
     },
     onSuccess: (res) => {
@@ -466,7 +470,7 @@ function MemberList({ libraryId }: { libraryId: string }) {
     <div className="space-y-2">
       <div className="text-xs font-medium text-mast-muted">{tr("成员指针", "Member pointers")}</div>
       {detailQ.isPending && <Spinner />}
-      {detailQ.isError && <ErrorNote error={detailQ.error} />}
+      {detailQ.isError && <ErrorNote error={detailQ.error} retrying />}
       {detail?.degraded && <DegradedNote what={tr("成员列表", "Member list")} />}
       {detail && !detail.degraded && !detail.found && (
         <EmptyNote label={tr("未找到该库。", "Library not found.")} />

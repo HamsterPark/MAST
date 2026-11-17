@@ -7,17 +7,19 @@ method, instrument operation or multi-step workflow to the existing parameter ch
 constraints and operator interface. Human-written and agent-assisted skills follow the same review
 and verification process.
 
-This is MAST's public source edition. Code contributions enter through `contrib/skills/` and progress
+This is MAST's public source edition. Skill contributions enter through `contrib/skills/` and progress
 from community checks to maintainer hardware verification before joining the official tree.
-The rest of the source is maintained through exports from the development repository; use issues
-for related bugs and improvement proposals. Report vulnerability details privately through
-[`SECURITY.md`](SECURITY.md).
+Pull requests to any other part of the source (a bug fix, documentation, a test, the frontend) are
+welcome too; see [How pull requests are merged](#how-pull-requests-are-merged). Report vulnerability
+details privately through [`SECURITY.md`](SECURITY.md).
 
 ## Contribution scope
 
 - A new skill under `contrib/skills/<Name>/`: prefer **CompositeSpec JSON** to reuse official skills;
   write a **Python skill** when the required execution logic cannot be expressed by composition.
 - Fixes to an existing contribution under `contrib/`.
+- A pull request anywhere else in the repository: a bug fix, a documentation correction, a test, a
+  frontend change. Keep it focused, and open an issue first for anything large or design-level.
 
 ## Scope and constraints
 
@@ -27,8 +29,26 @@ for related bugs and improvement proposals. Report vulnerability details private
 - **Defaults that describe one instrument.** Calibration values, piezo ranges, controller gains, bias or
   current working points measured on your machine. Parameters get instrument-independent defaults (or
   none) and explicit `min_value` / `max_value`.
-- **Changes outside `contrib/`.** Everything else is regenerated from the private repository and would be
-  overwritten by the next export. Open an issue instead.
+- **Content that is not shipped in this edition.** Parts of the development repository are deliberately
+  absent here (the snapshot notes list them). A change that targets such a part cannot be imported;
+  open an issue to describe it instead.
+
+## How pull requests are merged
+
+The development repository is the source of truth, and this repository is regenerated from it at each
+release. A pull request is therefore handled in four steps:
+
+1. A maintainer reviews and merges it on GitHub.
+2. The maintainer imports the merged change into the development repository (a three-way merge per
+   file), checks that the release export reproduces the merged files, and runs the full test suite there.
+3. The change ships in the next release.
+4. Because the public `main` is rebuilt at each release, your commits are replaced by the release commit.
+   You are credited with a `Co-authored-by:` trailer in the development repository's commit, and
+   contributed skills are also listed in [`contrib/GRADUATED.md`](contrib/GRADUATED.md) when they graduate.
+
+A change that touches a path the release export excludes, or that cannot be reproduced by the export,
+is sent back to you with the reason. CI here runs a subset of the tests; the full suite runs on the
+maintainers' side before release.
 
 ## Two tiers
 
@@ -50,7 +70,8 @@ Use a Python 3.13 environment. For contribution-only checks, install `MASTv2/req
 Here, `python` means the interpreter in that environment; run commands from the repository root.
 See [AGENTS.md](AGENTS.md#validation-without-hardware) for setup and broader validation routes.
 
-- [ ] Only files under `contrib/skills/<Name>/` change.
+- [ ] A skill contribution changes only files under `contrib/skills/<Name>/`; any other pull request
+      stays focused on one change and updates the tests and documentation it touches.
 - [ ] `manifest.json`, then `skill.py` **or** `spec.json`, and at least one test (`test_<name>.py`, a file
       name not used anywhere else in `contrib/`).
 - [ ] `python scripts/skill_check.py contrib/skills/<Name>` exits `0`.
@@ -59,7 +80,8 @@ See [AGENTS.md](AGENTS.md#validation-without-hardware) for setup and broader val
 - [ ] Every commit is signed off (see below).
 
 These are local submission checks. CI runs `python scripts/skill_check.py --all-contrib`, followed by
-contribution compliance tests, checker mutation tests and documentation guards. Its current commands
+contribution compliance tests, checker mutation tests and documentation guards, and a separate job runs
+a broader backend test subset plus the frontend type check and unit tests. Its current commands
 are in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 ## Verification levels

@@ -132,6 +132,10 @@
     {
       "source": "las1",
       "wavelength_nm": 532.0,
+      "beam": {
+        "source_mw": null,
+        "m2": null
+      },
       "branches": [
         {
           "branch": "0",
@@ -141,13 +145,35 @@
               "x0": 50.0,
               "y0": 68.8,
               "x1": 118.8,
-              "y1": 68.8
+              "y1": 68.8,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             },
             {
               "x0": 118.8,
               "y0": 68.8,
               "x1": 118.8,
-              "y1": 250.0
+              "y1": 250.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             }
           ],
           "events": [
@@ -156,18 +182,42 @@
               "action": "reflect",
               "x": 118.8,
               "y": 68.8,
+              "z_mm": 75.0,
               "offset_mm": -8.91,
+              "dz_mm": 0.0,
               "incidence_deg": 45.0,
-              "path_mm": 68.8
+              "path_mm": 68.8,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             },
             {
               "component": "det1",
               "action": "stop",
               "x": 118.8,
               "y": 250.0,
+              "z_mm": 75.0,
               "offset_mm": 6.3,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 250.0
+              "path_mm": 250.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             }
           ],
           "end": "stop"
@@ -177,6 +227,10 @@
     {
       "source": "las2",
       "wavelength_nm": 532.0,
+      "beam": {
+        "source_mw": null,
+        "m2": null
+      },
       "branches": [
         {
           "branch": "0",
@@ -186,13 +240,35 @@
               "x0": 50.0,
               "y0": 56.2,
               "x1": 106.2,
-              "y1": 56.2
+              "y1": 56.2,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             },
             {
               "x0": 106.2,
               "y0": 56.2,
               "x1": 106.2,
-              "y1": 250.0
+              "y1": 250.0,
+              "z_mm": 75.0,
+              "beam": {
+                "p": 1.0,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "q": null
+              },
+              "passes": []
             }
           ],
           "events": [
@@ -201,18 +277,42 @@
               "action": "reflect",
               "x": 106.2,
               "y": 56.2,
+              "z_mm": 75.0,
               "offset_mm": 8.91,
+              "dz_mm": 0.0,
               "incidence_deg": 45.0,
-              "path_mm": 56.2
+              "path_mm": 56.2,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             },
             {
               "component": "det1",
               "action": "stop",
               "x": 106.2,
               "y": 250.0,
+              "z_mm": 75.0,
               "offset_mm": -6.3,
+              "dz_mm": 0.0,
               "incidence_deg": 0.0,
-              "path_mm": 250.0
+              "path_mm": 250.0,
+              "beam": {
+                "p": 1.0,
+                "mw": null,
+                "d_mm": null,
+                "s": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
             }
           ],
           "end": "stop"

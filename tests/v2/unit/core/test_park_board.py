@@ -85,14 +85,17 @@ class TestNeverTouchesRealData:
         So: same anchor as the billing ledger and the experiment folders.
         """
         monkeypatch.delenv("MAST_PARK_BOARD_DIR", raising=False)
+        monkeypatch.delenv("MAST_DATA_DIR", raising=False)   # the launcher sets only the root
         monkeypatch.setenv("MAST2_PROJECT_ROOT", str(tmp_path / "data-root"))
         got = pb._board_path()
         assert "data-root" in str(got), \
             f"the park board resolved to {got} — outside the user data root, so an " \
             "OTA update would delete pending activations"
 
-        from mast._runtime_paths import project_root
+        from mast._runtime_paths import data_root, project_root
+        from mast.billing.ledger import _default_path as ledger_path
         assert Path(project_root()) in got.parents
+        assert Path(data_root()) in got.parents and Path(data_root()) in ledger_path().parents
 
     def test_the_singleton_is_injectable(self, board):
         pb.set_board_for_test(board)

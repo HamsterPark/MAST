@@ -72,6 +72,140 @@ refused before it starts, because the E-STOP that set the latch has already stop
 withdrawn the tip: at that point, do not retry a stop; ask the operator, who releases the latch from
 MAST's own interface.
 
+## Superconducting magnet (Lake Shore 625)
+
+On a station with a Lake Shore 625 magnet supply (`GetMagnetState` reports it), MAST 7.2 can change
+the field. There are three skills:
+
+- `CheckMagnetFieldChange(target_t)`: a dry run. It returns every gate's verdict and the expected
+  duration, and writes nothing. Run it first.
+- `RampMagnetField(target_t, user_authorization, authorized_up_to_t, require_tip_withdrawn)`:
+  sends the new set point if every gate passes, then follows the ramp to the end while holding the
+  instrument token. 0 → 5 T takes about an hour, so wait on the job. Cancelling the job sends STOP:
+  cancel only to stop the ramp, never just to stop waiting.
+- `StopMagnetRamp`: freezes the output at its present value. It needs no token and passes no gate.
+  It does not bring the field to zero; to lower the field, ramp to a lower target. While the
+  emergency latch is set it is refused like every job, but the E-STOP that set the latch has
+  already sent STOP to the supply.
+
+The gates are the operator's decisions. They are not yours to work around:
+
+- The maximum field and the field constant are entered at instrument initialization. Until they
+  are, MAST does not change the field. A target whose |B| is above the maximum is refused, never
+  clipped. A negative `target_t` is a reverse field, allowed within the same maximum and the
+  supply's own current limit (a magnitude).
+- Before raising |B| (making it larger, on either side of zero), ask the user. Put the user's own
+  words in `user_authorization` and the field they authorized in `authorized_up_to_t`, a
+  magnitude. The helium level cannot be read, so a verbal go-ahead is the operator's condition.
+  Never write either yourself. A target whose |B| is above `authorized_up_to_t` is refused, and
+  so is a mismatch with a field the words name on the target's side of zero; going higher means
+  asking again. Lowering |B| needs no authorization, going to 0 from either side included.
+- A reverse (negative) target needs the user's words to name a negative or reverse field
+  explicitly, such as "-2 T", "negative 2 T", "reverse 2 T", "负2T" or "反向2T". Words that name
+  only a positive field do not authorize it, and words that name only a negative field do not
+  authorize a positive target. A dash is a minus sign only when it touches the number and does not
+  follow a number ("1T-2T" and "1 T - 2 T" are ranges, not -2 T). If the words use a sign word
+  ("reverse", "negative", "minus", "反向") that does not touch a number, a positive target is
+  refused as unclear until the user writes the field as "+2 T" or "-2 T". A reverse target from an
+  output that is not on the negative side counts as a raise however small it is.
+- A ramp never crosses zero. To go from a positive field to a negative one, or back, ramp to 0 T
+  first, then start a second ramp; a target on the other side of zero is refused with that reason.
+- The 625 manual never says its ramp segments are looked up by |I| for negative output. Until the
+  operator has seen the rate change at the first segment boundary on the negative side and turned
+  on "Negative-side ramp segments verified" in the initialization, a negative target whose |I| is
+  above the first segment's upper current is refused, and the refusal names that boundary. Until
+  then the supply's RATE must also not be faster than the first segment's rate. Ask the operator;
+  do not look for a way around it.
+- Raising also needs the magnet thermometer named at initialization to read below its limit. The
+  reading drifts with field; if it blocks you, ask the operator instead of looking for a way around
+  it.
+- By default the tip must be withdrawn. Pass `require_tip_withdrawn=false` only when the change
+  must be made with the tip in; a changing field moves the tip laterally and vertically.
+- Heating and field changes never overlap. A field change is refused while a heater output of
+  the Lake Shore 335 reads on, while an output in zone mode still ramps its setpoint (the next
+  zone could turn its heater on; `HoldSampleTemperature` stops the ramp), or while MAST's own
+  heating is on (a temperature change, the watch after it, or a zone table / control mode
+  write); turn the heater off first (`HeaterOff`). On a station without a 335 this gate passes;
+  a 335 that does not answer blocks it.
+- If the supply's front panel is in local mode, the supply may ignore the set point; the skill
+  says so. MAST never switches the interface mode.
+
+E-STOP and a hard environment alarm also send STOP to the supply. STOP freezes the field; it does
+not make it zero. No STOP is sent while the supply protects the magnet by itself (a hardware
+error, a quench, crowbar discharge or remote inhibit): it is driving the output on purpose.
+
+## Sample-stage heating (Lake Shore 335)
+
+On a station with a Lake Shore 335 temperature controller and a heater on the sample stage, MAST
+can regulate the stage temperature. There are six skills:
+
+- `CheckSampleTemperatureChange(target_k)`: a dry run. It returns every gate's verdict, the
+  expected duration and what the controller reports, and writes nothing. Run it first.
+- `SetSampleTemperature(target_k, rate_k_per_min, heater_range, user_authorization,
+  authorized_up_to_k, require_tip_withdrawn)`: if every gate passes, brings the setpoint to the
+  present temperature, turns the heater on, and lets the 335 ramp to the target. It follows the
+  change until the temperature has settled, holding the instrument token, then ends; the 335 keeps
+  the target by itself afterwards. Cancelling the job stops the ramp where it is (the heater stays
+  on).
+- `HoldSampleTemperature`: stops a ramp near the present temperature; the heater keeps
+  regulating. No token, no gate.
+- `HeaterOff`: turns the heater off (`RANGE 0`) and reads it back; in zone mode it also stops a
+  ramping setpoint, which would otherwise turn the heater back on at the next zone. An off that
+  does not read back is retried in the background. No token, no gate; available wherever
+  temperature control is set up and whenever MAST's own heating is on. Where it is not set up,
+  MAST writes nothing to the 335: use ALL OFF at the panel.
+- `SetHeaterZoneTable(zones)` and `SetHeaterControlMode(mode)`: commissioning steps, taken with
+  the operator. The first writes the heater output's zone table (a JSON array, zone 1 first:
+  upper bound, P, I, D, heater range, ramp rate); the second switches the output between
+  closed-loop PID and zone mode. Both need the heater off, write nothing unless the table passes
+  the initialization limits, read every value back, and put the old values back when a write
+  fails. Never invent zone values.
+
+The gates are the operator's decisions. They are not yours to work around:
+
+- The heater output, the control input, the maximum setpoint, the maximum heater range, the
+  heater's rated current and the maximum ramp rate are entered at instrument initialization. Until
+  they are, MAST does not turn a heater on. A target, rate or range above its maximum is refused,
+  never clipped. The maximum setpoint is the heater stage's rated maximum: the heater is turned off
+  when the stage goes above it. MAST also reads the output's HTRSET? (never writes it) and works out
+  the full-scale current of the maximum range (the max user current, or the code's value, for High;
+  each range step down divides the current by sqrt(10)); above the rated current it refuses to heat,
+  naming both fixes (a lower maximum range, or a lower max user current at the panel), and while
+  heating it checks again at intervals and turns the heater off if the present range is above it.
+  The manual output (MOUT, added to the PID output) must be within the maximum manual output set at
+  initialization (default 0 = none); a zone row may carry a manual output up to that cap as a
+  feed-forward, MAST never writes MOUT on its own, and the heater is turned off if MOUT reads above
+  the cap while heating.
+- To heat, MAST writes the setpoint, the ramp and the heater range; it writes the zone table and
+  switches between closed-loop PID and zone mode only through the two commissioning skills. It
+  reads, and never changes, the rest: the output must be in closed-loop PID or zone mode on the
+  configured input, stay off after a power cut, have no manual output, and the control input must
+  read in kelvin. The 335's own temperature limit on the control input must be on, at least the
+  target plus an overshoot allowance (or the maximum setpoint, whichever is lower), and not above
+  the maximum setpoint: it is the only protection that does not depend on MAST. If a check fails,
+  ask the operator; do not look for a way around it.
+- In zone mode the zone table, not the call, sets the heater range and the ramp rate on the way:
+  every zone between the present temperature and the target must have the heater on, the
+  requested range is ignored, and the rate is at most the first zone's.
+- No heating while MAST changes the magnet's field.
+- Before raising the temperature (or giving a heater that is on a higher range), ask the user. Put
+  the user's own words in `user_authorization`; they must name the temperature, and that
+  temperature goes in `authorized_up_to_k`. Never write either yourself.
+- By default the tip must be withdrawn. Pass `require_tip_withdrawn=false` only when heating with
+  the tip in was agreed with the user beforehand; the waiver is written to the ledger.
+- If the controller's front panel ignores interface commands, the skill says so and leaves the
+  heater as it found it. MAST never switches the interface mode.
+
+E-STOP and a hard environment alarm turn both heater outputs off on a station where temperature
+control is set up, like ALL OFF on the front panel. After `SetSampleTemperature` ends with the
+heater on, MAST keeps watching it and turns it off on a sensor fault, overheating, a heater range
+above the maximum, the guard thermometer or a heater stuck at full power. It writes nothing else,
+with one exception: when that heating is turned off elsewhere while the setpoint still ramps in
+zone mode, MAST stops the ramp, because the next zone would turn the heater back on. While it
+watches, the field does not change. A MAST shutdown leaves the
+heater regulating (the 335's own temperature limit stays), and the next MAST process watches it
+again.
+
 ## Long-running tasks in an agent harness
 
 When your own harness spawns a task that will drive the instrument for a while, start the

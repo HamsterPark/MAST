@@ -256,6 +256,48 @@ MODULES: tuple[HardwareModule, ...] = (
                 "TERSTimeSeries", "TERSPolarizationSeries", "TERSBiasSeries",
                 "TERSSetpointSeries", "LaserFocusMap"),
     ),
+    # Superconducting-magnet field control (7.2.0, instruments/magnet_625.py). Not a
+    # Nanonis module: the supply is a serial instrument MAST identifies by *IDN?, so this
+    # module is switched on by DETECTION (see DETECTION_IMPLIED_MODULES), not by the
+    # operator's switch. What actually enables a field change is the initialization
+    # page (max field + field constant), and every gate lives in the controller.
+    HardwareModule(
+        id="superconducting_magnet",
+        name=tr("超导磁体调场（Lake Shore 625）", "Superconducting-magnet field control (Lake Shore 625)"),
+        hardware=tr("Lake Shore Model 625 超导磁体电源（RS-232）",
+                    "Lake Shore Model 625 superconducting magnet supply (RS-232)"),
+        description=tr("预检、改变、停住磁场：CheckMagnetFieldChange / RampMagnetField / StopMagnetRamp。"
+                       "识别到 625 时自动开启；初始化里填好最大磁场与场常数之前，调场一律拒绝。",
+                       "Check, change and stop the field: CheckMagnetFieldChange / RampMagnetField / "
+                       "StopMagnetRamp. Switched on when a 625 is detected; until the maximum field and "
+                       "the field constant are set at initialization, every change is refused."),
+        prefixes=(),
+        skills=("CheckMagnetFieldChange", "RampMagnetField", "StopMagnetRamp"),
+    ),
+    # Sample-stage heating (instruments/heater_335.py). Same shape as the magnet: a serial
+    # instrument MAST identifies by *IDN?, switched on by DETECTION of exactly one Model
+    # 335. What enables heating is the initialization page (output, control input,
+    # maximum setpoint / range / rate), and every gate lives in the controller.
+    HardwareModule(
+        id="temperature_control",
+        name=tr("样品台控温（Lake Shore 335）", "Sample-stage temperature control (Lake Shore 335)"),
+        hardware=tr("Lake Shore Model 335 温控仪与样品台加热器",
+                    "Lake Shore Model 335 temperature controller and a sample-stage heater"),
+        description=tr("预检、控温、停住扫温、关加热器：CheckSampleTemperatureChange / "
+                       "SetSampleTemperature / HoldSampleTemperature / HeaterOff；调试时写分区表、切换"
+                       "控制模式：SetHeaterZoneTable / SetHeaterControlMode。识别到 335 时自动开启；"
+                       "初始化里填好控温一组之前，加热和改配置一律拒绝（关加热器始终可用）。",
+                       "Check, regulate, hold and switch off: CheckSampleTemperatureChange / "
+                       "SetSampleTemperature / HoldSampleTemperature / HeaterOff; for commissioning, "
+                       "the zone table and the control mode: SetHeaterZoneTable / "
+                       "SetHeaterControlMode. Switched on when a 335 is detected; until the "
+                       "temperature-control group is filled in at initialization, heating and "
+                       "configuration writes are refused (HeaterOff always works)."),
+        prefixes=(),
+        skills=("CheckSampleTemperatureChange", "SetSampleTemperature",
+                "HoldSampleTemperature", "HeaterOff", "SetHeaterZoneTable",
+                "SetHeaterControlMode"),
+    ),
 )
 
 MODULE_BY_ID: dict[str, HardwareModule] = {m.id: m for m in MODULES}
@@ -268,27 +310,63 @@ SKILL_OWNER: dict[str, str] = {
 
 DEFAULT_ENABLED: frozenset[str] = frozenset(m.id for m in MODULES if m.default_on)
 
-#: Modules a **station profile** switches on by itself (``mast.station``; design
-#: ``docs/v2/design/optical_station_witec.md`` D1). On an optical station the optical bench
-#: (spectrometer, polarizer, camera ...) is not "licensed hardware the machine may lack": it
-#: is the machine. Left to the operator's switch, a fresh install on the WITec computer would
-#: refuse ``AcquireSpectrum`` at the external door until someone found 设置 → 硬件模块.
+#: Modules a **station capability** switches on by itself (``mast.station``; designs
+#: ``docs/v2/design/optical_station_witec.md`` D1 and ``generic_station.md`` §3.2). On a station
+#: whose instrument is the optical bench (``optical_bench``: the optical station, the generic
+#: station) the bench (spectrometer, polarizer, camera ...) is not "licensed hardware the machine
+#: may lack": it is the machine. Left to the operator's switch, a fresh install would refuse
+#: ``AcquireSpectrum`` at the external door until someone found 设置 → 硬件模块.
 #: The implication is read live, so it survives any write to the ``hardware_modules``
 #: setting (a UI form that does not send ``ters_optics`` cannot turn it off). The Nanonis-bound
 #: members of the module (``NanonisMotorGroupMove``, the TERS composites) are still withheld
-#: on that station by ``skills.station_face``.
-PROFILE_IMPLIED_MODULES: dict[str, frozenset[str]] = {
-    "optical": frozenset({"ters_optics"}),
+#: on those stations by ``skills.station_face``. An STM station has no such capability: there
+#: the operator's switches alone decide, as before.
+CAPABILITY_IMPLIED_MODULES: dict[str, frozenset[str]] = {
+    "optical_bench": frozenset({"ters_optics"}),
 }
 
 
 def _profile_implied() -> frozenset[str]:
+    """The modules the station's capabilities imply (:data:`CAPABILITY_IMPLIED_MODULES`)."""
     try:
         from mast import station
 
-        return PROFILE_IMPLIED_MODULES.get(station.current_profile(), frozenset())
+        caps = station.capabilities()
     except Exception:  # noqa: BLE001 - no profile information: the operator's switches only
         return frozenset()
+    out: set[str] = set()
+    for cap, modules in CAPABILITY_IMPLIED_MODULES.items():
+        if cap in caps:
+            out |= modules
+    return frozenset(out)
+
+
+#: Modules switched on because MAST **detected** the hardware itself, read live like the
+#: profile-implied ones. Unlike a Nanonis option, a serial instrument answers ``*IDN?``,
+#: so "is it plugged in" is not a question only the operator can answer. Exactly one
+#: identified Model 625 turns on superconducting_magnet, exactly one Model 335
+#: temperature_control; none, or two (ambiguous), leaves the module off and its skills
+#: out of every tool list.
+DETECTION_IMPLIED_MODULES: tuple[str, ...] = ("superconducting_magnet", "temperature_control")
+
+
+def _detected_implied() -> frozenset[str]:
+    on: set[str] = set()
+    try:
+        from mast.core import magnet_control
+
+        if magnet_control.present():
+            on.add("superconducting_magnet")
+    except Exception:  # noqa: BLE001 - cannot tell: the operator's switches only
+        pass
+    try:
+        from mast.core import heater_control
+
+        if heater_control.present():
+            on.add("temperature_control")
+    except Exception:  # noqa: BLE001 - cannot tell: the operator's switches only
+        pass
+    return frozenset(on)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -301,11 +379,12 @@ _enabled: frozenset[str] = DEFAULT_ENABLED   # read lock-free; swapped under _lo
 
 def enabled_ids() -> frozenset[str]:
     """The module ids currently switched ON: the operator's switches, plus what the
-    station profile implies (:data:`PROFILE_IMPLIED_MODULES`; nothing on an STM station).
+    station's capabilities imply (:data:`CAPABILITY_IMPLIED_MODULES`; nothing on an STM station),
+    plus what MAST detected (:data:`DETECTION_IMPLIED_MODULES`: a Model 625).
     Lock-free (a CPython attribute read is atomic — a reader never sees a half-updated
     set; the writer swaps the whole frozenset)."""
     on = _enabled
-    implied = _profile_implied()
+    implied = _profile_implied() | _detected_implied()
     return on | implied if implied else on
 
 

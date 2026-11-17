@@ -1,9 +1,12 @@
 // Optical layout data model.
 //
 // Hand-written from docs/v2/design/optical_layout.md section 3 (the layout JSON) and
-// section 4 (the trace output). The backend (MASTv2/mast/optical_layout/) validates the
-// same shapes with pydantic; these types could be replaced by generated ones if the
-// generated schema carried them.
+// section 4 (the trace output), with the additions of docs/v2/design/optical_layout_v2.md
+// (the `pbs` type and the beam props of section 3, the `beam` keys of the trace in section 4.7)
+// and of docs/v2/design/optical_layout_3d.md (heights: `table.beam_height_mm`, `props.z_mm`,
+// a periscope's `props.z_out_mm`; `z_mm` and `passes` of a segment, `z_mm` and `dz_mm` of an event).
+// The backend (MASTv2/mast/optical_layout/) validates the same shapes with pydantic; these
+// types could be replaced by generated ones if the generated schema carried them.
 //
 // Units everywhere: length mm, angle degrees (counter-clockwise from +x, [0, 360)),
 // wavelength nm, power mW. Platform coordinates have the origin at the lower-left
@@ -52,6 +55,10 @@ export const LIMITS = {
   pitchMax: 500,
   holeOffsetMax: 500,
   maxWavelengths: 16,
+  /** heights (docs/v2/design/optical_layout_3d.md section 2): props.z_mm and props.z_out_mm within ±zAbs mm */
+  zAbs: 10_000,
+  /** table.beam_height_mm: above 0, at most this */
+  beamHeightMax: 10_000,
 } as const;
 
 /** The values of `table.grid`. */
@@ -68,6 +75,7 @@ export const COMPONENT_TYPES = [
   "led",
   "mirror",
   "beam_splitter",
+  "pbs",
   "dichroic",
   "grating",
   "lens",
@@ -103,6 +111,35 @@ export function isComponentType(v: unknown): v is ComponentType {
 export function isSourceType(type: string): type is SourceType {
   return (SOURCE_TYPES as readonly string[]).includes(type);
 }
+
+/**
+ * The values of `props.polarization` of a laser or a fibre output (v2 section 3.2). Not given is
+ * "unpolarized": the trace treats light of unknown polarisation as unpolarised and says so.
+ */
+export const POLARIZATIONS = ["unpolarized", "linear"] as const;
+export type Polarization = (typeof POLARIZATIONS)[number];
+
+/**
+ * Component types whose `props.throughput` (0 to 1, default 1) scales the power that goes on after
+ * the component acts (v2 section 3.2: the reflectance of a mirror, the transmittance of a lens, the
+ * transmission of a polarizer along its axis, a filter's in-band transmission, a grating's zero-order
+ * efficiency).
+ */
+export const THROUGHPUT_TYPES = [
+  "mirror",
+  "grating",
+  "lens",
+  "objective",
+  "waveplate",
+  "polarizer",
+  "filter",
+  "window",
+  "aotf",
+  "prism",
+  "periscope",
+  "sample",
+  "custom",
+] as const;
 
 export interface Vec {
   x: number;
@@ -161,6 +198,12 @@ export interface TableSpec {
   hole_pitch_mm: number;
   hole_offset_mm: number;
   grid: string;
+  /**
+   * The height of the beam above the table top, mm (docs/v2/design/optical_layout_3d.md section 2): every
+   * component and source without `props.z_mm` sits at it. Absent = 75 mm (heights.ts DEFAULT_BEAM_HEIGHT_MM);
+   * an absent key is left out of the PUT body, as the server leaves it out of what it stores.
+   */
+  beam_height_mm?: number;
 }
 
 export interface LayoutText {
@@ -186,11 +229,77 @@ export interface OpticalLayout {
 
 // ── trace (section 4) ─────────────────────────────────────────────────────────
 
+// The beam state (v2 sections 4.1 to 4.7). Polarisation angles are measured in the ray's own frame:
+// e_h = z × d (in the table plane, to the LEFT of the direction of travel) towards e_v = z (straight
+// up), so 0° is in the table plane (p for any in-plane reflection) and 90° is vertical (s).
+
+/**
+ * The normalised Stokes vector (S1/S0, S2/S0, S3/S0): S1 = I_h - I_v, S2 = I_+45 - I_-45; the sign of
+ * S3 is a convention only (no handedness is named, the text says χ = ±45°). null when S0 = 0 (no light).
+ */
+export type StokesNorm = [number, number, number];
+
+/**
+ * The Gaussian beam parameter q = z + i·zR as [z, zR] in mm: z is the signed distance from the waist
+ * (> 0 past it and diverging, < 0 before it and converging), zR > 0 the Rayleigh range.
+ */
+export type QParam = [number, number];
+
+/** `beam` of a tree: what is the same for the whole tree. */
+export interface TreeBeam {
+  /** power of the source in mW (per wavelength); null when the source has no `power_mw` (lamps, LEDs: always null) */
+  source_mw: number | null;
+  /** beam quality factor M² of the tree; null when the tree has no Gaussian beam */
+  m2: number | null;
+}
+
+/** `beam` of a segment: the state at the START of the segment (after the previous action). */
+export interface SegmentBeam {
+  /** power relative to the source of the tree (S0; 1 at the source) */
+  p: number;
+  s: StokesNorm | null;
+  /** at the start of the segment; null when the tree has no Gaussian beam */
+  q: QParam | null;
+}
+
+/** `beam` of an event: the state ARRIVING at the component, before it acts. */
+export interface EventBeam {
+  /** power relative to the source of the tree */
+  p: number;
+  /** source_mw × p; null when the tree's source_mw is null */
+  mw: number | null;
+  /** 1/e² diameter where the ray arrives, mm; null without a Gaussian beam */
+  d_mm: number | null;
+  s: StokesNorm | null;
+}
+
+/**
+ * A component a segment passes over or under (docs/v2/design/optical_layout_3d.md section 3.5): in the table
+ * plane the ray meets its working surface inside the aperture, but at a height more than half the aperture from
+ * its axis, so it goes on untouched. `dz_mm` = the height of the beam minus that of the component's axis (a
+ * periscope: of its entrance for this direction); above 0 the beam passes over it.
+ */
+export interface TracePass {
+  component: string;
+  x: number;
+  y: number;
+  dz_mm: number;
+}
+
 export interface Segment {
   x0: number;
   y0: number;
   x1: number;
   y1: number;
+  /**
+   * 3D: the height of the beam along the segment, mm above the table top. Optional: a trace of an older server
+   * has none; read it as `segment.z_mm ?? beamHeightOf(table)` (heights.ts).
+   */
+  z_mm?: number;
+  /** v2: the beam at the start of the segment. Optional: a trace of an older server has none. */
+  beam?: SegmentBeam;
+  /** 3D: the components the segment passes over or under, in the order along it. Optional as z_mm. */
+  passes?: TracePass[];
 }
 
 /**
@@ -207,12 +316,21 @@ export interface TraceEvent {
   action: string;
   x: number;
   y: number;
+  /** 3D: the height of the beam arriving here (that of the segment that leads here). Optional: older servers. */
+  z_mm?: number;
   /** Signed distance from the component centre along its active surface (local +y positive). */
   offset_mm: number;
+  /**
+   * 3D: the height of the beam minus that of the component's axis (a periscope: of its entrance for the direction
+   * the light goes), mm; above 0 the beam is above the axis. Optional: older servers.
+   */
+  dz_mm?: number;
   /** Angle between the ray and the surface normal, 0 to 90. */
   incidence_deg: number;
-  /** Cumulative geometric path from the source to this hit. */
+  /** Cumulative geometric path from the source to this hit (3D: with the vertical runs inside periscopes). */
   path_mm: number;
+  /** v2: the beam arriving here, before the component acts. Optional: a trace of an older server has none. */
+  beam?: EventBeam;
 }
 
 export interface TraceBranch {
@@ -226,6 +344,8 @@ export interface TraceBranch {
 export interface SourceTrace {
   source: string;
   wavelength_nm: number | null;
+  /** v2: power and beam quality of the tree. Optional: a trace of an older server has none. */
+  beam?: TreeBeam;
   branches: TraceBranch[];
 }
 

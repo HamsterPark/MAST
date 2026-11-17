@@ -38,12 +38,14 @@ from mast.skills.builtins.bias import (
     SetBiasRange,
 )
 from mast.skills.builtins.acquire_osci_trace import AcquireOsciTrace
+from mast.skills.builtins.diagnose_mains_gap import DiagnoseMainsGapModulation
 from mast.skills.builtins.acquire_psd import AcquirePSD
 from mast.skills.builtins.bias_pulse import BiasPulse
 from mast.skills.builtins.capture_signal_buffer import CaptureSignalBuffer
 from mast.skills.builtins.characterise_noise import CharacteriseCurrentNoise
 from mast.skills.builtins.bias_pulse_readback import BiasPulseWithReadback
 from mast.skills.builtins.bias_wiggle import BiasWiggle
+from mast.skills.builtins.verify_bias_junction import VerifyBiasAtJunction
 from mast.skills.builtins.clean_spot import FindCleanSpot
 from mast.skills.builtins.cluster_extract import ExtractClusters
 from mast.skills.builtins.cluster_select import SelectPokedCluster
@@ -77,6 +79,9 @@ from mast.skills.builtins.scan_texture import AssessScanTexture
 from mast.skills.builtins.lattice_cell_skill import MeasureLatticeCell
 from mast.skills.builtins.feedback_tracking import AssessFeedbackTracking
 from mast.skills.builtins.frame_drift_skill import MeasureFrameDrift
+from mast.skills.builtins.average_frames import AverageFramesDriftCorrected
+from mast.skills.builtins.tip_hopping_diag import DiagnoseTipAdsorbateHopping
+from mast.skills.builtins.compare_frames import CompareFramesLocalChange
 from mast.skills.builtins.spectrum_assess import AssessSpectrum
 from mast.skills.builtins.tip_from_spectrum import AssessTipFromSpectrum
 from mast.skills.builtins.domain_assess import AssessDomainPhase
@@ -357,6 +362,20 @@ from mast.skills.builtins.sweep import (
     GetLockInSweepSignal,
 )
 from mast.skills.builtins.temperature import GetTemperature
+from mast.skills.builtins.cryostat import GetHeliumLevel, GetMagnetState
+from mast.skills.builtins.magnet_control import (
+    CheckMagnetFieldChange,
+    RampMagnetField,
+    StopMagnetRamp,
+)
+from mast.skills.builtins.heater_control import (
+    CheckSampleTemperatureChange,
+    HeaterOff,
+    HoldSampleTemperature,
+    SetHeaterControlMode,
+    SetHeaterZoneTable,
+    SetSampleTemperature,
+)
 from mast.skills.builtins.tip import EmergencyRetract, SafeRetract
 from mast.skills.builtins.tip_shaper import TipShape
 from mast.skills.builtins.util import (
@@ -484,6 +503,7 @@ __all__ = [
     "CharacteriseCurrentNoise",
     "MonitorCurrentFFT",
     "AcquireOsciTrace",
+    "DiagnoseMainsGapModulation",
     # Scan-derived analysis
     "CheckPiezoRange",
     "ReconcileSafetyEnvelope",
@@ -508,6 +528,8 @@ __all__ = [
     "AutoProcessScanBatch",
     # 贵金属针尖修整 (2026-08-01)
     "BiasPulseWithReadback",
+    # 偏压是否真到隧道结上
+    "VerifyBiasAtJunction",
     "FindCleanSpot",
     "AssessTipSharpness",
     # 大平台上的验收判据 (2026-08-10)
@@ -518,6 +540,9 @@ __all__ = [
     "AssessFeedbackTracking",
     "MeasureLatticeCell",
     "MeasureFrameDrift",
+    "AverageFramesDriftCorrected",
+    "DiagnoseTipAdsorbateHopping",
+    "CompareFramesLocalChange",
     "AssessSpectrum",
     "AssessTipFromSpectrum",
     "AssessDomainPhase",
@@ -575,6 +600,17 @@ __all__ = [
     "StopMotor",
     "GetChamberPressure",
     "GetTemperature",
+    "GetMagnetState",
+    "GetHeliumLevel",
+    "CheckMagnetFieldChange",
+    "RampMagnetField",
+    "StopMagnetRamp",
+    "CheckSampleTemperatureChange",
+    "SetSampleTemperature",
+    "HoldSampleTemperature",
+    "HeaterOff",
+    "SetHeaterZoneTable",
+    "SetHeaterControlMode",
     "CoarseMotionSelfCheck",
     # Navigation / FolMe
     "MoveToXY",
