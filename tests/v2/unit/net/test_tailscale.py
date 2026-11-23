@@ -233,6 +233,9 @@ def test_extra_cert_hosts():
 
 
 def test_summary_shape(monkeypatch):
+    # Stub the CLI lookup too, as the get_status tests do: without it, ready depends on whether this
+    # machine has Tailscale installed (find_cli() finds the real exe), and a clean CI runner says False.
+    monkeypatch.setattr(ts, "find_cli", lambda: "tailscale")
     monkeypatch.setattr(ts.subprocess, "run", _fake_run(stdout=RUNNING_JSON))
     s = ts.summary(7862, "https")
     assert s["tailscale"]["ready"] is True
