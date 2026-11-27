@@ -68,12 +68,17 @@ function fmt(v: number | null | undefined, digits: number, suffix = ""): string 
 // the whole-app colored border lives in AppLayout.
 const MODES = ["safe", "semi", "auto"] as const;
 
-// Open-loop coarse Z approach toward the sample (MotorMove z-approach) is blocked by
-// SafetyGate layer 0 in all three modes, before the mode gate is consulted. The
-// tooltips state this so that no mode suggests it will drive the coarse motor.
+// Open-loop coarse Z approach toward the sample (MotorMove z-approach): since
+// 2026-11-26 safe mode refuses an autonomous call outright (it is the step a tip
+// poke is made of — mast.core.safety.mode_refusal); in semi and auto an
+// autonomous call runs and notifies within a per-call step cap and is refused
+// above it. A closed-loop coarse move with a Z target is refused in every mode.
+// The number is the backend's AUTONOMOUS_Z_APPROACH_MAX_STEPS
+// (MASTv2/mast/core/safety.py); a test pins the two together. The tooltips state
+// this so that no mode over- or under-states what may happen to the coarse motor.
 const COARSE_NOTE = tr(
-  "开环粗逼近（MotorMove z-approach）在三种模式下一律禁止，须用户手动执行",
-  "Open-loop coarse approach (MotorMove z-approach) is blocked in all three modes and must be performed manually by the user.",
+  "开环粗逼近（MotorMove z-approach）：安全模式下自主调用一律拒绝；半自动和自动模式下自主调用每次最多 20 步，照常执行并通知，超过即整条拒绝。带 Z 目标的闭环粗动在三种模式下一律拒绝",
+  "Open-loop coarse approach (MotorMove z-approach): in safe mode an autonomous call is refused; in semi-automatic and automatic mode an autonomous call may take at most 20 steps, runs and notifies, and a larger one is refused as a whole. Closed-loop coarse moves with a Z target are refused in all three modes.",
 );
 
 type LiveReadings = components["schemas"]["LiveReadings"];
@@ -122,8 +127,8 @@ const MODE_SEG: Record<
   semi: {
     label: tr("半自动", "Semi"),
     title: tr(
-      `半自动模式：允许浅层机械修针；电脉冲需人工确认。${COARSE_NOTE}`,
-      `Semi-automatic mode: shallow mechanical tip conditioning is allowed; electrical pulses need manual confirmation. ${COARSE_NOTE}`,
+      `半自动模式：允许浅层机械修针；电脉冲照常执行并通知。${COARSE_NOTE}`,
+      `Semi-automatic mode: shallow mechanical tip conditioning is allowed; electrical pulses run and notify. ${COARSE_NOTE}`,
     ),
     active: "bg-mast-warn-bg text-mast-warn",
     dot: "var(--mast-warn)",

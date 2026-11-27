@@ -262,11 +262,16 @@ def test_an_unknown_skill_is_refused(tmp_path):
     assert "NoSuchSkillAtAll" in _problems(rep)
 
 
-def test_coarse_z_approach_is_a_hard_design_time_error(tmp_path):
+def test_coarse_z_approach_over_the_step_cap_is_a_hard_design_time_error(tmp_path):
+    """2026-11-21:原名 ``test_coarse_z_approach_is_a_hard_design_time_error``,
+    steps=10。上限之内的 z-approach 现在只是 warning(运行期照跑并通知),所以
+    这里改用超过单次步数上限的 cap+1 —— 它运行期整条被拒,设计期仍是硬错。"""
+    from mast.core.safety import AUTONOMOUS_Z_APPROACH_MAX_STEPS as cap
+    assert cap is not None
     spec = spec_with([
         {"type": "step", "id": "a", "skill": "GetBias", "params": {}},
         {"type": "step", "id": "b", "skill": "MotorMove",
-         "params": {"direction": "z-approach", "steps": 10}},
+         "params": {"direction": "z-approach", "steps": cap + 1}},
     ], name="SneakyApproach")
     rep = _draft(spec, st=store(tmp_path))
     assert rep["ok"] is False

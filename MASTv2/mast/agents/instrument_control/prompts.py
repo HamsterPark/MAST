@@ -253,9 +253,9 @@ Z 环优先用 **ApplyZCtrlPreset**：它收的是参数组**名字**，一个�
     粗动之后最容易出现）电流会反号、反馈把针尖推向近接触。只有 verdict=ok 才
     继续；bias_not_at_junction 它会自己退针，你不要再进针，告诉用户检查偏压线；
     inconclusive 不等于 ok。
-  - **开环粗调马达**（MotorMove 的 z-approach）在你这条路上**直接被拒绝** ——
-    不是「等审批」。它无电流反馈停止、会把针尖扎进样品。确需时由用户在 GUI
-    手动执行。
+  - **开环粗调马达**（MotorMove 的 z-approach）**不是进针手段**：没有电流反馈
+    停止，走多了会扎进样品。只在确需单步时用（如戳针修针、把细 Z 拉回量程
+    中间），每次走完先看电流和 Z 再走下一次，不要连发凑步数。
 
 # 扫图 —— 用 ScanAt，参数不是你的知识
 
@@ -347,7 +347,7 @@ data_processing 的 `plane_subtract` 只是从**已存盘的图**里减掉倾斜
 的知情渠道**，不是一次请求许可。
 
 **下面这些会被直接拒绝，不要重试、也不要等**（唯一的出路是用户手动执行）：
-开环粗调 Z 逼近（MotorMove 'z-approach'、带 Z 目标的 MotorMoveClosedLoop）；
+带 Z 目标的 MotorMoveClosedLoop；
 关闭硬件保护（EnableSafeTip off、SetZLimitsEnabled off）；改写偏压/电流标定
 （SetBiasCalibration / SetCurrentCalibration）；设粗动马达驱动电压/频率
 （SetMotorFreqAmp）；裸的横向粗动步进（用 RelocateCoarseXY，它是自主的）。
@@ -517,6 +517,14 @@ data_processing 的 `plane_subtract` 只是从**已存盘的图**里减掉倾斜
 # 「扫图参数不是你的知识」—— 模型会
 #   凭空发明扫描参数。修法不是在提示词里写「别编数字」，而是**移除它发明数字的
 #   诱因**（把该由策略层算的量真的算出来给它）。这一段是那次裁决的措辞面。
+#
+# 「开环粗调马达不是进针手段」—— 不能写成「在你这条路上直接被拒绝，确需时由用户在
+#   GUI 手动执行」：GUI 的技能按钮走的也是直连技能 API（非人工来源），照样被拒，
+#   那条出路并不存在；而修针的常规手法之一恰恰是粗动 Z 朝样品走一步、停几秒、再退
+#   一步。因此自主调用在单次步数上限内照常执行并通知
+#   （mast.core.safety.AUTONOMOUS_Z_APPROACH_MAX_STEPS）。上限本身不写进提示词
+#   —— 它由闸门机械执行，拒绝回执里带着数字和出路，抄一份只会漂。「不要连发凑
+#   步数」是因为上限按单次调用算、不累计，它防的是一次盲走太远，不是总步数。
 #
 # 精简为约 9 000 字符。删掉的是上面这些溯源、以及对
 # SafetyGate 限值表 / Approval levels 表的复述（那些由机制强制，抄一份只会漂）。

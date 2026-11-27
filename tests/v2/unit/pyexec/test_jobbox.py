@@ -56,19 +56,27 @@ def test_jobbox_is_available_on_this_machine():
         box.close()
 
 
-def test_kill_takes_the_whole_process_tree():
+def test_kill_takes_the_whole_process_tree(tmp_path):
     """父进程 + 3 个 spawn 出来的子进程，一起死。
 
     这条是「可以放开 multiprocessing」的凭据。它一红，就说明并行开出去的进程
-    会在超时后留在机器上 —— 而这台机器同时在采数据。
+    会在超时后留在机器上 —— 而这类机器通常同时在采数据。
+
+    spawner 必须从文件运行。用 ``-c`` 时 spawn 出来的子进程找不到 ``__main__.spin``，
+    一起来就 AttributeError 自己退出：下面「活下来的」恒为空，这条对子进程什么也没证明；
+    「子进程还活着」那一步也成了和它们自杀赛跑，机器一忙就输。
     """
+    spawner = tmp_path / "spawner.py"
+    spawner.write_text(_SPAWNER, encoding="utf-8")
     box = JobBox(memory_bytes=1024 ** 3, active_process_limit=8)
-    proc = _popen(_SPAWNER, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    proc = subprocess.Popen([sys.executable, str(spawner)], creationflags=CREATE_NO_WINDOW,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         assert box.assign(proc.pid), "assign 失败，这次测试什么也没证明"
         line = proc.stdout.readline().strip()
         assert line.startswith("KIDS"), f"子进程没起来：{line!r}"
         kids = [int(x) for x in line[len("KIDS "):].split(",")]
+        time.sleep(0.5)   # 过了启动期还活着，才说明它们真在跑 spin()，而不是还没来得及死
         assert all(psutil.pid_exists(k) for k in kids), "子进程本来就没活着"
 
         box.kill(proc.pid)

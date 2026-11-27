@@ -447,16 +447,20 @@ SKILL_EXTRA: dict[str, dict] = {
         "example": '{"name": "DeconvolveTip_RL", "input": {"image_path": "scan.npy", "psf_sigma": 2.0}}',
     },
     "MotorMove": {
-        # 横向移动请用 RelocateCoarseXY —— 自主路径上 MotorMove 的 x±/y± 已被
-        # Layer-0 挡住并要求人工审批(见 mast.core.safety.
-        # is_unguarded_lateral_coarse_move)。这里留下的用法只剩 z-retract。
+        # 横向移动请用 RelocateCoarseXY —— 自主路径上 MotorMove 的 x±/y± 被
+        # Layer-0 拒绝(见 mast.core.safety.is_unguarded_lateral_coarse_move)。
+        # 这里留下的用法是 z-retract,以及单次步数上限内的少量 z-approach
+        # (见 mast.core.safety.autonomous_z_approach_refusal)。
         "when_use": "粗动马达单步原语。**横向换区请用 RelocateCoarseXY,不要用它。**"
                     "z-retract(远离样品;方向码按本机声明的粗动退针方向换算,"
-                    "没声明时按 Nanonis 标准 Z+)可以直接用。",
+                    "没声明时按 Nanonis 标准 Z+)可以直接用。"
+                    "z-approach(朝样品)只用于确需的少量单步,例如戳针修针、"
+                    "把细 Z 拉回量程中间;每步之后先看电流和 Z。",
         "when_not": "x±/y± 横向移动:自主路径会被拒绝,因为它只检查压电是否收到顶"
                     "(约 1 µm 余量,读不到状态还会放行),不做粗动退针清障、不看真空、"
                     "不核对驱动电压、移动中不看电流、也不记进粗动大地图。"
-                    "z-approach(朝样品)是全系统唯一必须人工审批的动作。",
+                    "接近样品不要用 z-approach 连走:它开环、没有电流反馈停,"
+                    "自主调用每次有步数上限、超过整条拒绝 —— 进针用 ApproachTip。",
         "related": "横向换区 → RelocateCoarseXY(+ get_coarse_map 选方向步数);"
                    "大退针 → RetractForSampleChange;进针 → ApproachTip",
         "nanonis": "Motor_StartMove, Motor_StopMove, Motor_PosGet",

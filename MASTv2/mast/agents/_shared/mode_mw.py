@@ -57,8 +57,9 @@ logger = logging.getLogger(__name__)
 # guidance, which no override can reach.
 _SAFE_BELIEF = (
     "## 操作模式：安全模式（SAFE）\n"
-    "当前针尖状态良好，无需任何针尖处理。本模式下**不修针、不做电脉冲、也不做 tip "
-    "shaping**。请把针尖当作处于良好状态，直接用它继续采集数据、推进实验；不要去评估"
+    "当前针尖状态良好，无需任何针尖处理。本模式下**不修针、不做电脉冲、不做 tip "
+    "shaping，也不用 MotorMove z-approach 扎针**（接近样品用 ApproachTip）。"
+    "请把针尖当作处于良好状态，直接用它继续采集数据、推进实验；不要去评估"
     "是否需要修针，也不要尝试任何 tip conditioning / tip pulse / tip shape 操作。"
     "忽略系统提示中先前任何“若针尖变差则修针”的指引——在本模式下一律不修针，专注实验。"
 )

@@ -37,6 +37,14 @@ does not pop a dialog and does not wait for anybody; it says no at the boundary
 and explains why. Over the two field nights that produced ⑰ this layer was the
 one that actually stopped something dangerous, and it did so with zero false
 positives.
+
+One refusal was narrowed in 7.3.2: Layer 0 used to refuse every
+open-loop ``MotorMove z-approach``, which left the agent no way at all to take
+a single coarse step toward the sample. It now refuses only a call over the
+per-call step cap (``mast.core.safety.AUTONOMOUS_Z_APPROACH_MAX_STEPS``); a call
+within it passes on to ``AutoApprovalNoticeMiddleware``, which announces it —
+except in SAFE mode, where the operating-mode layer refuses it (since 7.3.3).
+The closed-loop coarse move with a Z component is still refused outright.
 """
 
 from __future__ import annotations
@@ -79,10 +87,13 @@ from mast.core.safety_escalation import (  # noqa: E402
 from mast.core.safety import (  # noqa: E402
     _GLOBAL_CHECKS,
     _valid_check_item,
+    autonomous_z_approach_refusal,
     check_state_preconditions as _core_check_state_preconditions,
+    hard_gate_manual_path,
     is_calibration_change,
+    is_closed_loop_coarse_z_move,
     is_coarse_drive_change,
-    is_coarse_sample_approach,
+    is_open_loop_z_approach,
     is_protection_disable,
     is_unguarded_lateral_coarse_move,
     mode_refusal,
@@ -366,9 +377,15 @@ class SafetyGate:
     # ── Layer 2: State preconditions ─────────────────────────────────
 
     def check_state_preconditions(
-        self, meta: SkillMetadata, state: HardwareState
+        self, meta: SkillMetadata, state: HardwareState,
+        params: dict | None = None,
     ) -> list[str]:
         """Delegates to ``mast.core.safety.check_state_preconditions``.
+
+        ``params``: the tool call's args, so a per-call exemption applies here
+        exactly as at the skill tool wrapper (MotorMove z-approach needs no
+        ``z_controller_off`` — ``mast.core.preconditions.effective_preconditions``,
+        2026-11-26). ``None`` checks every declared precondition.
 
         This used to be a hand-vendored copy of that parser, and it had ALREADY
         DRIFTED: the core version grew a ``withdrawn`` branch in the 2026-07-03
@@ -378,7 +395,7 @@ class SafetyGate:
         above is shared for exactly this reason after exactly this kind of drift;
         the precondition parser simply had not been given the same treatment yet
         (2026-07-31)."""
-        return _core_check_state_preconditions(meta, state)
+        return _core_check_state_preconditions(meta, state, params)
 
     # ── Layer 3: Approval requirement (info only — HITL middleware acts) ──
 
@@ -506,26 +523,50 @@ class SafetyGateMiddleware(AgentMiddleware):
             else getattr(tool_call, "id", "")
         )
 
-        # Layer 0: the ONE physically-dangerous action — an open-loop coarse Z
-        # step TOWARD the sample (pan-type stepper, no feedback stop) — must NOT
-        # run autonomously. Block it fail-closed and tell the model to hand off
-        # to a human operator (who runs it via the GUI manual/approval path).
-        # is_coarse_sample_approach keys on MotorMove direction='z-approach'
-        # only; everything else is bounded by Nanonis (2026-06-11 re-scoping).
-        if is_coarse_sample_approach(tool.name, args or {}):
+        # Layer 0: coarse Z toward the sample — the action class that can crash
+        # the tip into the sample with nothing to stop it.
+        #
+        #   * A closed-loop coarse move with a Z component servos to a position
+        #     and does not stop on contact, and its direction cannot be proven
+        #     safe from the static target. Blocked fail-closed: the model hands
+        #     off to a human operator, who does it in Nanonis itself (MAST's
+        #     skill-page buttons are an autonomous path too — 2026-11-26).
+        #   * An open-loop MotorMove z-approach is not refused as a class any
+        #     more (2026-11-21). Within the per-call step cap it runs, and
+        #     AutoApprovalNoticeMiddleware (inside this gate) announces it like
+        #     every other formerly approval-gated call; above the cap the call is
+        #     refused as a whole, never clamped.
+        #
+        # Everything else is bounded by Nanonis (2026-06-11 re-scoping).
+        if is_closed_loop_coarse_z_move(tool.name, args or {}):
             logger.warning(
-                "SafetyGate blocked autonomous coarse sample approach: %s", tool.name
+                "SafetyGate blocked autonomous closed-loop coarse Z move: %s", tool.name
             )
             return ToolMessage(
                 content=(
-                    "[safety_gate] coarse_sample_approach_blocked: an open-loop coarse "
-                    "Z step toward the sample can crash the tip and must be performed by "
-                    "a human operator via the GUI. Do NOT retry — hand off to the user."
+                    "[safety_gate] coarse_sample_approach_blocked: a closed-loop coarse "
+                    "move with a Z component (MotorMoveClosedLoop with target_z_m) servos "
+                    "to a position and does not stop on tip contact, so no autonomous "
+                    "path runs it. Do NOT retry — hand off to the user. "
+                    f"{hard_gate_manual_path()} To engage the tip use ApproachTip."
                 ),
                 tool_call_id=call_id,
                 name=tool.name,
                 status="error",
             )
+        if is_open_loop_z_approach(tool.name, args or {}):
+            cap_refusal = autonomous_z_approach_refusal(args or {})
+            if cap_refusal is not None:
+                logger.warning(
+                    "SafetyGate refused z-approach over the autonomous step cap: "
+                    "%s steps=%r", tool.name, (args or {}).get("steps"),
+                )
+                return ToolMessage(
+                    content=f"[safety_gate] {cap_refusal}",
+                    tool_call_id=call_id,
+                    name=tool.name,
+                    status="error",
+                )
 
         # Layer 0b: disabling a hardware protection (SafeTip / Z soft-limits)
         # removes a safety net and must not happen autonomously — hand off to a
@@ -537,9 +578,9 @@ class SafetyGateMiddleware(AgentMiddleware):
             return ToolMessage(
                 content=(
                     "[safety_gate] protection_disable_blocked: turning OFF a hardware "
-                    "protection (SafeTip / Z soft-limits) removes a tip-crash safety net "
-                    "and must be done by a human operator via the GUI. Do NOT retry — "
-                    "hand off to the user."
+                    "protection (SafeTip / Z soft-limits) removes a tip-crash safety net, "
+                    "so no autonomous path does it. Do NOT retry — hand off to the user. "
+                    f"{hard_gate_manual_path()}"
                 ),
                 tool_call_id=call_id,
                 name=tool.name,
@@ -556,8 +597,8 @@ class SafetyGateMiddleware(AgentMiddleware):
                 content=(
                     "[safety_gate] calibration_change_blocked: rewriting the global "
                     "bias/current calibration scale silently defeats every voltage/current "
-                    "safety bound and must be done by a human operator via the GUI. Do NOT "
-                    "retry — hand off to the user."
+                    "safety bound, so no autonomous path does it. Do NOT retry — hand off "
+                    f"to the user. {hard_gate_manual_path()}"
                 ),
                 tool_call_id=call_id,
                 name=tool.name,
@@ -582,7 +623,9 @@ class SafetyGateMiddleware(AgentMiddleware):
                     "只能由用户设置。控制器支持的电压与这台机器的压电叠堆能承受的电压"
                     "是两个不同的数(有的控制器给到 400 V,而有的叠堆 300 V 就烧了),"
                     "没有任何读数能告诉你是哪一种,设错了不可恢复。"
-                    "Do NOT retry — 需要改就交给用户在【高级】页设置。"
+                    "Do NOT retry — 需要改就交给用户：驱动电压/频率由用户在 Nanonis 的"
+                    "粗动面板里设(MAST 技能页上的按钮也算自主调用,同样会被拒);"
+                    "MAST【高级】页声明的是本机叠堆的耐压上限,不是驱动本身。"
                 ),
                 tool_call_id=call_id,
                 name=tool.name,
@@ -611,7 +654,7 @@ class SafetyGateMiddleware(AgentMiddleware):
                     "移动过程中不看电流、也不会记进粗动大地图。"
                     "RelocateCoarseXY 会做这些,并且可以自主执行。"
                     "先用 get_coarse_map 看该往哪走。"
-                    "确实需要裸移动时,请交给用户人工执行。"
+                    f"确实需要裸移动时,请交给用户。{hard_gate_manual_path()}"
                 ),
                 tool_call_id=call_id,
                 name=tool.name,
@@ -631,15 +674,31 @@ class SafetyGateMiddleware(AgentMiddleware):
         # internal escalation goes through ExecutionContext.run, not through
         # this middleware, so the safe path is untouched. Only a DIRECT agent
         # tool call while a refusal is live is refused.
-        if is_approach_escalation(tool.name):
+        #
+        # An open-loop MotorMove z-approach within the step cap (Layer 0 lets it
+        # through) is the other side door, and the less protected one: it has no
+        # current-feedback stop at all. Same rule, its own message.
+        if is_approach_escalation(tool.name, args or {}):
             refusal = active_approach_refusal()
             if refusal is not None:
                 logger.warning(
                     "SafetyGate blocked %s: %s refused the escalation %.0fs ago",
                     tool.name, refusal.source, refusal.age_s(),
                 )
-                return ToolMessage(
-                    content=(
+                if tool.name == "MotorMove":
+                    content = (
+                        "[safety_gate] approach_escalation_refused: "
+                        f"{refusal.source} 在 {refusal.age_s():.0f} 秒前拒绝了粗进针"
+                        f"升级，理由：{refusal.reason}。MotorMove z-approach 是开环粗动、"
+                        "没有电流反馈停止，比它拒绝的那个 AutoApproach 更没有保护，直接"
+                        "调用等于绕过刚做出的安全判断。Do NOT retry MotorMove "
+                        "z-approach. 出路有三条：(1) 重新调用 ApproachTip —— 它会"
+                        "重新核验 Z 反馈状态，若确实需要粗进针会自己升级，本拦截随即"
+                        "解除；(2) 先修好拒绝理由里说的那个状态（如 Z 反馈开关读不出"
+                        "/ 关不掉）再走 ApproachTip；(3) 交给用户在 Nanonis 里手动进针。"
+                    )
+                else:
+                    content = (
                         "[safety_gate] approach_escalation_refused: "
                         f"{refusal.source} 在 {refusal.age_s():.0f} 秒前拒绝了粗进针"
                         f"升级，理由：{refusal.reason}。AutoApproach 就是它拒绝的那个"
@@ -647,15 +706,20 @@ class SafetyGateMiddleware(AgentMiddleware):
                         "AutoApproach. 出路有三条：(1) 重新调用 ApproachTip —— 它会"
                         "重新核验 Z 反馈状态，若确实需要粗进针会自己升级，本拦截随即"
                         "解除；(2) 先修好拒绝理由里说的那个状态（如 Z 反馈开关读不出"
-                        "/ 关不掉）再走 ApproachTip；(3) 交给用户在 GUI 手动进针。"
-                    ),
+                        "/ 关不掉）再走 ApproachTip；(3) 交给用户在 Nanonis 里手动进针。"
+                    )
+                return ToolMessage(
+                    content=content,
                     tool_call_id=call_id,
                     name=tool.name,
                     status="error",
                 )
 
         # Layer 0e: global operating-mode tip-processing gate (2026-07-07).
-        # SAFE hard-blocks electrical pulses + mechanical tip shaping; SEMI blocks
+        # SAFE hard-blocks electrical pulses + mechanical tip shaping, and since
+        # 2026-11-26 an open-loop MotorMove z-approach within the step cap (the
+        # step a tip poke is made of; Layer 0 above already refused one over the
+        # cap, in every mode); SEMI blocks
         # a too-deep mechanical plunge (electrical pulses in SEMI are NOT blocked
         # anywhere any more — ⑰ replaced their confirmation dialog with a
         # notice); AUTO / no get_mode is a no-op.
@@ -683,7 +747,8 @@ class SafetyGateMiddleware(AgentMiddleware):
                 logger.warning("get_state failed in safety check: %s", e)
                 hw_state = None
             if hw_state is not None:
-                state_violations = self.gate.check_state_preconditions(meta_obj, hw_state)
+                state_violations = self.gate.check_state_preconditions(
+                    meta_obj, hw_state, args or {})
                 if state_violations:
                     logger.warning("SafetyGate blocked %s on state: %s", tool.name, state_violations)
                     return ToolMessage(

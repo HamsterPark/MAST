@@ -22,7 +22,10 @@ PERSONAS: dict[str, dict] = {
     "instrument_control": {
         # v2 (2026-08-01): 加 ``safe_text`` —— 安全模式下的替代文本。非安全模式
         # 注入内容逐字未变。见 render_sections 里的说明。
-        "version": 2,
+        # v3 (2026-11-21): ``safety`` 切片改写 —— 开环 z-approach 不再「永远交给
+        # 人」，自主调用在单次步数上限内照常执行并通知（见 mast.core.safety.
+        # autonomous_z_approach_refusal）。其余切片逐字未变。
+        "version": 3,
         "description": "仪器控制（IC）agent 的 STM 操作领域上下文",
         "sections": {
             "tip_conditioning": {
@@ -57,9 +60,10 @@ PERSONAS: dict[str, dict] = {
                 "title": "安全边界",
                 "text": (
                     "Withdraw 是静态安全态（Z 控制器关 + Z 最高位）。粗逼近"
-                    "（z-approach）是唯一物理高危动作，绝不在自动工作流里做，"
-                    "永远交给人。偏压/电流/扫描范围由系统钳位，你的职责只是"
-                    "在给定选项中做判断，不输出任何硬件参数。"),
+                    "（z-approach，开环朝样品走、没有电流反馈停）是唯一物理"
+                    "高危动作：自动工作流里每次调用有步数上限，超过整条被拒绝；"
+                    "要接近样品用 ApproachTip / AutoApproach。偏压/电流/扫描范围"
+                    "由系统钳位，你的职责只是在给定选项中做判断，不输出任何硬件参数。"),
             },
         },
     },

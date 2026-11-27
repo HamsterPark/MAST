@@ -14,7 +14,9 @@
 刻意复用 ``ExecutionContext`` —— 与 agent 工具边界、群聊、信号采集 API 走的是
 同一套:
 
-  * 安全闸门(``SafetyGuard`` / ``safety_level`` / DANGEROUS 的 HITL);
+  * 安全闸门(``SafetyGuard`` / ``safety_level`` / 硬闸 / 模式闸 / 开环 z-approach 的
+    步数上限)。这条路不是 ``human`` 来源:硬闸在这里同样拒绝,界面技能页上的
+    按钮也一样;DANGEROUS 不弹框,照常执行并通知;
   * 仪器仲裁(``instrument_lock``:一台物理仪器,取令牌的机制清单在它的 docstring 里);
   * 中止事件(急停/环境告警一样能停住它);
   * 状态缓存回写 + 扫描地图标记(composite 子步骤那条路也在这里)。

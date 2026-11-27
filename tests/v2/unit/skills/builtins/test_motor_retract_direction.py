@@ -3,7 +3,7 @@
 ``z-retract`` used to be fixed at Z+ (code 4) and ``z-approach`` at Z-
 (code 5), whatever ``retract_motor_dir`` said. A rig that declares
 ``z-``: every 'z-retract' stepped TOWARD the sample — outside the
-human-approval gate, which keys on the 'z-approach' label — and
+z-approach gate, which keys on the 'z-approach' label — and
 RecoverTipFromSaturation's six-rung ladder after a crash (20/30/50/100/200/400
 steps, 800 by default) would have stepped up to 800 steps into the sample.
 

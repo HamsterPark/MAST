@@ -67,9 +67,14 @@ logger = logging.getLogger(__name__)
 #: the agent never goes back through the front door.
 APPROACH_REFUSAL_TTL_S = 600.0
 
-#: Skills that ARE the coarse approach escalation. ``MotorMove z-approach`` is
-#: absent on purpose — it is already fail-closed in SafetyGate Layer 0 and
-#: never reaches this check.
+#: Skills that ARE the coarse approach escalation, whatever their arguments.
+#: The open-loop ``MotorMove`` step toward the sample is the other door into
+#: the same place, but only for one direction, so it is matched on the call
+#: (see :func:`is_approach_escalation`) rather than listed here. It used to be
+#: refused outright on the agent path and never reached this check; within its
+#: per-call step cap it now runs autonomously, so it needs this gate as well —
+#: it has no current-feedback stop at all, which makes it a worse door than the
+#: AutoApproach this gate was written for.
 _ESCALATION_SKILLS = frozenset({"AutoApproach"})
 
 
@@ -96,9 +101,21 @@ _lock = threading.Lock()
 _refusal: ApproachRefusal | None = None
 
 
-def is_approach_escalation(skill_name: str) -> bool:
-    """True iff *skill_name* starts the coarse current-feedback approach."""
-    return skill_name in _ESCALATION_SKILLS
+def is_approach_escalation(skill_name: str, params: dict | None = None) -> bool:
+    """True iff this call moves the tip toward the sample with the coarse motor.
+
+    That is the current-feedback ``AutoApproach`` (any arguments) and — when
+    *params* are given — an open-loop ``MotorMove`` step in the z-approach
+    direction. Without *params* only the skill name is judged, as before.
+    """
+    if skill_name in _ESCALATION_SKILLS:
+        return True
+    if params is None:
+        return False
+    # Lazy, so this module still imports nothing from mast at load time.
+    from mast.core.safety import is_open_loop_z_approach
+
+    return is_open_loop_z_approach(skill_name, params)
 
 
 def record_approach_refusal(
@@ -124,8 +141,8 @@ def record_approach_refusal(
             owner=str(owner or ""),
         )
     logger.warning(
-        "approach escalation refused by %s (%s) — direct AutoApproach gated for "
-        "%.0fs: %s", source, owner or "unscoped", ttl_s, reason,
+        "approach escalation refused by %s (%s) — direct AutoApproach / MotorMove "
+        "z-approach gated for %.0fs: %s", source, owner or "unscoped", ttl_s, reason,
     )
 
 

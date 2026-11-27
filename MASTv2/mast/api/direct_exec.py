@@ -63,7 +63,8 @@ logger = logging.getLogger(__name__)
 #: v1 ``actions.approval_source`` 是**出处**词表（auto / llm / human），不是闸门。
 #: 外部 agent 的决定出自一个模型，记 ``llm``；没声明身份的程序化直调记 ``auto``。
 #: 注意与 ``ExecutionContext._approval_source`` 区分：那个是闸门，这条路上永远
-#: 保持非 ``human``（SAFE/SEMI 模式闸与五条硬闸都写着 ``!= "human"``）。
+#: 保持非 ``human``（SAFE/SEMI 模式闸、五条硬闸与开环 z-approach 的单次步数
+#: 上限都写着 ``!= "human"``）。
 APPROVAL_AUTO = "auto"
 APPROVAL_LLM = "llm"
 

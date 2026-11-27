@@ -142,7 +142,7 @@ def test_motor_move_lateral_ok_when_withdrawn():
 
 
 def test_motor_move_zapproach_not_blocked_by_withdrawn_check():
-    # z-approach legitimately steps a non-withdrawn tip (human-gated elsewhere).
+    # z-approach legitimately steps a non-withdrawn tip (step cap + notice live elsewhere).
     st = HardwareState()
     st.withdrawn = False
     ctx = FakeCtx(canned={"Motor_StartMove": {"return_value": ("", b"", [])}}, state_obj=st)

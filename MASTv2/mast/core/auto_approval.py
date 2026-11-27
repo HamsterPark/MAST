@@ -24,11 +24,17 @@
 
 ## 这个模块**不**负责什么
 
-拒绝型防护不经过这里,一条都没动:``is_coarse_sample_approach`` 硬闸、Layer 0e
-粗动驱动电压、``is_protection_disable`` / ``is_calibration_change`` /
+拒绝型防护不经过这里:带 Z 分量的闭环粗动(``is_closed_loop_coarse_z_move``)硬闸、
+Layer 0e 粗动驱动电压、``is_protection_disable`` / ``is_calibration_change`` /
 ``is_unguarded_lateral_coarse_move``、SafetyGate 包络、针尖包络、``bias_nonzero``
 前置。它们**不弹框、不等人**,越界就直接说不并说清理由 —— 真正拦下危险的
 就是这一类(针尖包络拦下过一次超包络深扎)。
+
+开环粗动 Z 朝样品(MotorMove z-approach)原来也在这张单子上,而且是其中唯一一条
+整类拒绝的:自主路径上一次都做不了,出路只有「交给用户」。2026-11-21 起它回到本
+模块这一类 —— 执行 + 留痕 + 通知 —— 只保留一条拒绝型的线:每次调用的步数上限
+(``mast.core.safety.AUTONOMOUS_Z_APPROACH_MAX_STEPS``),超过就整条拒绝。这正是
+下一节说的形状:不接回弹框,给那一个具体判据配一条拒绝型的硬线。
 
 ## 要把「等人批准」加回来,需要观测到什么
 
@@ -84,13 +90,19 @@ def would_have_asked(
 ) -> str | None:
     """这一步在 ⑰ 之前会不会停下来等人批准?会 → 返回一句中文理由;不会 → ``None``。
 
+    「等人」有两种旧形状:弹框等批准(DANGEROUS 技能、SEMI 下的电脉冲),以及
+    开环粗动 Z 朝样品 —— 旧策略下它在自主路径上一律拒绝、只能交给用户。后者只在
+    每次调用的步数上限之内返回理由:超过上限的调用根本不会执行(被拒绝型的线
+    挡掉),不该留下「已执行并通知」的痕。
+
     Parameters
     ----------
     meta:
         ``SkillMetadata``(或任何有 ``safety_level`` / ``capabilities`` 的对象)。
         ``None`` ⇒ 不是技能工具,一律 ``None``。
     tool_name / args:
-        用于电脉冲判据(``is_electrical_pulse`` 要看参数:带电压的 TipShape 也算)。
+        用于电脉冲判据(``is_electrical_pulse`` 要看参数:带电压的 TipShape 也算)
+        与开环粗动 Z 判据(要看 ``direction`` 与 ``steps``)。
         缺省时退回 ``meta.name`` / 空参数。
     mode:
         操作模式。``None`` ⇒ 读实时全局值,这样中间件(有 ``get_mode``)和
@@ -109,6 +121,22 @@ def would_have_asked(
             return tr(f"DANGEROUS 技能({getattr(meta, 'name', '') or tool_name})", f"DANGEROUS skill ({getattr(meta, 'name', '') or tool_name})")
     except Exception:  # noqa: BLE001
         logger.debug("auto_approval: 读 safety_level 失败", exc_info=True)
+
+    try:
+        from mast.core.safety import (
+            autonomous_z_approach_refusal,
+            is_open_loop_z_approach,
+        )
+
+        name = tool_name or str(getattr(meta, "name", "") or "")
+        if (is_open_loop_z_approach(name, args or {})
+                and autonomous_z_approach_refusal(args or {}) is None):
+            # 旧路径:自主路径上的硬闸拒绝(「请用户在 GUI 手动执行」)。
+            steps = (args or {}).get("steps")
+            return tr(f"开环粗动 Z 朝样品(MotorMove z-approach,steps={steps})",
+                      f"Open-loop coarse Z toward the sample (MotorMove z-approach, steps={steps})")
+    except Exception:  # noqa: BLE001
+        logger.debug("auto_approval: 开环粗动 Z 判据不可用", exc_info=True)
 
     try:
         from mast.core.safety import is_electrical_pulse

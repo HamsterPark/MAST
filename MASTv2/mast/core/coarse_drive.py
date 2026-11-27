@@ -26,10 +26,12 @@ THE FOUR LOCKS
    tool is not wrapped at all, so it is absent from the tool list. Turning it on
    is an admin-PIN write (``admin_pin.GUARDED_KEYS``), fail-closed: with no PIN
    set, the key cannot be written at all.
-2. **The agent cannot call it anyway.** ``safety.is_coarse_drive_change`` blocks
-   it on the autonomous path and forces human approval on the manual path — the
-   same Layer-0 shape as ``is_calibration_change`` / ``is_protection_disable``.
-   Two independent locks because lock 1 is a switch a human could flip.
+2. **The agent cannot call it anyway.** ``safety.is_coarse_drive_change`` refuses
+   it on every autonomous path — MAST's own skill page included, since it posts
+   to the direct skill API — the same Layer-0 shape as ``is_calibration_change``
+   / ``is_protection_disable``. The operator sets the drive in Nanonis itself
+   (no MAST screen offers a manual path for it). Two independent locks because lock 1 is a
+   switch a human could flip.
 3. **The rig ceiling.** :func:`authorize` refuses anything above the declared
    ``max_amplitude_v`` — and refuses EVERYTHING when nothing has been declared.
    Silence is not consent: not knowing what this stack tolerates is a reason to

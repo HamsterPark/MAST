@@ -352,12 +352,15 @@ class ExecutionContext:
         SkillExecutor guards only the manual path, so a composite SUB-step
         reaches hardware through here alone .
 
-        Scope, precisely: this gate promises only that HUMAN-level approval
-        (DANGEROUS skills, and the open-loop coarse Z approach) never flows
-        down implicitly. CONFIRM-level sub-steps are NOT re-gated here — on
-        the v2 agent path CONFIRM ≡ auto-run (leaf CONFIRM skills run ungated
-        there too), unlike executor.run which also rejects CONFIRM under an
-        'auto' source. The coarse-approach + human-level check itself is kept
+        Scope, precisely: on a non-human source the hard gates (closed-loop
+        coarse Z, protection disable, calibration change, coarse drive change,
+        bare lateral coarse move) refuse; an open-loop coarse Z approach
+        (MotorMove z-approach) runs and notifies within the per-call step cap
+        (``AUTONOMOUS_Z_APPROACH_MAX_STEPS``) and is refused above it;
+        baseline-DANGEROUS skills run and notify. CONFIRM-level sub-steps are
+        NOT re-gated here — on the v2 agent path CONFIRM ≡ auto-run (leaf
+        CONFIRM skills run ungated there too), unlike executor.run which also
+        rejects CONFIRM under an 'auto' source. The coarse-Z checks are kept
         aligned with safety_mw.py and executor.py.
         """
         # ── ABORT GATE (2026-07-11) ──────────────────────────────────────
@@ -385,9 +388,11 @@ class ExecutionContext:
 
         # ── APPROVAL GATE (fail-closed) ──────────────────────────────────
         from mast.core.safety import (
+            autonomous_z_approach_refusal,
             is_calibration_change,
+            is_closed_loop_coarse_z_move,
             is_coarse_drive_change,
-            is_coarse_sample_approach,
+            is_open_loop_z_approach,
             is_protection_disable,
             is_unguarded_lateral_coarse_move,
             mode_refusal,
@@ -427,11 +432,19 @@ class ExecutionContext:
         #
         # 分开之后:
         #   * **硬闸**(下面五条)照旧拒绝。它们不弹框、不等人,是拒绝型防护 ——
-        #     实机里真正拦住危险的就是这一类,因此保留。出路是操作员用
-        #     手动路径(GUI / manual executor,那条路的 approval_source 就是 human)。
+        #     实机里真正拦住危险的就是这一类,因此保留。出路是操作员在 Nanonis
+        #     里手动做(MAST 界面上的技能按钮走的是直连技能 API,不是 human 来源,
+        #     所以并没有 GUI 手动路径;见 ``mast.core.safety.hard_gate_manual_path``)。
         #   * **基线 DANGEROUS**(``safety_level`` 派生)转成「执行 + 留痕 + 通知」,
         #     与 agent 顶层路径(``AutoApprovalNoticeMiddleware``)口径一致 ——
         #     同一个技能不该因为「是不是被复合技能调用的」而有两种安全语义。
+        #   * **开环粗动 Z 朝样品**(MotorMove z-approach)从硬闸里拿出来了
+        #     (2026-11-21):它原来也在下面,结果是自主路径上永远做不了、而那句
+        #     「请用户在 GUI 手动执行」连 MAST 自己的手动按钮都走不通(它们发的是
+        #     ``POST /api/skills/{name}/execute``,不是 human 来源)。现在与基线
+        #     DANGEROUS 同一口径,只多一条每次调用的步数上限
+        #     (``AUTONOMOUS_Z_APPROACH_MAX_STEPS``),超过就整条拒绝、不截断。
+        #     带 Z 分量的闭环粗动仍是硬闸。
         # ── OPERATING-MODE GATE (2026-08-27) ─────────────────────────────
         # SAFE's contract ("the tip is fine — do NOT repair it",
         # :class:`mast.core.types.OperatingMode`) used to be enforced at the
@@ -476,11 +489,12 @@ class ExecutionContext:
                 )
 
         hard_gate: str | None = None
-        if is_coarse_sample_approach(skill_name, params):
-            # 唯一一个物理上会毁东西的动作:开环粗动 Z 朝样品走(pan 型步进,
-            # 没有反馈停止)。与技能自己的 safety_level 无关。
-            hard_gate = tr("开环粗动 Z 向样品进针（没有反馈能让它停下来）",
-                           "open-loop coarse Z approach toward the sample (no feedback can stop it)")
+        if is_closed_loop_coarse_z_move(skill_name, params):
+            # 带 Z 分量的闭环粗动:位置反馈伺服到目标,碰到样品不会停,朝向也没法
+            # 从静态参数证明安全。与技能自己的 safety_level 无关。开环的
+            # MotorMove z-approach 不在这里 —— 它走下面的步数上限。
+            hard_gate = tr("带 Z 分量的闭环粗动（位置反馈，碰到样品不会停）",
+                           "closed-loop coarse move with a Z component (positional feedback; it does not stop on contact)")
         elif is_protection_disable(skill_name, params):
             # 关掉硬件保护(SafeTip / Z 软限位)= 拆掉撞针安全网,工作流不许悄悄干
             # (2026-07-03 review)。
@@ -506,21 +520,49 @@ class ExecutionContext:
                 "Sub-skill '%s' refused inside composite: %s (approval_source=%s)",
                 skill_name, hard_gate, self._approval_source,
             )
+            from mast.core.safety import hard_gate_manual_path
+
             return SkillResult(
                 skill_name=skill_name, success=False,
                 error=tr(
                     f"硬闸拒绝：'{skill_name}' 属于「{hard_gate}」，"
                     "自主路径上一律不执行——这不是等待审批，没有任何批准会到来，"
-                    "换参数也绕不过去。STOP retrying。"
-                    "确实需要时，请用户在 GUI 手动执行（手动路径本身就是人工授权）。",
+                    "换参数也绕不过去。STOP retrying。",
                     f"Hard gate refused: '{skill_name}' is classed as: {hard_gate}. "
                     "It is never executed on autonomous paths -- this is not waiting for approval, "
                     "no approval will ever come, and changing parameters cannot get around it. "
-                    "STOP retrying. "
-                    "If it is really needed, ask the user to run it manually in the GUI "
-                    "(the manual path is itself the human authorisation).",
-                ),
+                    "STOP retrying. ",
+                ) + hard_gate_manual_path(),
             )
+
+        if (is_open_loop_z_approach(skill_name, params)
+                and self._approval_source != "human"):
+            # 开环粗动 Z 朝样品(pan 型步进,没有电流反馈停止)。步数上限内照跑,
+            # 并与基线 DANGEROUS 一样留一行台账;超过上限整条拒绝,不截断。人工
+            # 手动路径(approval_source == "human")不受上限约束。
+            _cap_refusal = autonomous_z_approach_refusal(params)
+            if _cap_refusal is not None:
+                logger.info(
+                    "Sub-skill '%s' refused: z-approach over the autonomous step cap "
+                    "(approval_source=%s)", skill_name, self._approval_source,
+                )
+                return SkillResult(
+                    skill_name=skill_name, success=False,
+                    error=f"[{skill_name}] {_cap_refusal}",
+                )
+            try:
+                from mast.core.auto_approval import notify, would_have_asked
+
+                _reason = would_have_asked(meta, tool_name=skill_name, args=params)
+                notify(skill_name,
+                       tr(f"{_reason or '开环粗动 Z 朝样品'} —— 自主路径，"
+                          "已直接执行并通知，不再等待人工批准",
+                          f"{_reason or 'open-loop coarse Z toward the sample'} -- autonomous "
+                          "path, executed directly and notified; no human approval is pending"),
+                       args=params, approval_source=self._approval_source,
+                       path="execution_context")
+            except Exception:  # noqa: BLE001 — 通知坏了绝不能让子步骤失败
+                logger.debug("auto_approval 通知失败(已忽略)", exc_info=True)
 
         if (self._safety_guard().requires_approval(meta) == "human"
                 and self._approval_source != "human"):
@@ -568,7 +610,11 @@ class ExecutionContext:
             current_state = None
         if current_state is not None and hasattr(skill, "check_preconditions"):
             try:
-                unmet = skill.check_preconditions(current_state)
+                # With this call's params: a per-call exemption applies (MotorMove
+                # z-approach needs no z_controller_off — 2026-11-26).
+                from mast.skills.base import unmet_preconditions
+
+                unmet = unmet_preconditions(skill, current_state, params)
                 if unmet:
                     # 不满足就**先去问一次硬件再判一次**。
                     #
@@ -578,7 +624,7 @@ class ExecutionContext:
                     # 而它恰恰是缓存最容易过期的那条 —— 子步骤刚把硬件改完,
                     # 1 Hz 的后台 refresh 还没轮到。
                     # 两条路径对同一件事一条做一条不做,本身就该有测试钉着。
-                    unmet = self._recheck_after_refresh(skill, unmet)
+                    unmet = self._recheck_after_refresh(skill, unmet, params)
                 if unmet:
                     return SkillResult(
                         skill_name=skill_name,
@@ -655,11 +701,14 @@ class ExecutionContext:
                 error=f"{type(e).__name__}: {e}",
             )
 
-    def _recheck_after_refresh(self, skill, unmet: list) -> list:
+    def _recheck_after_refresh(self, skill, unmet: list,
+                               params: dict | None = None) -> list:
         """前置不满足时向硬件问一次,再判一次。返回仍然不满足的那些。
 
         与 ``core/executor.py`` 的手动路径同一个动作、同一个理由(硬件状态的传播
         落后于 TCP 回包)。读不到硬件就**保留原判**——刷新失败不该变成放行。
+        ``params`` 与第一次判定相同(按调用豁免的前置,见
+        ``mast.core.preconditions.effective_preconditions``)。
         """
         state = getattr(self, "state", None)
         refresh = getattr(state, "refresh", None)
@@ -671,7 +720,9 @@ class ExecutionContext:
             logger.debug("precondition recheck refresh failed: %s", exc)
             return unmet
         try:
-            return skill.check_preconditions(fresh) or []
+            from mast.skills.base import unmet_preconditions
+
+            return unmet_preconditions(skill, fresh, params) or []
         except Exception as exc:  # noqa: BLE001
             logger.debug("precondition recheck raised: %s", exc)
             return unmet

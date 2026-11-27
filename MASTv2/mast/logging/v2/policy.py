@@ -8,10 +8,11 @@ unless an approval row already exists. This module manages that table.
 The trigger is a *generic, operator-extensible* gate: it fires on whatever
 ``action_type`` strings are registered. It is NOT the hardware-safety
 boundary. Under the 2026-06-11 safety re-scoping the only action that can
-physically damage the instrument — open-loop coarse Z stepping toward the
-sample — is gated by ``mast.core.safety.is_coarse_sample_approach`` at the
-executor/agent layer (executor forces human approval; the agent
-``SafetyGateMiddleware`` blocks it fail-closed).
+physically damage the instrument — coarse Z motion toward the sample — is
+gated by ``mast.core.safety.is_coarse_sample_approach`` at the executor/agent
+layer. Since 2026-11-21 an autonomous open-loop ``MotorMove z-approach`` runs
+and notifies within a per-call step cap and is refused above it; a closed-loop
+coarse move with a Z target is refused on every non-human path.
 
 CORRECTION (2026-07-28): this file used to add "No builtin skill is
 ``SafetyLevel.DANGEROUS`` any more, so ``_derive_hitl_map()`` returns ``{}``".
@@ -56,9 +57,10 @@ from mast.logging.v2.ulid import ulid_now
 
 # No builtin skill auto-requires DB-level approval under the 2026-06-11 safety
 # model (hardware safety is enforced by Nanonis fail-safes + the executor/agent
-# is_coarse_sample_approach gate, not by this table). Kept as an explicit empty
-# tuple so seed_default_policies has a single, documented source of truth and
-# operators can see the gate is intentionally unseeded rather than forgotten.
+# coarse-approach gates in mast.core.safety, not by this table). Kept as an
+# explicit empty tuple so seed_default_policies has a single, documented source
+# of truth and operators can see the gate is intentionally unseeded rather than
+# forgotten.
 DEFAULT_DANGEROUS_ACTION_TYPES: tuple[str, ...] = ()
 
 POLICY_VERSION = "v1.0.0"

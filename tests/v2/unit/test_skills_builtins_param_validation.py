@@ -16,9 +16,11 @@
       (bias/current/fine-Z ranges, AutoApproach current feedback) and cannot
       wreck the rig, so nothing needs the DANGEROUS HITL pane.
       The dangerous case is NOT gated by safety_level — it is detected by
-      mast.core.safety.is_coarse_sample_approach(skill_name, params): the agent
-      path BLOCKS it fail-closed (SafetyGateMiddleware), the executor path
-      forces human approval. As a result the re-classified safety levels are:
+      mast.core.safety.is_coarse_sample_approach(skill_name, params): on
+      autonomous paths an open-loop z-approach executes with an approvals row +
+      notification, at most AUTONOMOUS_Z_APPROACH_MAX_STEPS per call (the
+      closed-loop absolute-Z move stays refused there).
+      As a result the re-classified safety levels are:
         BiasPulse / TipShape / TipShapeWithReadback / AutoApproach → AUTO
         MotorMove (baseline) / MotorMoveClosedLoop → CONFIRM
         SetBiasCalibration / SetCurrentCalibration → CONFIRM (metadata write)

@@ -7,10 +7,10 @@ Skills covered (6):
 
 2026-06-11 safety re-scoping: the ONLY physically-dangerous action is an
 open-loop coarse Z step TOWARD the sample (MotorMove direction='z-approach').
-MotorMove is now CONFIRM (baseline); the z-approach danger is gated at runtime
-by mast.core.safety.is_coarse_sample_approach (human approval on the executor
-path, fail-closed block on the autonomous agent path), NOT by safety_level.
-No builtin skill is DANGEROUS anymore.
+MotorMove is now CONFIRM (baseline); the z-approach danger is handled at
+runtime by mast.core.safety (autonomous paths: executes with an approvals row +
+notification, at most AUTONOMOUS_Z_APPROACH_MAX_STEPS per call), NOT by
+safety_level. No builtin skill is DANGEROUS anymore.
 
 Run from repo root:
     .venv-v2-py313/Scripts/python.exe -m pytest tests/v2/unit/skills/builtins/test_motor.py -x -v
@@ -82,10 +82,10 @@ def _invoke(tool, **kwargs) -> Any:
 @pytest.mark.parametrize("skill_cls,expected_name,expected_danger", [
     # 2026-06-11 safety re-scoping: MotorMove is CONFIRM (baseline), NOT
     # DANGEROUS. The only physically-dangerous case — an open-loop coarse Z
-    # step TOWARD the sample (direction='z-approach') — is gated at runtime by
-    # mast.core.safety.is_coarse_sample_approach (human approval on the executor
-    # path, fail-closed block on the autonomous agent path), independent of the
-    # safety_level. No builtin skill is DANGEROUS anymore. MotorMoveClosedLoop
+    # step TOWARD the sample (direction='z-approach') — is handled at runtime by
+    # mast.core.safety (autonomous paths: per-call step cap + approvals row +
+    # notification), independent of the safety_level. No builtin skill is
+    # DANGEROUS anymore. MotorMoveClosedLoop
     # keeps a feedback target (not the open-loop danger) and stays CONFIRM.
     (MotorMove, "MotorMove", "CONFIRM"),
     (MotorGetPos, "MotorGetPos", "AUTO"),

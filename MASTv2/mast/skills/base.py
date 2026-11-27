@@ -15,6 +15,7 @@ from mast.core.preconditions import (
     PRECONDITION_CHECKS as _PRECONDITION_CHECKS,
     check_state_preconditions as _check_state_preconditions,
     context_suffix as _precondition_context_suffix,
+    effective_preconditions as _effective_preconditions,
     precondition_recognized as _precondition_recognized,
 )
 from mast.core.types import (
@@ -125,16 +126,25 @@ class BaseSkill(ABC):
 
         return errors
 
-    def check_preconditions(self, state: HardwareState) -> list[str]:
+    def check_preconditions(
+        self, state: HardwareState, params: dict | None = None
+    ) -> list[str]:
         """Check hardware preconditions against current state.
 
         Returns list of unmet condition descriptions (empty means all met).
         Default implementation checks metadata.preconditions against state fields.
+
+        ``params`` (2026-11-26): the call's parameters, when the caller has them.
+        A declared precondition can be exempt for one particular call
+        (:func:`mast.core.preconditions.effective_preconditions` — MotorMove
+        z-approach does not need the Z controller off). ``None`` checks every
+        declared precondition, as before. Callers holding the params go through
+        :func:`unmet_preconditions`, which keeps one-argument overrides working.
         """
         unmet: list[str] = []
         meta = self.metadata()
 
-        for condition in meta.preconditions:
+        for condition in _effective_preconditions(meta.name, meta.preconditions, params):
             check = _PRECONDITION_CHECKS.get(condition)
             if check is None:
                 # Not an exact-name key. It may still be a known substring-rule
@@ -244,3 +254,16 @@ class BaseSkill(ABC):
     def rollback(self, context: "ExecutionContext", params: dict) -> None:
         """Optional rollback action. Default is no-op."""
         pass
+
+
+def unmet_preconditions(skill, state: HardwareState, params: dict | None) -> list[str]:
+    """Unmet preconditions for ONE call of *skill* — for callers that hold the
+    call's params (the skill tool wrapper, ``ExecutionContext.run``).
+
+    The base implementation receives the params, so per-call exemptions
+    (:func:`mast.core.preconditions.effective_preconditions`) apply. A skill that
+    overrides ``check_preconditions`` keeps the one-argument form it was written
+    against and is called exactly as before."""
+    if getattr(type(skill), "check_preconditions", None) is BaseSkill.check_preconditions:
+        return BaseSkill.check_preconditions(skill, state, params)
+    return skill.check_preconditions(state)

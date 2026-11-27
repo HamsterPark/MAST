@@ -36,8 +36,9 @@ exact shape of an error body, see [the API reference](07-api-reference.md).
 | `429` | Too many jobs are running at once | Wait for one to finish, or cancel one you no longer need — a stop or retract skill (such as `StopScan`) is exempt from this limit and can always be submitted |
 | `503`, `shutting_down` | The service is shutting down and refuses new jobs | Wait for it to come back, then reconnect |
 | `lost_on_restart` | The job was still running when MAST's process restarted; it is never replayed | Read the briefing before deciding whether to submit it again |
-| A refusal naming `safe_mode_tip_processing_blocked` | The operator has set SAFE, which refuses tip processing everywhere, including inside a composite | Do not retry; ask the operator if the task genuinely needs it |
-| A refusal describing one of the five hard gates, saying no approval will come | You called, or a composite step called, one of the physically dangerous actions refused unconditionally on this path | Stop retrying — nothing changes this outcome; if it is genuinely needed, a person has to do it from MAST's own interface |
+| A refusal naming `safe_mode_tip_processing_blocked` | The operator has set SAFE, which refuses tip processing everywhere, including inside a composite — electrical pulses, tip shaping, and an open-loop `MotorMove` z-approach | Do not retry; to approach the sample use `ApproachTip` / `AutoApproach`; ask the operator if the task genuinely needs tip processing |
+| A refusal describing one of the five hard gates, saying no approval will come | You called, or a composite step called, one of the physically dangerous actions refused unconditionally on this path | Stop retrying — nothing changes this outcome; if it is genuinely needed, a person has to do it in Nanonis itself (MAST's own skill page is refused the same way) |
+| A refusal naming `z_approach_step_cap_exceeded` | A `MotorMove` with `direction='z-approach'` (open-loop coarse step toward the sample, no current-feedback stop) asked for more steps than one call may take; the refusal states the cap | Do not fire calls back to back to reach the same total — check the current and Z position after each call before deciding on the next. To approach the sample use `ApproachTip` / `AutoApproach`; a larger single move has to be made by a person in Nanonis |
 
 ## Connecting a client (new in 7.0)
 

@@ -11,8 +11,10 @@ from mast.core.connection import ConnectionPool
 from mast.core.registry import SkillRegistry
 from mast.core.safety import (
     SafetyGuard,
+    autonomous_z_approach_refusal,
+    is_closed_loop_coarse_z_move,
     is_coarse_drive_change,
-    is_coarse_sample_approach,
+    is_open_loop_z_approach,
     is_unguarded_lateral_coarse_move,
 )
 from mast.core.state import InstrumentState
@@ -288,14 +290,17 @@ class SkillExecutor:
         #   * **基线 DANGEROUS**(``safety_level`` 派生):转成「执行 + 留痕 + 通知」。
         #     原来这里的拒绝语让人「去审批面板批准」,而那个面板已经不会再为
         #     DANGEROUS 技能产生任何东西 —— 指向死路的提示比没有提示更坏。
+        #   * **开环粗动 Z 朝样品**(MotorMove z-approach):不再是硬闸,与基线
+        #     DANGEROUS 同口径,外加每次调用的步数上限(超过整条拒绝)。
         required_approval = self._safety.requires_approval(meta)
         hard_gate: str | None = None
-        # The one physically-dangerous action — an open-loop coarse Z step toward
-        # the sample — regardless of the skill's baseline safety_level (MotorMove
-        # is CONFIRM for x/y/retract). 2026-06-11.
-        if is_coarse_sample_approach(skill_name, params):
-            hard_gate = tr("开环粗动 Z 向样品进针（没有反馈能让它停下来）",
-                           "open-loop coarse Z approach toward the sample (no feedback can stop it)")
+        # A closed-loop coarse move with a Z component: positional feedback, no
+        # stop on contact, and its direction cannot be proven safe statically —
+        # regardless of the skill's baseline safety_level. The open-loop
+        # MotorMove z-approach is NOT here; it gets the step cap below.
+        if is_closed_loop_coarse_z_move(skill_name, params):
+            hard_gate = tr("带 Z 分量的闭环粗动（位置反馈，碰到样品不会停）",
+                           "closed-loop coarse move with a Z component (positional feedback; it does not stop on contact)")
         # The coarse stepper's DRIVE voltage: unrecoverable if wrong (some stacks
         # fail at 300 V on a controller that offers 400), and nothing reads back
         # which rig this is. The per-rig ceiling is the operator's to declare, so
@@ -314,21 +319,43 @@ class SkillExecutor:
                 "Skill '%s' refused: %s (source=%s)",
                 skill_name, hard_gate, approval_source,
             )
+            from mast.core.safety import hard_gate_manual_path
+
             return SkillResult(
                 skill_name=skill_name,
                 success=False,
                 error=tr(
                     f"硬闸拒绝：'{skill_name}' 属于「{hard_gate}」，"
                     "自主路径上一律不执行——这不是等待审批，没有任何批准会到来。"
-                    "STOP retrying。确实需要时请用户在 GUI 手动执行。",
+                    "STOP retrying。",
                     f"Hard gate refused: '{skill_name}' is classed as: {hard_gate}. "
                     "It is never executed on autonomous paths -- this is not waiting for approval, "
                     "no approval will ever come. "
-                    "STOP retrying. If it is really needed, ask the user to run it manually in the GUI.",
-                ),
+                    "STOP retrying. ",
+                ) + hard_gate_manual_path(),
                 elapsed_s=time.perf_counter() - t0,
                 state_before=current_state,
             )
+        # Open-loop coarse Z toward the sample from a non-human source: refused
+        # above the per-call step cap (never clamped). Within it the call runs
+        # and notifies — the notice is sent after the CONFIRM check below, so a
+        # call that check rejects leaves no "executed" notice behind.
+        z_approach_autonomous = (is_open_loop_z_approach(skill_name, params)
+                                 and approval_source != "human")
+        if z_approach_autonomous:
+            cap_refusal = autonomous_z_approach_refusal(params)
+            if cap_refusal is not None:
+                logger.info(
+                    "Skill '%s' refused: z-approach over the autonomous step cap "
+                    "(source=%s)", skill_name, approval_source,
+                )
+                return SkillResult(
+                    skill_name=skill_name,
+                    success=False,
+                    error=f"[{skill_name}] {cap_refusal}",
+                    elapsed_s=time.perf_counter() - t0,
+                    state_before=current_state,
+                )
         if required_approval == "human" and approval_source != "human":
             try:
                 from mast.core.auto_approval import notify, would_have_asked
@@ -355,6 +382,20 @@ class SkillExecutor:
                 elapsed_s=time.perf_counter() - t0,
                 state_before=current_state,
             )
+        if z_approach_autonomous:
+            try:
+                from mast.core.auto_approval import notify, would_have_asked
+
+                _reason = would_have_asked(meta, tool_name=skill_name, args=params)
+                notify(skill_name,
+                       tr(f"{_reason or '开环粗动 Z 朝样品'} —— 已直接执行并通知，"
+                          "不再等待人工批准",
+                          f"{_reason or 'open-loop coarse Z toward the sample'} -- executed "
+                          "directly and notified; no human approval is pending"),
+                       args=params, approval_source=approval_source,
+                       path="executor")
+            except Exception:  # noqa: BLE001 — 通知坏了绝不能让技能失败
+                logger.debug("auto_approval 通知失败(已忽略)", exc_info=True)
 
         # 5. Snapshot state_before
         state_before = replace(current_state)

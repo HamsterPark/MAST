@@ -705,7 +705,7 @@
  },
  "MotorMove": {
   "zh": "马达移动",
-  "description_zh": "移动粗逼近马达:x±/y± 为横向;'z-approach' 朝样品步进(危险,需人工批准),'z-retract' 远离样品(安全)。"
+  "description_zh": "移动粗逼近马达:x±/y± 为横向;'z-approach' 朝样品步进(开环,没有电流反馈停;自主调用每次有步数上限,照常执行并通知,SAFE 模式下拒绝;不要求先关 Z 反馈),'z-retract' 远离样品(安全)。横向和 z-retract 要求先关 Z 反馈。"
  },
  "MotorMoveClosedLoop": {
   "zh": "马达闭环移动",

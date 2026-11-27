@@ -859,10 +859,14 @@ def wrap_skill(
             _emit_record(success=False, summary=summary, error="; ".join(violations))
             return _SkillToolReturn(summary, _failure_update(meta.name, summary, tool_call_id))
 
-        # 2. Per-skill precondition check
+        # 2. Per-skill precondition check. With this call's params, so a per-call
+        # exemption applies (MotorMove z-approach needs no z_controller_off —
+        # mast.core.preconditions.effective_preconditions, 2026-11-26).
         if current_state is not None and hasattr(skill, "check_preconditions"):
             try:
-                unmet = skill.check_preconditions(current_state)
+                from mast.skills.base import unmet_preconditions
+
+                unmet = unmet_preconditions(skill, current_state, kwargs)
             except Exception as _pe:
                 # Preconditions are SAFETY-relevant (e.g. z_controller_off must
                 # hold before MotorMove — tip must be withdrawn). A crash here

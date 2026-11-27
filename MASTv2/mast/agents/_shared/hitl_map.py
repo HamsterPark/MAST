@@ -62,6 +62,12 @@ logger = logging.getLogger(__name__)
 # (BiasPulse / MotorMove / EmergencyRetract / TipShape) were re-scoped to
 # AUTO/CONFIRM in 2026-06-11 because Nanonis bounds them.
 #
+# Since 7.3.2: the coarse-approach paragraph above is history. An autonomous
+# MotorMove z-approach is no longer blocked: it runs and notifies (via
+# would_have_asked, like a DANGEROUS skill) within a per-call step cap and is
+# refused above it — see mast.core.safety.autonomous_z_approach_refusal. Only a
+# closed-loop coarse move with a Z target is still a hard refusal.
+#
 # CORRECTION (2026-07-28): the sentence that used to stand here — "NO builtin
 # skill carries safety_level=DANGEROUS anymore: derive_hitl_map() returns an
 # empty map and the HITL middleware is a no-op" — has been FALSE for a while,

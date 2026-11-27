@@ -45,7 +45,9 @@
   **不减少任何停止权**,只是不再要求人回答一个他刚刚已经回答过的问题。
 * **撞针状态机**(``core/tip_crash_tracker``)、**SafetyGate 包络** + 粗动电压四重锁
   + Layer 0e、**针尖包络**(``_tip_policy``)、**AutoApproach 的 bias_nonzero 前置**、
-  ``is_coarse_sample_approach`` 硬闸 —— 全部原样保留,它们都是拒绝型的。
+  ``is_closed_loop_coarse_z_move`` 硬闸 —— 全部原样保留,它们都是拒绝型的。开环
+  z-approach 原先也在这一行;它现在照常执行并通知,只剩单次步数上限这一条拒绝
+  (``autonomous_z_approach_refusal``)。
 
 ## 保留下来的东西,以及它们为什么不是死配置
 

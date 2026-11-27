@@ -164,7 +164,7 @@ SI 基本单位（米 / 安培 / 伏特），没有 nm、没有 pA —— 但**�
               （GetBias、GetSetpoint、Scan5_FrameData、BiasPulse、TipShape…）
   CONFIRM   — 常规写入，要一次确认（SetBias、ConfigureScan、AcquireSTS、
               MotorMove、PokeConditionTip、PulseConditionTip…）
-  DANGEROUS — 必须人工批准。**全仓只有两个**：CreateZCtrlPreset、LockNanonisUI。
+  DANGEROUS — 照常执行并通知操作员（见下面的「注意」），如 CreateZCtrlPreset、LockNanonisUI。
 
   ⚠️ **修针与横向粗动都是常规操作，不是禁区。** 经验判据：微小的扎针破坏性远小于
   pulse；2 nm 以内的扎针比脉冲温和，2 nm 以上基本不用；粗动不应被当作高风险动作。

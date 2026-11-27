@@ -2870,19 +2870,22 @@ class CoreRuntime:
         except Exception:  # noqa: BLE001 — unknown mode → the neutral wording
             return tr("修针尖后可重跑。", "Re-run after conditioning the tip.")
         if mode is OperatingMode.SAFE:
-            return tr("当前为**安全模式**，MAST 不会自动修针尖（电脉冲/tip shaping 均被"
-                      "拒绝）——请人工处理针尖，或切换到 semi/auto 模式后重试。"
-                      "不要在本模式下反复重扫或尝试修针。",
+            return tr("当前为**安全模式**，MAST 不会自动修针尖（电脉冲、tip shaping 和开环"
+                      "粗动扎针 MotorMove z-approach 都被拒绝）——请人工处理针尖，或切换到 "
+                      "semi/auto 模式后重试。不要在本模式下反复重扫或尝试修针。",
                       "Currently in **SAFE mode**: MAST will not condition the tip automatically "
-                      "(electrical pulses / tip shaping are both refused) -- handle the tip "
-                      "manually, or switch to semi/auto mode and retry. "
+                      "(electrical pulses, tip shaping and an open-loop coarse poke - MotorMove "
+                      "z-approach - are all refused) -- handle the tip manually, or switch to "
+                      "semi/auto mode and retry. "
                       "Do not repeatedly rescan or try to condition the tip in this mode.")
         if mode is OperatingMode.SEMI:
-            return tr("当前为**半自动模式**：电脉冲修针需人工确认；可先尝试浅层机械 "
-                      "tip shaping，或请用户处理后重跑。",
-                      "Currently in **SEMI mode**: electrical-pulse tip conditioning needs "
-                      "manual confirmation; try shallow mechanical tip shaping first, or ask "
-                      "the user to handle it and re-run.")
+            # A SEMI pulse runs and is announced; only a deep plunge is refused.
+            return tr("当前为**半自动模式**：电脉冲修针照常执行并通知，机械修针只允许浅层；"
+                      "可先尝试浅层机械 tip shaping，或请用户处理后重跑。",
+                      "Currently in **SEMI mode**: electrical-pulse tip conditioning runs and "
+                      "notifies, and mechanical tip shaping is limited to shallow plunges; try "
+                      "shallow mechanical tip shaping first, or ask the user to handle it and "
+                      "re-run.")
         return tr("修针尖后可重跑。", "Re-run after conditioning the tip.")
 
     def clear_tip_halt(self) -> None:

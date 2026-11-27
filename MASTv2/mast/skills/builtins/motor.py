@@ -1,4 +1,5 @@
-"""Motor skills — coarse motor movement (DANGEROUS).
+"""Motor skills — coarse motor movement (which calls are gated, and how, is in
+``MotorMove``'s docstring and ``mast.core.safety``; none of these is DANGEROUS).
 
 vendored from v1 mast/skills/builtins/motor.py 2026-04-23.
 7 skills: MotorMove, MotorGetPos, StopMotor, GetMotorFreqAmp, SetMotorFreqAmp,
@@ -136,9 +137,10 @@ def _z_direction_codes() -> "tuple[int, int, str] | None":
       ``undeclared_nanonis_standard``, and the result carries a warning to declare it.
 
     A map fixed at z-retract = Z+ whatever the rig declares is wrong: on a rig whose
-    ``retract_motor_dir`` is ``z-``, every 'z-retract' would step TOWARD the sample,
-    outside the human-approval gate (``is_coarse_sample_approach`` keys on the
-    'z-approach' label), and RecoverTipFromSaturation's multi-rung ladder after a
+    ``retract_motor_dir`` is ``z-``, every 'z-retract' would step TOWARD the sample
+    with none of the z-approach rules applied (``is_open_loop_z_approach`` keys on
+    the 'z-approach' label: no per-call step cap, no notice), and
+    RecoverTipFromSaturation's multi-rung ladder after a
     crash would step many steps into the sample."""
     try:
         from mast.core import instrument_profile as ip
@@ -163,7 +165,9 @@ class MotorMove(BaseSkill):
     ====================  ==========  ============================================
     ``x±`` / ``y±``       CONFIRM     横移撞不到样品(样品在 Z 方向)。换区就靠它。
     ``z-retract``         CONFIRM     远离样品。是**变安全**的方向。
-    ``z-approach``        人工批准     开环朝样品走、没有反馈停 —— 唯一真正危险的那一档。
+    ``z-approach``        执行+通知   开环朝样品走、没有反馈停 —— 唯一真正危险的那一档。
+                                      自主调用每次限步数,超过整条拒绝;SAFE 模式下
+                                      拒绝;人工手动不限。不要求先关 Z 反馈。
     ====================  ==========  ============================================
 
     ⚠️ 2026-08-24 更正:这段自述原来写的是「DANGEROUS … Requires human approval」,
@@ -172,33 +176,58 @@ class MotorMove(BaseSkill):
     **自述与 metadata 矛盾了两个多月,而 agent 读的是自述**,于是横向换区被当成
     需要人守着的动作,自主流程宁可绕路也不用它。
 
-    先决条件 ``z_controller_off`` 仍然要满足(先退针再动粗动马达)——那是防撞,
-    与「危不危险」的分档无关。换区请优先用 ``RelocateCoarseXY``:它把退针、
-    确认清空、分段移动、对账、重进针都串好了;这条原语是它的底层。
+    2026-11-21:``z-approach`` 不再「只能人工」。原来在每条自主路径(agent、复合
+    技能、conduct、直连技能 API、外部网关)上都是硬闸拒绝,拒绝语让用户去 GUI 手动
+    执行 —— 而 GUI 的手动按钮走的也是直连技能 API。现在与其它原需批准的动作同一
+    口径:执行 + 留痕 + 通知,只多一条每次调用的步数上限
+    (``mast.core.safety.AUTONOMOUS_Z_APPROACH_MAX_STEPS``),超过就整条拒绝、不截断。
+    从远处接近样品仍用 ``ApproachTip`` / ``AutoApproach``(有电流反馈停)。
+
+    7.3.3 起:上限改为每次 20 步;SAFE 模式下自主 z-approach 一律
+    拒绝(``mast.core.safety.mode_refusal``),SEMI / AUTO 照旧执行并通知。
+
+    先决条件 ``z_controller_off``(先退针再动粗动马达)管横向和 z-retract ——
+    那是防撞,与「危不危险」的分档无关。**z-approach 不受它约束**(7.3.3 起):
+    扎针修针常见的做法是在隧穿、反馈开着的状态下扎 5–10 步,反馈开着时针尖
+    被压进去后会被控制器往回拉,关着则停在最深处。
+    豁免只在一处判定:``mast.core.preconditions.effective_preconditions``。
+    换区请优先用 ``RelocateCoarseXY``:它把退针、确认清空、分段移动、对账、
+    重进针都串好了;这条原语是它的底层。
     """
 
     def metadata(self) -> SkillMetadata:
+        from mast.core.safety import autonomous_z_approach_cap_note
+
+        # tr() picks the language when it is called, and so does the note, so
+        # both halves of the description below carry the same language.
+        z_cap_note = autonomous_z_approach_cap_note()
         return SkillMetadata(
             name="MotorMove",
             version="1.0.0",
             category=SkillCategory.WRITE,
             # CONFIRM baseline (2026-06-11 safety re-scoping): X/Y coarse moves and
             # Z RETRACT (away from sample) can't wreck the instrument — LLM/operator
-            # confirm path. The ONE physically-dangerous case — an open-loop coarse
-            # Z step TOWARD the sample ('z-approach', pan-type stepper, no feedback
-            # stop) — is gated to HUMAN approval by is_coarse_sample_approach() in
-            # SkillExecutor (manual path) and BLOCKED outright on the autonomous
-            # agent path by SafetyGateMiddleware. The z_controller_off precondition
-            # still applies (withdraw before stepping the coarse motor).
+            # confirm path. The physically-dangerous case — an open-loop coarse Z
+            # step TOWARD the sample ('z-approach', pan-type stepper, no feedback
+            # stop) — is recognised by is_open_loop_z_approach(). On every
+            # autonomous path it runs and notifies within
+            # AUTONOMOUS_Z_APPROACH_MAX_STEPS steps per call and is refused above
+            # that (2026-11-21; it used to be refused outright), and SAFE mode
+            # refuses it (since 7.3.3); the human manual path is not capped. The
+            # z_controller_off precondition (withdraw before stepping the coarse
+            # motor) applies to lateral moves and z-retract; a z-approach is exempt
+            # (mast.core.preconditions.effective_preconditions, since 7.3.3).
             safety_level=SafetyLevel.CONFIRM,
             description=(
                 tr("驱动粗动马达（pan 型步进）。x±/y± 为横向；"
-                "'z-approach' 朝**样品方向**走步（DANGEROUS —— 需要人工"
-                "批准）；'z-retract' 朝**远离样品**走步（安全）。"
+                f"'z-approach' 朝**样品方向**走步（开环、没有电流反馈停；{z_cap_note}；"
+                "不要求先关 Z 反馈，反馈开着也能走）；"
+                "'z-retract' 朝**远离样品**走步（安全）。横向和 z-retract 要求先关 Z 反馈。"
                 "Z 的这两个方向按本机声明的退针方向（设置 → 退针 → 退针方向）换算成 Z+ / Z−；"
                 "没声明时按 Nanonis 标准 Z+ 视为远离样品，结果里带警告。", "Drive the coarse motor (pan-type stepper). x±/y± are lateral; "
-"'z-approach' steps **toward the sample** (DANGEROUS -- needs human "
-"approval); 'z-retract' steps **away from the sample** (safe). "
+f"'z-approach' steps **toward the sample** (open loop, no current-feedback stop; {z_cap_note}; "
+"the Z feedback does not have to be off - it may step with the feedback on); "
+"'z-retract' steps **away from the sample** (safe). Lateral moves and z-retract need the Z feedback off. "
 "The two Z directions are converted to Z+ / Z− according to the withdraw direction declared on this machine (Settings -> Withdraw -> Withdraw direction); "
 "when none is declared, by the Nanonis standard Z+ is taken as away from the sample, and the result carries a warning.")
             ),
@@ -237,8 +266,9 @@ class MotorMove(BaseSkill):
 
         # Lateral codes are fixed: 0=X+, 1=X-, 2=Y+, 3=Y-. The two Z labels are
         # SEMANTIC — 'z-retract' = away from the sample, 'z-approach' = toward it
-        # (the DANGEROUS open-loop step gated by is_coarse_sample_approach, which
-        # keys on the label) — and map onto Z+ (4) / Z- (5) by this rig's declared
+        # (the open-loop step the z-approach rules key on, by label: per-call step
+        # cap on autonomous paths, a notice when it runs) — and map onto Z+ (4) /
+        # Z- (5) by this rig's declared
         # retract direction (_z_direction_codes). Fixed Z codes (z-retract = Z+)
         # would be wrong on a rig declared z-: 'z-retract' would step toward the
         # sample with no gate at all.
@@ -273,8 +303,9 @@ class MotorMove(BaseSkill):
         # only guaranteed by an explicit retract), so a lateral step would scrape
         # it. Refuse a lateral move when we KNOW the tip is not withdrawn
         # (unknown state passes, matching the precondition fail-open). Z moves are
-        # exempt: 'z-retract' moves away, and 'z-approach' is human-gated
-        # elsewhere and legitimately steps a non-withdrawn tip.
+        # exempt: 'z-retract' moves away, and 'z-approach' (step-capped on
+        # autonomous paths, see mast.core.safety) legitimately steps a
+        # non-withdrawn tip.
         if direction in ("x+", "x-", "y+", "y-"):
             try:
                 snap = context.state.snapshot() if getattr(context, "state", None) else None
@@ -510,9 +541,9 @@ class SetMotorFreqAmp(BaseSkill):
             version="1.1.0",
             category=SkillCategory.WRITE,
             # Stays CONFIRM as the BASELINE; the real gating is elsewhere and is
-            # not expressible as a level: safety.is_coarse_drive_change forces
-            # human approval on the manual path and blocks the autonomous one,
-            # the advanced_capabilities gate keeps the tool out of the agent's
+            # not expressible as a level: safety.is_coarse_drive_change refuses it
+            # on every autonomous path (MAST's skill page included — the user sets
+            # the drive in Nanonis), the advanced_capabilities gate keeps the tool out of the agent's
             # list entirely, and coarse_drive.authorize() refuses anything above
             # (or without) the operator's declaration.
             safety_level=SafetyLevel.CONFIRM,
@@ -630,10 +661,12 @@ class MotorMoveClosedLoop(BaseSkill):
             category=SkillCategory.WRITE,
             safety_level=SafetyLevel.CONFIRM,
             description=(
-                tr("闭环粗动到目标 XYZ。DANGEROUS:可能与样品相撞 —— "
-                "横向与远离样品的移动是常规操作;朝样品走的那一段由人工批准挡着。"
-                "并非所有控制器都支持闭环。", "Closed-loop coarse motion to a target XYZ. DANGEROUS: may collide with the sample -- "
-"lateral and away-from-sample moves are routine; the segment toward the sample is blocked by human approval. "
+                tr("闭环粗动到目标 XYZ。带 Z 目标时可能与样品相撞 —— "
+                "纯横向的移动是常规操作;只要带 Z 目标,自主路径(包括 MAST 技能页上的按钮)"
+                "一律拒绝,需要时由用户在 Nanonis 里手动做。"
+                "并非所有控制器都支持闭环。", "Closed-loop coarse motion to a target XYZ. With a Z target it may collide with the sample -- "
+"pure lateral moves are routine; any move with a Z target is refused on every autonomous path (MAST's skill-page buttons included), "
+"and when it is needed the user does it in Nanonis itself. "
 "Not all controllers support closed loop.")
             ),
             parameters=[
@@ -668,9 +701,9 @@ class MotorMoveClosedLoop(BaseSkill):
                     # (which is rig-specific and unknown here). ±1e-4 m (±100 µm)
                     # rejects absurd / fat-fingered Z targets that could drive the
                     # stepper hard into the sample; the real per-rig range is
-                    # enforced by Nanonis + the human-approval gate (any Z-bearing
-                    # closed-loop move is treated as a coarse sample approach by
-                    # is_coarse_sample_approach). target_x/y_m are deliberately
+                    # enforced by Nanonis + the hard gate (any Z-bearing closed-loop
+                    # move is refused on every non-human path —
+                    # is_closed_loop_coarse_z_move). target_x/y_m are deliberately
                     # left unbounded here — they are already clamped by the global
                     # x_m/y_m bounds check (mast.core.safety._GLOBAL_CHECKS).
                     min_value=-1e-4,

@@ -90,10 +90,18 @@ However a skill call arrives — a direct job, a step inside a composite, MAST's
 2. **Sample gate** — skills that produce data need an active sample (see below).
 3. **Operating-mode gate** — SAFE or SEMI may refuse tip-processing calls (see below).
 4. **Five hard gates** — physical protections that are refused unconditionally on this path, with
-   no approval to wait for: open-loop coarse Z approach toward the sample; disabling a hardware
-   protection (SafeTip, Z soft limits); rewriting the global bias/current calibration; setting the
-   coarse motor's drive voltage or frequency; and a raw lateral coarse move that bypasses the
-   guarded relocation skill. Nothing you do changes these five; they are not addressed to you.
+   no approval to wait for: a closed-loop coarse move with a Z target (it servos to a position and
+   does not stop on contact); disabling a hardware protection (SafeTip, Z soft limits); rewriting
+   the global bias/current calibration; setting the coarse motor's drive voltage or frequency; and
+   a raw lateral coarse move that bypasses the guarded relocation skill. Nothing you do changes
+   these five; they are not addressed to you. When one of them is genuinely needed, a person does
+   it in Nanonis itself — MAST's own skill page is an autonomous path too and is refused the same
+   way. The open-loop coarse Z step toward the sample (`MotorMove` with
+   `direction='z-approach'`) is not among them: it executes and the operator is notified
+   afterward, but one call may take only a few steps — a call above the per-call step cap is
+   refused as a whole, and the refusal states the cap. In SAFE mode it is refused (it is the step
+   a tip poke is made of). It does not need the Z feedback switched off first; lateral moves and
+   `z-retract` do.
 5. **Global safety envelope** — every dimensioned parameter is checked against the administrator's
    configured bounds, regardless of what the skill's own metadata says.
 6. **Parameter validation** — the skill's own `validate_params`.
@@ -117,9 +125,9 @@ deserves", not "MAST will pause for a human here":
 | `confirm` | Also executes immediately — this path has no human in the loop to confirm to. Scan parameters, spectroscopy, tip conditioning and guarded lateral coarse motion are typically this level. |
 | `dangerous` | Also executes — recorded, and the operator is notified afterward. It is not blocked and no approval is awaited; this level is rare (only a couple of skills in the whole catalog). |
 
-The five hard gates above are the only calls that are unconditionally refused regardless of
-`safety_level`. Everything else executing means the judgment about whether an action is wise is
-yours to make, not something the level enforces for you.
+The five hard gates above, and a coarse Z approach above the per-call step cap, are the only calls
+that are refused regardless of `safety_level`. Everything else executing means the judgment about
+whether an action is wise is yours to make, not something the level enforces for you.
 
 ## Operating modes
 
@@ -128,7 +136,7 @@ The **operating mode** is the operator's global setting, reported by `GET /statu
 
 | Mode | What it allows |
 |---|---|
-| `safe` | No tip processing at all: every electrical pulse and mechanical tip-shaping call is refused, including one buried inside a composite. Scans, spectroscopy and all other measurement continue normally. |
+| `safe` | No tip processing at all: every electrical pulse, mechanical tip-shaping call and open-loop `MotorMove` z-approach is refused, including one buried inside a composite. Scans, spectroscopy, `ApproachTip` / `AutoApproach` and all other measurement continue normally. |
 | `semi` | Shallow, purely mechanical tip shaping is allowed; a plunge that is too deep is refused. An electrical pulse runs and is logged — it is not silently blocked here. |
 | `auto` | Everything allowed (subject to every other gate above). |
 

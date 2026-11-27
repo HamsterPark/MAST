@@ -5,7 +5,7 @@
 ``validate_spec_payload`` 的三个遍历(``_walk_steps`` / ``_collect_names`` /
 ``_lint_exprs``)各自手写 if / loop / llm / human / agent 五种容器,**漏了 try**。
 于是藏在 ``try`` 的 body / finally 里的步骤对整个设计期检查是不存在的:未知技能、
-超包络的字面量、z-approach 硬错,一条都不报 —— 而运行期它照样打到硬件上。
+超包络的字面量、粗动 Z 的硬错,一条都不报 —— 而运行期它照样打到硬件上。
 
 ``spec.walk_nodes`` 早就是「遍历一棵 spec 树」的唯一真源(loader 的缺失技能检查
 已经在用它),它自己的注释就写着这件事。这一组钉住三个遍历都委托过去了。
@@ -68,10 +68,15 @@ def test_an_unknown_skill_inside_a_try_branch_is_caught(reg, branch):
 
 def test_a_coarse_z_approach_inside_a_try_body_is_caught(reg):
     """这是最贵的那一个:它在运行期也会被 ctx.run 拒,但设计期不说的话,模型是
-    在**做完前面几步硬件动作之后**才知道的。"""
+    在**做完前面几步硬件动作之后**才知道的。
+
+    2026-11-21:steps 从 10 改成 cap+1 —— 上限之内的 z-approach 运行期照跑并
+    通知、设计期只给 warning;超过上限的才在运行期被拒,设计期是硬错。"""
+    from mast.core.safety import AUTONOMOUS_Z_APPROACH_MAX_STEPS as cap
+    assert cap is not None
     node = {"type": "try", "id": "t", "body": [
         {"type": "step", "id": "m", "skill": "MotorMove",
-         "params": {"direction": "z-approach", "steps": 10}}], "finally": []}
+         "params": {"direction": "z-approach", "steps": cap + 1}}], "finally": []}
     rep = validate_spec_payload(_spec([node]), registry=reg)
     assert rep["ok"] is False
     assert "z-approach" in _all_errors(rep)

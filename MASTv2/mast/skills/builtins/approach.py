@@ -1615,8 +1615,9 @@ class ApproachTip(BaseSkill):
       2. ONLY if feedback can't reach tunnelling (needs_auto_approach) → AutoApproach,
          the Nanonis current-feedback approach module. It hardware-STOPS at the
          setpoint, so there is NO tip-crash risk — this is deliberately NOT the
-         open-loop coarse Z stepper (MotorMove z-approach), which stays behind the
-         human-approval gate and is never touched here.
+         open-loop coarse Z stepper (MotorMove z-approach), which has no
+         current-feedback stop, is step-capped per call on autonomous paths, and
+         is never touched here.
 
     Route a plain '进针 / engage / approach the tip' here. For an explicit coarse
     '自动粗逼近' call AutoApproach directly; to only try feedback (no approach) call
@@ -1630,8 +1631,9 @@ class ApproachTip(BaseSkill):
             category=SkillCategory.WRITE,
             # Both phases are current-feedback protected (engage = no motor;
             # AutoApproach stops at setpoint). The one crash-risky action —
-            # open-loop coarse MotorMove z-approach — is NEVER invoked here and
-            # stays human-gated, so this smart dispatcher is AUTO.
+            # open-loop coarse MotorMove z-approach (no current-feedback stop,
+            # step-capped per call on autonomous paths) — is NEVER invoked here,
+            # so this smart dispatcher is AUTO.
             safety_level=SafetyLevel.AUTO,
             description=(
                 tr("面对一句朴素的「进针」，用**安全**的方式建立隧道：先试着让 "

@@ -252,13 +252,51 @@ class TestSafetyGateMiddleware:
         assert "global_bounds_violation" in result.content
         assert result.status == "error"
 
-    def test_coarse_z_approach_blocked_on_agent_path(self):
-        """2026-06-11: an open-loop coarse Z step toward the sample is the one
-        physically-dangerous action; the autonomous agent path blocks it
-        fail-closed (operator runs it manually via the GUI instead)."""
+    def test_coarse_z_approach_within_the_step_cap_runs_on_agent_path(self):
+        """(was ``test_coarse_z_approach_blocked_on_agent_path``:
+        steps=10 → ``coarse_sample_approach_blocked``, handler never called).
+
+        An open-loop coarse Z step toward the sample is no longer refused as a
+        class on the agent path: within the per-call step cap it passes the gate
+        (AutoApprovalNoticeMiddleware announces it), so the agent can poke the
+        tip or re-centre the fine Z with a step or two."""
+        from mast.core import safety_escalation as esc
+        from mast.core.safety import AUTONOMOUS_Z_APPROACH_MAX_STEPS
+        from mast.skills.builtins.motor import MotorMove
+        # A refusal another test left live would gate this call at Layer 0g.
+        esc.clear_approach_refusal(owner=None)
+        tool = wrap_skill(MotorMove, lambda: MagicMock(safe_call=lambda *a, **k: None))
+        steps = AUTONOMOUS_Z_APPROACH_MAX_STEPS or 10
+        req = _make_request(tool, {"direction": "z-approach", "steps": steps})
+        handler = MagicMock(return_value="ok")
+        result = self.mw.wrap_tool_call(req, handler)
+        handler.assert_called_once()
+        assert result == "ok"
+
+    def test_coarse_z_approach_over_the_step_cap_refused_on_agent_path(self):
+        """One step over the cap: the whole call is refused (never clamped), and
+        the refusal names the cap and the feedback-stopped alternative."""
+        from mast.core.safety import AUTONOMOUS_Z_APPROACH_MAX_STEPS
+        if AUTONOMOUS_Z_APPROACH_MAX_STEPS is None:
+            pytest.skip("the autonomous z-approach step cap is switched off")
         from mast.skills.builtins.motor import MotorMove
         tool = wrap_skill(MotorMove, lambda: MagicMock(safe_call=lambda *a, **k: None))
-        req = _make_request(tool, {"direction": "z-approach", "steps": 10})
+        req = _make_request(tool, {"direction": "z-approach",
+                                   "steps": AUTONOMOUS_Z_APPROACH_MAX_STEPS + 1})
+        handler = MagicMock()
+        result = self.mw.wrap_tool_call(req, handler)
+        handler.assert_not_called()
+        assert "z_approach_step_cap_exceeded" in result.content
+        assert "AutoApproach" in result.content
+        assert result.status == "error"
+
+    def test_closed_loop_coarse_z_move_still_blocked_on_agent_path(self):
+        """The closed-loop move with a Z target keeps the hard gate (and its key):
+        it servos to a position and does not stop on tip contact."""
+        from mast.skills.builtins.motor import MotorMoveClosedLoop
+        tool = wrap_skill(MotorMoveClosedLoop,
+                          lambda: MagicMock(safe_call=lambda *a, **k: None))
+        req = _make_request(tool, {"target_z_m": 1e-6})
         handler = MagicMock()
         result = self.mw.wrap_tool_call(req, handler)
         handler.assert_not_called()

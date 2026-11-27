@@ -261,7 +261,7 @@ _MAX_TREE_DEPTH = 50   # 纵深防御：恶意深嵌套 spec 不许打穿递归�
 #
 # 2026-08-25:这三个遍历原来各自手写 if/loop/llm/human/agent 五种,**漏了 try**。
 # 于是藏在 ``try`` 的 body / finally 里的 step 对整个设计期 lint 是隐形的:未知
-# 技能、超包络的字面量、z-approach 硬错,一条都不会报——而运行期它照样打到硬件
+# 技能、超包络的字面量、粗动 Z 的硬错,一条都不会报——而运行期它照样打到硬件
 # 上。``spec.walk_nodes`` 早就是「遍历一棵 spec 树」的唯一真源(loader 的缺失技能
 # 检查已经用它),这里补上同一条。
 def _child_branches(n: dict):
@@ -365,8 +365,10 @@ def validate_spec_payload(spec_dict: dict, *, registry=None) -> dict:
 
     Returns {"ok", "problems": [spec-level], "steps": [{id, skill, errors,
     warnings}]}. Per-step lint: unknown skill, unknown/missing params, bounds
-    on literal numerics, coarse-Z-approach hard error, DANGEROUS warning,
-    declared safety_level below leaf max (P4 preview, warning only).
+    on literal numerics, coarse-Z checks (closed-loop Z target: error;
+    z-approach: warning within the per-call step cap, error above it or with
+    $expr steps), DANGEROUS warning, declared safety_level below leaf max (P4
+    preview, warning only).
 
     ``registry`` (2026-08-25): 显式传入要用的 SkillRegistry。``None`` 回落模块全局
     ``_registry``(GUI/API 的接线方式,行为不变)。agent 侧的技能工坊持有的是被
@@ -455,24 +457,66 @@ def validate_spec_payload(spec_dict: dict, *, registry=None) -> dict:
         sl = str(getattr(meta.safety_level, "value", meta.safety_level)).lower()
         max_leaf_rank = max(max_leaf_rank, _SAFETY_RANK.get(sl, 1))
 
-        # Coarse Z approach: hard design-time error — the runtime gate
-        # (ExecutionContext.run, 修复项) rejects it anyway; surface it here.
-        from mast.core.safety import is_coarse_sample_approach
-        if is_coarse_sample_approach(skill, literal):
-            errors.append(tr("开环 Z 粗逼近（z-approach）不可在工作流内执行——"
-                             "必须由人工经审批流程执行",
-                             "Open-loop Z coarse approach (z-approach) cannot run inside a workflow; "
-                             "it must be performed by a human through the approval process"))
+        # Coarse Z toward the sample — mirror the runtime gate (ExecutionContext.run)
+        # at design time, so a step that will be refused when the workflow runs
+        # is not saved as if it were fine:
+        #   * closed-loop move with a Z target: refused at run time → error;
+        #   * open-loop MotorMove z-approach: runs and notifies at run time within
+        #     the per-call step cap. A literal ``steps`` within the cap is only a
+        #     warning (nobody approves it, and the cap is per call — a loop
+        #     multiplies it); above the cap, or ``steps`` from $expr (the cap cannot
+        #     be checked before the run), is an error. A missing ``steps`` is
+        #     reported by the required-parameter check below.
+        from mast.core.safety import (
+            AUTONOMOUS_Z_APPROACH_MAX_STEPS, autonomous_z_approach_refusal,
+            is_closed_loop_coarse_z_move, is_open_loop_z_approach)
+        if is_closed_loop_coarse_z_move(skill, literal):
+            errors.append(tr("带 Z 分量的闭环粗动（MotorMoveClosedLoop 的 target_z_m）"
+                             "不可在工作流内执行——它按位置伺服、碰到样品不会停，运行期会被拒绝",
+                             "A closed-loop coarse move with a Z component (MotorMoveClosedLoop "
+                             "target_z_m) cannot run inside a workflow; it servos to a position, "
+                             "does not stop on tip contact, and is refused at run time"))
+        elif is_open_loop_z_approach(skill, literal):
+            if "steps" in dynamic:
+                errors.append(tr("开环 Z 粗逼近（z-approach）的 steps 不可动态提供（$expr）——"
+                                 "运行期有单次步数上限，设计期必须能核对",
+                                 "Open-loop Z coarse approach (z-approach) `steps` cannot be "
+                                 "supplied dynamically ($expr); there is a per-call step cap at "
+                                 "run time, so it must be checkable at design time"))
+            elif "steps" in literal:
+                if autonomous_z_approach_refusal(literal):
+                    errors.append(tr(
+                        f"开环 Z 粗逼近（z-approach）steps={literal.get('steps')!r} 不在单次"
+                        f"步数上限内（须为不超过 {AUTONOMOUS_Z_APPROACH_MAX_STEPS} 的整数），"
+                        "运行期会被整条拒绝——从远处接近样品请用 ApproachTip / AutoApproach",
+                        f"Open-loop Z coarse approach (z-approach) steps={literal.get('steps')!r} "
+                        f"is not within the per-call step cap (a whole number no larger than "
+                        f"{AUTONOMOUS_Z_APPROACH_MAX_STEPS}) and will be refused as a whole at run "
+                        "time; to close in on the sample use ApproachTip / AutoApproach"))
+                else:
+                    warnings.append(tr("开环 Z 粗逼近（z-approach）会在无人批准的情况下"
+                                       "让粗动马达朝样品走（执行并通知；SAFE 模式下运行期会被"
+                                       "拒绝）；步数上限按单次调用算，放进循环会成倍累积。"
+                                       "从远处接近样品请用 ApproachTip / AutoApproach",
+                                       "Open-loop Z coarse approach (z-approach) steps the coarse "
+                                       "motor toward the sample with nobody approving it (it runs "
+                                       "and notifies; in SAFE mode it is refused at run time); the "
+                                       "step cap is per call, so a loop multiplies it. To close in "
+                                       "on the sample use ApproachTip / AutoApproach"))
         elif skill == "MotorMove" and "direction" in dynamic:
             errors.append(tr("MotorMove 的 direction 不可动态提供（$expr）——"
                              "方向必须是设计期字面量",
                              "MotorMove `direction` cannot be supplied dynamically ($expr); "
                              "the direction must be a design-time literal"))
         if sl == "dangerous":
-            warnings.append(tr("DANGEROUS 技能在工作流（agent 路径）中会被运行期"
-                               "审批门拒绝，需人工执行",
-                               "DANGEROUS skills are rejected by the runtime approval gate in workflows "
-                               "(agent path); a human must run them"))
+            # 2026-11-26: this used to say the runtime approval gate rejects it and
+            # "a human must run it". No such gate exists for DANGEROUS any more:
+            # the step runs and the operator is notified (ExecutionContext.run).
+            warnings.append(tr("DANGEROUS 技能在工作流里照常执行，并通知操作员（不弹框、"
+                               "不等批准）—— 在步骤说明里写清楚为什么需要它",
+                               "DANGEROUS skills run in a workflow and the operator is "
+                               "notified (no dialog, no approval wait) - say in the step "
+                               "why it is needed"))
 
         spec_params = {p.name: p for p in (meta.parameters or [])}
         for k in params:
@@ -627,7 +671,7 @@ _GEN_SYSTEM = """你是 MAST 技能构建 agent。把用户的自然语言需求
 
 硬规则：
 1. step.skill 必须严格来自下方技能目录，参数名必须匹配；
-2. 绝不使用 MotorMove 的 z-approach 方向（物理危险，会被拒绝）；
+2. MotorMove 的 z-approach 方向（开环朝样品走、没有电流反馈停）只在用户明确要求时使用：{z_steps_rule}，不要放进循环；要接近样品用 ApproachTip / AutoApproach；
 3. 触达硬件的 loop 必须设 max_iter ≤ 100；
 4. 表达式（cond/count/value/$expr）是受限 Python 表达式：可引用工作流参数名、
    上游节点 id（其结果 dict，如 q['quality']）、set 变量；禁属性访问/import；
@@ -643,6 +687,16 @@ def _gen_model_factory():
     """Patchable in tests. Heavy import lazy."""
     from mast.agents._shared.models import make_chat_model
     return make_chat_model("orchestrator", max_tokens=8000, temperature=0.2)
+
+
+def _z_steps_rule() -> str:
+    """The ``steps`` clause of _GEN_SYSTEM rule 2, from the same constant the
+    runtime gate and the design-time lint read, so the prompt never states a
+    different cap than the one that refuses the step."""
+    from mast.core.safety import AUTONOMOUS_Z_APPROACH_MAX_STEPS as cap
+    if cap is None:
+        return "steps 必须是整数字面量"
+    return f"steps 必须是不超过 {cap} 的整数字面量"
 
 
 def _skill_digest(limit: int = 400) -> str:
@@ -680,7 +734,8 @@ def generate_spec_sync(prompt: str, current_spec: dict | None = None,
         mdl = model if model is not None else _gen_model_factory()
     except Exception as exc:  # noqa: BLE001
         return {"error": tr(f"模型不可用：{exc}", f"Model unavailable: {exc}")}
-    sys_msg = _GEN_SYSTEM.replace("{catalog}", _skill_digest())
+    sys_msg = (_GEN_SYSTEM.replace("{z_steps_rule}", _z_steps_rule())
+               .replace("{catalog}", _skill_digest()))
     user = f"用户需求：{prompt}"
     if current_spec:
         user += ("\n\n当前画布上的工作流（按需求修改它而不是从零开始）：\n"

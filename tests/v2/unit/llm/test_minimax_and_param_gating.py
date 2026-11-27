@@ -464,14 +464,19 @@ def test_use_clears_key_when_new_provider_has_none(monkeypatch, tmp_path):
                 "MOONSHOT_API_KEY", "KIMI_API_KEY", "DASHSCOPE_API_KEY",
                 "ALIYUN_BAILIAN_API_KEY", "ZHIPU_API_KEY", "GLM_API_KEY"):
         monkeypatch.delenv(var, raising=False)
-    import importlib
+    # The key-file map is built once, at import. Repoint it with monkeypatch instead of
+    # reloading mast.config: a reload builds new class objects (SafetyLimits, LLMConfig, ...),
+    # and pydantic objects made before it no longer compare equal to ones made after it.
+    # That turned api/test_safety_limits_effective red whenever this file ran first on the
+    # same xdist worker.
     import mast.config as C
-    importlib.reload(C)
-    cfg = C.LLMConfig()
+    empty = tmp_path / "api key"
+    monkeypatch.setattr(C, "_API_KEY_FILES",
+                        {prov: empty / f.name for prov, f in C._API_KEY_FILES.items()})
+    cfg = LLMConfig()
     cfg.api_key = "leaky-kimi-key"
     cfg.use("deepseek-v4-pro")
     assert cfg.api_key == "", repr(cfg.api_key)   # NOT the stale kimi key
-    importlib.reload(C)   # restore module state for any later test
 
 
 # ── fix 4: DeepSeek presets honour the ≥16000 truncation floor ──

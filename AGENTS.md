@@ -89,8 +89,8 @@ and [external-agent integration](docs/external/).
   record spanned about 99 hours. The maintainer reports this
   deployment experience. Selected de-identified figures appear in the README;
   complete experimental datasets and full logs remain outside this release.
-- **Public 7.3.1 software validation:** on 2026-11-17, the Windows / Python 3.13
-  run on the exported tree recorded **21,458 passed**; 68 skipped and 2 expected failures; **2,946 frontend unit tests**
+- **Public 7.3.3 software validation:** on 2026-11-27, the Windows / Python 3.13
+  run on the exported tree recorded **21,590 passed**; 68 skipped and 2 expected failures; **2,946 frontend unit tests**
   and the frontend build with typechecking passed. Commands, environment and scope are recorded in
   [the snapshot notes](docs/OPEN_SOURCE_NOTES.md).
 - **External interface:** `/api/ext/v1` and its MCP integration extend the
@@ -111,6 +111,14 @@ and [external-agent integration](docs/external/).
   the temperature controller on a real instrument is maintainer-reported;
   hardware validation of field ramps, temperature control and the live scan is
   pending.
+- **Coarse Z approach (7.3.2–7.3.3):** an autonomous open-loop `MotorMove`
+  z-approach runs and notifies within a per-call step cap
+  (`AUTONOMOUS_Z_APPROACH_MAX_STEPS` in `MASTv2/mast/core/safety.py`, 20 steps),
+  is refused above the cap and in safe mode, and does not require the Z feedback
+  to be off (`effective_preconditions` in `MASTv2/mast/core/preconditions.py`).
+  The other hard gates still refuse on every autonomous path, and their refusals
+  point to Nanonis for a manual action. These rules have software tests with
+  instrument doubles.
 - **Experimental extensions:** `MASTv2/mast/conduct/`, `MASTv2/mast/agentruntime/`,
   `MASTv2/mast/goals/`, the skill workshop/market and qPlus paths explore longer
   planning, execution and instrument capabilities; hardware validation is pending.

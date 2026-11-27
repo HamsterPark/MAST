@@ -263,7 +263,8 @@ def _step_skills(nodes: Any) -> set[str]:
 def agent_track_lint(spec_dict: dict, registry, *, store=None) -> list[str]:
     """agent 轨专有的拒绝条款。返回问题清单(空 = 通过)。
 
-    ``validate_spec_payload`` 那套(未知技能、参数名/边界、z-approach 硬错、
+    ``validate_spec_payload`` 那套(未知技能、参数名/边界、粗动 Z 检查——闭环 Z
+    目标与超出单次步数上限/动态步数的 z-approach 硬错、
     悬空 $expr、声明级不得低于叶子 max)已经跑过了,这里**只加** GUI 轨不需要的
     那几条(见下面的分节)。刻意不把它们塞进 ``CompositeSpec.validate``:编辑器里
     人是在场的,``human`` 节点是功能不是死锁。
@@ -490,7 +491,8 @@ def _validate(spec_dict: dict, registry, *, store=None) -> dict:
     """设计期全量校验 = 官方内核 + agent 轨附加 + 缺失技能兜底。
 
     官方内核是 ``webui/builder_api.validate_spec_payload`` —— **复用而不是重写**:
-    未知技能、钉住的版本不存在、未知/缺失参数、字面量超包络、z-approach 硬错、
+    未知技能、钉住的版本不存在、未知/缺失参数、字面量超包络、粗动 Z 检查(闭环
+    Z 目标、超出单次步数上限或动态步数的 z-approach 是硬错)、
     悬空 $expr、声明安全级不得低于叶子 max,这七条都在那里,而且 GUI 与 agent
     必须给出同一个答案。
     """

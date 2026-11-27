@@ -289,14 +289,49 @@ class TestValidate:
         assert rep["ok"] is False
         assert any("99" in e for e in rep["steps"][0]["errors"])
 
-    def test_coarse_z_approach_design_time_error(self, client):
+    # z-approach 不再是设计期一律硬错。原来的
+    # ``test_coarse_z_approach_design_time_error`` 用 steps=5 断言 error;现在 5 在
+    # 每次调用的步数上限之内,运行期照跑并通知 → 设计期只给 warning、可以保存。
+    # 超过上限、steps 来自 $expr(上限没法在设计期核对)、以及带 Z 目标的闭环
+    # 粗动才是 error —— 这三种运行期同样会被拒绝。
+    @staticmethod
+    def _one_step(skill, params):
+        return dict(SPEC, nodes=[{"type": "step", "id": "a", "skill": skill,
+                                  "params": params}])
+
+    def test_coarse_z_approach_within_cap_is_only_a_warning(self, client):
         c, *_ = client
-        bad = dict(SPEC, nodes=[{"type": "step", "id": "a", "skill": "MotorMove",
-                                 "params": {"direction": "z-approach",
-                                            "steps": 5}}])
-        rep = self._post(c, bad)
+        rep = self._post(c, self._one_step(
+            "MotorMove", {"direction": "z-approach", "steps": 5}))
+        step = rep["steps"][0]
+        assert not any("粗逼近" in e for e in step["errors"]), step
+        assert any("粗逼近" in w for w in step["warnings"]), step
+        assert rep["ok"] is True
+
+    def test_coarse_z_approach_over_cap_is_a_design_time_error(self, client):
+        from mast.core.safety import AUTONOMOUS_Z_APPROACH_MAX_STEPS as cap
+        assert cap is not None
+        c, *_ = client
+        rep = self._post(c, self._one_step(
+            "MotorMove", {"direction": "z-approach", "steps": cap + 1}))
         assert rep["ok"] is False
-        assert any("粗逼近" in e for e in rep["steps"][0]["errors"])
+        assert any("粗逼近" in e and "上限" in e for e in rep["steps"][0]["errors"])
+
+    def test_coarse_z_approach_dynamic_steps_is_a_design_time_error(self, client):
+        c, *_ = client
+        rep = self._post(c, self._one_step(
+            "MotorMove", {"direction": "z-approach", "steps": {"$expr": "n"}}))
+        assert rep["ok"] is False
+        assert any("粗逼近" in e and "$expr" in e for e in rep["steps"][0]["errors"])
+
+    def test_closed_loop_coarse_z_is_a_design_time_error(self, client):
+        from mast.skills.builtins.motor import MotorMoveClosedLoop
+        c, reg, _ = client
+        reg.register(MotorMoveClosedLoop)
+        rep = self._post(c, self._one_step(
+            "MotorMoveClosedLoop", {"target_z_m": 1e-6}))
+        assert rep["ok"] is False
+        assert any("闭环粗动" in e for e in rep["steps"][0]["errors"])
 
     def test_dynamic_direction_rejected(self, client):
         c, *_ = client

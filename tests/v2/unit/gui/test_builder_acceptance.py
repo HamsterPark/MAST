@@ -135,15 +135,37 @@ def test_acceptance_workflow_roundtrip(client):
 
 
 def test_acceptance_spec_rejects_zapproach_smuggling(client):
-    """画布若被手改塞入 z-approach 步骤，保存必须 422（设计期+运行期双拒）。"""
+    """画布若被手改塞入超过单次步数上限的 z-approach 步骤，保存必须 422
+    （设计期+运行期双拒）。
+
+    原来塞的是 steps=3，任何步数都 422；现在上限之内的 z-approach
+    运行期照跑并通知，设计期只给 warning（见下一条），所以这里改塞 cap+1。"""
+    from mast.core.safety import AUTONOMOUS_Z_APPROACH_MAX_STEPS as cap
+    assert cap is not None
     c, *_ = client
     bad = json.loads(json.dumps(ACCEPT_SPEC))
     bad["name"] = "验收_走私粗逼近"
     bad["nodes"].append({"type": "step", "id": "smuggle", "skill": "MotorMove",
-                         "params": {"direction": "z-approach", "steps": 3}})
+                         "params": {"direction": "z-approach", "steps": cap + 1}})
     r = c.post(f"/composites/{bad['name']}", json={"spec": bad})
     assert r.status_code == 422
     assert any("粗逼近" in e for s in r.json()["steps"] for e in s["errors"])
+
+
+def test_acceptance_spec_with_a_single_z_approach_step_saves_with_a_warning(client):
+    """单步 z-approach（修针时的一下轻戳）在上限之内：保存成功，但校验报告里
+    带一条「粗逼近」warning —— 没人批准它，设计者应当知道。"""
+    c, *_ = client
+    spec = json.loads(json.dumps(ACCEPT_SPEC))
+    spec["name"] = "验收_单步粗逼近"
+    spec["nodes"].append({"type": "step", "id": "poke", "skill": "MotorMove",
+                          "params": {"direction": "z-approach", "steps": 1}})
+    rep = c.post("/composites/validate", json={"spec": spec}).json()
+    assert rep["ok"] is True, rep
+    poke = next(s for s in rep["steps"] if s["id"] == "poke")
+    assert any("粗逼近" in w for w in poke["warnings"]), poke
+    r = c.post(f"/composites/{spec['name']}", json={"spec": spec, "base_version": 0})
+    assert r.status_code == 200, r.text
 
 
 # NOTE: test_builder_static_assets_present + test_built_js_in_sync_with_jsx were

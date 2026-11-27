@@ -12,11 +12,11 @@ HumanInTheLoopMiddleware）**暂停**在 ``__interrupt__`` 而不执行；随后
 
 ## 什么没变（本文件同样钉着）
 
-``TestDefaultBuildAndCoarseApproachGate`` 一个字没改：默认构建不暂停，
-而那一个真正危险的动作 —— 开环粗动 Z 向样品进针
-（``MotorMove direction='z-approach'``）—— 仍然由 SafetyGateMiddleware
-**fail-closed 拒绝**。那是**拒绝型防护**：不弹框、不等人、越界就说不。
-⑷ 割的是「等人」，不是「说不」。
+``TestDefaultBuildAndCoarseApproachGate``：默认构建不暂停。开环粗动 Z 向样品
+进针（``MotorMove direction='z-approach'``）原来在这里由 SafetyGateMiddleware
+整类 **fail-closed 拒绝**；2026-11-21 起它在每次调用的步数上限之内照跑并通知，
+超过上限仍由 SafetyGateMiddleware 拒绝 —— 那一条是**拒绝型防护**：不弹框、
+不等人、越界就说不。被割掉的是「等人」，不是「说不」。
 """
 from __future__ import annotations
 
@@ -266,10 +266,12 @@ class TestDefaultBuildAndCoarseApproachGate:
 
     No builtin skill is DANGEROUS anymore, so the default-derived HITL map is
     empty and the HITL middleware is a no-op. The hardware-danger gate is no
-    longer a static-safety_level human弹框 but a PARAMETER condition — an
+    longer a static-safety_level human弹框 but a PARAMETER condition on an
     open-loop coarse Z step toward the sample (``MotorMove
-    direction='z-approach'``) — which SafetyGateMiddleware blocks FAIL-CLOSED on
-    the autonomous agent path (see mast.core.safety.is_coarse_sample_approach).
+    direction='z-approach'``). Since 2026-11-21 that condition is the step
+    count: within ``AUTONOMOUS_Z_APPROACH_MAX_STEPS`` the call runs and
+    notifies; above it SafetyGateMiddleware refuses it FAIL-CLOSED on the
+    autonomous agent path (see mast.core.safety.autonomous_z_approach_refusal).
     """
 
     def test_default_build_does_not_interrupt_on_biaspulse(self):
@@ -292,12 +294,14 @@ class TestDefaultBuildAndCoarseApproachGate:
         assert any(m == "Bias_Pulse" for m, _ in ctx.calls), \
             "AUTO BiasPulse must execute on the default path (no HITL gate)"
 
-    def test_coarse_sample_approach_blocked_fail_closed(self):
-        # The ONE physically-dangerous action — an open-loop coarse Z step TOWARD
-        # the sample — must be BLOCKED by SafetyGateMiddleware on the autonomous
-        # agent path: status=error ToolMessage, content carries
-        # 'coarse_sample_approach_blocked', and the skill handler is NEVER
+    def test_coarse_sample_approach_over_the_step_cap_blocked_fail_closed(self):
+        # 原名 ``test_coarse_sample_approach_blocked_fail_closed``,同样 steps=50,
+        # 原来断言 'coarse_sample_approach_blocked'(任何步数都拒)。现在拒它的是
+        # 每次调用的步数上限:status=error ToolMessage, content carries
+        # 'z_approach_step_cap_exceeded', and the skill handler is NEVER
         # reached (no Motor_StartMove safe_call).
+        from mast.core.safety import AUTONOMOUS_Z_APPROACH_MAX_STEPS as cap
+        assert cap is not None and 50 > cap, "steps=50 must be over the cap"
         ctx, prov = _shared_ctx(_CANNED_MOTOR)
         agent = build(
             buf=None, context_provider=prov,
@@ -307,26 +311,59 @@ class TestDefaultBuildAndCoarseApproachGate:
         cfg = {"configurable": {"thread_id": "coarse-approach-blocked"}}
         result = agent.invoke({"messages": [("user", "approach the sample")]}, config=cfg)
         # It must NOT pause for human approval (this is a fail-closed BLOCK, not a
-        # HITL弹框 — autonomous agents may not coarse-approach at all).
+        # HITL弹框).
         assert not agent.get_state(cfg).next, \
-            "coarse approach is fail-closed blocked, not paused for approval"
+            "an over-cap coarse approach is fail-closed blocked, not paused for approval"
         assert not result.get("__interrupt__")
         # Handler NEVER ran: the underlying Nanonis Motor_StartMove was not called.
         assert not any(m == "Motor_StartMove" for m, _ in ctx.calls), \
-            "SafetyGate must block the coarse approach before the handler runs"
+            "SafetyGate must block the over-cap coarse approach before the handler runs"
         # A status=error ToolMessage carrying the gate marker must be present.
         msgs = result.get("messages", [])
         tool_msgs = [m for m in msgs if isinstance(m, ToolMessage)]
         blocked = [
             m for m in tool_msgs
-            if "coarse_sample_approach_blocked" in str(getattr(m, "content", ""))
+            if "z_approach_step_cap_exceeded" in str(getattr(m, "content", ""))
         ]
         assert blocked, (
-            "a coarse_sample_approach_blocked ToolMessage must be injected; "
+            "a z_approach_step_cap_exceeded ToolMessage must be injected; "
             f"tool messages: {[str(getattr(m, 'content', '')) for m in tool_msgs]}"
         )
         assert getattr(blocked[0], "status", None) == "error", \
-            "the coarse-approach block must be a status=error ToolMessage"
+            "the over-cap block must be a status=error ToolMessage"
+
+    def test_coarse_sample_approach_within_the_step_cap_runs_and_notifies(self):
+        """A single step toward the sample (the tip-conditioning poke) is not
+        refused on the autonomous agent path: no pause, no gate marker, and the
+        notice middleware leaves a ``notice_only`` row for it. Whether the
+        handler then succeeds depends on the instrument config, not on this gate."""
+        from mast.core import diagnostics as diag
+        from mast.core import safety_escalation as esc
+
+        # A live ApproachTip refusal (process-global, left by another test)
+        # would refuse it in Layer 0g — a different rule from the one pinned here.
+        esc.clear_approach_refusal(owner=None)
+        newest = diag.recent(1)
+        seq0 = int(newest[0].get("seq", 0)) if newest else 0
+        ctx, prov = _shared_ctx(_CANNED_MOTOR)
+        agent = build(
+            buf=None, context_provider=prov,
+            model=_motormove_llm(direction="z-approach", steps=1),
+            checkpointer=InMemorySaver(), enable_hitl=True,
+        )
+        cfg = {"configurable": {"thread_id": "coarse-approach-within-cap"}}
+        result = agent.invoke({"messages": [("user", "poke the tip once")]}, config=cfg)
+        assert not agent.get_state(cfg).next
+        assert not result.get("__interrupt__")
+        joined = "\n".join(
+            str(getattr(m, "content", "")) for m in result.get("messages", []))
+        assert "coarse_sample_approach_blocked" not in joined
+        assert "z_approach_step_cap_exceeded" not in joined
+        notices = [r for r in diag.recent(200, kinds=("notice_only",))
+                   if r.get("seq", 0) > seq0 and r.get("subject") == "MotorMove"]
+        assert len(notices) == 1, "a within-cap z-approach must notify exactly once"
+        assert notices[0].get("agent_path") == "tool_call"
+        assert "z-approach" in notices[0]["reason"]
 
     def test_lateral_motormove_is_gated_but_not_as_a_sample_approach(self):
         """A bare lateral step is blocked — by its OWN gate, not the approach one.
@@ -338,9 +375,10 @@ class TestDefaultBuildAndCoarseApproachGate:
         — with no coarse-Z retract, no chamber-pressure check, no drive-voltage
         readback, no current watch and no record of where the stage has been.
 
-        The two gates stay distinct on purpose: their remedies differ. A blocked
-        sample-approach means "a human must run this"; a blocked lateral move
-        means "call RelocateCoarseXY instead", which the agent can do itself."""
+        The two gates stay distinct on purpose: their remedies differ. A refused
+        sample-approach means "fewer steps per call, or ApproachTip /
+        AutoApproach"; a blocked lateral move means "call RelocateCoarseXY
+        instead", which the agent can do itself."""
         ctx, prov = _shared_ctx(_CANNED_MOTOR)
         agent = build(
             buf=None, context_provider=prov,
@@ -353,6 +391,8 @@ class TestDefaultBuildAndCoarseApproachGate:
             str(getattr(m, "content", "")) for m in result.get("messages", []))
         assert "coarse_sample_approach_blocked" not in joined, \
             "a lateral move is not the open-loop sample-approach danger"
+        assert "z_approach_step_cap_exceeded" not in joined, \
+            "a lateral move has no z-approach step cap"
         assert "unguarded_lateral_coarse_move_blocked" in joined, \
             "a BARE lateral coarse step must be refused on the autonomous path"
         assert "RelocateCoarseXY" in joined, \

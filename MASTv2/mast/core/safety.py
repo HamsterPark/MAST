@@ -8,6 +8,7 @@ from mast.config import SafetyLimits
 from mast.core.si_quantity import parse_quantity as _parse_quantity
 from mast.core.preconditions import (
     check_state_preconditions as _shared_check_state_preconditions,
+    effective_preconditions,
 )
 from mast.core.types import (
     HardwareState,
@@ -254,55 +255,224 @@ def _is_truthy_absolute(val: object) -> bool:
 def is_coarse_sample_approach(skill_name: str, params: dict | None) -> bool:
     """True iff this call is a coarse Z motion that can crash the tip into the sample.
 
-    This is the ONE physically-dangerous action class in MAST (2026-06-11
-    safety re-scoping). A coarse Z step toward the sample (pan-type piezo
-    stepper) has NO current-feedback stop, so too many / too large steps crash
-    the tip into the sample and can wreck tip + sample. Everything else is
-    bounded by Nanonis (bias/current/fine-Z ranges) or by the current-feedback
-    AutoApproach module, so this is the SOLE action gated behind human approval
-    (BLOCKED on the autonomous agent path, human-approval on manual/composite).
+    A coarse Z step toward the sample (pan-type piezo stepper) has NO
+    current-feedback stop, so too many / too large steps crash the tip into the
+    sample and can wreck tip + sample. Everything else is bounded by Nanonis
+    (bias/current/fine-Z ranges) or by the current-feedback AutoApproach module.
 
-    Two coarse-motor shapes are recognised:
+    This is the umbrella over the two coarse-motor shapes; the gates call the
+    two narrow predicates because they treat them differently:
 
-    * ``MotorMove`` open-loop step — keyed on the SEMANTIC
-      ``direction='z-approach'`` (independent of the raw Nanonis Z code).
-    * ``MotorMoveClosedLoop`` move with a Z component — closed-loop coarse moves
-      use POSITIONAL feedback (servo to a target XYZ); they do NOT stop on tip
-      contact, and the Z direction toward/away from the sample cannot be proven
-      safe from the static target alone (the sign depends on the instrument's Z
-      convention and, for relative moves, the current position). So be
-      CONSERVATIVE: treat ANY closed-loop move that touches Z as a coarse sample
-      approach. A pure-XY closed-loop move (no Z) is NOT flagged.
+    * ``MotorMove`` open-loop step toward the sample —
+      :func:`is_open_loop_z_approach`. On an autonomous path it runs and
+      notifies within :data:`AUTONOMOUS_Z_APPROACH_MAX_STEPS` steps per call
+      and is refused above that (:func:`autonomous_z_approach_refusal`), and
+      SAFE mode refuses it outright (:func:`mode_refusal`); the human manual
+      path is not capped.
+    * ``MotorMoveClosedLoop`` move with a Z component —
+      :func:`is_closed_loop_coarse_z_move`. A hard gate: refused on every
+      non-human path.
     """
+    return (is_open_loop_z_approach(skill_name, params)
+            or is_closed_loop_coarse_z_move(skill_name, params))
+
+
+# The spellings of "open-loop coarse Z toward the sample" that MotorMove
+# accepts. One tuple, so the predicate and the step cap can never disagree
+# about what counts as a z-approach.
+_Z_APPROACH_DIRECTIONS = ("z-approach", "z_approach", "zapproach")
+
+
+def is_open_loop_z_approach(skill_name: str, params: dict | None) -> bool:
+    """True iff this is an OPEN-LOOP coarse Z step toward the sample.
+
+    ``MotorMove`` keyed on the SEMANTIC ``direction='z-approach'`` (independent
+    of the raw Nanonis Z code). Not a hard gate: an autonomous call runs like
+    any other formerly approval-gated action (execute, leave a trace, notify) as
+    long as :func:`autonomous_z_approach_refusal` lets its step count through
+    and the operating mode is not SAFE (:func:`mode_refusal`).
+
+    Also the one call shape exempt from MotorMove's declared ``z_controller_off``
+    precondition — the operator pokes with the Z feedback on
+    (:func:`mast.core.preconditions.effective_preconditions`).
+    """
+    if skill_name != "MotorMove":
+        return False
+    direction = str((params or {}).get("direction", "")).strip().lower()
+    return direction in _Z_APPROACH_DIRECTIONS
+
+
+def is_closed_loop_coarse_z_move(skill_name: str, params: dict | None) -> bool:
+    """True iff this is a CLOSED-LOOP coarse move with a Z component.
+
+    Closed-loop coarse moves use POSITIONAL feedback (servo to a target XYZ);
+    they do NOT stop on tip contact, and the Z direction toward/away from the
+    sample cannot be proven safe from the static target alone (the sign depends
+    on the instrument's Z convention and, for relative moves, the current position).
+    So be CONSERVATIVE: treat ANY closed-loop move that touches Z as a coarse
+    sample approach. A pure-XY closed-loop move (no Z) is NOT flagged.
+
+    A hard gate: refused on every non-human path, with no step budget — the
+    move's length is a target distance, not a count of small steps.
+    """
+    if skill_name != "MotorMoveClosedLoop":
+        return False
     p = params or {}
-    if skill_name == "MotorMove":
-        direction = str(p.get("direction", "")).strip().lower()
-        return direction in ("z-approach", "z_approach", "zapproach")
-    if skill_name == "MotorMoveClosedLoop":
-        target_z = p.get("target_z_m")
-        if target_z is None:
-            return False  # pure-XY closed-loop move — no Z component
-        # Absolute positioning with a Z target present: gate even at 0.0, since
-        # an absolute Z target's "safe side" cannot be proven statically.
-        #
-        # This gate runs in SafetyGateMiddleware on the RAW LLM JSON args, BEFORE
-        # pydantic coercion (safety_mw parses the model's tool-call dict). A weak
-        # model routinely emits absolute="true" / absolute=1 (we already coerce
-        # bias_v="50.0" strings elsewhere), and motor.py executes with a truthy
-        # test (`1 if params.get("absolute") else 0`). A bare `is True` here saw
-        # those as False and dropped into the relative branch — where a 0.0
-        # target then read as "no Z move" and skipped the human-approval gate
-        # entirely. Parse the flag fail-closed: any recognised truthy form gates,
-        # and anything unparseable also gates (matches the target_z fallback).
-        if _is_truthy_absolute(p.get("absolute")):
-            return True
-        # Relative move: any non-zero Z step is a coarse Z motion → gate.
-        # An unparseable Z target fails closed (treated as a Z move).
+    target_z = p.get("target_z_m")
+    if target_z is None:
+        return False  # pure-XY closed-loop move — no Z component
+    # Absolute positioning with a Z target present: gate even at 0.0, since
+    # an absolute Z target's "safe side" cannot be proven statically.
+    #
+    # This gate runs in SafetyGateMiddleware on the RAW LLM JSON args, BEFORE
+    # pydantic coercion (safety_mw parses the model's tool-call dict). A weak
+    # model routinely emits absolute="true" / absolute=1 (we already coerce
+    # bias_v="50.0" strings elsewhere), and motor.py executes with a truthy
+    # test (`1 if params.get("absolute") else 0`). A bare `is True` here saw
+    # those as False and dropped into the relative branch — where a 0.0
+    # target then read as "no Z move" and skipped the human-approval gate
+    # entirely. Parse the flag fail-closed: any recognised truthy form gates,
+    # and anything unparseable also gates (matches the target_z fallback).
+    if _is_truthy_absolute(p.get("absolute")):
+        return True
+    # Relative move: any non-zero Z step is a coarse Z motion → gate.
+    # An unparseable Z target fails closed (treated as a Z move).
+    try:
+        return _parse_quantity(target_z, strict=False, what="target_z") != 0.0
+    except Exception:  # noqa: BLE001
+        return True
+
+
+# ── Autonomous open-loop Z approach: per-call step cap ──────────────────────
+# MotorMove(direction='z-approach') used to be refused outright on every
+# non-human path (the agent, composites, conduct, the direct skill API, the
+# external gateway), with "the user must do it in the GUI" as the only way out.
+# It no longer is: an autonomous call gets the same treatment as every other
+# formerly approval-gated action — it runs, leaves a trace and notifies the
+# operator. What remains is a bound on how far ONE call can step blind: open-
+# loop steps have no current-feedback stop, so a call asking for more than this
+# many steps is refused as a whole (never clamped to the cap).
+#
+# Why 20 (since 7.3.3; 7.3.2 shipped 10): the uses that motivated lifting the
+# refusal are short — a tip poke is typically 5–10 coarse steps into the
+# sample with the Z feedback on, and re-centring the fine-Z range after an
+# approach takes single steps. 20 covers both with room to spare and still
+# stops a mistyped or invented count (steps=200) before the motor moves.
+# Closing in from a distance is AutoApproach's job; it has the current-
+# feedback stop this primitive lacks.
+#
+# Per CALL, not cumulative: consecutive calls are not summed. Only the human
+# manual path (approval_source == "human") is uncapped. MAST's own skill-page
+# buttons are NOT that path: they post to the direct skill API, which is a
+# non-human source, so they hit the cap like any other autonomous caller.
+#
+# Two neighbouring rules are NOT this constant (both since 7.3.3): SAFE mode
+# refuses an autonomous z-approach outright (:func:`mode_refusal`), and a
+# z-approach does not need the Z controller off
+# (:func:`mast.core.preconditions.effective_preconditions`).
+#
+# Set to ``None`` to remove the cap. Skill descriptions, lint and refusal texts
+# derive from this constant; the one place that states the number by hand is
+# the operating-mode tooltip (frontend TopBar.tsx ``COARSE_NOTE``), and a test
+# fails until it is updated too.
+AUTONOMOUS_Z_APPROACH_MAX_STEPS: int | None = 20
+
+
+def _coerce_steps(raw: object) -> int | None:
+    """Whole-number ``steps`` from raw (pre-pydantic) args; ``None`` if not one.
+
+    The gates see the caller's raw values, where a model may send ``3``,
+    ``3.0`` or ``"3"``. A bool is not a step count (``True`` is an ``int``
+    subclass), and neither is anything fractional or unparseable.
+    """
+    if raw is None or isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, float):
+        return int(raw) if raw.is_integer() else None
+    if isinstance(raw, str):
         try:
-            return _parse_quantity(target_z, strict=False, what="target_z") != 0.0
-        except Exception:  # noqa: BLE001
-            return True
-    return False
+            value = float(raw.strip())
+        except ValueError:
+            return None
+        return int(value) if value.is_integer() else None
+    return None
+
+
+def autonomous_z_approach_refusal(params: dict | None) -> str | None:
+    """The step-cap refusal for an AUTONOMOUS ``MotorMove z-approach``, or ``None``.
+
+    Only for calls :func:`is_open_loop_z_approach` flags and that do NOT come
+    from the human manual path — the cap does not apply there. Returns ``None``
+    when the cap is off (:data:`AUTONOMOUS_Z_APPROACH_MAX_STEPS` is ``None``) or
+    ``steps`` is a whole number within it; values below 1 are left to the
+    skill's own parameter validation. Anything else — over the cap, missing,
+    fractional, unparseable — is refused (fail-closed), never clamped.
+
+    Like :func:`mode_refusal` it returns the sentence without a caller prefix;
+    what must not drift is the leading KEY ``z_approach_step_cap_exceeded``.
+    """
+    cap = AUTONOMOUS_Z_APPROACH_MAX_STEPS
+    if cap is None:
+        return None
+    raw = (params or {}).get("steps")
+    steps = _coerce_steps(raw)
+    if steps is not None and steps <= cap:
+        return None
+    return tr(
+        f"z_approach_step_cap_exceeded: 自主调用的开环粗动 Z 朝样品（MotorMove "
+        f"z-approach）每次最多 {cap} 步，这次是 steps={raw!r}。开环步进没有电流"
+        f"反馈让它停下来，所以这次调用整条拒绝，不会截成 {cap} 步执行。要从远处"
+        f"接近样品请用 ApproachTip 或 AutoApproach，它们有电流反馈停止；确实需要"
+        f"开环多走时，拆成每次不超过 {cap} 步的调用，每次之后先看电流和 Z 位置"
+        f"再决定下一步。单次走更多步须由用户在 Nanonis 里手动操作。",
+        f"z_approach_step_cap_exceeded: an autonomous open-loop coarse Z move "
+        f"toward the sample (MotorMove z-approach) is limited to {cap} steps per "
+        f"call; this call asked for steps={raw!r}. Open-loop stepping has no "
+        f"current-feedback stop, so the call is refused as a whole rather than "
+        f"clamped to {cap}. To close in on the sample from a distance use "
+        f"ApproachTip or AutoApproach, which stop on current; if more open-loop "
+        f"steps are really needed, split them into calls of at most {cap} steps "
+        f"and check the current and Z position after each one. A larger single "
+        f"move has to be done by the user in Nanonis itself.",
+    )
+
+
+def hard_gate_manual_path() -> str:
+    """Where a hard-gated action can actually be done by hand — the sentence every
+    hard-gate refusal ends with (since 7.3.3).
+
+    The refusals used to end 「请用户在 GUI 手动执行（手动路径本身就是人工授权）」.
+    No MAST screen offers that path: the skill page posts to the direct skill API,
+    which is a non-human source, so the operator who followed the advice in MAST's
+    own GUI was refused by the same gate. The only manual path is Nanonis itself."""
+    return tr(
+        "确实需要时，只能由用户在 Nanonis 里手动操作 —— MAST 技能页上的按钮走的也是"
+        "自主路径，同样会被拒。",
+        "If it is really needed, the user does it by hand in Nanonis itself - the "
+        "buttons on MAST's skill page are an autonomous path too and are refused "
+        "the same way.",
+    )
+
+
+def autonomous_z_approach_cap_note() -> str:
+    """One clause describing the autonomous z-approach rule, for skill
+    descriptions and lint/prompt text — so none of them hard-codes the cap.
+
+    It also names the SAFE-mode refusal (:func:`mode_refusal`, since 7.3.3):
+    a reader of the description must not conclude that a call within the cap
+    runs in every mode."""
+    cap = AUTONOMOUS_Z_APPROACH_MAX_STEPS
+    if cap is None:
+        return tr("自主调用照常执行并通知（不限步数），SAFE 模式下拒绝",
+                  "autonomous calls run and notify (no step limit) and are "
+                  "refused in SAFE mode")
+    return tr(f"自主调用每次最多 {cap} 步，照常执行并通知，超过即整条拒绝；"
+              f"SAFE 模式下拒绝",
+              f"autonomous calls are limited to {cap} steps per call and run "
+              f"with a notification; more is refused as a whole; refused in "
+              f"SAFE mode")
 
 
 def _is_falsey(val: object, *, default_true: bool = True) -> bool:
@@ -342,7 +512,8 @@ def is_coarse_drive_change(skill_name: str, params: dict | None) -> bool:
     baseline ``safety_level`` cannot say so: ``SetMotorFreqAmp`` is CONFIRM, and
     CONFIRM on the autonomous path means the model approves itself.
 
-    Value-independent, unlike ``is_coarse_sample_approach``: there is no
+    Value-independent, unlike the coarse Z gates (``is_coarse_sample_approach``
+    and the autonomous step cap): there is no
     amplitude that is safe to set without knowing this rig, and "this rig" is
     knowledge only the operator has. The per-rig ceiling lives in
     ``mast.core.coarse_drive``; this predicate just makes sure a human is the one
@@ -374,8 +545,8 @@ def is_unguarded_lateral_coarse_move(skill_name: str, params: dict | None) -> bo
     the autonomous path, and the bare motor command is the one that needs a
     human**.
 
-    Not flagged: Z moves (retract is safe, approach is already gated by
-    ``is_coarse_sample_approach``) and the composite's own stepping, which goes
+    Not flagged: Z moves (retract is safe, approach has its own rule — see
+    ``is_open_loop_z_approach``) and the composite's own stepping, which goes
     through ``safe_call`` and never passes a skill name through this predicate."""
     if skill_name != "MotorMove":
         return False
@@ -389,8 +560,8 @@ def is_protection_disable(skill_name: str, params: dict | None) -> bool:
     Turning OFF SafeTip (EnableSafeTip enable=False) or the Z soft-limits
     (SetZLimitsEnabled enabled=False) removes a hardware safety net. Enabling
     them is always safe (AUTO); DISABLING must not happen autonomously without a
-    human in the loop (2026-07-03 review). Value-dependent, like
-    is_coarse_sample_approach — the skill's baseline safety_level can't express
+    human in the loop (2026-07-03 review). Value-dependent, like the coarse Z
+    gates — the skill's baseline safety_level can't express
     "safe to turn on, gated to turn off"."""
     p = params or {}
     if skill_name == "EnableSafeTip":
@@ -576,7 +747,11 @@ def mode_refusal(
 
     Three-way, and the middle one matters:
 
-    * SAFE — refuse BOTH electrical pulses and mechanical shaping.
+    * SAFE — refuse electrical pulses, mechanical shaping, and an open-loop
+      coarse Z step toward the sample (``MotorMove z-approach``, since
+      7.3.3): that step is what a tip poke is made of, and SAFE says the
+      tip is not to be repaired. ``AutoApproach`` / ``ApproachTip`` stop on
+      current and are not refused.
     * SEMI — refuse only a too-DEEP mechanical plunge. Deliberately NOT "refuse
       any shaping": a SEMI pulse simply runs and is
       announced in the diagnostics ledger, and making one entry point stricter
@@ -611,6 +786,28 @@ def mode_refusal(
         return None
 
     if mode is OperatingMode.SAFE:
+        # Keyed on name + params, not on a capability tag: MotorMove is also the
+        # lateral and retract primitive, and only its z-approach direction is a
+        # tip-conditioning action. The step cap (Layer 0 / ExecutionContext) is
+        # a separate rule and still applies in SEMI and AUTO.
+        if is_open_loop_z_approach(tool_name, params):
+            return tr(
+                f"safe_mode_tip_processing_blocked: 当前是 SAFE 模式，'{tool_name}' "
+                "的 z-approach 是开环粗动 Z 朝样品（没有电流反馈停），就是扎针修针用的"
+                "那一步 —— 拒绝执行。SAFE 的契约是「当前针尖视为良好、专注实验、不修针」，"
+                "包一层组合技能、换一个入口都不会改变这一点。要接近样品请用 ApproachTip "
+                "或 AutoApproach（有电流反馈停）；确实需要扎针或开环走粗动时，请用户切换到 "
+                "SEMI 或 AUTO 模式。不要重试。",
+                f"safe_mode_tip_processing_blocked: the current mode is SAFE, and "
+                f"'{tool_name}' z-approach is an open-loop coarse Z step toward the "
+                "sample (no current-feedback stop) - the step a tip poke is made of - "
+                "refused. SAFE's contract is \"the current tip is considered good, focus "
+                "on the experiment, no tip conditioning\"; wrapping the call in a "
+                "composite skill or using a different entry point does not change that. "
+                "To close in on the sample use ApproachTip or AutoApproach, which stop on "
+                "current; if a poke or an open-loop coarse step is really needed, ask the "
+                "user to switch to SEMI or AUTO mode. Do not retry."
+            )
         if pulse or shaping:
             what = (tr("电脉冲", "electrical pulse") if pulse
                     else tr("机械修针", "mechanical tip conditioning"))
@@ -1038,7 +1235,8 @@ class SafetyGuard:
         return violations
 
     def check_state_preconditions(
-        self, skill_meta: SkillMetadata, state: HardwareState
+        self, skill_meta: SkillMetadata, state: HardwareState,
+        params: dict | None = None,
     ) -> list[str]:
         """Check hardware state preconditions.
         Returns list of violation messages.
@@ -1049,8 +1247,12 @@ class SafetyGuard:
         never grew the ``withdrawn`` branch, so a coarse motor move requested by
         the agent skipped the "is the tip actually clear" check that the manual
         path applied (found 2026-07-31). ``_GLOBAL_CHECKS`` was unified for the
-        same reason after the same kind of drift."""
-        return check_state_preconditions(skill_meta, state)
+        same reason after the same kind of drift.
+
+        ``params``: the call's parameters, for per-call exemptions
+        (:func:`mast.core.preconditions.effective_preconditions`); ``None``
+        checks every declared precondition."""
+        return check_state_preconditions(skill_meta, state, params)
 
     def requires_approval(self, skill_meta: SkillMetadata) -> str:
         """Returns approval requirement: 'none', 'llm', 'human'."""
@@ -1068,12 +1270,13 @@ class SafetyGuard:
         """Combined validation. Returns (is_safe, list_of_issues)."""
         issues: list[str] = []
         issues.extend(self.check_parameter_bounds(skill_meta, params))
-        issues.extend(self.check_state_preconditions(skill_meta, state))
+        issues.extend(self.check_state_preconditions(skill_meta, state, params))
         return (len(issues) == 0, issues)
 
 
 def check_state_preconditions(
-    skill_meta: SkillMetadata, state: HardwareState
+    skill_meta: SkillMetadata, state: HardwareState,
+    params: dict | None = None,
 ) -> list[str]:
     """Hardware-state preconditions -> violation messages (empty = all met).
 
@@ -1092,6 +1295,12 @@ def check_state_preconditions(
     rule added here alone does not merely go unenforced elsewhere, it breaks every
     skill that declares it. Both missing rules (``withdrawn`` and the computed
     ``vacuum_ok_for_coarse``) now live in ``preconditions``; there is one chain
-    (2026-07-31)."""
+    (2026-07-31).
+
+    ``params`` (since 7.3.3): the call's parameters, so a per-call exemption
+    (:func:`mast.core.preconditions.effective_preconditions`) applies here
+    exactly as in ``BaseSkill.check_preconditions``. ``None`` checks every
+    declared precondition, as before."""
     return _shared_check_state_preconditions(
-        list(skill_meta.preconditions), state)
+        effective_preconditions(skill_meta.name, skill_meta.preconditions, params),
+        state)

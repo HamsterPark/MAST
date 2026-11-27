@@ -269,6 +269,45 @@ def check_state_preconditions(
     return violations
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# PER-CALL exemptions — a declared precondition that does not apply to one
+# particular call of the skill (since 7.3.3).
+#
+# Preconditions are declared per SKILL (``SkillMetadata.preconditions``), but one
+# skill can do physically different things depending on its params. MotorMove
+# declares ``z_controller_off`` — withdraw before stepping the coarse motor — and
+# for a lateral step or a coarse retract that is still what it means. An open-
+# loop coarse Z step TOWARD the sample is the exception: a tip poke is commonly
+# done with the Z feedback ON, and with the feedback on the controller pulls
+# the tip back out after the step instead of holding it at full depth. So a
+# z-approach may run with the feedback on or off.
+#
+# ONE function decides, and every layer that evaluates preconditions asks it with
+# the call's params: ``BaseSkill.check_preconditions`` (the skill tool wrapper
+# and ``ExecutionContext.run``), ``SafetyGuard`` (the legacy executor) and
+# ``SafetyGate`` Layer 2 (the agent). A caller that cannot see the params passes
+# ``None`` and gets the declared list unchanged — as strict as before.
+# ─────────────────────────────────────────────────────────────────────────
+
+def effective_preconditions(
+    skill_name: str, declared: "list[str] | tuple[str, ...] | None", params: "dict | None"
+) -> list[str]:
+    """The declared preconditions that apply to THIS call of *skill_name*.
+
+    Today one exemption: ``MotorMove`` with an open-loop z-approach direction
+    (:func:`mast.core.safety.is_open_loop_z_approach`) does not need
+    ``z_controller_off``. ``params is None`` returns *declared* unchanged."""
+    names = list(declared or [])
+    if params is None or "z_controller_off" not in names:
+        return names
+    # Lazy: mast.core.safety imports this module at load time.
+    from mast.core.safety import is_open_loop_z_approach
+
+    if is_open_loop_z_approach(skill_name, params):
+        return [n for n in names if n != "z_controller_off"]
+    return names
+
+
 def precondition_recognized(name: str) -> bool:
     """True when *name* is a precondition this module can evaluate — either an
     exact-name key (``PRECONDITION_CHECKS``) or a substring-rule match
@@ -292,5 +331,6 @@ __all__ = [
     "PRECONDITION_CONTEXT_FIELDS",
     "context_suffix",
     "check_state_preconditions",
+    "effective_preconditions",
     "precondition_recognized",
 ]
